@@ -1,0 +1,16 @@
+[project]
+name = "market-analysis-backend"
+version = "0.1.0"
+description = "Backend for market analysis with quantitative tools"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"},
+]
+dependencies = [
+    "Flask==3.1.2",
+    "numpy==2.4.2",
+    "pandas==3.0.0",
+    "scipy==1.17.0",
+    "boto3==1.42.48",
+    "python-dotenv==1.2.1",
+]
+requires-python = ">=3.11"
