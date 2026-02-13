@@ -1,0 +1,8 @@
+Flask==2.3.3
+numpy==1.24.3
+pandas==2.0.3
+scipy==1.11.3
+boto3==1.28.57
+strands-agents==0.1.0
+strands-agents-tools==0.1.0
+python-dotenv==1.0.0
