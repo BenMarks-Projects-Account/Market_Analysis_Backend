@@ -1,0 +1,64 @@
+<!-- BenTrade Dashboard View: Credit Spread Analysis -->
+<div class="view-wrap">
+<div class="dashboard-layout">
+            <main class="main">
+                <div class="file-selector">
+                    <h2>Analysis Report + Underlying</h2>
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                        <select id="reportSelect" style="flex:1;min-width:260px">
+                            <option value="">Loading reports...</option>
+                        </select>
+
+                        <select id="fileSelect" style="flex:1;min-width:260px">
+                            <option value="ALL">Loading symbols...</option>
+                        </select>
+
+                        <button id="genBtn" class="btn" style="flex:0 0 auto;padding:10px 14px;">Generate New Report</button>
+                    </div>
+                        </div>
+
+                        <!-- Content area where analysis results will be rendered -->
+                        <div id="content" style="margin-top:18px"></div>
+
+                    </main>
+                </div>
+
+    
+
+    <!-- Execute Trade Modal (UI-only) -->
+    <div id="tradeModal" style="display:none;position:fixed;inset:0;z-index:2600;align-items:center;justify-content:center;background:rgba(2,6,18,0.78);backdrop-filter:blur(6px);">
+        <div style="width:min(520px,92vw);border-radius:16px;padding:18px 18px 14px;background:linear-gradient(180deg, rgba(6,6,18,0.92), rgba(8,6,22,0.88));border:1px solid rgba(0,220,255,0.18);box-shadow:0 30px 90px rgba(0,220,255,0.14), 0 22px 70px rgba(0,234,255,0.12);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
+                <div style="font-family:'Orbitron',sans-serif;color:var(--accent-cyan);letter-spacing:0.14em;text-transform:uppercase;font-size:14px;">Execute Trade</div>
+                <button class="btn" style="padding:6px 10px" onclick="closeTradeModal()">Close</button>
+            </div>
+            <div style="color:#e6fbff;font-size:15px;line-height:1.4;margin:10px 0 14px;">
+                trade capability off
+            </div>
+            <div style="color:var(--muted);font-size:12px;line-height:1.4;">
+                (Stub UI only — wire this to your broker execution path later.)
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Simple modal for Execute Trade -->
+    <div id="modal" onclick="this.style.display='none'">
+        <div id="modalCard" onclick="event.stopPropagation()">
+            <div id="modalTitle">Trade Action</div>
+            <div id="modalMsg">Trade capability off</div>
+            <button id="modalClose" class="btn" onclick="document.getElementById('modal').style.display='none'">Close</button>
+        </div>
+    </div>
+
+    <!-- Generate overlay (used by the Generate New Report button) -->
+    <div id="genOverlay" style="display:none;position:fixed;inset:0;z-index:2700;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(6px);">
+        <div style="width:min(560px,92vw);border-radius:12px;padding:18px;background:linear-gradient(180deg, rgba(6,6,18,0.92), rgba(8,6,22,0.88));border:1px solid rgba(0,220,255,0.12);box-shadow:0 30px 90px rgba(0,220,255,0.08);">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:6px 8px;">
+                <div class="overlay-spinner" style="width:88px;height:88px;border-radius:50%;border:8px solid rgba(255,255,255,0.06);border-top-color:#00eaff;animation:spin 900ms linear infinite;"></div>
+                <div id="genStatus" style="color:#e6fbff;font-size:15px;text-align:center;">Starting...</div>
+                <div id="genStatusLog" style="width:100%;max-height:220px;overflow:auto;border:1px solid rgba(0,234,255,0.2);border-radius:10px;padding:10px 12px;background:rgba(2,8,16,0.55);color:#9fefff;font-size:12px;line-height:1.45;"></div>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,46 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+dist_*/
+dist_release/
+dist_new/
+dist_new2/
+dist_console/
+release_launcher.zip
+*.egg-info/
+*.egg
+*.whl
+*.zip
+
+# PyInstaller internals
+_internal/
+*.spec
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+.env
+
+# Logs
+*.log
+
+# IDE / editor
+.vscode/
+.idea/
+*.suo
+*.user
+
+# OS
+.DS_Store
+
+# Python cache / artifacts
+*.pyc
+*.pyo
+*.pyd

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BenTrade</title>
+
+  <link rel="icon" href="assets/icons/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="assets/icons/favicon-16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/favicon-180.png">
+
+  <link rel="stylesheet" href="assets/css/app.css">
+  <style>
+    /* App shell tweaks: keep BenTrade theme, host dashboards inside iframe */
+    .shell{ max-width:1860px; margin:0 auto; padding:10px 14px; }
+    .shell-layout{
+      display:grid;
+      grid-template-columns: 260px minmax(0, 1fr) 300px;
+      gap:18px;
+      align-items:stretch;
+      margin-top:10px;
+      height: calc(100vh - 60px);
+      min-width: 0;
+    }
+    @media (max-width: 1200px){ .shell-layout{ grid-template-columns: 240px minmax(0, 1fr) 280px; } }
+    @media (max-width: 980px){ .shell-layout{ grid-template-columns: 1fr; } }
+
+    .dash-frame{
+      width:100%;
+      height: calc(100vh - 210px);
+      border:0;
+      border-radius:16px;
+      background: rgba(0,0,0,0.0);
+      box-shadow:
+        0 18px 52px rgba(0,0,0,0.55),
+        0 0 0 1px rgba(0,234,255,0.14) inset,
+        0 0 34px rgba(0,234,255,0.10);
+    }
+    /* Make sidebar feel like nav; reuse nav-panel styles from app.css */
+    .nav-link{ text-decoration:none; display:flex; align-items:center; gap:10px; }
+    .nav-link.disabled{ opacity:0.45; cursor:not-allowed; }
+    .nav-link.disabled:hover{ filter:none; transform:none; }
+  
+    #view{ min-width:0; }
+    .view-wrap{ width:100%; }
+</style>
+</head>
+<body>
+  <div class="shell">
+    <!-- Header banner (matches dashboard) -->
+    <div class="titlebar">
+      <div class="brand-badge" aria-hidden="true">
+        <span class="bt">BT</span>
+        <span class="brand-name">BenTrade</span>
+      </div>
+      <div class="hero">
+        <div class="hero-title">BENTRADE</div>
+        <div class="hero-subtitle">Credit Spread Analysis</div>
+      </div>
+      <div class="titlebar-right" aria-hidden="true"></div>
+    </div>
+    <div class="subtitlebar"  style="margin-top:10px;">
+    </div>
+
+    <div class="shell-layout">
+      <aside class="sidebar">
+        <div class="nav-panel">
+          <div class="nav-title">Navigation</div>
+
+          <a class="nav-link active" href="#/credit-spread" data-route="credit-spread">
+            <span class="nav-dot"></span>
+            Credit Spread Analysis
+          </a>
+
+          <a class="nav-link disabled" href="javascript:void(0)">
+            <span class="nav-dot" style="opacity:.35;"></span>
+            Watchlist (soon)
+          </a>
+          <a class="nav-link disabled" href="javascript:void(0)">
+            <span class="nav-dot" style="opacity:.35;"></span>
+            Macro (soon)
+          </a>
+          <a class="nav-link disabled" href="javascript:void(0)">
+            <span class="nav-dot" style="opacity:.35;"></span>
+            Signals (soon)
+          </a>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div id="view"></div>
+      </main>
+
+      <aside class="diagnostic-sidebar">
+        <div class="diagnosticPanel">
+          <div class="diagnosticSection">
+            <div class="diagnosticTitle">SOURCE HEALTH</div>
+            <div id="sourceHealthRows"></div>
+          </div>
+
+          <div class="diagnosticSection">
+            <div class="diagnosticTitle">CURRENT REPORT STATS</div>
+            <div id="reportStatsGrid" class="statGrid"></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- Router is provided by assets/js/router.js -->
+
+  <script src="assets/js/app.js?v=20260213b"></script>
+  <script src="assets/js/router.js?v=20260213b"></script>
+</body>
+</html>

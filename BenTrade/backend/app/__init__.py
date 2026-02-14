@@ -1,0 +1,1 @@
+"""BenTrade FastAPI application package."""

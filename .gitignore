@@ -1,6 +1,11 @@
 # Environment variables
 .env
 backend/.env
+BenTrade/.env
+BenTrade/backend/.env
+.env.*
+!.env.example
+!.env.sample
 
 # Stock widget and worker
 Stock_Widget_quantum.html
@@ -43,5 +48,10 @@ env/
 .DS_Store
 Thumbs.db
 
-#report files
-*.json
+# Build outputs / logs
+*.log
+BenTrade/backend/dist/
+BenTrade/backend/build/
+
+# Generated report files
+BenTrade/backend/results/*.json
