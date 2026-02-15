@@ -21,6 +21,40 @@ def resource_path(name: str) -> Path:
     return base_dir() / name
 
 
+def _is_backend_root(path: Path) -> bool:
+    try:
+        return (
+            (path / "start_backend.ps1").exists()
+            and (path / "requirements.txt").exists()
+            and (path / "app" / "main.py").exists()
+        )
+    except Exception:
+        return False
+
+
+def find_project_root() -> Path | None:
+    anchors = []
+    try:
+        anchors.append(Path(__file__).resolve().parent)
+    except Exception:
+        pass
+    anchors.append(base_dir())
+    anchors.append(Path.cwd())
+
+    seen = set()
+    for anchor in anchors:
+        if not anchor:
+            continue
+        for parent in (anchor, *anchor.parents):
+            key = str(parent).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            if _is_backend_root(parent):
+                return parent
+    return None
+
+
 # Prepare a log file for backend stdout/stderr
 log_file = resource_path("backend.log")
 try:
@@ -29,43 +63,33 @@ except Exception:
     log_fh = None
 
 
-# Determine project root (folder containing start_backend.ps1). Try several anchors:
-project_root = None
-anchors = []
-try:
-    anchors.append(Path(__file__).resolve().parent)
-except Exception:
-    pass
-anchors.append(base_dir())
-anchors.append(Path.cwd())
-
-for anchor in anchors:
-    if anchor is None:
-        continue
-    for parent in (anchor, *anchor.parents):
-        if (parent / "start_backend.ps1").exists():
-            project_root = parent
-            break
-    if project_root:
-        break
+# Determine project root (folder containing start_backend.ps1, requirements, app/main.py)
+project_root = find_project_root()
 
 
 # Locate start_backend.ps1: prefer repository copy, then base_dir, then bundled _internal
 script_path = None
+cwd = None
 if project_root and (project_root / "start_backend.ps1").exists():
     script_path = project_root / "start_backend.ps1"
     cwd = str(project_root)
 else:
     candidate = resource_path("start_backend.ps1")
-    if candidate.exists():
+    if candidate.exists() and (candidate.parent / "requirements.txt").exists():
         script_path = candidate
-        cwd = None
+        cwd = str(candidate.parent)
     else:
         # search under base_dir (useful for PyInstaller _internal placement)
         found = list(base_dir().rglob("start_backend.ps1"))
-        if found:
+        for found_script in found:
+            parent = found_script.parent
+            if (parent / "requirements.txt").exists():
+                script_path = found_script
+                cwd = str(parent)
+                break
+        if script_path is None and found:
             script_path = found[0]
-            cwd = None
+            cwd = str(found[0].parent)
 
 if script_path is None or not script_path.exists():
     messagebox.showerror("Error", f"start_backend.ps1 not found. Checked project and bundle locations.")

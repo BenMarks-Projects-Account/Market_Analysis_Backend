@@ -317,12 +317,23 @@
             background: linear-gradient(180deg, rgba(7,10,16,0.70), rgba(3,4,8,0.50));
             position:relative;
             z-index:1;
-            box-shadow: 0 10px 26px rgba(0,0,0,0.45), 0 0 24px rgba(0,234,255,0.10);
+            box-shadow:
+              0 14px 30px rgba(0,0,0,0.55),
+              0 6px 14px rgba(0,234,255,0.10),
+              inset 0 1px 0 rgba(210,252,255,0.18),
+              inset 0 -10px 14px rgba(0,0,0,0.34),
+              0 0 24px rgba(0,234,255,0.10);
         }
+        .nav-panel .nav-link + .nav-link{ margin-top: 10px; }
         .nav-link:hover{ filter:brightness(1.06); transform: translateY(-1px); }
         .nav-link.active{
             border-color: rgba(0,234,255,0.35);
-            box-shadow: 0 14px 34px rgba(0,0,0,0.50), 0 0 30px rgba(0,234,255,0.14);
+            box-shadow:
+              0 18px 38px rgba(0,0,0,0.58),
+              0 10px 24px rgba(0,234,255,0.14),
+              inset 0 1px 0 rgba(210,252,255,0.22),
+              inset 0 -10px 14px rgba(0,0,0,0.30),
+              0 0 34px rgba(0,234,255,0.18);
         }
         .nav-dot{
             width:10px; height:10px; border-radius:999px;
@@ -1164,3 +1175,162 @@ main.main,
 #content .trades-grid{
   grid-column: 1 / -1 !important;
 }
+
+/* ===== Banner dashboard nav ===== */
+.banner-nav{
+    margin-top: 8px;
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    justify-content:center;
+}
+
+.banner-nav-link{
+    text-decoration:none;
+    color: rgba(0,234,255,0.92);
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.12em;
+    padding:7px 10px;
+    border-radius:10px;
+    border:1px solid rgba(0,234,255,0.18);
+    background: linear-gradient(180deg, rgba(7,10,16,0.74), rgba(3,4,8,0.56));
+    box-shadow: 0 10px 24px rgba(0,0,0,0.42), 0 0 18px rgba(0,234,255,0.08);
+    transition: transform .12s ease, filter .12s ease;
+}
+
+.banner-nav-link:hover{
+    filter:brightness(1.08);
+    transform: translateY(-1px);
+}
+
+.banner-nav-link.active{
+    border-color: rgba(0,234,255,0.34);
+    box-shadow: 0 10px 24px rgba(0,0,0,0.42), 0 0 24px rgba(0,234,255,0.18);
+}
+
+/* ===== Placeholder dashboard scene ===== */
+.placeholder-intro{
+    margin-bottom: 14px;
+}
+
+.placeholder-title{
+    font-family:'Orbitron', sans-serif;
+    font-size:15px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color: var(--cyan);
+    margin-bottom: 8px;
+}
+
+.placeholder-subtitle{
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.tron-construction{
+    position: relative;
+    min-height: calc(100vh - 330px);
+    border-radius: 18px;
+    border: 1px solid rgba(0,234,255,0.2);
+    overflow: hidden;
+    background:
+        radial-gradient(640px 260px at 50% 22%, rgba(0,234,255,0.14), transparent 70%),
+        linear-gradient(180deg, rgba(5,8,16,0.8), rgba(3,5,12,0.94));
+    box-shadow:
+        0 24px 70px rgba(0,0,0,0.5),
+        0 0 0 1px rgba(0,234,255,0.08) inset,
+        0 0 36px rgba(0,234,255,0.12);
+}
+
+.tron-sky-glow{
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+    background:
+        radial-gradient(520px 200px at 50% 20%, rgba(0,234,255,0.24), transparent 70%),
+        radial-gradient(680px 340px at 50% -10%, rgba(0,234,255,0.16), transparent 65%);
+    opacity:0.8;
+}
+
+.tron-grid-floor{
+    position:absolute;
+    left:-8%;
+    right:-8%;
+    bottom:-10px;
+    height:54%;
+    transform: perspective(620px) rotateX(66deg);
+    transform-origin: center bottom;
+    background-image:
+        repeating-linear-gradient(90deg, rgba(0,234,255,0.22) 0 1px, transparent 1px 52px),
+        repeating-linear-gradient(0deg, rgba(0,234,255,0.18) 0 1px, transparent 1px 48px);
+    border-top:1px solid rgba(0,234,255,0.30);
+    box-shadow: inset 0 8px 40px rgba(0,234,255,0.08);
+}
+
+.tron-content{
+    position:relative;
+    z-index:2;
+    min-height: calc(100vh - 330px);
+    display:grid;
+    place-items:center;
+    padding: 22px;
+}
+
+.tron-holo-sign{
+    width:min(780px, 92%);
+    border-radius:16px;
+    border:1px solid rgba(0,234,255,0.30);
+    background:
+        radial-gradient(380px 150px at 50% 18%, rgba(0,234,255,0.22), transparent 74%),
+        linear-gradient(180deg, rgba(8,14,24,0.72), rgba(2,7,14,0.62));
+    box-shadow:
+        0 28px 70px rgba(0,234,255,0.18),
+        0 0 0 1px rgba(0,234,255,0.14) inset;
+    padding: 22px 20px 18px;
+    text-align:center;
+    position:relative;
+}
+
+.tron-holo-sign::before,
+.tron-holo-sign::after{
+    content:'';
+    position:absolute;
+    top:14px;
+    bottom:14px;
+    width:1px;
+    background: linear-gradient(180deg, transparent, rgba(0,234,255,0.4), transparent);
+}
+
+.tron-holo-sign::before{ left:14px; }
+.tron-holo-sign::after{ right:14px; }
+
+.tron-holo-title{
+    font-family:'Orbitron', sans-serif;
+    letter-spacing:0.24em;
+    font-size: clamp(22px, 4vw, 40px);
+    color: var(--cyan);
+    text-transform:uppercase;
+    text-shadow: 0 0 26px rgba(0,234,255,0.42);
+    margin-bottom: 8px;
+}
+
+.tron-holo-caption{
+    color:#d6f8ff;
+    opacity:0.95;
+    font-size:14px;
+    margin-bottom: 16px;
+}
+
+.tron-equipment{
+    width:min(560px, 100%);
+    margin:0 auto;
+}
+
+.tron-equipment svg{
+    width:100%;
+    height:auto;
+    display:block;
+    filter: drop-shadow(0 0 20px rgba(0,234,255,0.18));
+}
+

@@ -890,3 +890,58 @@ function attachTooltipHandlers(){
         loadFiles();
 
 };
+
+window.BenTrade = window.BenTrade || {};
+window.BenTrade._underConstructionTronMarkup = null;
+
+window.BenTrade.ensureUnderConstructionTron = async function ensureUnderConstructionTron(hostEl){
+    if(!hostEl) return;
+    if(!window.BenTrade._underConstructionTronMarkup){
+        const res = await fetch('dashboards/partials/under-construction-tron.view.html', { cache: 'no-store' });
+        window.BenTrade._underConstructionTronMarkup = await res.text();
+    }
+    hostEl.innerHTML = window.BenTrade._underConstructionTronMarkup;
+};
+
+window.BenTrade.renderSourceHealthPlaceholder = function renderSourceHealthPlaceholder(){
+    const container = document.getElementById('sourceHealthRows');
+    if(!container) return;
+    container.innerHTML = [
+        ['Market Data Feed', 'status-yellow', 'Placeholder source status while dashboard is under construction.'],
+        ['Options Chain Feed', 'status-yellow', 'Placeholder source status while dashboard is under construction.'],
+        ['Risk Engine', 'status-green', 'Core services available. Dashboard metrics not wired yet.'],
+        ['Automation Jobs', 'status-red', 'No jobs configured yet for this dashboard.']
+    ].map(([label, statusClass, tip]) => `
+        <div class="diagnosticRow">
+            <span class="diagnosticLabel">${label}</span>
+            <span class="status-wrap" tabindex="0">
+                <span class="status-dot ${statusClass}"></span>
+                <span class="status-tooltip">${tip}</span>
+            </span>
+        </div>
+    `).join('');
+};
+
+window.BenTrade.renderStatsPlaceholder = function renderStatsPlaceholder(title){
+    const stats = document.getElementById('reportStatsGrid');
+    if(!stats) return;
+    stats.innerHTML = [
+        ['Dashboard', title],
+        ['Status', 'Placeholder'],
+        ['Cards', 'Coming Soon'],
+        ['Automation', 'Planned']
+    ].map(([label, value]) => `
+        <div class="statTile">
+            <div class="statLabel">${label}</div>
+            <div class="statValue">${value}</div>
+        </div>
+    `).join('');
+};
+
+window.BenTrade.initPlaceholderDashboard = async function initPlaceholderDashboard(config){
+    const title = config?.title || 'Dashboard';
+    const host = document.querySelector('[data-under-construction-host]');
+    await window.BenTrade.ensureUnderConstructionTron(host);
+    window.BenTrade.renderSourceHealthPlaceholder();
+    window.BenTrade.renderStatsPlaceholder(title);
+};
