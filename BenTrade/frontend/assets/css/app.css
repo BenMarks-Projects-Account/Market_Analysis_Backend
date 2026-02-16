@@ -1977,11 +1977,17 @@ main.main{
 .home-full-refresh-btn{
     border-color: rgba(0,234,255,0.44);
     box-shadow: 0 14px 34px rgba(0,234,255,0.18), inset 0 0 0 1px rgba(0,234,255,0.14);
-    color: rgba(230,255,255,0.98);
+    color: rgba(0,234,255,0.96);
 }
 
 .home-full-refresh-btn:hover{
+    color: rgba(0,234,255,0.98);
     box-shadow: 0 18px 42px rgba(0,234,255,0.24), 0 0 30px rgba(0,234,255,0.16);
+}
+
+.home-full-refresh-btn:disabled{
+    color: rgba(0,234,255,0.88);
+    opacity: 0.72;
 }
 
 .home-refreshing-badge{

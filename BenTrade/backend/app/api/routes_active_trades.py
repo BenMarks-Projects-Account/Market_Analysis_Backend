@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 
+from app.utils.http import UpstreamError
 from app.utils.trade_key import trade_key
 
 router = APIRouter(prefix="/api/trading", tags=["trading"])
+logger = logging.getLogger(__name__)
 
 
 def _utc_iso_now() -> str:
@@ -48,6 +52,78 @@ def _to_int(value: Any) -> int | None:
         return int(float(value))
     except (TypeError, ValueError):
         return None
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_safe(val) for key, val in value.items()}
+    return str(value)
+
+
+def _extract_retry_after(details: dict[str, Any] | None) -> int | None:
+    payload = details or {}
+    body = str(payload.get("body") or "")
+    for marker in ("retry_after", "retry-after"):
+        idx = body.lower().find(marker)
+        if idx >= 0:
+            segment = body[idx:idx + 64]
+            digits = "".join(ch for ch in segment if ch.isdigit())
+            if digits:
+                try:
+                    return int(digits)
+                except ValueError:
+                    return None
+    return None
+
+
+def _error_payload_from_exception(exc: Exception, *, fallback_message: str) -> dict[str, Any]:
+    error = {
+        "message": fallback_message,
+        "type": type(exc).__name__,
+        "upstream_status": None,
+        "upstream_body_snippet": None,
+    }
+
+    if isinstance(exc, UpstreamError):
+        details = exc.details or {}
+        status_code = details.get("status_code")
+        error["upstream_status"] = int(status_code) if isinstance(status_code, int) else None
+        body = str(details.get("body") or "")
+        error["upstream_body_snippet"] = body[:400] if body else None
+
+        message_lower = str(exc).lower()
+        exception_text = str(details.get("exception") or "").lower()
+        if "timeout" in message_lower or "timeout" in exception_text or "timed out" in exception_text:
+            error["message"] = "Timeout"
+        elif error["upstream_status"] in (401, 403):
+            error["message"] = "Tradier API key invalid or unauthorized"
+        elif error["upstream_status"] == 429:
+            error["message"] = "Tradier rate limited or unavailable"
+            retry_after = _extract_retry_after(details)
+            if retry_after is not None:
+                error["retry_after"] = retry_after
+        elif error["upstream_status"] and error["upstream_status"] >= 500:
+            error["message"] = "Tradier service unavailable"
+        else:
+            error["message"] = str(exc)
+    else:
+        text = str(exc).lower()
+        if "timeout" in text or "timed out" in text:
+            error["message"] = "Timeout"
+        else:
+            error["message"] = str(exc)
+
+    return error
 
 
 def _parse_occ_symbol(option_symbol: str) -> dict[str, Any] | None:
@@ -364,20 +440,37 @@ async def _build_active_payload(request: Request) -> dict[str, Any]:
     settings = request.app.state.trading_service.settings
     if not settings.TRADIER_TOKEN or not settings.TRADIER_ACCOUNT_ID:
         return {
+            "ok": False,
             "as_of": _utc_iso_now(),
             "source": "tradier",
             "positions": [],
             "orders": [],
             "active_trades": [],
             "source_health": request.app.state.base_data_service.get_source_health_snapshot(),
-            "error": "Tradier not configured",
+            "error": {
+                "message": "Tradier credentials not configured",
+                "type": "ConfigurationError",
+                "upstream_status": None,
+                "upstream_body_snippet": None,
+            },
         }
 
     try:
         raw_positions_payload = await request.app.state.tradier_client.get_positions()
         raw_orders_payload = await request.app.state.tradier_client.get_orders(status="open")
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to load active trades from Tradier: {exc}") from exc
+        error = _error_payload_from_exception(exc, fallback_message="Failed to load active trades from Tradier")
+        logger.exception("trading.active_fetch_failed error=%s", error)
+        return {
+            "ok": False,
+            "as_of": _utc_iso_now(),
+            "source": "tradier",
+            "positions": [],
+            "orders": [],
+            "active_trades": [],
+            "source_health": request.app.state.base_data_service.get_source_health_snapshot(),
+            "error": error,
+        }
 
     raw_positions = _extract_positions(raw_positions_payload)
     raw_orders = _extract_orders(raw_orders_payload)
@@ -394,23 +487,43 @@ async def _build_active_payload(request: Request) -> dict[str, Any]:
     if symbols:
         try:
             quote_map = await request.app.state.tradier_client.get_quotes(symbols)
-        except Exception:
+        except Exception as exc:
+            logger.warning("trading.quote_fetch_failed exc=%s", exc)
             quote_map = {}
 
-    positions = _normalize_positions(raw_positions, quote_map)
-    orders = _normalize_orders(raw_orders)
-    active_trades = _build_active_trades(positions, orders)
+    try:
+        positions = _normalize_positions(raw_positions, quote_map)
+        orders = _normalize_orders(raw_orders)
+        active_trades = _build_active_trades(positions, orders)
+    except Exception as exc:
+        logger.exception("trading.serialization_failed exc=%s", exc)
+        return {
+            "ok": False,
+            "as_of": _utc_iso_now(),
+            "source": "tradier",
+            "positions": [],
+            "orders": [],
+            "active_trades": [],
+            "source_health": request.app.state.base_data_service.get_source_health_snapshot(),
+            "error": {
+                "message": "Failed to serialize broker payload",
+                "type": type(exc).__name__,
+                "upstream_status": None,
+                "upstream_body_snippet": None,
+            },
+        }
 
     return {
+        "ok": True,
         "as_of": _utc_iso_now(),
         "source": "tradier",
-        "positions": positions,
-        "orders": orders,
-        "active_trades": active_trades,
+        "positions": _json_safe(positions),
+        "orders": _json_safe(orders),
+        "active_trades": _json_safe(active_trades),
         "source_health": request.app.state.base_data_service.get_source_health_snapshot(),
         "raw": {
-            "positions": raw_positions_payload,
-            "orders": raw_orders_payload,
+            "positions": _json_safe(raw_positions_payload),
+            "orders": _json_safe(raw_orders_payload),
         },
     }
 
@@ -429,10 +542,12 @@ async def refresh_active_trades(request: Request) -> dict[str, Any]:
 async def get_tradier_positions(request: Request) -> dict[str, Any]:
     payload = await _build_active_payload(request)
     return {
+        "ok": bool(payload.get("ok", False)),
         "as_of": payload.get("as_of"),
         "source": payload.get("source", "tradier"),
         "positions": payload.get("positions") or [],
         "source_health": payload.get("source_health") or {},
+        "error": payload.get("error") if not payload.get("ok", False) else None,
     }
 
 
@@ -440,10 +555,12 @@ async def get_tradier_positions(request: Request) -> dict[str, Any]:
 async def get_tradier_open_orders(request: Request) -> dict[str, Any]:
     payload = await _build_active_payload(request)
     return {
+        "ok": bool(payload.get("ok", False)),
         "as_of": payload.get("as_of"),
         "source": payload.get("source", "tradier"),
         "orders": payload.get("orders") or [],
         "source_health": payload.get("source_health") or {},
+        "error": payload.get("error") if not payload.get("ok", False) else None,
     }
 
 
@@ -452,20 +569,37 @@ async def get_tradier_account(request: Request) -> dict[str, Any]:
     settings = request.app.state.trading_service.settings
     if not settings.TRADIER_TOKEN or not settings.TRADIER_ACCOUNT_ID:
         return {
+            "ok": False,
             "as_of": _utc_iso_now(),
             "source": "tradier",
             "account": {},
-            "error": "Tradier not configured",
+            "error": {
+                "message": "Tradier credentials not configured",
+                "type": "ConfigurationError",
+                "upstream_status": None,
+                "upstream_body_snippet": None,
+            },
         }
 
     try:
         account_payload = await request.app.state.tradier_client.get_balances()
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to load account balances from Tradier: {exc}") from exc
+        error = _error_payload_from_exception(exc, fallback_message="Failed to load account balances from Tradier")
+        logger.exception("trading.account_fetch_failed error=%s", error)
+        return {
+            "ok": False,
+            "as_of": _utc_iso_now(),
+            "source": "tradier",
+            "account": {},
+            "source_health": request.app.state.base_data_service.get_source_health_snapshot(),
+            "error": error,
+        }
 
     return {
+        "ok": True,
         "as_of": _utc_iso_now(),
         "source": "tradier",
-        "account": account_payload,
+        "account": _json_safe(account_payload),
         "source_health": request.app.state.base_data_service.get_source_health_snapshot(),
+        "error": None,
     }

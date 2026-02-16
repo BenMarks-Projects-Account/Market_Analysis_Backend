@@ -1,7 +1,15 @@
 window.BenTradeApi = (function(){
   async function jsonFetch(url, options){
     const response = await fetch(url, options);
-    const payload = await response.json().catch(() => ({}));
+    const responseText = await response.text();
+    let payload = {};
+    if(responseText){
+      try{
+        payload = JSON.parse(responseText);
+      }catch(_err){
+        payload = {};
+      }
+    }
     if(!response.ok){
       const message = payload?.error?.message || payload?.detail || `Request failed (${response.status})`;
       const err = new Error(message);
@@ -9,6 +17,7 @@ window.BenTradeApi = (function(){
       err.detail = payload?.detail || payload?.error?.message || null;
       err.payload = payload;
       err.endpoint = String(url || '');
+      err.bodySnippet = responseText ? String(responseText).slice(0, 200) : '';
       throw err;
     }
 

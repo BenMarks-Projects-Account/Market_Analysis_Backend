@@ -82,6 +82,9 @@ window.BenTradeHomeCacheStore = (function(){
       recommendation,
       route: source?.route || '#/credit-spread',
       source: source?.label || 'Unknown',
+      strategy_id: source?.id || null,
+      report_file: source?.report_file || null,
+      source_feed: source?.source_feed || 'latest analysis_*.json trades',
       sourceType,
       model: modelEvaluation,
       key_metrics: {
@@ -105,7 +108,11 @@ window.BenTradeHomeCacheStore = (function(){
         if(!report) return;
         const payload = await api.getStrategyReport(source.id, report);
         const trades = Array.isArray(payload?.trades) ? payload.trades : [];
-        trades.slice(0, 8).forEach((trade) => allIdeas.push(normalizeTradeIdea(trade, source)));
+        trades.slice(0, 8).forEach((trade) => allIdeas.push(normalizeTradeIdea(trade, {
+          ...source,
+          report_file: report,
+          source_feed: 'latest analysis_*.json trades',
+        })));
       }catch(_err){
       }
     }));
@@ -114,7 +121,7 @@ window.BenTradeHomeCacheStore = (function(){
       const scannerPayload = await api.getStockScanner();
       const candidates = Array.isArray(scannerPayload?.candidates) ? scannerPayload.candidates : [];
       candidates.slice(0, 8).forEach((idea) => {
-        allIdeas.push(normalizeTradeIdea(idea, { label: 'Stock Scanner', route: '#/stock-scanner', type: 'stock' }));
+        allIdeas.push(normalizeTradeIdea(idea, { label: 'Stock Scanner', route: '#/stock-scanner', type: 'stock', source_feed: 'stock scanner' }));
       });
     }catch(_err){
     }

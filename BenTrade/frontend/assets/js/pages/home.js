@@ -44,6 +44,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
   let latestOpportunities = [];
   const opportunityModelState = new Map();
   const topPickModelState = { key: null, model: null };
+  const devLoggedCards = new Set();
+  let devLoggedTopPickSource = false;
 
   function setScanError(text){
     if(!text){
@@ -154,12 +156,67 @@ window.BenTradePages.initHome = function initHome(rootEl){
     const type = String(sourceType || '').toLowerCase();
     const key = String(metric || '').toLowerCase();
     if(type === 'stock'){
-      if(key === 'ev') return 'EV not computed for equity ideas yet';
-      if(key === 'pop') return 'POP not computed for equity ideas yet';
-      if(key === 'ror') return 'RoR not computed for equity ideas yet';
-      return 'Not computed for equity ideas yet';
+      if(key === 'ev') return 'EV not computed for equities';
+      if(key === 'pop') return 'POP not computed for equities';
+      if(key === 'ror') return 'RoR not computed for equities';
+      return 'Not computed for equities';
     }
-    return 'Not available from source.';
+    return 'Missing from source payload';
+  }
+
+  function isLikelyOptionsStrategy(value){
+    const text = String(value || '').toLowerCase();
+    if(!text) return false;
+    return text.includes('credit')
+      || text.includes('debit')
+      || text.includes('condor')
+      || text.includes('butter')
+      || text.includes('calendar')
+      || text.includes('spread')
+      || text.includes('covered_call')
+      || text.includes('cash_secured_put');
+  }
+
+  function isDevInstrumentationEnabled(){
+    try{
+      const host = String(location.hostname || '').toLowerCase();
+      const localHost = host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local');
+      if(localHost) return true;
+      return localStorage.getItem('bentrade_debug_home_metrics') === '1';
+    }catch(_err){
+      return false;
+    }
+  }
+
+  function logOpportunityInstrumentationOnce(idea, idx){
+    if(!isDevInstrumentationEnabled()) return;
+    const key = opportunityKey(idea, idx);
+    if(devLoggedCards.has(key)) return;
+    devLoggedCards.add(key);
+
+    const trade = (idea?.trade && typeof idea.trade === 'object') ? idea.trade : {};
+    const fields = {
+      ev_to_risk: trade?.ev_to_risk,
+      ev_per_share: trade?.ev_per_share,
+      p_win_used: trade?.p_win_used,
+      pop_delta_approx: trade?.pop_delta_approx,
+      return_on_risk: trade?.return_on_risk,
+      max_profit_per_share: trade?.max_profit_per_share,
+      max_loss_per_share: trade?.max_loss_per_share,
+    };
+    console.debug('[HomeMetrics] card_source', {
+      symbol: idea?.symbol,
+      strategy: idea?.strategy,
+      source_feed: idea?.source_feed || 'latest analysis_*.json trades',
+      source: idea?.source,
+      sourceType: idea?.sourceType,
+      fields,
+      normalized: {
+        ev: idea?.ev,
+        pop: idea?.pop,
+        ror: idea?.ror,
+      },
+    });
   }
 
   function normalizeTradeIdea(row, source){
@@ -203,9 +260,10 @@ window.BenTradePages.initHome = function initHome(rootEl){
       : (row?.raw && typeof row.raw === 'object' ? row.raw : row);
 
     const inferredSource = String(sourceType || row?.sourceType || row?.type || '').toLowerCase();
-    const isStock = inferredSource === 'stock' || String(row?.source || '').toLowerCase().includes('stock scanner');
     const symbol = normalizeSymbol(row?.symbol || raw?.symbol || raw?.underlying || raw?.underlying_symbol) || 'N/A';
-    const strategy = String(row?.strategy || raw?.spread_type || raw?.strategy || raw?.recommended_strategy || (isStock ? 'stock_scanner' : 'idea'));
+    const strategy = String(row?.strategy || raw?.spread_type || raw?.strategy || raw?.recommended_strategy || 'idea');
+    const strategySuggestsOptions = isLikelyOptionsStrategy(strategy);
+    const isStock = !strategySuggestsOptions && (inferredSource === 'stock' || String(row?.source || '').toLowerCase().includes('stock scanner'));
     const rank = toNumber(row?.rank ?? row?.score ?? row?.rank_score ?? raw?.rank_score ?? raw?.composite_score ?? raw?.trade_quality_score) ?? 0;
 
     let ev = null;
@@ -219,14 +277,14 @@ window.BenTradePages.initHome = function initHome(rootEl){
       ror = null;
       notes.push('Not computed for equities ideas yet.');
     }else{
-      ev = toNumber(row?.key_metrics?.ev_to_risk ?? row?.key_metrics?.ev ?? raw?.ev_to_risk ?? row?.ev_to_risk);
+      ev = toNumber(row?.key_metrics?.ev_to_risk ?? row?.key_metrics?.ev ?? row?.ev_to_risk ?? raw?.ev_to_risk ?? row?.ev);
       if(ev === null){
-        ev = toNumber(raw?.ev_per_share ?? row?.ev_per_share ?? row?.key_metrics?.ev_per_share ?? raw?.expected_value ?? raw?.ev ?? raw?.edge ?? row?.ev ?? row?.expected_value);
+        ev = toNumber(row?.ev_per_share ?? raw?.ev_per_share ?? row?.key_metrics?.ev_per_share ?? raw?.expected_value ?? raw?.ev ?? row?.edge ?? row?.ev ?? row?.expected_value);
       }
 
-      pop = toNumber(raw?.p_win_used ?? row?.p_win_used ?? row?.key_metrics?.pop);
+      pop = toNumber(row?.p_win_used ?? raw?.p_win_used ?? row?.key_metrics?.pop ?? row?.pop);
       if(pop === null){
-        pop = toNumber(raw?.pop_delta_approx ?? raw?.probability_of_profit ?? raw?.pop ?? row?.pop_delta_approx ?? row?.probability_of_profit ?? row?.pop);
+        pop = toNumber(row?.pop_delta_approx ?? raw?.pop_delta_approx ?? row?.probability_of_profit ?? row?.probability_of_profit ?? row?.pop ?? raw?.pop);
       }
 
       if(pop !== null && pop > 1.0){
@@ -305,6 +363,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
       },
       route: row?.route || row?.actions?.open_route || '#/credit-spread',
       source: row?.source || (isStock ? 'Stock Scanner' : 'Strategy'),
+      source_feed: row?.source_feed || (isStock ? 'stock scanner' : 'latest analysis_*.json trades'),
       trade: raw,
       trade_payload: isStock ? null : {
         ...raw,
@@ -341,6 +400,10 @@ window.BenTradePages.initHome = function initHome(rootEl){
   function formatModelSummary(model){
     if(!model || model.status === 'not_run') return 'Not run';
     if(model.status === 'running') return 'Running...';
+    if(model.status === 'error'){
+      const summary = String(model.summary || '').trim();
+      return summary ? `Error • ${summary}` : 'Error • Model analysis failed';
+    }
     const rec = String(model.recommendation || 'UNKNOWN').toUpperCase();
     const confText = toNumber(model.confidence) === null ? '' : ` (${(toNumber(model.confidence) * 100).toFixed(0)}%)`;
     const summary = String(model.summary || '').trim();
@@ -409,41 +472,153 @@ window.BenTradePages.initHome = function initHome(rootEl){
     location.hash = destination;
   }
 
-  function runModelForOpportunity(idea, onModel){
+  function buildExecutionTradeFromIdea(idea){
+    const src = (idea?.trade_payload && typeof idea.trade_payload === 'object')
+      ? idea.trade_payload
+      : ((idea?.trade && typeof idea.trade === 'object') ? idea.trade : {});
+    const symbol = String(src?.underlying || src?.underlying_symbol || src?.symbol || idea?.symbol || '').toUpperCase();
+    const strategy = String(src?.spread_type || src?.strategy || idea?.strategy || '');
+    return {
+      ...src,
+      underlying: symbol,
+      underlying_symbol: symbol,
+      spread_type: strategy,
+      strategy,
+      symbol,
+    };
+  }
+
+  function openExecuteForOpportunity(idea){
     if(!idea || idea.sourceType === 'stock'){
-      return Promise.resolve(false);
+      return;
     }
+    const trade = buildExecutionTradeFromIdea(idea);
+    if(typeof window.executeTrade === 'function'){
+      window.executeTrade(trade);
+      return;
+    }
+    window.BenTradeExecutionModal?.open?.(trade || {}, { primaryLabel: 'Execute (off)' });
+  }
+
+  function strategyIdFromValue(value){
+    const text = String(value || '').toLowerCase();
+    if(!text) return null;
+    if(text.includes('credit') || text.includes('put_spread') || text.includes('call_spread')) return 'credit_spread';
+    if(text.includes('debit')) return 'debit_spreads';
+    if(text.includes('iron_condor') || text.includes('condor')) return 'iron_condor';
+    if(text.includes('butter') || text.includes('fly')) return 'butterflies';
+    return null;
+  }
+
+  function hasUsableTradePayload(value){
+    return !!(value && typeof value === 'object' && (value.short_strike !== undefined || value.long_strike !== undefined || value.expiration || value.contracts || value.snapshot));
+  }
+
+  function getModelSourceFromSession(){
+    const sessionSource = window.BenTradeSessionState?.getCurrentReportFile?.();
+    if(sessionSource) return String(sessionSource);
+    if(window.currentReportFile) return String(window.currentReportFile);
+    return null;
+  }
+
+  async function resolveModelSourceFile(idea){
+    const direct = String(idea?.report_file || idea?.trade?.report_file || '').trim();
+    if(direct) return direct;
+
+    const sessionSource = getModelSourceFromSession();
+    if(sessionSource) return sessionSource;
+
+    const strategyId = String(idea?.strategy_id || strategyIdFromValue(idea?.strategy || idea?.trade?.spread_type || idea?.trade?.strategy) || '').trim();
+    if(strategyId && api?.listStrategyReports){
+      try{
+        const files = await api.listStrategyReports(strategyId);
+        const candidate = Array.isArray(files) && files.length ? String(files[0] || '').trim() : '';
+        if(candidate) return candidate;
+      }catch(_err){
+      }
+    }
+
+    return null;
+  }
+
+  function findMatchingOpportunityForModel(idea){
+    const symbol = normalizeSymbol(idea?.symbol || idea?.trade?.underlying || idea?.trade?.symbol || '');
+    if(!symbol) return null;
+    const strategyText = String(idea?.strategy || idea?.trade?.spread_type || idea?.trade?.strategy || '').toLowerCase();
+    const normalizedIdeas = Array.isArray(latestOpportunities)
+      ? latestOpportunities.map((row) => normalizeOpportunity(row, row?.sourceType)).filter((row) => row && row.sourceType === 'options')
+      : [];
+
+    const strict = normalizedIdeas.find((row) => {
+      const sameSymbol = normalizeSymbol(row?.symbol) === symbol;
+      const sameStrategy = String(row?.strategy || '').toLowerCase() === strategyText;
+      return sameSymbol && sameStrategy;
+    });
+    if(strict) return strict;
+
+    const loose = normalizedIdeas.find((row) => normalizeSymbol(row?.symbol) === symbol);
+    return loose || null;
+  }
+
+  function resolveIdeaForModel(idea){
+    if(idea?.sourceType === 'stock') return idea;
+    if(hasUsableTradePayload(idea?.trade_payload || idea?.trade)){
+      return idea;
+    }
+    return findMatchingOpportunityForModel(idea) || idea;
+  }
+
+  async function runModelForOpportunity(idea, onModel, originTag = 'home_opportunities'){
+    if(!idea || idea.sourceType === 'stock'){
+      return false;
+    }
+
+    const resolvedIdea = resolveIdeaForModel(idea);
+    const sourceFile = await resolveModelSourceFile(resolvedIdea);
+    if(!sourceFile){
+      const nextModel = {
+        status: 'error',
+        recommendation: 'ERROR',
+        confidence: null,
+        summary: 'No report source available for model analysis.',
+      };
+      if(typeof onModel === 'function') onModel(nextModel);
+      return false;
+    }
+
     const tradePayload = {
-      ...(idea.trade_payload && typeof idea.trade_payload === 'object' ? idea.trade_payload : {}),
-      underlying: String(idea?.trade?.underlying || idea?.trade?.underlying_symbol || idea.symbol || '').toUpperCase(),
-      underlying_symbol: String(idea?.trade?.underlying_symbol || idea?.trade?.underlying || idea.symbol || '').toUpperCase(),
-      spread_type: String(idea?.trade?.spread_type || idea?.trade?.strategy || idea.strategy || ''),
+      ...(resolvedIdea?.trade_payload && typeof resolvedIdea.trade_payload === 'object' ? resolvedIdea.trade_payload : {}),
+      ...(resolvedIdea?.trade && typeof resolvedIdea.trade === 'object' ? resolvedIdea.trade : {}),
+      underlying: String(resolvedIdea?.trade?.underlying || resolvedIdea?.trade?.underlying_symbol || resolvedIdea?.symbol || '').toUpperCase(),
+      underlying_symbol: String(resolvedIdea?.trade?.underlying_symbol || resolvedIdea?.trade?.underlying || resolvedIdea?.symbol || '').toUpperCase(),
+      spread_type: String(resolvedIdea?.trade?.spread_type || resolvedIdea?.trade?.strategy || resolvedIdea?.strategy || ''),
+      home_origin: String(originTag || 'home_opportunities'),
     };
     if(typeof onModel === 'function'){
       onModel({ status: 'running', recommendation: 'RUNNING', confidence: null, summary: 'Running...' });
     }
-    return api.modelAnalyze(tradePayload, 'home_opportunity')
-      .then((result) => {
-        const me = result?.evaluated_trade?.model_evaluation || {};
-        const nextModel = {
-          status: 'available',
-          recommendation: String(me?.recommendation || 'NEUTRAL').toUpperCase(),
-          confidence: toNumber(me?.confidence),
-          summary: String(me?.summary || '').trim(),
-        };
-        if(typeof onModel === 'function') onModel(nextModel);
-        return true;
-      })
-      .catch((err) => {
-        const nextModel = {
-          status: 'available',
-          recommendation: 'NEUTRAL',
-          confidence: null,
-          summary: String(err?.message || err || 'Model analysis failed'),
-        };
-        if(typeof onModel === 'function') onModel(nextModel);
-        return false;
-      });
+
+    try{
+      const result = await api.modelAnalyze(tradePayload, sourceFile);
+      const me = result?.evaluated_trade?.model_evaluation || {};
+      const nextModel = {
+        status: 'available',
+        recommendation: String(me?.recommendation || 'NEUTRAL').toUpperCase(),
+        confidence: toNumber(me?.confidence),
+        summary: String(me?.summary || '').trim(),
+      };
+      if(typeof onModel === 'function') onModel(nextModel);
+      return true;
+    }catch(err){
+      const nextModel = {
+        status: 'error',
+        recommendation: 'ERROR',
+        confidence: null,
+        summary: String(err?.detail || err?.message || err || 'Model analysis failed'),
+      };
+      if(typeof onModel === 'function') onModel(nextModel);
+      return false;
+    }
   }
 
   function metricValueOrMissing(value, formatter, reason){
@@ -637,6 +812,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     latestOpportunities = Array.isArray(ideas) ? ideas.slice() : [];
     const top = latestOpportunities.slice(0, 5).map((idea, idx) => {
       const normalized = normalizeOpportunity(idea, idea?.sourceType);
+      logOpportunityInstrumentationOnce(normalized, idx);
       const key = opportunityKey(normalized, idx);
       const modelState = opportunityModelState.get(key);
       if(modelState && typeof modelState === 'object'){
@@ -672,10 +848,10 @@ window.BenTradePages.initHome = function initHome(rootEl){
           <div class="stock-note">MODEL: ${escapeHtml(formatModelSummary(idea.model || { status: 'not_run' }))}</div>
           ${idea.sourceType === 'stock' ? `<div class="stock-note">Price ${metricValueOrMissing(idea.key_metrics?.price, (v) => fmt(v, 2), 'Price unavailable')} • RSI ${metricValueOrMissing(idea.key_metrics?.rsi14, (v) => fmt(v, 1), 'RSI14 unavailable')} • Trend ${idea.key_metrics?.trend || '—'} • IV/RV ${metricValueOrMissing(idea.key_metrics?.iv_rv_ratio, (v) => fmt(v, 2), 'IV/RV unavailable')} ${idea.key_metrics?.iv_rv_flag ? `(${idea.key_metrics.iv_rv_flag})` : ''}</div>` : ''}
           <div class="home-op-actions">
-            <button class="btn qtButton" data-action="execute" data-idx="${idx}">Execute trade</button>
-            <button class="btn qtButton" data-action="workbench" data-idx="${idx}">Send to workbench</button>
-            <button class="btn qtButton" data-action="analysis" data-idx="${idx}">Open analysis</button>
-            <button class="btn qtButton" data-action="run-model" data-idx="${idx}" ${idea.sourceType === 'stock' ? 'disabled title="Model analysis currently supports options trades only"' : ''}>${idea.model?.status === 'running' ? 'Running model...' : 'Run model analysis'}</button>
+            <button type="button" class="btn qtButton" data-action="execute" data-idx="${idx}" ${idea.sourceType === 'stock' ? 'disabled title="Execution supported for options trades only (for now)"' : ''}>Execute trade</button>
+            <button type="button" class="btn qtButton" data-action="workbench" data-idx="${idx}">Send to workbench</button>
+            <button type="button" class="btn qtButton" data-action="analysis" data-idx="${idx}">Open analysis</button>
+            <button type="button" class="btn qtButton" data-action="run-model" data-idx="${idx}" ${idea.sourceType === 'stock' ? 'disabled title="Model analysis currently supports options trades only"' : ''}>${idea.model?.status === 'running' ? 'Running model...' : 'Run model analysis'}</button>
           </div>
         </div>
       </div>
@@ -701,11 +877,16 @@ window.BenTradePages.initHome = function initHome(rootEl){
           runModelForOpportunity(idea, (modelState) => {
             opportunityModelState.set(opKey, modelState);
             renderOpportunities(latestOpportunities);
-          });
+          }, 'home_opportunities').catch(() => {});
           return;
         }
-        const destination = action === 'execute' ? '#/active-trade' : '#/trade-testing';
-        sendToWorkbenchForOpportunity(idea, destination);
+
+        if(action === 'execute'){
+          openExecuteForOpportunity(idea);
+          return;
+        }
+
+        sendToWorkbenchForOpportunity(idea, '#/trade-testing');
       });
     });
   }
@@ -786,11 +967,16 @@ window.BenTradePages.initHome = function initHome(rootEl){
       </div>
       <div class="stock-note">Model: ${formatModelSummary(first.model || { status: 'not_run' })}</div>
       <div class="home-top-pick-actions">
-        <button class="btn qtButton" data-action="open">Open Analysis</button>
-        <button class="btn qtButton" data-action="workbench">Send to Workbench</button>
-        <button class="btn qtButton" data-action="model" ${first.sourceType === 'stock' ? 'disabled title="Model analysis currently supports options trades only"' : ''}>Run Model</button>
+        <button type="button" class="btn qtButton" data-action="execute" ${first.sourceType === 'stock' ? 'disabled title="Execution supported for options trades only (for now)"' : ''}>Execute Trade</button>
+        <button type="button" class="btn qtButton" data-action="open">Open Analysis</button>
+        <button type="button" class="btn qtButton" data-action="workbench">Send to Workbench</button>
+        <button type="button" class="btn qtButton" data-action="model" ${first.sourceType === 'stock' ? 'disabled title="Model analysis currently supports options trades only"' : ''}>Run Model</button>
       </div>
     `;
+
+    topPickEl.querySelector('[data-action="execute"]')?.addEventListener('click', () => {
+      openExecuteForOpportunity(first);
+    });
 
     topPickEl.querySelector('[data-action="open"]')?.addEventListener('click', () => {
       openAnalysisForOpportunity(first);
@@ -814,7 +1000,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
         topPickModelState.key = topKey;
         topPickModelState.model = modelState;
         renderTopPick(payload);
-      });
+      }, 'home_top_pick').catch(() => {});
     });
   }
 
@@ -989,9 +1175,17 @@ window.BenTradePages.initHome = function initHome(rootEl){
       return payload;
     }
 
-    const sorted = sourceIdeas
-      .map((row) => normalizeOpportunity(row, row?.sourceType))
+    const normalizedIdeas = sourceIdeas
+      .map((row) => normalizeOpportunity(row, row?.sourceType));
+
+    const optionsFirst = normalizedIdeas
+      .filter((row) => row?.sourceType === 'options')
       .sort((a, b) => (toNumber(b?.rank) ?? 0) - (toNumber(a?.rank) ?? 0));
+    const equities = normalizedIdeas
+      .filter((row) => row?.sourceType !== 'options')
+      .sort((a, b) => (toNumber(b?.rank) ?? 0) - (toNumber(a?.rank) ?? 0));
+
+    const sorted = optionsFirst.length ? [...optionsFirst, ...equities] : equities;
 
     const first = sorted[0];
     if(!first){
@@ -1004,6 +1198,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
       rank_score: first.rank,
       type: first.sourceType,
       source: first.source,
+      source_feed: first.source_feed,
       route: first.route,
       why: [
         `Derived from latest ${first.sourceType === 'stock' ? 'stock scanner' : 'strategy report'} candidates`,
@@ -1055,6 +1250,13 @@ window.BenTradePages.initHome = function initHome(rootEl){
     renderSectors(sectorSummaries);
     renderOpportunities(ideas);
     const topPickPayload = buildTopPickFallback(topPickPayloadRaw, ideas);
+    if(isDevInstrumentationEnabled() && !devLoggedTopPickSource){
+      const topPickSource = Array.isArray(topPickPayload?.picks) && topPickPayload.picks[0]
+        ? String(topPickPayload.picks[0]?.source_feed || 'recommendations/top')
+        : 'none';
+      console.debug('[HomeMetrics] top_pick_source', { source: topPickSource });
+      devLoggedTopPickSource = true;
+    }
     renderTopPick(topPickPayload);
     renderSignalHub(signalUniversePayload);
     if(playbookPayload){
@@ -1222,6 +1424,33 @@ window.BenTradePages.initHome = function initHome(rootEl){
       || (response?.report_stats && typeof response.report_stats === 'object');
   }
 
+  function readErrorMessageFromPayload(payload){
+    const p = (payload && typeof payload === 'object') ? payload : {};
+    return String(
+      p?.error?.message
+      || p?.detail
+      || p?.message
+      || p?.error
+      || ''
+    ).trim();
+  }
+
+  function describeRefreshError(err, step){
+    const status = String(err?.status || err?.statusCode || err?.code || 'n/a');
+    const endpoint = String(err?.endpoint || step?.endpoint || 'n/a');
+    const payload = err?.payload && typeof err.payload === 'object' ? err.payload : null;
+    const payloadMessage = readErrorMessageFromPayload(payload);
+    const payloadDetail = String(payload?.error?.details?.message || payload?.error?.details?.detail || payload?.error?.details || '').trim();
+    const detail = payloadMessage || payloadDetail || String(err?.detail || err?.message || '').trim() || 'n/a';
+    const bodySnippet = String(err?.bodySnippet || '').trim();
+    return {
+      status,
+      endpoint,
+      detail,
+      bodySnippet: bodySnippet ? bodySnippet.slice(0, 200) : '',
+    };
+  }
+
   function updateHomeSessionSnapshot(){
     try{
       const snap = cacheStore?.getSnapshot?.();
@@ -1242,8 +1471,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
       provider: 'tradier',
       endpoint: '/api/trading/positions',
       timeoutMs: 20000,
-      critical: true,
-      optional: false,
+      critical: false,
+      optional: true,
       fn: () => api.getTradingPositions(),
       afterSuccess: async () => {
         await api.refreshActiveTrades().catch(() => {});
@@ -1256,8 +1485,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
       provider: 'tradier',
       endpoint: '/api/trading/orders/open',
       timeoutMs: 20000,
-      critical: true,
-      optional: false,
+      critical: false,
+      optional: true,
       fn: () => api.getTradingOpenOrders(),
     });
 
@@ -1445,11 +1674,20 @@ window.BenTradePages.initHome = function initHome(rootEl){
             break;
           }
 
+          const value = response?.value;
+          if(value && typeof value === 'object' && value.ok === false){
+            const detail = readErrorMessageFromPayload(value) || 'n/a';
+            const nonFatalText = `Broker sync failed (non-fatal): ${step.label} endpoint=${step.endpoint || 'n/a'} detail=${detail}`;
+            pushLog(nonFatalText);
+            warnings += 1;
+            continue;
+          }
+
           pushLog(`Success: ${step.label}`);
           completed += 1;
 
           if(typeof step.afterSuccess === 'function'){
-            await step.afterSuccess(response?.value);
+            await step.afterSuccess(value);
           }
 
           if(overlay?.isOpen?.()){
@@ -1462,13 +1700,23 @@ window.BenTradePages.initHome = function initHome(rootEl){
             continue;
           }
 
-          const status = String(err?.status || err?.statusCode || err?.code || 'n/a');
-          const endpoint = String(err?.endpoint || step?.endpoint || 'n/a');
-          const detail = String(err?.detail || err?.message || 'n/a');
-          pushLog(`Failed: ${step.label} (${status}) endpoint=${endpoint} detail=${detail}`);
+          const parsed = describeRefreshError(err, step);
+          const failLine = `Failed: ${step.label} (${parsed.status}) endpoint=${parsed.endpoint} detail=${parsed.detail}`;
+          pushLog(failLine);
+          if(parsed.bodySnippet){
+            pushLog(`Body: ${parsed.bodySnippet}`);
+          }
+
+          if(step.optional){
+            if(String(step.id || '').startsWith('broker_')){
+              pushLog(`Broker sync failed (non-fatal): ${step.label}`);
+            }
+            warnings += 1;
+            continue;
+          }
 
           if(step.critical){
-            fatalFailure = { label: step.label, detail };
+            fatalFailure = { label: step.label, detail: parsed.detail };
             break;
           }
           warnings += 1;

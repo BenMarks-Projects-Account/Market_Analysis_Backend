@@ -79,12 +79,15 @@
     }
     /* Left nav layout */
     .nav-panel{
+      display:flex;
+      flex-direction:column;
       min-height:0;
       max-height:100%;
       overflow-y:auto;
+      padding-top:10px;
       padding-bottom: var(--scroll-pad);
     }
-    .nav-group{ margin-top:14px; }
+    .nav-group{ margin-top:16px; flex:0 0 auto; }
     .nav-group:first-of-type{ margin-top:0; }
     .nav-group-header{
       font-family:'Orbitron',sans-serif;
@@ -92,7 +95,10 @@
       letter-spacing:0.2em;
       text-transform:uppercase;
       color: rgba(215,251,255,0.88);
-      margin-bottom:2px;
+      margin:6px 0 4px;
+      min-height:16px;
+      display:flex;
+      align-items:flex-end;
     }
     .nav-group-desc{
       font-size:11px;
@@ -119,6 +125,7 @@
       align-items:flex-start;
       gap:10px;
       padding:10px 12px;
+      line-height:1.3;
     }
     .nav-item-text{ display:flex; flex-direction:column; gap:2px; min-width:0; }
     .nav-item-title{ font-size:13px; line-height:1.2; color: rgba(0,234,255,0.96); }
@@ -149,6 +156,36 @@
     .titlebar-right .btn{
       white-space:nowrap;
     }
+    .brand-stack{
+      display:flex;
+      flex-direction:column;
+      align-items:flex-start;
+      gap:6px;
+      z-index:2;
+    }
+    .brand-nav{
+      display:flex;
+      align-items:center;
+      gap:6px;
+    }
+    .brand-nav-btn{
+      padding:4px 10px;
+      border-radius:999px;
+      font-size:11px;
+      line-height:1.1;
+      min-height:26px;
+    }
+    .brand-nav-btn:disabled{
+      opacity:0.45;
+      cursor:not-allowed;
+      transform:none;
+      filter:none;
+      box-shadow: 0 0 0 1px rgba(0,234,255,0.08) inset;
+    }
+    .brand-nav-btn:focus-visible{
+      outline:none;
+      box-shadow: 0 0 0 3px rgba(0,234,255,0.14), 0 0 18px rgba(0,234,255,0.16);
+    }
   
     #view{ min-width:0; min-height:0; display:block; height:auto; overflow:visible; padding-bottom: var(--scroll-pad); box-sizing:border-box; }
     .view-wrap{ width:100%; min-height:0; padding-bottom: var(--scroll-pad); box-sizing:border-box; }
@@ -158,9 +195,16 @@
   <div class="shell">
     <!-- Header banner (matches dashboard) -->
     <div class="titlebar">
-      <div class="brand-badge" aria-hidden="true">
-        <span class="bt">BT</span>
-        <span class="brand-name">BenTrade</span>
+      <div class="brand-stack">
+        <div class="brand-badge" aria-hidden="true">
+          <span class="bt">BT</span>
+          <span class="brand-name">BenTrade</span>
+        </div>
+        <div class="brand-nav" aria-label="App navigation controls">
+          <button id="headerBackBtn" class="btn brand-nav-btn" type="button" title="Back" aria-label="Back" disabled>◀ Back</button>
+          <button id="headerForwardBtn" class="btn brand-nav-btn" type="button" title="Forward" aria-label="Forward" disabled>Forward ▶</button>
+          <button id="headerHomeBtn" class="btn brand-nav-btn" type="button" title="Home" aria-label="Home">⌂ Home</button>
+        </div>
       </div>
       <div class="hero">
         <div class="hero-title">BENTRADE</div>
@@ -177,14 +221,16 @@
     <div class="shell-layout">
       <aside class="sidebar">
         <div class="nav-panel">
-          <div class="nav-title">Navigation</div>
-          <a class="nav-link" href="#/home" data-route="home">
-            <span class="nav-dot"></span>
-            <span class="nav-item-text">
-              <span class="nav-item-title">Home</span>
-              <span class="nav-item-sub">Market overview command center</span>
-            </span>
-          </a>
+          <section class="nav-group" aria-label="Navigation">
+            <div class="nav-group-header">Navigation</div>
+            <a class="nav-link" href="#/home" data-route="home">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Home</span>
+                <span class="nav-item-sub">Market overview command center</span>
+              </span>
+            </a>
+          </section>
 
           <section class="nav-group" aria-label="Analysis">
             <div class="nav-group-header">Analysis</div>
@@ -377,6 +423,6 @@
   <script src="assets/js/pages/trade_lifecycle.js?v=20260216a"></script>
   <script src="assets/js/pages/strategy_analytics.js?v=20260216a"></script>
   <script src="assets/js/app.js?v=20260216a"></script>
-  <script src="assets/js/router.js?v=20260216b"></script>
+  <script src="assets/js/router.js?v=20260216c"></script>
 </body>
 </html>

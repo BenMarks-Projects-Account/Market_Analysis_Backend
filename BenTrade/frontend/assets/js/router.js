@@ -1,5 +1,147 @@
 // BenTrade SPA Router (no framework)
 (function(){
+  const ROUTE_HISTORY_KEY = 'bentrade_route_history_v1';
+  const routeHistoryState = {
+    stack: [],
+    index: -1,
+    pendingTarget: null,
+  };
+
+  function normalizeHashForHistory(hash){
+    const raw = String(hash || '').trim();
+    if(!raw) return '#/home';
+    if(raw.startsWith('#/')) return raw;
+    if(raw.startsWith('#')) return `#/${raw.slice(1)}`;
+    return `#/${raw}`;
+  }
+
+  function loadRouteHistory(){
+    try{
+      const raw = sessionStorage.getItem(ROUTE_HISTORY_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      const stack = Array.isArray(parsed?.stack)
+        ? parsed.stack.map((row) => normalizeHashForHistory(row)).filter(Boolean)
+        : [];
+      const index = Number(parsed?.index);
+      routeHistoryState.stack = stack;
+      routeHistoryState.index = Number.isFinite(index) ? Math.max(-1, Math.min(index, stack.length - 1)) : (stack.length - 1);
+    }catch(_err){
+      routeHistoryState.stack = [];
+      routeHistoryState.index = -1;
+    }
+  }
+
+  function persistRouteHistory(){
+    try{
+      sessionStorage.setItem(ROUTE_HISTORY_KEY, JSON.stringify({
+        stack: routeHistoryState.stack,
+        index: routeHistoryState.index,
+        last_route: routeHistoryState.stack[routeHistoryState.index] || null,
+      }));
+    }catch(_err){
+    }
+  }
+
+  function updateHeaderNavButtons(){
+    const backBtn = document.getElementById('headerBackBtn');
+    const forwardBtn = document.getElementById('headerForwardBtn');
+    if(backBtn){
+      const hasSpaBack = routeHistoryState.index > 0;
+      const hasBrowserBack = window.history.length > 1;
+      backBtn.disabled = !(hasSpaBack || hasBrowserBack);
+    }
+    if(forwardBtn){
+      const hasSpaForward = routeHistoryState.index >= 0 && routeHistoryState.index < (routeHistoryState.stack.length - 1);
+      forwardBtn.disabled = !hasSpaForward;
+    }
+  }
+
+  function commitRouteInHistory(hash){
+    const normalized = normalizeHashForHistory(hash);
+    if(routeHistoryState.pendingTarget && routeHistoryState.pendingTarget === normalized){
+      routeHistoryState.pendingTarget = null;
+      persistRouteHistory();
+      updateHeaderNavButtons();
+      return;
+    }
+
+    const current = routeHistoryState.stack[routeHistoryState.index] || null;
+    if(current === normalized){
+      persistRouteHistory();
+      updateHeaderNavButtons();
+      return;
+    }
+
+    const nextStack = routeHistoryState.stack.slice(0, Math.max(0, routeHistoryState.index + 1));
+    nextStack.push(normalized);
+    routeHistoryState.stack = nextStack;
+    routeHistoryState.index = nextStack.length - 1;
+    persistRouteHistory();
+    updateHeaderNavButtons();
+  }
+
+  function goBack(){
+    if(routeHistoryState.index > 0){
+      routeHistoryState.index -= 1;
+      const target = routeHistoryState.stack[routeHistoryState.index];
+      routeHistoryState.pendingTarget = target;
+      persistRouteHistory();
+      updateHeaderNavButtons();
+      location.hash = target;
+      return;
+    }
+    window.history.back();
+    updateHeaderNavButtons();
+  }
+
+  function goForward(){
+    if(routeHistoryState.index >= 0 && routeHistoryState.index < (routeHistoryState.stack.length - 1)){
+      routeHistoryState.index += 1;
+      const target = routeHistoryState.stack[routeHistoryState.index];
+      routeHistoryState.pendingTarget = target;
+      persistRouteHistory();
+      updateHeaderNavButtons();
+      location.hash = target;
+      return;
+    }
+    window.history.forward();
+    updateHeaderNavButtons();
+  }
+
+  function goHome(){
+    location.hash = '#/home';
+  }
+
+  function initHeaderNavControls(){
+    const backBtn = document.getElementById('headerBackBtn');
+    const forwardBtn = document.getElementById('headerForwardBtn');
+    const homeBtn = document.getElementById('headerHomeBtn');
+
+    if(backBtn && backBtn.dataset.bound !== '1'){
+      backBtn.dataset.bound = '1';
+      backBtn.addEventListener('click', goBack);
+    }
+    if(forwardBtn && forwardBtn.dataset.bound !== '1'){
+      forwardBtn.dataset.bound = '1';
+      forwardBtn.addEventListener('click', goForward);
+    }
+    if(homeBtn && homeBtn.dataset.bound !== '1'){
+      homeBtn.dataset.bound = '1';
+      homeBtn.addEventListener('click', goHome);
+    }
+
+    window.BenTradeRouterHistory = {
+      canGoBack: () => routeHistoryState.index > 0 || window.history.length > 1,
+      canGoForward: () => routeHistoryState.index >= 0 && routeHistoryState.index < (routeHistoryState.stack.length - 1),
+      goBack,
+      goForward,
+      goHome,
+      getState: () => ({ stack: routeHistoryState.stack.slice(), index: routeHistoryState.index }),
+    };
+
+    updateHeaderNavButtons();
+  }
+
   function initFullscreenToggle(){
     const btn = document.getElementById('fullscreenToggleBtn');
     if(!btn || btn.dataset.bound === '1') return;
@@ -26,6 +168,8 @@
     setLabel();
   }
 
+  loadRouteHistory();
+  initHeaderNavControls();
   initFullscreenToggle();
 
   const routeMeta = {
@@ -213,7 +357,11 @@
     return hash.replace(/^#/, '').trim() || 'home';
   }
 
-  function navigate(){ loadView(routeFromHash()); }
+  function navigate(){
+    const hash = normalizeHashForHistory(location.hash || '#/home');
+    commitRouteInHistory(hash);
+    loadView(routeFromHash());
+  }
 
   window.addEventListener("hashchange", navigate);
 
