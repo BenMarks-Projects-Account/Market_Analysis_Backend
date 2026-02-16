@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Request
 
 from app.models.schemas import HealthResponse
@@ -19,3 +21,50 @@ async def health(request: Request) -> HealthResponse:
         "fred": "ok" if fred_ok else "down",
     }
     return HealthResponse(ok=all(x == "ok" for x in upstream.values()), upstream=upstream)
+
+
+@router.get("/sources")
+async def sources_health(request: Request) -> dict:
+    snapshot = request.app.state.base_data_service.get_source_health_snapshot()
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    source_name_map = {
+        "finnhub": "Finnhub",
+        "yahoo": "Yahoo",
+        "tradier": "Tradier",
+        "fred": "FRED",
+    }
+
+    def _to_canonical_status(raw: str | None) -> str:
+        value = str(raw or "").strip().lower()
+        if value == "green":
+            return "ok"
+        if value == "red":
+            return "down"
+        return "degraded"
+
+    sources: list[dict] = []
+    for key in ("finnhub", "yahoo", "tradier", "fred"):
+        item = snapshot.get(key) or {}
+        notes: list[str] = []
+        message = str(item.get("message") or "").strip()
+        if message:
+            notes.append(message)
+        last_http = item.get("last_http")
+        if last_http not in (None, ""):
+            notes.append(f"HTTP {last_http}")
+
+        sources.append(
+            {
+                "name": source_name_map.get(key, key.upper()),
+                "status": _to_canonical_status(item.get("status")),
+                "latency_ms": None,
+                "last_ok": item.get("last_ok_ts"),
+                "notes": notes,
+            }
+        )
+
+    return {
+        "as_of": now_iso,
+        "sources": sources,
+    }

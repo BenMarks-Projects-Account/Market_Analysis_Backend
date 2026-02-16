@@ -16,6 +16,7 @@ from app.api.routes_reports import router as reports_router
 from app.api.routes_risk_capital import router as risk_capital_router
 from app.api.routes_stock_analysis import router as stock_analysis_router
 from app.api.routes_spreads import router as spreads_router
+from app.api.routes_strategies import router as strategies_router
 from app.api.routes_strategy_analytics import router as strategy_analytics_router
 from app.api.routes_trade_lifecycle import router as trade_lifecycle_router
 from app.api.routes_trading import router as trading_router
@@ -32,6 +33,7 @@ from app.services.risk_policy_service import RiskPolicyService
 from app.services.report_service import ReportService
 from app.services.stock_analysis_service import StockAnalysisService
 from app.services.spread_service import SpreadService
+from app.services.strategy_service import StrategyService
 from app.services.trade_lifecycle_service import TradeLifecycleService
 from app.storage.repository import InMemoryTradingRepository
 from app.trading.paper_broker import PaperBroker
@@ -76,6 +78,11 @@ def create_app() -> FastAPI:
     stock_analysis_service = StockAnalysisService(base_data_service=base_data_service, results_dir=results_dir)
     trade_lifecycle_service = TradeLifecycleService(results_dir=results_dir)
     risk_policy_service = RiskPolicyService(results_dir=results_dir)
+    strategy_service = StrategyService(
+        base_data_service=base_data_service,
+        results_dir=results_dir,
+        risk_policy_service=risk_policy_service,
+    )
     report_service = ReportService(base_data_service=base_data_service, results_dir=results_dir)
     decision_service = DecisionService(results_dir=results_dir)
     trading_repository = InMemoryTradingRepository()
@@ -101,6 +108,7 @@ def create_app() -> FastAPI:
     app.state.base_data_service = base_data_service
     app.state.spread_service = spread_service
     app.state.stock_analysis_service = stock_analysis_service
+    app.state.strategy_service = strategy_service
     app.state.trade_lifecycle_service = trade_lifecycle_service
     app.state.risk_policy_service = risk_policy_service
     app.state.report_service = report_service
@@ -116,6 +124,7 @@ def create_app() -> FastAPI:
     app.include_router(underlying_router)
     app.include_router(spreads_router)
     app.include_router(stock_analysis_router)
+    app.include_router(strategies_router)
     app.include_router(portfolio_risk_router)
     app.include_router(risk_capital_router)
     app.include_router(trade_lifecycle_router)

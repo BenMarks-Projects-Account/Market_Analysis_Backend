@@ -297,6 +297,7 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
                 populateUnderlyingOptions(persistedFiltered);
                 applyUnderlyingFilter();
                 renderDiagnosticPanel({ reportStats, diagnostics, sourceHealth, trades });
+                window.BenTradeSourceHealthStore?.fetchSourceHealth?.({ force: true }).catch(() => {});
             } catch (error) {
                 console.error('Error loading analysis:', error);
                 content.innerHTML = '<div class="error">Error loading analysis data</div>';
@@ -502,7 +503,20 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
         }
 
         function formatTradeType(type) {
-            return type === 'put_credit' ? '📉 Put Credit Spread' : '📈 Call Credit Spread';
+            const key = String(type || '').toLowerCase();
+            if(key === 'put_credit' || key === 'credit_put_spread') return '📉 Put Credit Spread';
+            if(key === 'call_credit' || key === 'credit_call_spread') return '📈 Call Credit Spread';
+            if(key === 'debit_call_spread') return '📈 Call Debit Spread';
+            if(key === 'debit_put_spread') return '📉 Put Debit Spread';
+            if(key === 'iron_condor') return '🦅 Iron Condor';
+            if(key === 'debit_call_butterfly') return '🦋 Call Debit Butterfly';
+            if(key === 'debit_put_butterfly') return '🦋 Put Debit Butterfly';
+            if(key === 'iron_butterfly') return '🦋 Iron Butterfly';
+            if(key === 'calendar_call_spread') return '🗓️ Call Calendar Spread';
+            if(key === 'calendar_put_spread') return '🗓️ Put Calendar Spread';
+            if(key === 'cash_secured_put') return '💵 Cash Secured Put';
+            if(key === 'covered_call') return '📞 Covered Call';
+            return String(type || 'Spread');
         }
 
         
@@ -524,7 +538,22 @@ const html = `
                                     <div class="trade-type">${formatTradeType(trade.spread_type)}</div>
                                     <div class="trade-subtitle">
                                         <span class="underlying-symbol">${trade.underlying || trade.underlying_symbol || ''}</span>
-                                        <span class="trade-strikes-inline">${trade.short_strike}/${trade.long_strike}</span>
+                                        ${(function(){
+                                            const spreadType = String(trade.spread_type || trade.strategy || '').toLowerCase();
+                                            if(spreadType === 'iron_condor'){
+                                                return `<span class="trade-strikes-inline">P ${trade.put_short_strike ?? 'NA'}/${trade.put_long_strike ?? 'NA'} • C ${trade.call_short_strike ?? 'NA'}/${trade.call_long_strike ?? 'NA'}</span>`;
+                                            }
+                                            if(spreadType === 'debit_call_butterfly' || spreadType === 'debit_put_butterfly' || spreadType === 'iron_butterfly'){
+                                                return `<span class="trade-strikes-inline">${trade.lower_strike ?? 'NA'} / ${trade.center_strike ?? trade.short_strike ?? 'NA'} / ${trade.upper_strike ?? 'NA'}</span>`;
+                                            }
+                                            if(spreadType === 'calendar_call_spread' || spreadType === 'calendar_put_spread'){
+                                                return `<span class="trade-strikes-inline">K ${trade.strike ?? trade.short_strike ?? 'NA'} • ${trade.expiration_near ?? 'NA'} → ${trade.expiration_far ?? trade.expiration ?? 'NA'}</span>`;
+                                            }
+                                            if(spreadType === 'cash_secured_put' || spreadType === 'covered_call'){
+                                                return `<span class="trade-strikes-inline">K ${trade.short_strike ?? trade.strike ?? 'NA'} • ${trade.expiration ?? 'NA'}</span>`;
+                                            }
+                                            return `<span class="trade-strikes-inline">${trade.short_strike}/${trade.long_strike}</span>`;
+                                        })()}
                                         <span class="underlying-price">(${fmtNumber(trade.underlying_price,2,'','')})</span>
                                     </div>
                                     <div class="trade-rank-line">Rank Score: ${fmtPercent((trade.rank_score ?? trade.composite_score), 1)}</div>
@@ -595,8 +624,46 @@ const html = `
                                         <div class="trade-details">
                                             <div class="detail-row">
                                                 <span class="detail-label" data-metric="break_even">Break Even</span>
-                                                <span class="detail-value">${fmtNumber(trade.break_even,2,'$')}</span>
+                                                <span class="detail-value">${(function(){
+                                                    const spreadType = String(trade.spread_type || trade.strategy || '').toLowerCase();
+                                                    if(spreadType === 'iron_condor' || spreadType === 'debit_call_butterfly' || spreadType === 'debit_put_butterfly' || spreadType === 'iron_butterfly'){
+                                                        return `${fmtNumber(trade.break_even_low,2,'$')} / ${fmtNumber(trade.break_even_high,2,'$')}`;
+                                                    }
+                                                    return fmtNumber(trade.break_even,2,'$');
+                                                })()}</span>
                                             </div>
+                                            ${String(trade.spread_type || trade.strategy || '').toLowerCase() === 'iron_condor' ? `
+                                            <div class="detail-row">
+                                                <span class="detail-label">Put / Call Width</span>
+                                                <span class="detail-value">${fmtNumber(trade.width_put,2,'','')} / ${fmtNumber(trade.width_call,2,'','')}</span>
+                                            </div>
+                                            ` : ''}
+                                            ${['debit_call_butterfly','debit_put_butterfly','iron_butterfly'].includes(String(trade.spread_type || trade.strategy || '').toLowerCase()) ? `
+                                            <div class="detail-row">
+                                                <span class="detail-label">Payoff Summary</span>
+                                                <span class="detail-value">Center ${fmtNumber(trade.center_strike,2,'$')} • Peak ${fmtNumber(trade.peak_profit_at_center,2,'$')} • Slope ${fmtNumber(trade.payoff_slope,2,'$','/$')}</span>
+                                            </div>
+                                            ` : ''}
+                                            ${['calendar_call_spread','calendar_put_spread'].includes(String(trade.spread_type || trade.strategy || '').toLowerCase()) ? `
+                                            <div class="detail-row">
+                                                <span class="detail-label">Why Score</span>
+                                                <span class="detail-value">Term ${fmtPercent(trade.why_term_structure,0)} • Move ${fmtPercent(trade.why_move_risk,0)} • Liquidity ${fmtPercent(trade.why_liquidity,0)}</span>
+                                            </div>
+                                            <div class="detail-row">
+                                                <span class="detail-label">Calendar Metrics</span>
+                                                <span class="detail-value">Debit ${fmtNumber(trade.net_debit,2,'$')} • Theta ${fmtNumber(trade.theta_structure,4,'','')} • Vega ${fmtNumber(trade.vega_exposure,4,'','')}</span>
+                                            </div>
+                                            ` : ''}
+                                            ${['cash_secured_put','covered_call'].includes(String(trade.spread_type || trade.strategy || '').toLowerCase()) ? `
+                                            <div class="detail-row">
+                                                <span class="detail-label">Income Why Score</span>
+                                                <span class="detail-value">Yield ${fmtPercent(trade.why_yield,0)} • Buffer ${fmtPercent(trade.why_buffer,0)} • Liquidity ${fmtPercent(trade.why_liquidity,0)} • IV ${fmtPercent(trade.why_iv_rich,0)}</span>
+                                            </div>
+                                            <div class="detail-row">
+                                                <span class="detail-label">Income Metrics</span>
+                                                <span class="detail-value">Ann Yield ${fmtPercent(trade.annualized_yield_on_collateral,1)} • Prem/Day ${fmtNumber(trade.premium_per_day,2,'$')} • Buffer ${fmtPercent(trade.downside_buffer,1)} • Assign ${fmtPercent(trade.assignment_risk_score,1)}</span>
+                                            </div>
+                                            ` : ''}
                                             <div class="detail-row">
                                                 <span class="detail-label" data-metric="dte">Days to Expiration</span>
                                                 <span class="detail-value">${trade.dte ?? 'N/A'}</span>
@@ -678,7 +745,18 @@ const html = `
                 const expirationRaw = trade.expiration;
                 const expiration = expirationRaw === null || expirationRaw === undefined || String(expirationRaw).trim() === '' ? 'NA' : String(expirationRaw).trim();
                 const spread = String(trade.spread_type || trade.strategy || '').trim().toLowerCase();
-                const strategy = spread === 'call_credit' || spread === 'credit_call_spread' ? 'credit_call_spread' : 'credit_put_spread';
+                let strategy = 'credit_put_spread';
+                if(spread === 'call_credit' || spread === 'credit_call_spread') strategy = 'credit_call_spread';
+                else if(spread === 'debit_call_spread') strategy = 'debit_call_spread';
+                else if(spread === 'debit_put_spread') strategy = 'debit_put_spread';
+                else if(spread === 'iron_condor') strategy = 'iron_condor';
+                else if(spread === 'debit_call_butterfly') strategy = 'debit_call_butterfly';
+                else if(spread === 'debit_put_butterfly') strategy = 'debit_put_butterfly';
+                else if(spread === 'iron_butterfly') strategy = 'iron_butterfly';
+                else if(spread === 'calendar_call_spread') strategy = 'calendar_call_spread';
+                else if(spread === 'calendar_put_spread') strategy = 'calendar_put_spread';
+                else if(spread === 'cash_secured_put') strategy = 'cash_secured_put';
+                else if(spread === 'covered_call') strategy = 'covered_call';
 
                 const shortStrike = Number(trade.short_strike);
                 const longStrike = Number(trade.long_strike);
@@ -688,6 +766,18 @@ const html = `
                     strategy,
                     short_strike: Number.isFinite(shortStrike) ? shortStrike : trade.short_strike,
                     long_strike: Number.isFinite(longStrike) ? longStrike : trade.long_strike,
+                    put_short_strike: trade.put_short_strike,
+                    put_long_strike: trade.put_long_strike,
+                    call_short_strike: trade.call_short_strike,
+                    call_long_strike: trade.call_long_strike,
+                    center_strike: trade.center_strike,
+                    lower_strike: trade.lower_strike,
+                    upper_strike: trade.upper_strike,
+                    wing_width: trade.wing_width,
+                    butterfly_type: trade.butterfly_type,
+                    strike: trade.strike,
+                    expiration_near: trade.expiration_near,
+                    expiration_far: trade.expiration_far,
                     contractsMultiplier: Number(trade.contractsMultiplier || 100) || 100,
                 };
 
@@ -979,6 +1069,7 @@ const html = `
                     evt.close();
                     genBtn.classList.remove('is-loading');
                     loadFiles(fn);
+                    window.BenTradeSourceHealthStore?.fetchSourceHealth?.({ force: true }).catch(() => {});
                 }, 900);
             });
             evt.addEventListener('error', (e)=>{

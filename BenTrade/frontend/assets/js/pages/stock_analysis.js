@@ -18,7 +18,6 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
   const recentClosesEl = scope.querySelector('#stockRecentCloses');
   const indicatorsEl = scope.querySelector('#stockIndicators');
   const optionsContextEl = scope.querySelector('#stockOptionsContext');
-  const sourceHealthEl = scope.querySelector('#stockSourceHealth');
   const notesEl = scope.querySelector('#stockNotes');
   const debugBodyEl = scope.querySelector('#stockDebugBody');
   const summaryModeBtn = scope.querySelector('#stockSummaryModeBtn');
@@ -471,6 +470,7 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
       scanPayload = payload;
       renderScanResults(scanPayload);
       renderSourceHealth(scanPayload?.source_health || {});
+      window.BenTradeSourceHealthStore?.fetchSourceHealth?.({ force: true }).catch(() => {});
       renderNotes(scanPayload?.notes || []);
       renderDebug(scanPayload, '');
     }catch(err){
@@ -515,26 +515,7 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
   function renderSourceHealth(snapshot){
     if(sourceHealthUi?.renderFromSnapshot){
       sourceHealthUi.renderFromSnapshot(snapshot || {});
-      return;
     }
-
-    if(!sourceHealthEl) return;
-
-    const rows = Object.entries(snapshot || {}).map(([source, value]) => {
-      const status = String(value?.status || 'yellow').toLowerCase();
-      const dot = status === 'green' ? 'status-green' : (status === 'red' ? 'status-red' : 'status-yellow');
-      const msg = value?.message || 'No message';
-      return `
-        <div class="diagnosticRow">
-          <span class="diagnosticLabel">${String(source).toUpperCase()}</span>
-          <span class="status-wrap" tabindex="0">
-            <span class="status-dot ${dot}"></span>
-            <span class="status-tooltip">${msg}</span>
-          </span>
-        </div>
-      `;
-    }).join('');
-    sourceHealthEl.innerHTML = rows || '<div class="loading">No source health available.</div>';
   }
 
   function renderNotes(notes){
@@ -578,6 +559,7 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
       renderIndicators(payload?.indicators || {});
       renderOptionsContext(payload?.options_context || {});
       renderSourceHealth(payload?.source_health || {});
+      window.BenTradeSourceHealthStore?.fetchSourceHealth?.({ force: true }).catch(() => {});
       renderNotes(payload?.notes || []);
       renderCandidate();
       renderDebug(payload, '');

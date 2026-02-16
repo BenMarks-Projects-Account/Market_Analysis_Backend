@@ -1267,39 +1267,6 @@ main.main{
   grid-column: 1 / -1 !important;
 }
 
-/* ===== Banner dashboard nav ===== */
-.banner-nav{
-    margin-top: 8px;
-    display:flex;
-    flex-wrap:wrap;
-    gap:8px;
-    justify-content:center;
-}
-
-.banner-nav-link{
-    text-decoration:none;
-    color: rgba(0,234,255,0.92);
-    font-size:11px;
-    text-transform:uppercase;
-    letter-spacing:0.12em;
-    padding:7px 10px;
-    border-radius:10px;
-    border:1px solid rgba(0,234,255,0.18);
-    background: linear-gradient(180deg, rgba(7,10,16,0.74), rgba(3,4,8,0.56));
-    box-shadow: 0 10px 24px rgba(0,0,0,0.42), 0 0 18px rgba(0,234,255,0.08);
-    transition: transform .12s ease, filter .12s ease;
-}
-
-.banner-nav-link:hover{
-    filter:brightness(1.08);
-    transform: translateY(-1px);
-}
-
-.banner-nav-link.active{
-    border-color: rgba(0,234,255,0.34);
-    box-shadow: 0 10px 24px rgba(0,0,0,0.42), 0 0 24px rgba(0,234,255,0.18);
-}
-
 /* ===== Placeholder dashboard scene ===== */
 .placeholder-intro{
     margin-bottom: 14px;

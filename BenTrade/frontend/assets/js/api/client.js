@@ -6,6 +6,16 @@ window.BenTradeApi = (function(){
       const message = payload?.error?.message || payload?.detail || `Request failed (${response.status})`;
       throw new Error(message);
     }
+
+    try{
+      const textUrl = String(url || '');
+      const isHealthEndpoint = textUrl.startsWith('/api/health');
+      if(!isHealthEndpoint && window.BenTradeSourceHealthStore?.fetchSourceHealth){
+        window.BenTradeSourceHealthStore.fetchSourceHealth({ force: true }).catch(() => {});
+      }
+    }catch(_err){
+    }
+
     return payload;
   }
 
@@ -135,6 +145,26 @@ window.BenTradeApi = (function(){
     return jsonFetch('/api/risk/snapshot');
   }
 
+  function listStrategyReports(strategyId){
+    const key = encodeURIComponent(String(strategyId || ''));
+    return jsonFetch(`/api/strategies/${key}/reports`);
+  }
+
+  function getStrategyReport(strategyId, filename){
+    const key = encodeURIComponent(String(strategyId || ''));
+    const file = encodeURIComponent(String(filename || ''));
+    return jsonFetch(`/api/strategies/${key}/reports/${file}`);
+  }
+
+  function generateStrategyReport(strategyId, payload){
+    const key = encodeURIComponent(String(strategyId || ''));
+    return jsonFetch(`/api/strategies/${key}/generate`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
   return {
     listReports,
     getReport,
@@ -158,5 +188,8 @@ window.BenTradeApi = (function(){
     getRiskPolicy,
     updateRiskPolicy,
     getRiskSnapshot,
+    listStrategyReports,
+    getStrategyReport,
+    generateStrategyReport,
   };
 })();
