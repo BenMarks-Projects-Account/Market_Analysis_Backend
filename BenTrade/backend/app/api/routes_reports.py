@@ -7,6 +7,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from app.models.trade_contract import TradeContract
+
 router = APIRouter(tags=["reports"])
 
 
@@ -149,9 +151,10 @@ async def model_analyze(payload: dict):
         raise HTTPException(status_code=400, detail='Missing "source" filename in request body')
 
     try:
-        from common.utils import analyze_trade_with_model
+        from common.model_analysis import analyze_trade
 
-        evaluated = analyze_trade_with_model(trade, source)
+        contract = TradeContract.from_dict(trade)
+        evaluated = analyze_trade(contract, source)
         if evaluated is None:
             raise HTTPException(status_code=500, detail="Model call failed or returned unparsable response")
         return {"ok": True, "evaluated_trade": evaluated}

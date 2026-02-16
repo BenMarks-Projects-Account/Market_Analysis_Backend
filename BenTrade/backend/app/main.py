@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from app.api.routes_frontend import router as frontend_router
 from app.api.routes_health import router as health_router
 from app.api.routes_options import router as options_router
+from app.api.routes_decisions import router as decisions_router
 from app.api.routes_reports import router as reports_router
 from app.api.routes_spreads import router as spreads_router
 from app.api.routes_trading import router as trading_router
@@ -19,6 +20,7 @@ from app.clients.tradier_client import TradierClient
 from app.clients.yahoo_client import YahooClient
 from app.config import get_settings
 from app.services.base_data_service import BaseDataService
+from app.services.decision_service import DecisionService
 from app.services.report_service import ReportService
 from app.services.spread_service import SpreadService
 from app.storage.repository import InMemoryTradingRepository
@@ -62,6 +64,7 @@ def create_app() -> FastAPI:
     )
     spread_service = SpreadService(base_data_service=base_data_service)
     report_service = ReportService(base_data_service=base_data_service, results_dir=results_dir)
+    decision_service = DecisionService(results_dir=results_dir)
     trading_repository = InMemoryTradingRepository()
     paper_broker = PaperBroker()
     tradier_broker = TradierBroker(
@@ -85,6 +88,7 @@ def create_app() -> FastAPI:
     app.state.base_data_service = base_data_service
     app.state.spread_service = spread_service
     app.state.report_service = report_service
+    app.state.decision_service = decision_service
     app.state.trading_repository = trading_repository
     app.state.trading_service = trading_service
     app.state.backend_dir = backend_dir
@@ -97,6 +101,7 @@ def create_app() -> FastAPI:
     app.include_router(spreads_router)
     app.include_router(trading_router)
     app.include_router(reports_router)
+    app.include_router(decisions_router)
     app.include_router(frontend_router)
 
     @app.exception_handler(UpstreamError)

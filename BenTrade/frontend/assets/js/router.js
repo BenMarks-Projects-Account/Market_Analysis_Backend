@@ -3,7 +3,7 @@
   const routes = {
     "credit-spread": {
       view: "dashboards/credit-spread.view.html",
-      init: () => window.BenTrade?.initCreditSpread?.(document.getElementById('view')),
+      init: () => (window.BenTradePages?.initCreditSpread || window.BenTrade?.initCreditSpread)?.(document.getElementById('view')),
       title: "Credit Spread Analysis"
     },
     "active-trade": {

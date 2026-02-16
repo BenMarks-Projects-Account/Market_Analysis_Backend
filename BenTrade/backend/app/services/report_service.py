@@ -10,9 +10,13 @@ from collections import Counter, defaultdict
 from typing import Any
 
 from app.utils.http import UpstreamError
+from app.models.trade_contract import TradeContract
 from app.services.base_data_service import BaseDataService
+from app.services.evaluation.gates import evaluate_trade as evaluate_trade_contract
+from app.services.evaluation.ranking import sort_trades_by_rank as sort_trades_by_rank_contracts
+from app.services.evaluation.scoring import compute_composite_score as compute_composite_score_contract
+from app.services.evaluation.types import EvaluationContext
 from app.services.ranking import safe_float as rank_safe_float
-from app.services.ranking import sort_trades_by_rank
 from app.utils.dates import dte_ceil
 
 try:
@@ -907,12 +911,17 @@ class ReportService:
 
                 accepted_symbol_exp: list[dict[str, Any]] = []
                 for trade in merged_with_history:
-                    is_ok, reasons = evaluate_trade(trade, rules, validation_mode)
-                    if is_ok:
-                        accepted_symbol_exp.append(trade)
+                    contract = TradeContract.from_dict(trade)
+                    result = evaluate_trade_contract(
+                        contract,
+                        EvaluationContext(rules=rules, validation_mode=validation_mode),
+                        legacy_evaluator=evaluate_trade,
+                    )
+                    if result.accepted:
+                        accepted_symbol_exp.append(contract.to_dict())
                     else:
-                        reject_reason_counts.update(reasons)
-                        reject_reason_counts_by_symbol[current_symbol].update(reasons)
+                        reject_reason_counts.update(result.reasons)
+                        reject_reason_counts_by_symbol[current_symbol].update(result.reasons)
 
                 accepted_symbol_all.extend(accepted_symbol_exp)
                 merged_symbol.extend(merged)
@@ -936,7 +945,8 @@ class ReportService:
                 )
 
             for tr in accepted_symbol_all:
-                tr["composite_score"] = compute_composite_score(tr)
+                contract = TradeContract.from_dict(tr)
+                tr["composite_score"] = compute_composite_score_contract(contract, legacy_scorer=compute_composite_score)
 
             all_candidates.extend(merged_symbol)
             accepted.extend(accepted_symbol_all)
@@ -967,7 +977,8 @@ class ReportService:
                 "message": "Scoring and ranking accepted trades across all symbols.",
             },
         )
-        accepted = sort_trades_by_rank(accepted)
+        accepted_contracts = [TradeContract.from_dict(trade) for trade in accepted]
+        accepted = [trade.to_dict() for trade in sort_trades_by_rank_contracts(accepted_contracts)]
         for idx, tr in enumerate(accepted, start=1):
             tr["rank_in_report"] = idx
 

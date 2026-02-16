@@ -808,3 +808,20 @@ def hard_gate_override(trade: dict, me: dict) -> dict:
 
     print('[utils] All model call attempts failed for single trade; last error:', last_err)
     return None
+
+
+_analyze_trade_with_model_legacy = analyze_trade_with_model
+
+
+def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http://localhost:1234/v1/chat/completions', retries=2, timeout=30):
+    # TODO(architecture): remove this compatibility shim once all imports use common.model_analysis directly.
+    from app.models.trade_contract import TradeContract
+    from common.model_analysis import analyze_trade
+
+    return analyze_trade(
+        TradeContract.from_dict(trade),
+        source_filename,
+        model_url=model_url,
+        retries=retries,
+        timeout=timeout,
+    )

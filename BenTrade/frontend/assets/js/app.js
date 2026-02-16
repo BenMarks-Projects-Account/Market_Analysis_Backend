@@ -3,6 +3,9 @@ window.BenTrade = window.BenTrade || {};
 window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
   const doc = (rootEl && rootEl.ownerDocument) ? rootEl.ownerDocument : document;
   const scope = rootEl || doc;
+    const session = window.BenTradeSession || null;
+    const api = window.BenTradeApi || null;
+    const tradeCardUi = window.BenTradeTradeCard || null;
 
     const reportSelect = scope.querySelector('#reportSelect');
   const fileSelect = scope.querySelector('#fileSelect');
@@ -15,15 +18,29 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
                 const REPORT_KEY = 'creditSpreadSelectedReport';
         const UNDERLYING_KEY = 'creditSpreadSelectedUnderlying';
                 function getSelectedReport(){
+                        if(session?.getSelectedReport){
+                            return session.getSelectedReport();
+                        }
                         return localStorage.getItem(REPORT_KEY) || '';
                 }
                 function setSelectedReport(report){
+                        if(session?.setSelectedReport){
+                            session.setSelectedReport(report || '');
+                            return;
+                        }
                         localStorage.setItem(REPORT_KEY, report || '');
                 }
         function getSelectedUnderlying(){
+            if(session?.getSelectedUnderlying){
+                return session.getSelectedUnderlying();
+            }
             return localStorage.getItem(UNDERLYING_KEY) || 'ALL';
         }
         function setSelectedUnderlying(symbol){
+            if(session?.setSelectedUnderlying){
+                session.setSelectedUnderlying(symbol || 'ALL');
+                return;
+            }
             localStorage.setItem(UNDERLYING_KEY, symbol || 'ALL');
         }
 
@@ -239,15 +256,45 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
 
                 window.allTrades = trades;
                 const filtered = Array.isArray(trades) ? trades.filter(passesQualityGate) : trades;
-                window.currentTrades = filtered;
+                const keyedFiltered = Array.isArray(filtered)
+                    ? filtered.map((trade) => {
+                        const tradeKey = tradeCardUi?.buildTradeKey
+                            ? tradeCardUi.buildTradeKey(trade)
+                            : `${String(trade?.underlying || trade?.underlying_symbol || '').toUpperCase()}|${trade?.expiration || ''}|${trade?.spread_type || ''}|${trade?.short_strike || ''}|${trade?.long_strike || ''}|${trade?.dte || ''}`;
+                        return { ...trade, _trade_key: tradeKey };
+                    })
+                    : filtered;
+
+                const persistedRejected = new Set();
+                if(Array.isArray(keyedFiltered) && filename && api?.getRejectDecisions){
+                    try{
+                        const decisionPayload = await api.getRejectDecisions(filename);
+                        const list = Array.isArray(decisionPayload?.decisions) ? decisionPayload.decisions : [];
+                        list.forEach(item => {
+                            if(item && item.type === 'reject' && item.trade_key){
+                                persistedRejected.add(String(item.trade_key));
+                            }
+                        });
+                    }catch(e){
+                        console.warn('[BenTrade] Failed to load decision file', e);
+                    }
+                }
+
+                const persistedFiltered = Array.isArray(keyedFiltered)
+                    ? keyedFiltered.filter(trade => !persistedRejected.has(String(trade._trade_key || '')))
+                    : keyedFiltered;
+
+                window.currentTrades = persistedFiltered;
                 window.currentReportFile = filename;
+                if(session?.setCurrentTrades) session.setCurrentTrades(persistedFiltered);
+                if(session?.setCurrentReportFile) session.setCurrentReportFile(filename);
                 setSelectedReport(filename);
 
                 if(Array.isArray(trades) && filtered.length !== trades.length){
                     console.log(`[ui] filtered out ${trades.length - filtered.length} rejected trade(s)`);
                 }
 
-                populateUnderlyingOptions(filtered);
+                populateUnderlyingOptions(persistedFiltered);
                 applyUnderlyingFilter();
                 renderDiagnosticPanel({ reportStats, diagnostics, sourceHealth, trades });
             } catch (error) {
@@ -644,7 +691,22 @@ const html = `
                 }
             };
 
-            window.manualReject = function(idx){
+            window.manualReject = async function(idx){
+                const trade = window.currentTrades && window.currentTrades[idx] ? window.currentTrades[idx] : null;
+                if(trade && window.currentReportFile && api?.persistRejectDecision){
+                    try{
+                        const tradeKey = trade._trade_key || (tradeCardUi?.buildTradeKey ? tradeCardUi.buildTradeKey(trade) : null);
+                        if(tradeKey){
+                            await api.persistRejectDecision({
+                                report_file: window.currentReportFile,
+                                trade_key: tradeKey,
+                                reason: 'manual_reject',
+                            });
+                        }
+                    }catch(err){
+                        console.warn('[BenTrade] Failed to persist manual reject', err);
+                    }
+                }
                 const card = document.querySelector(`.trade-card[data-idx="${idx}"]`);
                 if(card) card.remove();
                 if(window.currentTrades && window.currentTrades[idx]){
