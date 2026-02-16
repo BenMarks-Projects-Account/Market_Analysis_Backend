@@ -10,7 +10,7 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
   const symbolEl = scope.querySelector('#stockSymbol');
   const rangeEl = scope.querySelector('#stockRange');
   const refreshBtn = scope.querySelector('#stockRefreshBtn');
-  const chipsEl = scope.querySelector('#stockQuickChips');
+  const myStocksListEl = scope.querySelector('#stockMyStocksList');
   const errorEl = scope.querySelector('#stockError');
   const summaryGridEl = scope.querySelector('#stockSummaryGrid');
   const summaryPanelEl = scope.querySelector('#stockSummaryPanel');
@@ -18,7 +18,8 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
   const recentClosesEl = scope.querySelector('#stockRecentCloses');
   const indicatorsEl = scope.querySelector('#stockIndicators');
   const optionsContextEl = scope.querySelector('#stockOptionsContext');
-  const notesEl = scope.querySelector('#stockNotes');
+  const notesEl = scope.querySelector('#stockNotesSystem');
+  const notesMountEl = scope.querySelector('#stockNotesMount');
   const debugBodyEl = scope.querySelector('#stockDebugBody');
   const summaryModeBtn = scope.querySelector('#stockSummaryModeBtn');
   const scannerModeBtn = scope.querySelector('#stockScannerModeBtn');
@@ -31,9 +32,14 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
   const sendWorkbenchBtn = scope.querySelector('#stockSendWorkbenchBtn');
   const candidatePreviewEl = scope.querySelector('#stockCandidatePreview');
 
-  if(!symbolEl || !rangeEl || !refreshBtn || !summaryGridEl || !summaryPanelEl || !sparklineEl || !recentClosesEl || !indicatorsEl || !optionsContextEl || !notesEl || !debugBodyEl || !summaryModeBtn || !scannerModeBtn || !runScanBtn || !scannerResultsEl || !openScannerBtn || !sendWorkbenchBtn || !candidatePreviewEl || !addSymbolEl || !addBtn){
+  if(!symbolEl || !rangeEl || !refreshBtn || !myStocksListEl || !summaryGridEl || !summaryPanelEl || !sparklineEl || !recentClosesEl || !indicatorsEl || !optionsContextEl || !notesEl || !notesMountEl || !debugBodyEl || !summaryModeBtn || !scannerModeBtn || !runScanBtn || !scannerResultsEl || !openScannerBtn || !sendWorkbenchBtn || !candidatePreviewEl || !addSymbolEl || !addBtn){
     return;
   }
+
+  const notesController = window.BenTradeNotes?.attachNotes?.(notesMountEl, () => {
+    const symbol = normalizeSymbol(symbolEl.value) || 'SPY';
+    return `notes:stock:${symbol}`;
+  });
 
   let currentPayload = null;
   let candidate = null;
@@ -41,16 +47,57 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
   let lastStatusCode = null;
   let lastRequestUrl = '';
   let currentMode = 'summary';
+  const STOCK_LIST_KEY = 'bentrade_stock_list_v1';
+  const PRESET_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'AAPL', 'MSFT'];
   let watchlist = ['SPY', 'QQQ', 'IWM', 'AAPL', 'MSFT'];
+
+  function uniqueSymbols(list){
+    const out = [];
+    const seen = new Set();
+    (Array.isArray(list) ? list : []).forEach((item) => {
+      const symbol = normalizeSymbol(item);
+      if(!symbol || seen.has(symbol)) return;
+      seen.add(symbol);
+      out.push(symbol);
+    });
+    return out;
+  }
+
+  function persistStockList(){
+    try{
+      localStorage.setItem(STOCK_LIST_KEY, JSON.stringify(uniqueSymbols(watchlist)));
+    }catch(_err){
+    }
+  }
+
+  function readLocalStockList(){
+    try{
+      const raw = localStorage.getItem(STOCK_LIST_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return uniqueSymbols(arr);
+    }catch(_err){
+      return [];
+    }
+  }
 
   function normalizeSymbol(raw){
     const symbol = String(raw || '').trim().toUpperCase();
     return symbol.replace(/[^A-Z0-9.-]/g, '').slice(0, 12);
   }
 
-  function bindQuickChipEvents(){
-    if(!chipsEl) return;
-    chipsEl.querySelectorAll('[data-symbol]').forEach(btn => {
+  try{
+    const prefill = normalizeSymbol(localStorage.getItem('bentrade_selected_symbol'));
+    if(prefill){
+      symbolEl.value = prefill;
+      localStorage.removeItem('bentrade_selected_symbol');
+    }
+  }catch(_err){
+    localStorage.removeItem('bentrade_selected_symbol');
+  }
+
+  function bindMyStocksEvents(){
+    if(!myStocksListEl) return;
+    myStocksListEl.querySelectorAll('[data-symbol]').forEach(btn => {
       btn.addEventListener('click', () => {
         const sym = String(btn.getAttribute('data-symbol') || '').toUpperCase();
         if(!sym) return;
@@ -60,24 +107,35 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
     });
   }
 
-  function renderQuickChips(){
-    if(!chipsEl) return;
-    chipsEl.innerHTML = watchlist.map((symbol) => `<button class="btn" data-symbol="${symbol}">${symbol}</button>`).join('');
-    bindQuickChipEvents();
+  function renderMyStocks(){
+    if(!myStocksListEl) return;
+    const activeSymbol = normalizeSymbol(symbolEl.value);
+    const allSymbols = uniqueSymbols([...PRESET_SYMBOLS, ...watchlist]);
+    watchlist = allSymbols;
+    myStocksListEl.innerHTML = allSymbols
+      .map((symbol) => `<button class="btn qtButton qtPill ${symbol === activeSymbol ? 'stock-chip-active' : ''}" data-symbol="${symbol}">${symbol}</button>`)
+      .join('');
+    bindMyStocksEvents();
+    persistStockList();
   }
 
   async function loadWatchlist(){
+    const localSymbols = readLocalStockList();
+    watchlist = uniqueSymbols([...PRESET_SYMBOLS, ...localSymbols]);
+    renderMyStocks();
+
     try{
       if(!api?.getStockWatchlist){
-        renderQuickChips();
+        renderMyStocks();
         return;
       }
       const payload = await api.getStockWatchlist();
       const symbols = Array.isArray(payload?.symbols) ? payload.symbols : [];
-      watchlist = symbols.length ? symbols.map(normalizeSymbol).filter(Boolean) : watchlist;
-      renderQuickChips();
+      const remoteSymbols = symbols.length ? symbols.map(normalizeSymbol).filter(Boolean) : [];
+      watchlist = uniqueSymbols([...PRESET_SYMBOLS, ...watchlist, ...remoteSymbols]);
+      renderMyStocks();
     }catch(err){
-      renderQuickChips();
+      renderMyStocks();
       console.warn('[stock-analysis] watchlist load failed', err);
     }
   }
@@ -95,13 +153,15 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
       if(api?.addStockWatchlist){
         const payload = await api.addStockWatchlist(symbol);
         const symbols = Array.isArray(payload?.symbols) ? payload.symbols : [];
-        watchlist = symbols.length ? symbols.map(normalizeSymbol).filter(Boolean) : watchlist;
-      }else if(!watchlist.includes(symbol)){
-        watchlist.push(symbol);
+        const remoteSymbols = symbols.length ? symbols.map(normalizeSymbol).filter(Boolean) : [];
+        watchlist = uniqueSymbols([...PRESET_SYMBOLS, ...watchlist, ...remoteSymbols]);
+      }else{
+        watchlist = uniqueSymbols([...watchlist, symbol]);
       }
       addSymbolEl.value = '';
-      renderQuickChips();
+      renderMyStocks();
       symbolEl.value = symbol;
+      notesController?.reload?.();
       await refresh();
     }catch(err){
       setError(String(err?.message || err || 'Failed to add stock'));
@@ -237,15 +297,16 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
     }
 
     candidatePreviewEl.innerHTML = `
-      <div><strong>${candidate.symbol}</strong> ${normalizeStrike(candidate.short_strike)} / ${normalizeStrike(candidate.long_strike)} • ${candidate.expiration}</div>
+      <div><span class="qtPill">${candidate.symbol}</span> ${normalizeStrike(candidate.short_strike)} / ${normalizeStrike(candidate.long_strike)} • ${candidate.expiration}</div>
       <div class="workbench-key">${candidate.preview_trade_key}</div>
     `;
   }
 
   function renderSummary(payload){
     const p = payload?.price || {};
+    const summarySymbol = String(payload?.symbol || 'N/A').toUpperCase();
     summaryGridEl.innerHTML = `
-      <div class="statTile"><div class="statLabel">Symbol</div><div class="statValue">${payload?.symbol || 'N/A'}</div></div>
+      <div class="statTile"><div class="statLabel">Symbol</div><div class="statValue"><span class="qtPill">${summarySymbol}</span></div></div>
       <div class="statTile"><div class="statLabel" data-metric="mark">Last</div><div class="statValue">$${fmt(p.last)}</div></div>
       <div class="statTile"><div class="statLabel">Change</div><div class="statValue">$${fmt(p.change)}</div></div>
       <div class="statTile"><div class="statLabel">Change %</div><div class="statValue">${fmtPct(p.change_pct)}</div></div>
@@ -388,15 +449,15 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
 
       return `
         <div class="stock-card" data-scan-symbol="${symbol}" style="margin-bottom:8px;">
-          <div class="stock-note"><strong>#${idx + 1} ${symbol}</strong> • Score ${score}</div>
+          <div class="stock-note"><strong>#${idx + 1}</strong> <span class="qtPill">${symbol}</span> • Score ${score}</div>
           <div class="stock-note">Trend: ${trend} • <span data-metric="rsi_14">RSI</span>: ${fmt(item?.signals?.rsi_14)} • <span data-metric="realized_vol_20d">RV20</span>: ${fmtPct(item?.signals?.rv_20d)} • <span data-metric="iv_rv_ratio">IV/RV</span>: ${ivrv === null || ivrv === undefined ? 'N/A' : Number(ivrv).toFixed(2)}</div>
           <div class="stock-note">Suggested: <strong>${suggested}</strong></div>
           <div class="workbench-key">${keyPreview}</div>
           <div class="stock-note">Why: ${reasons.join(' | ') || 'N/A'}</div>
           <div class="workbench-actions" style="margin-top:6px;">
-            <button class="btn" data-action="view-summary" data-symbol="${symbol}">View Summary</button>
-            <button class="btn" data-action="send-credit" data-symbol="${symbol}">Send to Credit Spread Analysis</button>
-            <button class="btn" data-action="send-workbench" data-symbol="${symbol}" data-strategy="${suggested}" data-key="${keyPreview}">Send to Workbench</button>
+            <button class="btn qtButton" data-action="view-summary" data-symbol="${symbol}">View Summary</button>
+            <button class="btn qtButton" data-action="send-credit" data-symbol="${symbol}">Send to Credit Spread Analysis</button>
+            <button class="btn qtButton" data-action="send-workbench" data-symbol="${symbol}" data-strategy="${suggested}" data-key="${keyPreview}">Send to Workbench</button>
           </div>
         </div>
       `;
@@ -521,7 +582,7 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
   function renderNotes(notes){
     const list = Array.isArray(notes) ? notes : [];
     if(!list.length){
-      notesEl.innerHTML = '<div class="loading">No notes.</div>';
+      notesEl.innerHTML = '<div class="loading">No system notes.</div>';
       return;
     }
     notesEl.innerHTML = list.map(item => `<div class="stock-note">• ${String(item || '')}</div>`).join('');
@@ -536,6 +597,8 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
       const symbol = String(symbolEl.value || '').trim().toUpperCase() || 'SPY';
       const range = String(rangeEl.value || '6mo');
       symbolEl.value = symbol;
+      renderMyStocks();
+      notesController?.reload?.();
 
       const sym = encodeURIComponent(symbol);
       const rng = encodeURIComponent(range);
@@ -563,6 +626,7 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
       renderNotes(payload?.notes || []);
       renderCandidate();
       renderDebug(payload, '');
+      renderMyStocks();
     }catch(err){
       const message = String(err?.message || err || 'Failed to load stock summary');
       setError(message);
@@ -626,5 +690,6 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
 
   setMode('summary');
   renderScanResults({ results: [] });
+  renderMyStocks();
   loadWatchlist().finally(() => refresh());
 };

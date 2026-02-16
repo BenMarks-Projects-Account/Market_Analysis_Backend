@@ -44,6 +44,94 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
             localStorage.setItem(UNDERLYING_KEY, symbol || 'ALL');
         }
 
+        let pendingGeneratedReport = null;
+
+        function currentRouteKey(){
+            const hash = String(location.hash || '').trim().toLowerCase();
+            if(hash.startsWith('#/')) return String(hash.split('/')[1] || '').trim().toLowerCase();
+            return hash.replace(/^#/, '').trim().toLowerCase();
+        }
+
+        function tradeSpreadType(trade){
+            return String(trade?.spread_type || trade?.strategy || '').trim().toLowerCase();
+        }
+
+        function moduleIdFromRoute(trades){
+            const route = currentRouteKey();
+            if(route === 'strategy-credit-put') return 'credit_put';
+            if(route === 'strategy-credit-call') return 'credit_call';
+            if(route === 'debit-spreads') return 'debit_spreads';
+            if(route === 'iron-condor' || route === 'strategy-iron-condor') return 'iron_condor';
+            if(route === 'butterflies') return 'butterflies';
+            if(route === 'calendar') return 'calendar';
+            if(route === 'income') return 'income';
+            if(route !== 'credit-spread') return null;
+
+            const rows = Array.isArray(trades) ? trades : [];
+            const hasPut = rows.some((trade) => {
+                const spread = tradeSpreadType(trade);
+                return spread === 'put_credit' || spread === 'credit_put_spread';
+            });
+            const hasCall = rows.some((trade) => {
+                const spread = tradeSpreadType(trade);
+                return spread === 'call_credit' || spread === 'credit_call_spread';
+            });
+            if(hasPut && !hasCall) return 'credit_put';
+            if(hasCall && !hasPut) return 'credit_call';
+            return null;
+        }
+
+        function recordSessionRunFromPayload(filename, payload, trades){
+            const store = window.BenTradeSessionStatsStore;
+            if(!store?.recordRun) return;
+            if(!pendingGeneratedReport) return;
+            if(pendingGeneratedReport !== '*' && pendingGeneratedReport !== String(filename || '')) return;
+
+            const route = currentRouteKey();
+            if(route === 'credit-spread'){
+                const rows = Array.isArray(trades) ? trades : [];
+                const putRows = rows.filter((trade) => {
+                    const spread = tradeSpreadType(trade);
+                    return spread === 'put_credit' || spread === 'credit_put_spread';
+                });
+                const callRows = rows.filter((trade) => {
+                    const spread = tradeSpreadType(trade);
+                    return spread === 'call_credit' || spread === 'credit_call_spread';
+                });
+
+                if(putRows.length) store.recordRun('credit_put', { trades: putRows });
+                if(callRows.length) store.recordRun('credit_call', { trades: callRows });
+                if(!putRows.length && !callRows.length){
+                    const fallback = moduleIdFromRoute(rows) || 'credit_put';
+                    store.recordRun(fallback, payload);
+                }
+                pendingGeneratedReport = null;
+                return;
+            }
+
+            const moduleId = moduleIdFromRoute(trades);
+            if(moduleId){
+                store.recordRun(moduleId, payload);
+            }
+            pendingGeneratedReport = null;
+        }
+
+        function moduleIdForManualReject(trade){
+            const route = currentRouteKey();
+            if(route === 'strategy-credit-put') return 'credit_put';
+            if(route === 'strategy-credit-call') return 'credit_call';
+            if(route === 'debit-spreads') return 'debit_spreads';
+            if(route === 'iron-condor' || route === 'strategy-iron-condor') return 'iron_condor';
+            if(route === 'butterflies') return 'butterflies';
+            if(route === 'calendar') return 'calendar';
+            if(route === 'income') return 'income';
+
+            const spread = tradeSpreadType(trade);
+            if(spread === 'put_credit' || spread === 'credit_put_spread') return 'credit_put';
+            if(spread === 'call_credit' || spread === 'credit_call_spread') return 'credit_call';
+            return 'credit_put';
+        }
+
         function getTradeUnderlying(trade){
             return String(trade?.underlying || trade?.underlying_symbol || '').trim().toUpperCase();
         }
@@ -297,6 +385,7 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
                 populateUnderlyingOptions(persistedFiltered);
                 applyUnderlyingFilter();
                 renderDiagnosticPanel({ reportStats, diagnostics, sourceHealth, trades });
+                recordSessionRunFromPayload(filename, payload, trades);
                 window.BenTradeSourceHealthStore?.fetchSourceHealth?.({ force: true }).catch(() => {});
             } catch (error) {
                 console.error('Error loading analysis:', error);
@@ -404,33 +493,7 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
             const payloadTrades = Array.isArray(reportData)
                 ? reportData
                 : (Array.isArray(payload.trades) ? payload.trades : (Array.isArray(window.allTrades) ? window.allTrades : []));
-            const acceptedTrades = payloadTrades;
-            const reportStats = (payload.reportStats && typeof payload.reportStats === 'object')
-                ? payload.reportStats
-                : ((payload.report_stats && typeof payload.report_stats === 'object') ? payload.report_stats : {});
             const diagnostics = (payload.diagnostics && typeof payload.diagnostics === 'object') ? payload.diagnostics : {};
-
-            const totalCandidates = toNumeric(reportStats.total_candidates ?? diagnostics.total_candidates) ?? (payloadTrades.length || null);
-            const acceptedTradesCount = toNumeric(reportStats.accepted_trades ?? diagnostics.accepted_trades) ?? (acceptedTrades.length || null);
-            const rejectedTradesCount = toNumeric(reportStats.rejected_trades ?? diagnostics.rejected_trades) ?? ((totalCandidates !== null && acceptedTradesCount !== null) ? Math.max(totalCandidates - acceptedTradesCount, 0) : null);
-            const acceptanceRate = toNumeric(reportStats.acceptance_rate ?? diagnostics.acceptance_rate) ?? ((totalCandidates && acceptedTradesCount !== null) ? (acceptedTradesCount / totalCandidates) : null);
-
-            const avgQuality = toNumeric(reportStats.avg_trade_score ?? diagnostics.avg_trade_score ?? diagnostics.avg_quality_score) ?? avgMetric(acceptedTrades, t => t.composite_score ?? t.trade_quality_score);
-            const bestQuality = toNumeric(reportStats.best_trade_score ?? diagnostics.best_trade_score ?? diagnostics.best_quality_score) ?? (() => {
-                const scores = acceptedTrades.map(t => toNumeric(t.composite_score ?? t.trade_quality_score)).filter(v => v !== null);
-                return scores.length ? Math.max(...scores) : null;
-            })();
-            const worstQuality = toNumeric(reportStats.worst_accepted_score ?? diagnostics.worst_accepted_score ?? diagnostics.worst_quality_score) ?? (() => {
-                const scores = acceptedTrades.map(t => toNumeric(t.composite_score ?? t.trade_quality_score)).filter(v => v !== null);
-                return scores.length ? Math.min(...scores) : null;
-            })();
-            const avgPop = toNumeric(reportStats.avg_probability ?? diagnostics.avg_probability ?? diagnostics.avg_pop) ?? avgMetric(acceptedTrades, t => t.p_win_used ?? t.pop_delta_approx);
-            const avgRor = toNumeric(reportStats.avg_return_on_risk ?? diagnostics.avg_return_on_risk ?? diagnostics.avg_ror) ?? avgMetric(acceptedTrades, t => t.return_on_risk);
-            const bestUnderlying = reportStats.best_underlying ?? diagnostics.best_underlying ?? null;
-
-            const dteBuckets = (reportStats.dte_bucket_counts && typeof reportStats.dte_bucket_counts === 'object')
-                ? reportStats.dte_bucket_counts
-                : ((diagnostics.dte_bucket_counts && typeof diagnostics.dte_bucket_counts === 'object') ? diagnostics.dte_bucket_counts : {});
 
             const sourceHealth = (payload.sourceHealth && typeof payload.sourceHealth === 'object')
                 ? payload.sourceHealth
@@ -457,20 +520,26 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
                 `;
             }).join('');
 
+            const snapshot = window.BenTradeSessionStatsStore?.getState?.() || {
+                runs: 0,
+                total_candidates: 0,
+                accepted_trades: 0,
+                rejected_trades: 0,
+                acceptance_rate: 0,
+                best_score: null,
+                avg_quality_score: null,
+                avg_return_on_risk: null,
+            };
+
             const stats = [
-                { label: 'Total candidates', value: statValue(totalCandidates, v => String(Math.round(v))) },
-                { label: 'Accepted trades', value: statValue(acceptedTradesCount, v => String(Math.round(v))) },
-                { label: 'Rejected trades', value: statValue(rejectedTradesCount, v => String(Math.round(v))) },
-                { label: 'Acceptance rate', value: statValue(acceptanceRate, v => fmtPercent(v, 1)) },
-                { label: 'Avg quality score', value: statValue(avgQuality, v => fmtPercent(v, 1)) },
-                { label: 'Best trade score', value: statValue(bestQuality, v => fmtPercent(v, 1)) },
-                { label: 'Worst accepted score', value: statValue(worstQuality, v => fmtPercent(v, 1)) },
-                { label: 'Avg probability', value: statValue(avgPop, v => fmtPercent(v, 1)) },
-                { label: 'Avg return on risk', value: statValue(avgRor, v => fmtPercent(v, 1)) },
-                { label: 'Best underlying', value: statTextValue(bestUnderlying) },
-                { label: 'DTE 3-5 candidates', value: statValue(dteBuckets['3-5'], v => String(Math.round(v))) },
-                { label: 'DTE 6-10 candidates', value: statValue(dteBuckets['6-10'], v => String(Math.round(v))) },
-                { label: 'DTE 11-14 candidates', value: statValue(dteBuckets['11-14'], v => String(Math.round(v))) },
+                { label: 'Total candidates', value: String(Math.round(Number(snapshot.total_candidates || 0))) },
+                { label: 'Accepted trades/ideas', value: String(Math.round(Number(snapshot.accepted_trades || 0))) },
+                { label: 'Rejected', value: String(Math.round(Number(snapshot.rejected_trades || 0))) },
+                { label: 'Acceptance rate', value: fmtPercent(Number(snapshot.acceptance_rate || 0), 1) },
+                { label: 'Best score', value: (toNumeric(snapshot.best_score) === null ? 'N/A' : fmtPercent(snapshot.best_score, 1)) },
+                { label: 'Avg quality score', value: (toNumeric(snapshot.avg_quality_score) === null ? 'N/A' : fmtPercent(snapshot.avg_quality_score, 1)) },
+                { label: 'Avg return on risk', value: (toNumeric(snapshot.avg_return_on_risk) === null ? 'N/A' : fmtPercent(snapshot.avg_return_on_risk, 1)) },
+                { label: 'Session runs', value: String(Math.round(Number(snapshot.runs || 0))) },
             ];
 
             reportStatsGrid.innerHTML = stats.map(stat => `
@@ -688,6 +757,10 @@ const html = `
                                     </div>
 
                                     <div id="modelArea-${idx}" class="section section-model" style="display:none;"></div>
+                                    <div class="section section-details">
+                                        <div class="section-title">NOTES</div>
+                                        <div id="tradeNotes-${idx}"></div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -712,6 +785,28 @@ const html = `
             if(window.attachMetricTooltips){
                 window.attachMetricTooltips(content);
             }
+
+            trades.forEach((trade, idx) => {
+                const host = doc.getElementById(`tradeNotes-${idx}`);
+                if(!host || !window.BenTradeNotes?.attachNotes) return;
+
+                const helper = window.BenTradeUtils?.tradeKey;
+                const symbol = String(trade.underlying || trade.underlying_symbol || trade.symbol || '').trim().toUpperCase();
+                const expiration = String(trade.expiration || '').trim() || 'NA';
+                const strategy = String(trade.spread_type || trade.strategy || '').trim() || 'NA';
+                const tradeKey = helper?.tradeKey
+                    ? helper.tradeKey({
+                        underlying: symbol,
+                        expiration,
+                        spread_type: strategy,
+                        short_strike: trade.short_strike,
+                        long_strike: trade.long_strike,
+                        dte: trade.dte ?? 'NA',
+                    })
+                    : String(trade._trade_key || trade.trade_key || `${symbol}|${expiration}|${strategy}|${trade.short_strike}|${trade.long_strike}|${trade.dte ?? 'NA'}`);
+
+                window.BenTradeNotes.attachNotes(host, `notes:trade:${tradeKey}`);
+            });
 
             window.toggleTrade = function(idx){
                 const body = doc.getElementById(`tradeBody-${idx}`);
@@ -907,6 +1002,9 @@ const html = `
                 if(window.currentTrades && window.currentTrades[idx]){
                     window.currentTrades[idx].manual_reject = true;
                 }
+
+                const moduleId = moduleIdForManualReject(trade || {});
+                window.BenTradeSessionStatsStore?.recordReject?.(moduleId, 1);
             };
 
             window.analyzeTrade = async function(idx){
@@ -1036,6 +1134,8 @@ const html = `
             status.textContent = 'Starting...';
             if(statusLog) statusLog.innerHTML = '';
             genBtn.classList.add('is-loading');
+            let latestStage = 'starting';
+            let latestErrorPayload = null;
 
             const appendStatusLog = (text) => {
                 if(!statusLog) return;
@@ -1048,46 +1148,125 @@ const html = `
                 }
                 statusLog.scrollTop = statusLog.scrollHeight;
             };
+
+            const ensureCopyDetailsButton = (payload) => {
+                if(!statusLog || !payload) return;
+                let btn = statusLog.querySelector('#genCopyErrorBtn');
+                if(!btn){
+                    btn = document.createElement('button');
+                    btn.id = 'genCopyErrorBtn';
+                    btn.className = 'btn';
+                    btn.type = 'button';
+                    btn.textContent = 'Copy details';
+                    btn.style.marginTop = '8px';
+                    statusLog.appendChild(btn);
+                }
+                btn.onclick = async () => {
+                    try{
+                        await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+                        appendStatusLog('Copied error details to clipboard');
+                    }catch(_err){
+                        appendStatusLog('Copy failed');
+                    }
+                };
+            };
+
+            const readErrorPayload = (evt) => {
+                try{
+                    if(evt && evt.data){
+                        const parsed = JSON.parse(evt.data);
+                        if(parsed && typeof parsed === 'object') return parsed;
+                    }
+                }catch(_err){}
+                return null;
+            };
             appendStatusLog('Starting report generation...');
 
             const evt = new EventSource('/api/generate');
+            let finalized = false;
+            const finishGeneration = (finalText, filename) => {
+                if(finalized) return;
+                finalized = true;
+                if(finalText){
+                    status.textContent = finalText;
+                    appendStatusLog(finalText);
+                }
+                setTimeout(()=>{
+                    overlay.style.display = 'none';
+                    try{ evt.close(); }catch(_err){}
+                    genBtn.classList.remove('is-loading');
+                    if(filename){
+                        pendingGeneratedReport = String(filename);
+                        loadFiles(filename);
+                        window.BenTradeSourceHealthStore?.fetchSourceHealth?.({ force: true }).catch(() => {});
+                    }
+                }, 900);
+            };
+
             evt.addEventListener('progress', (e)=>{
                 try{
                     const data = JSON.parse(e.data);
+                    if(data?.stage) latestStage = String(data.stage);
                     const msg = data.message || data.step || 'Working...';
                     status.textContent = msg;
                     appendStatusLog(msg);
                 }catch(err){ status.textContent = e.data }
             });
+            evt.addEventListener('status', (e)=>{
+                try{
+                    const data = JSON.parse(e.data || '{}');
+                    if(data?.stage) latestStage = String(data.stage);
+                    const stageText = data?.stage ? ` [${data.stage}]` : '';
+                    const msg = `${data?.message || 'Working'}${stageText}`;
+                    status.textContent = msg;
+                    appendStatusLog(msg);
+                }catch(_err){
+                    status.textContent = 'Working...';
+                }
+            });
+            evt.addEventListener('completed', (e)=>{
+                let fn = null;
+                try{
+                    const data = JSON.parse(e.data || '{}');
+                    fn = data.filename || null;
+                }catch(_err){}
+                const msg = fn ? ('Completed — ' + fn) : 'Completed';
+                status.textContent = msg;
+                appendStatusLog(msg);
+            });
             evt.addEventListener('done', (e)=>{
-                const data = JSON.parse(e.data);
-                const fn = data.filename;
-                status.textContent = 'Completed — ' + fn;
-                appendStatusLog('Completed — ' + fn);
-                setTimeout(()=>{
-                    overlay.style.display = 'none';
-                    evt.close();
-                    genBtn.classList.remove('is-loading');
-                    loadFiles(fn);
-                    window.BenTradeSourceHealthStore?.fetchSourceHealth?.({ force: true }).catch(() => {});
-                }, 900);
+                let fn = null;
+                try{
+                    const data = JSON.parse(e.data || '{}');
+                    fn = data.filename || null;
+                }catch(_err){}
+                finishGeneration(fn ? ('Completed — ' + fn) : 'Completed', fn);
             });
             evt.addEventListener('error', (e)=>{
-                try{
-                    if(e && e.data){
-                        const d = JSON.parse(e.data);
-                        if(d && d.message){
-                            status.textContent = 'Error: ' + d.message;
-                            appendStatusLog('Error: ' + d.message);
-                        }
-                    }
-                }catch(err){}
-                if(evt.readyState === EventSource.CLOSED){
-                    setTimeout(()=>{ overlay.style.display='none'; evt.close(); genBtn.classList.remove('is-loading'); }, 900);
-                } else {
-                    // if not closed, still remove loading (user can retry)
-                    genBtn.classList.remove('is-loading');
+                if(finalized) return;
+                const parsed = readErrorPayload(e);
+                if(parsed){
+                    latestErrorPayload = parsed;
                 }
+
+                const stage = String(parsed?.stage || latestStage || 'unknown');
+                const errorMessage = String(parsed?.error_message || parsed?.message || 'Generation failed');
+                const traceId = String(parsed?.trace_id || 'n/a');
+                const hint = String(parsed?.hint || 'Check backend logs for trace details');
+                const detailsPayload = parsed || {
+                    stage,
+                    error_type: 'EventSourceError',
+                    error_message: errorMessage,
+                    trace_id: traceId,
+                    hint,
+                };
+
+                appendStatusLog(`Error stage: ${stage}`);
+                appendStatusLog(`Error message: ${errorMessage}`);
+                appendStatusLog(`Trace ID: ${traceId}`);
+                appendStatusLog(`Hint: ${hint}`);
+                ensureCopyDetailsButton(detailsPayload);
+                finishGeneration(`Error [${stage}]: ${errorMessage} (trace: ${traceId})`);
             });
         });
 
@@ -1127,6 +1306,10 @@ window.BenTrade.renderSourceHealthPlaceholder = function renderSourceHealthPlace
 };
 
 window.BenTrade.renderStatsPlaceholder = function renderStatsPlaceholder(title){
+    if(window.BenTradeSessionStatsStore?.renderPanel){
+        window.BenTradeSessionStatsStore.renderPanel();
+        return;
+    }
     const stats = document.getElementById('reportStatsGrid');
     if(!stats) return;
     stats.innerHTML = [
@@ -1146,6 +1329,6 @@ window.BenTrade.initPlaceholderDashboard = async function initPlaceholderDashboa
     const title = config?.title || 'Dashboard';
     const host = document.querySelector('[data-under-construction-host]');
     await window.BenTrade.ensureUnderConstructionTron(host);
-    window.BenTrade.renderSourceHealthPlaceholder();
+    window.BenTradeSourceHealthStore?.fetchSourceHealth?.({ force: true }).catch(() => {});
     window.BenTrade.renderStatsPlaceholder(title);
 };

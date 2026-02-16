@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
+from app.utils.http import request_json
+
 router = APIRouter(prefix="/api/stock", tags=["stock-analysis"])
 
 
@@ -64,6 +66,11 @@ async def get_stock_scan(
     return await request.app.state.stock_analysis_service.scan_universe(universe=universe)
 
 
+@router.get("/scanner")
+async def get_stock_scanner(request: Request) -> dict:
+    return await request.app.state.stock_analysis_service.stock_scanner()
+
+
 @router.get("/watchlist")
 async def get_stock_watchlist(request: Request) -> dict:
     return request.app.state.stock_analysis_service.get_watchlist()
@@ -72,3 +79,65 @@ async def get_stock_watchlist(request: Request) -> dict:
 @router.post("/watchlist")
 async def post_stock_watchlist(payload: StockWatchlistAddRequest, request: Request) -> dict:
     return request.app.state.stock_analysis_service.add_to_watchlist(payload.symbol)
+
+
+@router.get("/macro")
+async def get_macro_indicators(request: Request) -> dict:
+    fred = request.app.state.fred_client
+
+    ten_year = None
+    fed_funds = None
+    cpi_yoy = None
+    vix = None
+    notes: list[str] = []
+
+    try:
+        ten_year = await fred.get_latest_series_value("DGS10")
+    except Exception as exc:
+        notes.append(f"10Y unavailable: {exc}")
+
+    try:
+        fed_funds = await fred.get_latest_series_value("DFF")
+    except Exception as exc:
+        notes.append(f"Fed funds unavailable: {exc}")
+
+    try:
+        vix = await fred.get_latest_series_value(fred.settings.FRED_VIX_SERIES_ID)
+    except Exception as exc:
+        notes.append(f"VIX unavailable: {exc}")
+
+    try:
+        payload = await request_json(
+            fred.http_client,
+            "GET",
+            f"{fred.settings.FRED_BASE_URL}/series/observations",
+            params={
+                "series_id": "CPIAUCSL",
+                "sort_order": "desc",
+                "limit": 13,
+                "api_key": fred.settings.FRED_KEY,
+                "file_type": "json",
+            },
+        )
+        observations = payload.get("observations") or []
+        values: list[float] = []
+        for row in observations:
+            value = row.get("value")
+            if value in (None, "."):
+                continue
+            try:
+                values.append(float(value))
+            except (TypeError, ValueError):
+                continue
+        if len(values) >= 13 and values[12] != 0:
+            cpi_yoy = (values[0] / values[12]) - 1.0
+    except Exception as exc:
+        notes.append(f"CPI YoY unavailable: {exc}")
+
+    return {
+        "ten_year_yield": ten_year,
+        "fed_funds_rate": fed_funds,
+        "cpi_yoy": cpi_yoy,
+        "vix": vix,
+        "notes": notes,
+    }

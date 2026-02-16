@@ -25,6 +25,11 @@ async def health(request: Request) -> HealthResponse:
 
 @router.get("/sources")
 async def sources_health(request: Request) -> dict:
+    try:
+        await request.app.state.base_data_service.refresh_source_health_probe()
+    except Exception:
+        pass
+
     snapshot = request.app.state.base_data_service.get_source_health_snapshot()
     now_iso = datetime.now(timezone.utc).isoformat()
 

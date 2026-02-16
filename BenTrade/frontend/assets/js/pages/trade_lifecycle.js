@@ -9,13 +9,16 @@ window.BenTradePages.initTradeLifecycle = function initTradeLifecycle(rootEl){
   const refreshBtn = scope.querySelector('#lcRefreshBtn');
   const errorEl = scope.querySelector('#lcError');
   const bodyEl = scope.querySelector('#lcTradesBody');
+  const pageNotesMountEl = scope.querySelector('#lcPageNotesMount');
   const modalEl = scope.querySelector('#lcHistoryModal');
   const modalBody = scope.querySelector('#lcHistoryBody');
   const closeBtn = scope.querySelector('#lcHistoryCloseBtn');
 
-  if(!tabsEl || !refreshBtn || !bodyEl || !modalEl || !modalBody || !closeBtn){
+  if(!tabsEl || !refreshBtn || !bodyEl || !pageNotesMountEl || !modalEl || !modalBody || !closeBtn){
     return;
   }
+
+  window.BenTradeNotes?.attachNotes?.(pageNotesMountEl, 'notes:page:trade-lifecycle');
 
   let currentState = 'WATCHLIST';
 

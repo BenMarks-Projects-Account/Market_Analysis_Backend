@@ -39,9 +39,10 @@ LIQUIDITY_BONUS = {
 
 
 class StockAnalysisService:
-    def __init__(self, base_data_service: BaseDataService, results_dir: Path | None = None) -> None:
+    def __init__(self, base_data_service: BaseDataService, results_dir: Path | None = None, signal_service: Any | None = None) -> None:
         self.base_data_service = base_data_service
         self.results_dir = results_dir
+        self.signal_service = signal_service
         self._lock = RLock()
         self.watchlist_path = (results_dir / "stock_watchlist.json") if results_dir else None
 
@@ -278,6 +279,27 @@ class StockAnalysisService:
 
         return round(score, 3), reasons
 
+    @staticmethod
+    def _source_status(snapshot: dict[str, dict[str, Any]]) -> str:
+        statuses = [str((row or {}).get("status") or "").lower() for row in (snapshot or {}).values()]
+        if any(state == "red" for state in statuses):
+            return "down"
+        if any(state == "yellow" for state in statuses):
+            return "degraded"
+        if any(state == "green" for state in statuses):
+            return "ok"
+        return "degraded"
+
+    @staticmethod
+    def _score_label(score: float) -> str:
+        if score >= 85.0:
+            return "strong"
+        if score >= 70.0:
+            return "constructive"
+        if score >= 55.0:
+            return "neutral_plus"
+        return "weak"
+
     async def _scan_symbol(self, symbol: str) -> tuple[dict[str, Any], list[str]]:
         ticker = str(symbol or "").strip().upper()
         notes: list[str] = []
@@ -361,6 +383,307 @@ class StockAnalysisService:
             "results": results,
             "notes": notes,
             "source_health": self.base_data_service.get_source_health_snapshot(),
+        }
+
+    async def stock_scanner(self, max_candidates: int = 15) -> dict[str, Any]:
+        if self.signal_service and hasattr(self.signal_service, "get_symbol_signals"):
+            return await self._stock_scanner_via_signal_hub(max_candidates=max_candidates)
+
+        notes: list[str] = []
+        max_count = max(10, min(int(max_candidates or 15), 20))
+        source_health_snapshot = self.base_data_service.get_source_health_snapshot()
+        source_status = self._source_status(source_health_snapshot)
+
+        configured_symbols = list(self.get_watchlist().get("symbols") or [])
+        symbols = list(DEFAULT_SCANNER_UNIVERSE) + configured_symbols
+        normalized_symbols: list[str] = []
+        seen: set[str] = set()
+        for raw_symbol in symbols:
+            symbol = self._normalize_symbol(raw_symbol)
+            if not symbol or symbol in seen:
+                continue
+            normalized_symbols.append(symbol)
+            seen.add(symbol)
+
+        semaphore = asyncio.Semaphore(6)
+
+        async def _scan_symbol(symbol: str) -> dict[str, Any] | None:
+            async with semaphore:
+                try:
+                    history = await self.base_data_service.get_prices_history(symbol, lookback_days=280)
+                except Exception as exc:
+                    notes.append(f"{symbol}: history unavailable ({exc})")
+                    return None
+
+                closes = [float(value) for value in (history or []) if value is not None]
+                if len(closes) < 60:
+                    notes.append(f"{symbol}: insufficient history")
+                    return None
+
+                price = closes[-1]
+                lookback_252 = closes[-252:] if len(closes) >= 252 else closes
+                ema20 = self._ema(closes, 20)
+                sma50 = simple_moving_average(closes, 50)
+                sma200 = simple_moving_average(closes, 200)
+                rsi14 = self._safe_float(rsi(closes, 14))
+                rv20 = self._safe_float(realized_vol_annualized(closes[-21:])) if len(closes) >= 21 else None
+
+                trend_score = 0.0
+                momentum_score = 0.0
+                volatility_score = 0.0
+                signals: list[str] = []
+
+                if ema20 is not None and price > ema20:
+                    trend_score += 45.0
+                    signals.append("above_ema20")
+
+                if sma50 is not None and sma200 is not None and sma50 > sma200:
+                    trend_score += 35.0
+                    signals.append("trend_up")
+
+                if rsi14 is not None:
+                    if 50.0 <= rsi14 <= 70.0:
+                        momentum_score = 15.0
+                        signals.append("strong_rsi")
+                    elif 45.0 <= rsi14 < 50.0 or 70.0 < rsi14 <= 75.0:
+                        momentum_score = 10.0
+                    elif 40.0 <= rsi14 < 45.0 or 75.0 < rsi14 <= 80.0:
+                        momentum_score = 6.0
+                    else:
+                        momentum_score = 2.0
+
+                if rv20 is None:
+                    volatility_score = 6.0
+                elif 0.12 <= rv20 <= 0.40:
+                    volatility_score = 10.0
+                    signals.append("volatility_suitable")
+                elif 0.08 <= rv20 < 0.12 or 0.40 < rv20 <= 0.55:
+                    volatility_score = 7.0
+                elif rv20 < 0.08:
+                    volatility_score = 4.0
+                    signals.append("volatility_low")
+                else:
+                    volatility_score = 2.0
+                    signals.append("volatility_high")
+
+                if sma50 is not None and price > sma50:
+                    signals.append("above_sma50")
+
+                if sma200 is not None and price > sma200:
+                    signals.append("above_sma200")
+
+                composite_score = round(trend_score + momentum_score + volatility_score, 3)
+                strategy = "credit_put_spread" if "trend_up" in signals else "credit_call_spread"
+
+                trend = "up" if "trend_up" in signals else ("down" if rv20 is not None and rv20 > 0.55 else "range")
+                score_label = self._score_label(composite_score)
+
+                iv_estimate = None
+                iv_rv_ratio = None
+                try:
+                    iv_estimate, _ = await self._estimate_iv(symbol, price)
+                    if iv_estimate is not None and rv20 not in (None, 0):
+                        iv_rv_ratio = iv_estimate / rv20
+                except Exception as exc:
+                    notes.append(f"{symbol}: IV estimate unavailable ({exc})")
+
+                price_change_1d = None
+                if len(closes) >= 2 and closes[-2] not in (None, 0):
+                    price_change_1d = (closes[-1] / closes[-2]) - 1.0
+
+                price_change_20d = None
+                if len(closes) >= 21 and closes[-21] not in (None, 0):
+                    price_change_20d = (closes[-1] / closes[-21]) - 1.0
+
+                sparkline_source = closes[-24:]
+                sparkline: list[float] = []
+                if sparkline_source and sparkline_source[0] not in (None, 0):
+                    base = sparkline_source[0]
+                    sparkline = [round(((point / base) - 1.0) * 100.0, 3) for point in sparkline_source]
+
+                thesis: list[str] = []
+                if "trend_up" in signals:
+                    thesis.append("Trend is constructive with 50/200-day alignment")
+                else:
+                    thesis.append("Trend is mixed; prefer defined-risk setups")
+
+                if rsi14 is not None:
+                    if 50.0 <= rsi14 <= 70.0:
+                        thesis.append("Momentum remains healthy without overbought extremes")
+                    elif rsi14 > 75.0:
+                        thesis.append("Momentum is stretched; mean reversion risk elevated")
+
+                if rv20 is not None:
+                    if 0.12 <= rv20 <= 0.40:
+                        thesis.append("Realized volatility is in a favorable range for spreads")
+                    elif rv20 > 0.55:
+                        thesis.append("Realized volatility is elevated; manage width and sizing")
+
+                if iv_rv_ratio is not None:
+                    if iv_rv_ratio > 1.2:
+                        thesis.append("Implied volatility is rich versus realized volatility")
+                    elif iv_rv_ratio < 0.9:
+                        thesis.append("Implied volatility is not rich; edge may rely on directional thesis")
+
+                return {
+                    "symbol": symbol,
+                    "idea_key": f"{symbol}|stock_scanner",
+                    "price": round(price, 4),
+                    "trend_score": round(trend_score, 3),
+                    "momentum_score": round(momentum_score, 3),
+                    "volatility_score": round(volatility_score, 3),
+                    "composite_score": composite_score,
+                    "score_label": score_label,
+                    "signals": signals,
+                    "trend": trend,
+                    "recommended_strategy": strategy,
+                    "thesis": thesis,
+                    "source_health": {
+                        "status": source_status,
+                        "providers": {name: (state or {}).get("status") for name, state in source_health_snapshot.items()},
+                    },
+                    "metrics": {
+                        "rsi14": rsi14,
+                        "rv20": rv20,
+                        "iv": iv_estimate,
+                        "iv_rv_ratio": iv_rv_ratio,
+                        "ema20": self._safe_float(ema20),
+                        "sma50": self._safe_float(sma50),
+                        "sma200": self._safe_float(sma200),
+                        "high_52w": max(lookback_252) if lookback_252 else None,
+                        "low_52w": min(lookback_252) if lookback_252 else None,
+                        "price_change_1d": price_change_1d,
+                        "price_change_20d": price_change_20d,
+                    },
+                    "sparkline": sparkline,
+                }
+
+        scan_results = await asyncio.gather(*[_scan_symbol(symbol) for symbol in normalized_symbols], return_exceptions=True)
+
+        candidates: list[dict[str, Any]] = []
+        for result in scan_results:
+            if isinstance(result, Exception):
+                notes.append(f"scanner item failed: {result}")
+                continue
+            if not result:
+                continue
+            candidates.append(result)
+
+        candidates.sort(key=lambda row: float(row.get("composite_score") or 0.0), reverse=True)
+
+        return {
+            "as_of": self._utc_now_iso(),
+            "candidates": candidates[:max_count],
+            "notes": notes,
+            "source_health": source_health_snapshot,
+            "source_status": source_status,
+        }
+
+    async def _stock_scanner_via_signal_hub(self, max_candidates: int = 15) -> dict[str, Any]:
+        notes: list[str] = []
+        max_count = max(10, min(int(max_candidates or 15), 20))
+        source_health_snapshot = self.base_data_service.get_source_health_snapshot()
+        source_status = self._source_status(source_health_snapshot)
+
+        configured_symbols = list(self.get_watchlist().get("symbols") or [])
+        symbols = list(DEFAULT_SCANNER_UNIVERSE) + configured_symbols
+        normalized_symbols: list[str] = []
+        seen: set[str] = set()
+        for raw_symbol in symbols:
+            symbol = self._normalize_symbol(raw_symbol)
+            if not symbol or symbol in seen:
+                continue
+            normalized_symbols.append(symbol)
+            seen.add(symbol)
+
+        semaphore = asyncio.Semaphore(6)
+
+        async def _scan_symbol(symbol: str) -> dict[str, Any] | None:
+            async with semaphore:
+                try:
+                    sig = await self.signal_service.get_symbol_signals(symbol=symbol, range_key="6mo")
+                except Exception as exc:
+                    notes.append(f"{symbol}: signal hub unavailable ({exc})")
+                    return None
+
+                metrics = sig.get("metrics") if isinstance(sig.get("metrics"), dict) else {}
+                signals = sig.get("signals") if isinstance(sig.get("signals"), list) else []
+                signal_ids = {str(item.get("id") or "") for item in signals if item.get("value")}
+
+                trend = "up" if "trend_up" in signal_ids else ("down" if "trend_down" in signal_ids else "range")
+                composite_score = float((sig.get("composite") or {}).get("score") or 0.0)
+                strategy = "credit_put_spread" if trend == "up" else ("credit_call_spread" if trend == "down" else "iron_condor")
+
+                rsi14 = self._safe_float(metrics.get("rsi14"))
+                rv20 = self._safe_float(metrics.get("rv20d"))
+                iv_estimate = self._safe_float(metrics.get("iv"))
+                iv_rv_ratio = self._safe_float(metrics.get("iv_rv_ratio"))
+
+                thesis = [str(item.get("why") or "") for item in signals if item.get("value") and str(item.get("why") or "").strip()]
+                thesis = thesis[:4]
+                reasons = [str(item.get("id") or "") for item in signals if item.get("value")]
+
+                history = await self.base_data_service.get_prices_history(symbol, lookback_days=90)
+                closes = [float(value) for value in (history or []) if value is not None]
+                price = closes[-1] if closes else None
+                sparkline_source = closes[-24:]
+                sparkline: list[float] = []
+                if sparkline_source and sparkline_source[0] not in (None, 0):
+                    base = sparkline_source[0]
+                    sparkline = [round(((point / base) - 1.0) * 100.0, 3) for point in sparkline_source]
+
+                return {
+                    "symbol": symbol,
+                    "idea_key": f"{symbol}|stock_scanner",
+                    "price": round(float(price), 4) if price is not None else None,
+                    "trend_score": round(composite_score * 0.4, 3),
+                    "momentum_score": round(composite_score * 0.3, 3),
+                    "volatility_score": round(composite_score * 0.3, 3),
+                    "composite_score": round(composite_score, 3),
+                    "score_label": self._score_label(composite_score),
+                    "signals": reasons,
+                    "trend": trend,
+                    "recommended_strategy": strategy,
+                    "thesis": thesis or ["Signal Hub composite synthesis"],
+                    "source_health": {
+                        "status": source_status,
+                        "providers": {name: (state or {}).get("status") for name, state in source_health_snapshot.items()},
+                    },
+                    "metrics": {
+                        "rsi14": rsi14,
+                        "rv20": rv20,
+                        "iv": iv_estimate,
+                        "iv_rv_ratio": iv_rv_ratio,
+                        "ema20": self._safe_float(metrics.get("ema20")),
+                        "sma50": self._safe_float(metrics.get("sma50")),
+                        "sma200": self._safe_float(metrics.get("sma200")),
+                        "high_52w": max(closes[-252:]) if closes else None,
+                        "low_52w": min(closes[-252:]) if closes else None,
+                        "price_change_1d": ((closes[-1] / closes[-2]) - 1.0) if len(closes) >= 2 and closes[-2] not in (None, 0) else None,
+                        "price_change_20d": ((closes[-1] / closes[-21]) - 1.0) if len(closes) >= 21 and closes[-21] not in (None, 0) else None,
+                    },
+                    "sparkline": sparkline,
+                }
+
+        scan_results = await asyncio.gather(*[_scan_symbol(symbol) for symbol in normalized_symbols], return_exceptions=True)
+
+        candidates: list[dict[str, Any]] = []
+        for result in scan_results:
+            if isinstance(result, Exception):
+                notes.append(f"scanner item failed: {result}")
+                continue
+            if not result:
+                continue
+            candidates.append(result)
+
+        candidates.sort(key=lambda row: float(row.get("composite_score") or 0.0), reverse=True)
+
+        return {
+            "as_of": self._utc_now_iso(),
+            "candidates": candidates[:max_count],
+            "notes": notes,
+            "source_health": source_health_snapshot,
+            "source_status": source_status,
         }
 
     async def get_summary(self, symbol: str, range_key: str = "6mo") -> dict[str, Any]:

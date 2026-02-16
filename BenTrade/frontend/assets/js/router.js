@@ -1,6 +1,35 @@
 // BenTrade SPA Router (no framework)
 (function(){
+  function initFullscreenToggle(){
+    const btn = document.getElementById('fullscreenToggleBtn');
+    if(!btn || btn.dataset.bound === '1') return;
+
+    const target = document.querySelector('.shell') || document.documentElement;
+
+    const setLabel = () => {
+      btn.textContent = document.fullscreenElement ? 'Exit Fullscreen' : 'Fullscreen';
+    };
+
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', async () => {
+      try{
+        if(!document.fullscreenElement){
+          await target.requestFullscreen();
+        } else {
+          await document.exitFullscreen();
+        }
+      }catch(_err){
+      }
+    });
+
+    document.addEventListener('fullscreenchange', setLabel);
+    setLabel();
+  }
+
+  initFullscreenToggle();
+
   const routeMeta = {
+    "home": { title: "Home Dashboard", group: "Home", subgroup: "Market Overview", description: "Command center" },
     "credit-spread": { title: "Credit Spread Analysis", group: "Analysis", subgroup: "Options", description: "Credit Spreads" },
     "strategy-credit-put": { title: "Strategy Dashboard • Credit Put", group: "Analysis", subgroup: "Options → Credit Spreads", description: "Put wing" },
     "strategy-credit-call": { title: "Strategy Dashboard • Credit Call", group: "Analysis", subgroup: "Options → Credit Spreads", description: "Call wing" },
@@ -13,6 +42,7 @@
     "active-trade": { title: "Active Trade Dashboard", group: "Trading", subgroup: "Execution & Monitoring", description: "Broker positions/orders" },
     "trade-testing": { title: "Trade Testing Workbench", group: "Trading", subgroup: "Execution & Monitoring", description: "What-if lab + scenarios" },
     "stock-analysis": { title: "Stock Analysis Dashboard", group: "Analysis", subgroup: "Equities", description: "Stock analysis" },
+    "stock-scanner": { title: "Stock Scanner", group: "Analysis", subgroup: "Equities", description: "Auto-ranked stock ideas" },
     "risk-capital": { title: "Risk & Capital Management Dashboard", group: "Risk", subgroup: "Institutional controls", description: "Policies + limits" },
     "portfolio-risk": { title: "Portfolio Risk Matrix", group: "Risk", subgroup: "Institutional controls", description: "Greeks + scenarios" },
     "trade-lifecycle": { title: "Trade Lifecycle", group: "Lifecycle", subgroup: "Process & journaling", description: "States + history" },
@@ -20,6 +50,11 @@
   };
 
   const routes = {
+    "home": {
+      view: "dashboards/home.html",
+      init: () => window.BenTradePages?.initHome?.(document.getElementById('view')),
+      title: routeMeta["home"].title
+    },
     "credit-spread": {
       view: "dashboards/credit-spread.view.html",
       init: () => (window.BenTradePages?.initCreditSpread || window.BenTrade?.initCreditSpread)?.(document.getElementById('view')),
@@ -80,6 +115,11 @@
       init: () => window.BenTradePages?.initStockAnalysis?.(document.getElementById('view')),
       title: routeMeta["stock-analysis"].title
     },
+    "stock-scanner": {
+      view: "dashboards/stock_scanner.html",
+      init: () => window.BenTradePages?.initStockScanner?.(document.getElementById('view')),
+      title: routeMeta["stock-scanner"].title
+    },
     "risk-capital": {
       view: "dashboards/risk_capital.html",
       init: () => window.BenTradePages?.initRiskCapital?.(document.getElementById('view')),
@@ -128,10 +168,20 @@
   }
 
   async function loadView(routeKey){
-    const r = routes[routeKey] || routes["credit-spread"];
-    const meta = routeMeta[routeKey] || routeMeta["credit-spread"];
+    const r = routes[routeKey] || routes["home"];
+    const meta = routeMeta[routeKey] || routeMeta["home"];
     const viewEl = document.getElementById("view");
     if(!viewEl) return;
+
+    try{
+      if(typeof window.BenTradeActiveViewCleanup === 'function'){
+        window.BenTradeActiveViewCleanup();
+      }
+    }catch(e){
+      console.error(e);
+    }finally{
+      window.BenTradeActiveViewCleanup = null;
+    }
 
     // reset view
     viewEl.innerHTML = '<div class="loading">Loading…</div>';
@@ -142,22 +192,25 @@
 
     setHeroSubtitle(meta?.title || r.title);
     setHeroContext(meta);
-    try{ r.init && r.init(); } catch(e){ console.error(e); }
+    try{
+      const cleanup = r.init && r.init();
+      window.BenTradeActiveViewCleanup = (typeof cleanup === 'function') ? cleanup : null;
+    } catch(e){ console.error(e); }
     try{
       await window.BenTradeSourceHealthStore?.fetchSourceHealth?.({ force: true });
     } catch(e){
       console.error(e);
     }
     try{ window.attachMetricTooltips && window.attachMetricTooltips(viewEl); } catch(e){ console.error(e); }
-    setActive(routeKey in routes ? routeKey : "credit-spread");
+    setActive(routeKey in routes ? routeKey : "home");
   }
 
   function routeFromHash(){
-    const hash = location.hash || "#/credit-spread";
+    const hash = location.hash || "#/home";
     if(hash.startsWith('#/')){
-      return (hash.split('/')[1] || 'credit-spread').trim();
+      return (hash.split('/')[1] || 'home').trim();
     }
-    return hash.replace(/^#/, '').trim() || 'credit-spread';
+    return hash.replace(/^#/, '').trim() || 'home';
   }
 
   function navigate(){ loadView(routeFromHash()); }

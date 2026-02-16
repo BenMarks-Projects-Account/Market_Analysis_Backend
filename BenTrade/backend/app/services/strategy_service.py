@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,10 +18,19 @@ from app.utils.trade_key import trade_key
 
 
 class StrategyService:
-    def __init__(self, base_data_service: Any, results_dir: Path, risk_policy_service: Any | None = None) -> None:
+    def __init__(
+        self,
+        base_data_service: Any,
+        results_dir: Path,
+        risk_policy_service: Any | None = None,
+        signal_service: Any | None = None,
+        regime_service: Any | None = None,
+    ) -> None:
         self.base_data_service = base_data_service
         self.results_dir = results_dir
         self.risk_policy_service = risk_policy_service
+        self.signal_service = signal_service
+        self.regime_service = regime_service
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
         self._plugins: dict[str, StrategyPlugin] = {}
@@ -251,21 +261,150 @@ class StrategyService:
             "best_underlying": str((trades[0].get("underlying") if trades else "") or "").upper() or None,
         }
 
-    async def generate(self, strategy_id: str, request_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    @staticmethod
+    def _normalize_rank_100(value: Any) -> float:
+        try:
+            n = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if n <= 1.0:
+            n *= 100.0
+        return max(0.0, min(100.0, n))
+
+    @staticmethod
+    def _regime_fit_from_playbook(strategy: str, regime_payload: dict[str, Any] | None) -> float:
+        payload = regime_payload if isinstance(regime_payload, dict) else {}
+        playbook = payload.get("suggested_playbook") if isinstance(payload.get("suggested_playbook"), dict) else {}
+        primary = {str(x).lower() for x in (playbook.get("primary") or [])}
+        avoid = {str(x).lower() for x in (playbook.get("avoid") or [])}
+        key = str(strategy or "").lower()
+        if key in primary:
+            return 100.0
+        if key in avoid:
+            return 10.0
+
+        label = str(payload.get("regime_label") or "NEUTRAL").upper()
+        if label == "RISK_OFF" and ("credit_put" in key or "short_put" in key):
+            return 15.0
+        if label == "RISK_ON" and ("credit_put" in key or "covered_call" in key):
+            return 90.0
+        return 55.0
+
+    async def _apply_context_scores(self, accepted: list[dict[str, Any]]) -> None:
+        if not accepted:
+            return
+
+        regime_payload = None
+        if self.regime_service and hasattr(self.regime_service, "get_regime"):
+            try:
+                regime_payload = await self.regime_service.get_regime()
+            except Exception:
+                regime_payload = None
+
+        signal_scores: dict[str, float] = {}
+        if self.signal_service and hasattr(self.signal_service, "get_symbol_signals"):
+            symbols = sorted({str(t.get("underlying") or t.get("symbol") or "").upper() for t in accepted if str(t.get("underlying") or t.get("symbol") or "").strip()})
+            for symbol in symbols:
+                try:
+                    payload = await self.signal_service.get_symbol_signals(symbol=symbol, range_key="6mo")
+                    score = self._normalize_rank_100((payload.get("composite") or {}).get("score"))
+                    signal_scores[symbol] = score
+                except Exception:
+                    signal_scores[symbol] = 50.0
+
+        for trade in accepted:
+            strategy = str(trade.get("spread_type") or trade.get("strategy") or "")
+            symbol = str(trade.get("underlying") or trade.get("symbol") or "").upper()
+            structure_score = self._normalize_rank_100(trade.get("rank_score") or trade.get("composite_score"))
+            underlying_score = signal_scores.get(symbol, 50.0)
+            regime_fit = self._regime_fit_from_playbook(strategy, regime_payload)
+
+            blended = (0.60 * structure_score) + (0.20 * underlying_score) + (0.20 * regime_fit)
+            trade["rank_score_raw"] = structure_score
+            trade["rank_score"] = round(blended, 3)
+            trade["rank_components"] = {
+                "structure": round(structure_score, 3),
+                "underlying_composite": round(underlying_score, 3),
+                "regime_fit": round(regime_fit, 3),
+                "blended": round(blended, 3),
+            }
+
+    async def _emit_progress(self, callback: Any, stage: str, message: str, details: dict[str, Any] | None = None) -> None:
+        if callback is None:
+            return
+        payload = {
+            "stage": stage,
+            "message": message,
+        }
+        if isinstance(details, dict) and details:
+            payload.update(details)
+        try:
+            result = callback(payload)
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            pass
+
+    def _build_report_blob(
+        self,
+        strategy_id: str,
+        payload: dict[str, Any],
+        symbol_list: list[str],
+        primary: dict[str, Any] | None,
+        candidates: list[dict[str, Any]],
+        enriched: list[dict[str, Any]],
+        accepted: list[dict[str, Any]],
+        notes: list[str],
+    ) -> dict[str, Any]:
+        source_health = self.base_data_service.get_source_health_snapshot()
+        report_stats = self._build_report_stats(accepted)
+        return {
+            "strategyId": strategy_id,
+            "generated_at": self._utc_now_iso(),
+            "symbol": (primary or {}).get("symbol") if isinstance(primary, dict) else (symbol_list[0] if symbol_list else None),
+            "expiration": (primary or {}).get("expiration") if isinstance(primary, dict) else None,
+            "symbols": symbol_list,
+            "report_stats": report_stats,
+            "source_health": source_health,
+            "trades": accepted,
+            "diagnostics": {
+                "candidate_count": len(candidates),
+                "enriched_count": len(enriched),
+                "accepted_count": len(accepted),
+                "notes": list(dict.fromkeys([str(n) for n in notes if str(n).strip()])),
+            },
+        }
+
+    async def generate(self, strategy_id: str, request_payload: dict[str, Any] | None = None, progress_callback: Any | None = None) -> dict[str, Any]:
         plugin = self.get_plugin(strategy_id)
         payload = self._apply_request_defaults(strategy_id, request_payload or {})
+        notes: list[str] = []
+
+        await self._emit_progress(progress_callback, "prepare", f"Preparing {strategy_id} inputs")
 
         symbols = payload.get("symbols") if isinstance(payload.get("symbols"), list) else None
         symbol_list = [str(x).upper() for x in (symbols or []) if str(x).strip()] or [str(payload.get("symbol") or "SPY").upper()]
 
         snapshots: list[dict[str, Any]] = []
         for symbol in symbol_list:
-            expirations = await self._resolve_expirations(symbol, payload, strategy_id)
+            try:
+                expirations = await self._resolve_expirations(symbol, payload, strategy_id)
+            except Exception as exc:
+                notes.append(f"{symbol}: expirations unavailable ({exc})")
+                continue
+
             for expiration in expirations:
                 try:
                     snapshot_inputs = await self.base_data_service.get_analysis_inputs(symbol, expiration)
-                except Exception:
+                except Exception as exc:
+                    notes.append(f"{symbol} {expiration}: analysis inputs unavailable ({exc})")
                     continue
+
+                contracts = snapshot_inputs.get("contracts") or []
+                if not contracts:
+                    notes.append(f"{symbol} {expiration}: no_chain")
+                    continue
+
                 snapshots.append({
                     **snapshot_inputs,
                     "symbol": symbol,
@@ -273,10 +412,21 @@ class StrategyService:
                     "dte": dte_ceil(expiration),
                 })
 
-        if not snapshots:
-            raise ValueError("No analysis snapshots available for requested symbols/expirations")
+        await self._emit_progress(progress_callback, "snapshots", "Snapshots collected", {"count": len(snapshots)})
 
-        primary = snapshots[0]
+        candidates: list[dict[str, Any]] = []
+        enriched: list[dict[str, Any]] = []
+        accepted: list[dict[str, Any]] = []
+
+        if snapshots:
+            primary = snapshots[0]
+        else:
+            primary = {
+                "symbol": symbol_list[0] if symbol_list else None,
+                "expiration": str(payload.get("expiration") or ""),
+            }
+            notes.append("No analysis snapshots available for requested symbols/expirations")
+
         policy = self.risk_policy_service.get_policy() if self.risk_policy_service else {}
         inputs = {
             **primary,
@@ -288,25 +438,43 @@ class StrategyService:
         }
         inputs["request"] = payload
 
-        candidates = plugin.build_candidates(inputs)
-        enriched = plugin.enrich(candidates, inputs)
+        if snapshots:
+            await self._emit_progress(progress_callback, "build_candidates", "Building candidates")
+            try:
+                candidates = plugin.build_candidates(inputs)
+            except Exception as exc:
+                notes.append(f"build_candidates failed: {exc}")
+                raise
 
-        accepted: list[dict[str, Any]] = []
-        for row in enriched:
-            row = dict(row)
-            row["_policy"] = policy
-            row["_request"] = payload
-            ok, reasons = plugin.evaluate(row)
-            if not ok:
-                continue
-            rank_score, tie_breaks = plugin.score(row)
-            row.pop("_policy", None)
-            row.pop("_request", None)
-            row["rank_score"] = rank_score
-            row["tie_breaks"] = tie_breaks
-            row["strategyId"] = strategy_id
-            row["selection_reasons"] = reasons
-            accepted.append(self._normalize_trade(strategy_id, str(row.get("expiration") or primary.get("expiration") or "NA"), row))
+            await self._emit_progress(progress_callback, "enrich", "Enriching candidates", {"count": len(candidates)})
+            try:
+                enriched = plugin.enrich(candidates, inputs)
+            except Exception as exc:
+                notes.append(f"enrich failed: {exc}")
+                raise
+
+            await self._emit_progress(progress_callback, "evaluate", "Evaluating and scoring candidates", {"count": len(enriched)})
+            for row in enriched:
+                try:
+                    row = dict(row)
+                    row["_policy"] = policy
+                    row["_request"] = payload
+                    ok, reasons = plugin.evaluate(row)
+                    if not ok:
+                        continue
+                    rank_score, tie_breaks = plugin.score(row)
+                    row.pop("_policy", None)
+                    row.pop("_request", None)
+                    row["rank_score"] = rank_score
+                    row["tie_breaks"] = tie_breaks
+                    row["strategyId"] = strategy_id
+                    row["selection_reasons"] = reasons
+                    accepted.append(self._normalize_trade(strategy_id, str(row.get("expiration") or primary.get("expiration") or "NA"), row))
+                except Exception as exc:
+                    notes.append(f"candidate skipped: {exc}")
+                    continue
+
+        await self._apply_context_scores(accepted)
 
         accepted.sort(
             key=lambda tr: (
@@ -318,30 +486,25 @@ class StrategyService:
             reverse=True,
         )
 
+        await self._emit_progress(progress_callback, "write_report", "Writing report", {"accepted_count": len(accepted)})
+
         ts_name = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         filename = f"{strategy_id}_analysis_{ts_name}.json"
         path = self.results_dir / filename
 
-        source_health = self.base_data_service.get_source_health_snapshot()
-        report_stats = self._build_report_stats(accepted)
-
-        blob = {
-            "strategyId": strategy_id,
-            "generated_at": self._utc_now_iso(),
-            "symbol": primary.get("symbol"),
-            "expiration": primary.get("expiration"),
-            "symbols": symbol_list,
-            "report_stats": report_stats,
-            "source_health": source_health,
-            "trades": accepted,
-            "diagnostics": {
-                "candidate_count": len(candidates),
-                "enriched_count": len(enriched),
-                "accepted_count": len(accepted),
-            },
-        }
+        blob = self._build_report_blob(
+            strategy_id=strategy_id,
+            payload=payload,
+            symbol_list=symbol_list,
+            primary=primary,
+            candidates=candidates,
+            enriched=enriched,
+            accepted=accepted,
+            notes=notes,
+        )
 
         path.write_text(json.dumps(blob, indent=2), encoding="utf-8")
+        await self._emit_progress(progress_callback, "completed", "Report generation completed", {"filename": filename})
         return {"filename": filename, **blob}
 
     def list_reports(self, strategy_id: str) -> list[str]:

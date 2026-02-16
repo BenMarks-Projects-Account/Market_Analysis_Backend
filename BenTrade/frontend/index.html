@@ -12,6 +12,9 @@
 
   <link rel="stylesheet" href="assets/css/app.css">
   <style>
+    :root{
+      --scroll-pad: 36px;
+    }
     .shell{
       max-width:1860px;
       margin:0 auto;
@@ -34,12 +37,16 @@
     .shell-layout > .sidebar{
       min-height:0;
       overflow:auto;
+      padding-bottom: var(--scroll-pad);
+      box-sizing: border-box;
     }
     .shell-layout > .main{
       flex:1 1 auto;
       min-width:0;
       min-height:0;
       overflow:auto;
+      padding-bottom: var(--scroll-pad);
+      box-sizing: border-box;
     }
     .shell-layout > .diagnostic-sidebar{
       flex:0 0 auto;
@@ -47,6 +54,8 @@
       min-width:320px;
       min-height:0;
       overflow:auto;
+      padding-bottom: var(--scroll-pad);
+      box-sizing: border-box;
     }
     @media (max-width: 1200px){
       .shell-layout{ grid-template-columns:240px minmax(0, 1fr) 300px; }
@@ -73,7 +82,7 @@
       min-height:0;
       max-height:100%;
       overflow-y:auto;
-      padding-bottom:14px;
+      padding-bottom: var(--scroll-pad);
     }
     .nav-group{ margin-top:14px; }
     .nav-group:first-of-type{ margin-top:0; }
@@ -97,6 +106,12 @@
       text-transform:uppercase;
       color: rgba(160,230,238,0.9);
       margin:8px 2px 6px;
+    }
+    .nav-subgroup-desc{
+      font-size:11px;
+      color: rgba(147,167,182,0.9);
+      margin:0 2px 8px;
+      line-height:1.3;
     }
     .nav-link{
       text-decoration:none;
@@ -124,9 +139,19 @@
       text-overflow:ellipsis;
       max-width:100%;
     }
+    .titlebar-right{
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      min-width:170px;
+      z-index:2;
+    }
+    .titlebar-right .btn{
+      white-space:nowrap;
+    }
   
-    #view{ min-width:0; min-height:0; display:block; height:auto; overflow:visible; }
-    .view-wrap{ width:100%; min-height:0; }
+    #view{ min-width:0; min-height:0; display:block; height:auto; overflow:visible; padding-bottom: var(--scroll-pad); box-sizing:border-box; }
+    .view-wrap{ width:100%; min-height:0; padding-bottom: var(--scroll-pad); box-sizing:border-box; }
 </style>
 </head>
 <body>
@@ -142,7 +167,9 @@
         <div class="hero-subtitle">Credit Spread Analysis</div>
         <div class="hero-context" id="heroContext">Analysis → Options → Credit Spreads</div>
       </div>
-      <div class="titlebar-right" aria-hidden="true"></div>
+      <div class="titlebar-right">
+        <button id="fullscreenToggleBtn" class="btn" type="button">Fullscreen</button>
+      </div>
     </div>
     <div class="subtitlebar"  style="margin-top:10px;">
     </div>
@@ -151,29 +178,56 @@
       <aside class="sidebar">
         <div class="nav-panel">
           <div class="nav-title">Navigation</div>
+          <a class="nav-link" href="#/home" data-route="home">
+            <span class="nav-dot"></span>
+            <span class="nav-item-text">
+              <span class="nav-item-title">Home</span>
+              <span class="nav-item-sub">Market overview command center</span>
+            </span>
+          </a>
+
           <section class="nav-group" aria-label="Analysis">
             <div class="nav-group-header">Analysis</div>
-            <div class="nav-group-desc">Options Strategy Scanners</div>
+            <div class="nav-group-desc">Market and strategy analysis dashboards</div>
+
+            <div class="nav-parent-label">Stocks</div>
+            <div class="nav-subgroup-desc">Market-level and single-symbol analysis</div>
+            <a class="nav-link" href="#/stock-analysis" data-route="stock-analysis">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Stock Analysis</span>
+                <span class="nav-item-sub">Analysis → Stocks → Single symbol</span>
+              </span>
+            </a>
+            <a class="nav-link" href="#/stock-scanner" data-route="stock-scanner">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Stock Scanner</span>
+                <span class="nav-item-sub">Analysis → Stocks → Ranked ideas</span>
+              </span>
+            </a>
+
+            <div class="nav-parent-label">Options</div>
+            <div class="nav-subgroup-desc">Strategy scanners for option structures</div>
             <a class="nav-link" href="#/credit-spread" data-route="credit-spread">
               <span class="nav-dot"></span>
               <span class="nav-item-text">
                 <span class="nav-item-title">Credit Spread</span>
-                <span class="nav-item-sub">Analysis → Options → Credit Spreads</span>
+                <span class="nav-item-sub">Analysis → Options → Credit spreads</span>
               </span>
             </a>
-            <div class="nav-parent-label">Credit Spread Wings</div>
             <a class="nav-link" href="#/strategy-credit-put" data-route="strategy-credit-put">
               <span class="nav-dot"></span>
               <span class="nav-item-text">
                 <span class="nav-item-title">Credit Put</span>
-                <span class="nav-item-sub">Analysis → Options → Credit Spreads → Put wing</span>
+                <span class="nav-item-sub">Analysis → Options → Credit spreads → Put wing</span>
               </span>
             </a>
             <a class="nav-link" href="#/strategy-credit-call" data-route="strategy-credit-call">
               <span class="nav-dot"></span>
               <span class="nav-item-text">
                 <span class="nav-item-title">Credit Call</span>
-                <span class="nav-item-sub">Analysis → Options → Credit Spreads → Call wing</span>
+                <span class="nav-item-sub">Analysis → Options → Credit spreads → Call wing</span>
               </span>
             </a>
             <a class="nav-link" href="#/debit-spreads" data-route="debit-spreads">
@@ -284,7 +338,11 @@
           </div>
 
           <div class="diagnosticSection">
-            <div class="diagnosticTitle">CURRENT REPORT STATS</div>
+            <div class="diagnosticTitle" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <span id="sessionStatsTitle">SESSION STATS</span>
+              <button id="sessionStatsResetBtn" class="btn" type="button" style="padding:4px 8px;font-size:11px;line-height:1.1;">Reset</button>
+            </div>
+            <div id="sessionStatsMeta" class="stock-note" style="margin-bottom:8px;"></div>
             <div id="reportStatsGrid" class="statGrid"></div>
           </div>
         </div>
@@ -295,23 +353,30 @@
   <!-- Router is provided by assets/js/router.js -->
 
   <script src="assets/js/state/session_state.js?v=20260215a"></script>
-  <script src="assets/js/api/client.js?v=20260215a"></script>
+  <script src="assets/js/api/client.js?v=20260216e"></script>
   <script src="assets/js/utils/tradeKey.js?v=20260216a"></script>
   <script src="assets/js/metrics/glossary.js?v=20260215a"></script>
   <script src="assets/js/ui/tooltip.js?v=20260215a"></script>
   <script src="assets/js/ui/trade_card.js?v=20260215a"></script>
   <script src="assets/js/ui/source_health.js?v=20260215a"></script>
+  <script src="assets/js/ui/home_loading_overlay.js?v=20260216b"></script>
+  <script src="assets/js/utils/rateLimiter.js?v=20260216a"></script>
+  <script src="assets/js/ui/notes.js?v=20260216a"></script>
+  <script src="assets/js/stores/sessionStats.js?v=20260216b"></script>
+  <script src="assets/js/stores/homeCache.js?v=20260215a"></script>
   <script src="assets/js/pages/credit_spread.js?v=20260215a"></script>
   <script src="assets/js/strategies/defaults.js?v=20260215a"></script>
   <script src="assets/js/pages/strategy_dashboard_shell.js?v=20260215a"></script>
   <script src="assets/js/pages/active_trades.js?v=20260215a"></script>
-  <script src="assets/js/pages/trade_workbench.js?v=20260216a"></script>
-  <script src="assets/js/pages/stock_analysis.js?v=20260216a"></script>
+  <script src="assets/js/pages/trade_workbench.js?v=20260216b"></script>
+  <script src="assets/js/pages/stock_analysis.js?v=20260216d"></script>
+  <script src="assets/js/pages/stock_scanner.js?v=20260216b"></script>
+  <script src="assets/js/pages/home.js?v=20260216j"></script>
   <script src="assets/js/pages/risk_capital.js?v=20260216a"></script>
-  <script src="assets/js/pages/portfolio_risk.js?v=20260215b"></script>
-  <script src="assets/js/pages/trade_lifecycle.js?v=20260215b"></script>
-  <script src="assets/js/pages/strategy_analytics.js?v=20260215b"></script>
-  <script src="assets/js/app.js?v=20260213b"></script>
-  <script src="assets/js/router.js?v=20260213b"></script>
+  <script src="assets/js/pages/portfolio_risk.js?v=20260216a"></script>
+  <script src="assets/js/pages/trade_lifecycle.js?v=20260216a"></script>
+  <script src="assets/js/pages/strategy_analytics.js?v=20260216a"></script>
+  <script src="assets/js/app.js?v=20260216a"></script>
+  <script src="assets/js/router.js?v=20260216b"></script>
 </body>
 </html>

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse
 
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/{strategy_id}/generate")
@@ -86,30 +89,126 @@ async def generate_strategy_report_stream(strategy_id: str, request: Request):
     if allow_skewed not in (None, ""):
         request_payload["allow_skewed"] = str(allow_skewed)
 
+    timeout_seconds = 180
+    timeout_q = query.get("timeout_seconds")
+    if timeout_q not in (None, ""):
+        try:
+            timeout_seconds = max(30, min(int(timeout_q), 900))
+        except ValueError:
+            timeout_seconds = 180
+
     async def _stream():
         queue: asyncio.Queue[tuple[str, dict | None]] = asyncio.Queue()
+        done_event = asyncio.Event()
+        current_stage = "starting"
+
+        def _hint_for_error(stage: str, exc: Exception) -> str:
+            text = str(exc or "").lower()
+            if "unknown strategy" in text:
+                return "Verify strategyId matches a registered plugin.id"
+            if "no analysis snapshots" in text or "no expirations" in text:
+                return "No viable expirations/chains were available for current filters"
+            if "timed out" in text or "timeout" in text:
+                return "Reduce universe or loosen filters, then retry"
+            if "chain" in text:
+                return "Options chain data missing; try another symbol/expiration window"
+            if stage in {"build_candidates", "enrich", "evaluate"}:
+                return "Strategy plugin data assumptions failed; check diagnostics notes"
+            return "See server logs with trace_id for full stack details"
+
+        async def progress_callback(payload: dict[str, Any]):
+            nonlocal current_stage
+            stage = str((payload or {}).get("stage") or "progress")
+            current_stage = stage
+            await queue.put(("status", payload or {"stage": stage, "message": "Working"}))
 
         async def run_generation():
+            trace_id = str(uuid4())
             try:
-                await queue.put(("progress", {"step": "starting", "message": f"Starting {strategy_id} generation..."}))
-                generated = await request.app.state.strategy_service.generate(strategy_id=strategy_id, request_payload=request_payload)
-                await queue.put(("done", {"filename": generated.get("filename")}))
+                await queue.put(("status", {"stage": "starting", "message": f"Starting {strategy_id} generation..."}))
+                generated = await asyncio.wait_for(
+                    request.app.state.strategy_service.generate(
+                        strategy_id=strategy_id,
+                        request_payload=request_payload,
+                        progress_callback=progress_callback,
+                    ),
+                    timeout=timeout_seconds,
+                )
+                payload = {
+                    "strategyId": strategy_id,
+                    "filename": generated.get("filename"),
+                    "message": "Report generation completed",
+                }
+                await queue.put(("completed", payload))
+                await queue.put(("done", payload))
             except KeyError as exc:
-                await queue.put(("error", {"message": str(exc)}))
+                logger.exception("strategy_sse_unknown_strategy strategy_id=%s trace_id=%s", strategy_id, trace_id)
+                await queue.put(("error", {
+                    "strategyId": strategy_id,
+                    "stage": current_stage,
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                    "hint": _hint_for_error(current_stage, exc),
+                    "trace_id": trace_id,
+                    "message": str(exc),
+                }))
+            except asyncio.TimeoutError:
+                message = f"Generation timed out after {timeout_seconds}s"
+                logger.error("strategy_sse_timeout strategy_id=%s timeout_seconds=%s trace_id=%s", strategy_id, timeout_seconds, trace_id)
+                await queue.put(("error", {
+                    "strategyId": strategy_id,
+                    "stage": current_stage,
+                    "error_type": "TimeoutError",
+                    "error_message": message,
+                    "hint": _hint_for_error(current_stage, asyncio.TimeoutError(message)),
+                    "trace_id": trace_id,
+                    "message": message,
+                }))
             except Exception as exc:
-                await queue.put(("error", {"message": str(exc)}))
+                logger.exception("strategy_sse_failed strategy_id=%s stage=%s trace_id=%s", strategy_id, current_stage, trace_id)
+                await queue.put(("error", {
+                    "strategyId": strategy_id,
+                    "stage": current_stage,
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                    "hint": _hint_for_error(current_stage, exc),
+                    "trace_id": trace_id,
+                    "message": str(exc),
+                }))
             finally:
+                done_event.set()
                 await queue.put(("__end__", None))
 
         task = asyncio.create_task(run_generation())
         try:
+            elapsed = 0
             while True:
-                event, payload = await queue.get()
+                try:
+                    event, payload = await asyncio.wait_for(queue.get(), timeout=5)
+                except asyncio.TimeoutError:
+                    if done_event.is_set():
+                        break
+                    elapsed += 5
+                    heartbeat = {
+                        "step": "progress",
+                        "stage": current_stage,
+                        "strategyId": strategy_id,
+                        "message": f"Working... {elapsed}s elapsed",
+                    }
+                    yield f"event: status\ndata: {json.dumps(heartbeat)}\n\n"
+                    continue
                 if event == "__end__":
                     break
                 yield f"event: {event}\ndata: {json.dumps(payload or {})}\n\n"
         finally:
-            await task
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except Exception:
+                    pass
+            else:
+                await task
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
 

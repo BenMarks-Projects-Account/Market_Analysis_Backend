@@ -4,7 +4,12 @@ window.BenTradeApi = (function(){
     const payload = await response.json().catch(() => ({}));
     if(!response.ok){
       const message = payload?.error?.message || payload?.detail || `Request failed (${response.status})`;
-      throw new Error(message);
+      const err = new Error(message);
+      err.status = response.status;
+      err.detail = payload?.detail || payload?.error?.message || null;
+      err.payload = payload;
+      err.endpoint = String(url || '');
+      throw err;
     }
 
     try{
@@ -35,6 +40,18 @@ window.BenTradeApi = (function(){
     });
   }
 
+  function modelAnalyzeStock(symbol, idea, source){
+    return jsonFetch('/api/model/analyze_stock', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        symbol: String(symbol || ''),
+        idea: (idea && typeof idea === 'object') ? idea : {},
+        source: String(source || 'local_llm'),
+      }),
+    });
+  }
+
   function persistRejectDecision(payload){
     return jsonFetch('/api/decisions/reject', {
       method: 'POST',
@@ -57,6 +74,18 @@ window.BenTradeApi = (function(){
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({}),
     });
+  }
+
+  function getTradingPositions(){
+    return jsonFetch('/api/trading/positions');
+  }
+
+  function getTradingOpenOrders(){
+    return jsonFetch('/api/trading/orders/open');
+  }
+
+  function getTradingAccount(){
+    return jsonFetch('/api/trading/account');
   }
 
   function workbenchAnalyze(payload){
@@ -95,12 +124,44 @@ window.BenTradeApi = (function(){
     return jsonFetch('/api/stock/watchlist');
   }
 
+  function getStockScanner(){
+    return jsonFetch('/api/stock/scanner');
+  }
+
   function addStockWatchlist(symbol){
     return jsonFetch('/api/stock/watchlist', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ symbol: String(symbol || '') }),
     });
+  }
+
+  function getMacroIndicators(){
+    return jsonFetch('/api/stock/macro');
+  }
+
+  function getRegime(){
+    return jsonFetch('/api/regime');
+  }
+
+  function getTopRecommendations(){
+    return jsonFetch('/api/recommendations/top');
+  }
+
+  function getPlaybook(){
+    return jsonFetch('/api/playbook');
+  }
+
+  function getSignals(symbol, range){
+    const sym = encodeURIComponent(String(symbol || 'SPY').toUpperCase());
+    const rng = encodeURIComponent(String(range || '6mo'));
+    return jsonFetch(`/api/signals?symbol=${sym}&range=${rng}`);
+  }
+
+  function getSignalsUniverse(universe, range){
+    const uni = encodeURIComponent(String(universe || 'default'));
+    const rng = encodeURIComponent(String(range || '6mo'));
+    return jsonFetch(`/api/signals/universe?universe=${uni}&range=${rng}`);
   }
 
   function getPortfolioRiskMatrix(){
@@ -169,17 +230,28 @@ window.BenTradeApi = (function(){
     listReports,
     getReport,
     modelAnalyze,
+    modelAnalyzeStock,
     persistRejectDecision,
     getRejectDecisions,
     getActiveTrades,
     refreshActiveTrades,
+    getTradingPositions,
+    getTradingOpenOrders,
+    getTradingAccount,
     workbenchAnalyze,
     listWorkbenchScenarios,
     saveWorkbenchScenario,
     deleteWorkbenchScenario,
     getStockSummary,
     getStockWatchlist,
+    getStockScanner,
     addStockWatchlist,
+    getMacroIndicators,
+    getRegime,
+    getTopRecommendations,
+    getPlaybook,
+    getSignals,
+    getSignalsUniverse,
     getPortfolioRiskMatrix,
     postLifecycleEvent,
     getLifecycleTrades,

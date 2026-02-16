@@ -13,11 +13,14 @@ window.BenTradePages.initStrategyAnalytics = function initStrategyAnalytics(root
   const strategyBody = scope.querySelector('#saStrategyBody');
   const underlyingBody = scope.querySelector('#saUnderlyingBody');
   const evListEl = scope.querySelector('#saEvList');
-  const notesEl = scope.querySelector('#saNotes');
+  const notesEl = scope.querySelector('#saNotesSystem');
+  const notesMountEl = scope.querySelector('#saNotesMount');
 
-  if(!rangeEl || !refreshBtn || !kpisEl || !curveEl || !strategyBody || !underlyingBody || !evListEl || !notesEl){
+  if(!rangeEl || !refreshBtn || !kpisEl || !curveEl || !strategyBody || !underlyingBody || !evListEl || !notesEl || !notesMountEl){
     return;
   }
+
+  window.BenTradeNotes?.attachNotes?.(notesMountEl, 'notes:page:strategy-analytics');
 
   let payload = null;
   let selectedStrategy = null;

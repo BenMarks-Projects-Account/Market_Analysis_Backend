@@ -2,14 +2,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 
 from app.models.trade_contract import TradeContract
 
 router = APIRouter(tags=["reports"])
+
+
+class StockModelAnalyzeRequest(BaseModel):
+    symbol: str
+    idea: dict[str, Any]
+    source: str = "local_llm"
 
 
 def _to_float(value):
@@ -162,3 +171,53 @@ async def model_analyze(payload: dict):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/api/model/analyze_stock")
+async def model_analyze_stock(payload: StockModelAnalyzeRequest, request: Request):
+    symbol = str(payload.symbol or "").strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=400, detail='Missing "symbol" in request body')
+
+    idea = payload.idea if isinstance(payload.idea, dict) else {}
+    if not idea:
+        raise HTTPException(status_code=400, detail='Missing "idea" snapshot in request body')
+
+    source = str(payload.source or "local_llm").strip() or "local_llm"
+
+    try:
+        from common.model_analysis import LocalModelUnavailableError, analyze_stock_idea
+
+        model_output = analyze_stock_idea(
+            symbol=symbol,
+            idea=idea,
+            source=source,
+        )
+    except LocalModelUnavailableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Stock model analysis failed: {exc}") from exc
+
+    safe_source = "".join(ch for ch in source.lower() if ch.isalnum() or ch in ("_", "-")) or "local_llm"
+    artifact_path: Path = request.app.state.results_dir / f"model_stock_{safe_source}.jsonl"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "symbol": symbol,
+        "idea_key": str(idea.get("idea_key") or f"{symbol}|stock_scanner"),
+        "model_output": model_output,
+        "input_snapshot": {
+            "symbol": symbol,
+            "idea": idea,
+            "source": source,
+        },
+    }
+
+    try:
+        with open(artifact_path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to persist stock model artifact: {exc}") from exc
+
+    return model_output

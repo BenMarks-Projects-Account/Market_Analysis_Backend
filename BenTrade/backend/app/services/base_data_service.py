@@ -32,6 +32,44 @@ class BaseDataService:
             "fred": self._new_source_state(),
         }
 
+    def _source_configured(self, source: str) -> bool:
+        key = str(source or "").strip().lower()
+        if key == "tradier":
+            token = str(getattr(self.tradier_client.settings, "TRADIER_TOKEN", "") or "").strip()
+            return bool(token)
+        if key == "finnhub":
+            api_key = str(getattr(self.finnhub_client.settings, "FINNHUB_KEY", "") or "").strip()
+            return bool(api_key)
+        if key == "fred":
+            api_key = str(getattr(self.fred_client.settings, "FRED_KEY", "") or "").strip()
+            return bool(api_key)
+        if key == "yahoo":
+            return True
+        return False
+
+    async def refresh_source_health_probe(self) -> None:
+        async def _probe(source: str, fn):
+            if not self._source_configured(source):
+                self._source_health[source]["last_status"] = "error"
+                self._source_health[source]["message"] = "not configured"
+                return
+            try:
+                ok = await fn()
+                if ok:
+                    self._mark_success(source, http_status=200, message="healthy")
+                else:
+                    self._mark_failure(source, UpstreamError("health check failed", details={"status_code": 503}))
+            except Exception as exc:
+                self._mark_failure(source, exc)
+
+        await asyncio.gather(
+            _probe("tradier", self.tradier_client.health),
+            _probe("finnhub", self.finnhub_client.health),
+            _probe("yahoo", self.yahoo_client.health),
+            _probe("fred", self.fred_client.health),
+            return_exceptions=True,
+        )
+
     @staticmethod
     def _new_source_state() -> dict[str, Any]:
         return {
@@ -132,8 +170,20 @@ class BaseDataService:
             last_ok_ts = state.get("last_ok_ts")
             last_error_kind = state.get("last_error_kind")
 
-            status = "yellow"
-            message = state.get("message") or "unknown"
+            status = "red"
+            message = state.get("message") or "unavailable"
+
+            if not self._source_configured(source):
+                status = "red"
+                message = "not configured"
+                out[source] = {
+                    "status": status,
+                    "last_http": last_http,
+                    "last_ok_ts": self._iso(last_ok_ts),
+                    "last_error_ts": self._iso(state.get("last_error_ts")),
+                    "message": message,
+                }
+                continue
 
             if last_http in (401, 403):
                 status = "red"
@@ -158,8 +208,8 @@ class BaseDataService:
                     status = "green"
                     message = "healthy"
             else:
-                status = "yellow"
-                message = message or "unknown"
+                status = "red"
+                message = message or "unavailable"
 
             out[source] = {
                 "status": status,

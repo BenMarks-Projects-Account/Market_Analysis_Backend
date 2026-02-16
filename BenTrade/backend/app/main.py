@@ -11,9 +11,13 @@ from app.api.routes_health import router as health_router
 from app.api.routes_options import router as options_router
 from app.api.routes_active_trades import router as active_trades_router
 from app.api.routes_decisions import router as decisions_router
+from app.api.routes_playbook import router as playbook_router
 from app.api.routes_portfolio_risk import router as portfolio_risk_router
+from app.api.routes_recommendations import router as recommendations_router
+from app.api.routes_regime import router as regime_router
 from app.api.routes_reports import router as reports_router
 from app.api.routes_risk_capital import router as risk_capital_router
+from app.api.routes_signals import router as signals_router
 from app.api.routes_stock_analysis import router as stock_analysis_router
 from app.api.routes_spreads import router as spreads_router
 from app.api.routes_strategies import router as strategies_router
@@ -29,8 +33,12 @@ from app.clients.yahoo_client import YahooClient
 from app.config import get_settings
 from app.services.base_data_service import BaseDataService
 from app.services.decision_service import DecisionService
+from app.services.playbook_service import PlaybookService
 from app.services.risk_policy_service import RiskPolicyService
+from app.services.regime_service import RegimeService
+from app.services.recommendation_service import RecommendationService
 from app.services.report_service import ReportService
+from app.services.signal_service import SignalService
 from app.services.stock_analysis_service import StockAnalysisService
 from app.services.spread_service import SpreadService
 from app.services.strategy_service import StrategyService
@@ -74,14 +82,24 @@ def create_app() -> FastAPI:
         yahoo_client=yahoo_client,
         fred_client=fred_client,
     )
+    signal_service = SignalService(base_data_service=base_data_service, cache=cache, ttl_seconds=45)
     spread_service = SpreadService(base_data_service=base_data_service)
-    stock_analysis_service = StockAnalysisService(base_data_service=base_data_service, results_dir=results_dir)
+    stock_analysis_service = StockAnalysisService(base_data_service=base_data_service, results_dir=results_dir, signal_service=signal_service)
     trade_lifecycle_service = TradeLifecycleService(results_dir=results_dir)
     risk_policy_service = RiskPolicyService(results_dir=results_dir)
+    regime_service = RegimeService(base_data_service=base_data_service, cache=cache, ttl_seconds=45)
     strategy_service = StrategyService(
         base_data_service=base_data_service,
         results_dir=results_dir,
         risk_policy_service=risk_policy_service,
+        signal_service=signal_service,
+        regime_service=regime_service,
+    )
+    playbook_service = PlaybookService(regime_service=regime_service, signal_service=signal_service)
+    recommendation_service = RecommendationService(
+        strategy_service=strategy_service,
+        stock_analysis_service=stock_analysis_service,
+        regime_service=regime_service,
     )
     report_service = ReportService(base_data_service=base_data_service, results_dir=results_dir)
     decision_service = DecisionService(results_dir=results_dir)
@@ -106,11 +124,15 @@ def create_app() -> FastAPI:
     app.state.yahoo_client = yahoo_client
     app.state.fred_client = fred_client
     app.state.base_data_service = base_data_service
+    app.state.signal_service = signal_service
     app.state.spread_service = spread_service
     app.state.stock_analysis_service = stock_analysis_service
     app.state.strategy_service = strategy_service
     app.state.trade_lifecycle_service = trade_lifecycle_service
     app.state.risk_policy_service = risk_policy_service
+    app.state.regime_service = regime_service
+    app.state.playbook_service = playbook_service
+    app.state.recommendation_service = recommendation_service
     app.state.report_service = report_service
     app.state.decision_service = decision_service
     app.state.trading_repository = trading_repository
@@ -124,9 +146,13 @@ def create_app() -> FastAPI:
     app.include_router(underlying_router)
     app.include_router(spreads_router)
     app.include_router(stock_analysis_router)
+    app.include_router(signals_router)
+    app.include_router(playbook_router)
     app.include_router(strategies_router)
     app.include_router(portfolio_risk_router)
     app.include_router(risk_capital_router)
+    app.include_router(regime_router)
+    app.include_router(recommendations_router)
     app.include_router(trade_lifecycle_router)
     app.include_router(trading_router)
     app.include_router(active_trades_router)

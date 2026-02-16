@@ -423,3 +423,49 @@ async def get_active_trades(request: Request) -> dict[str, Any]:
 @router.post("/active/refresh")
 async def refresh_active_trades(request: Request) -> dict[str, Any]:
     return await _build_active_payload(request)
+
+
+@router.get("/positions")
+async def get_tradier_positions(request: Request) -> dict[str, Any]:
+    payload = await _build_active_payload(request)
+    return {
+        "as_of": payload.get("as_of"),
+        "source": payload.get("source", "tradier"),
+        "positions": payload.get("positions") or [],
+        "source_health": payload.get("source_health") or {},
+    }
+
+
+@router.get("/orders/open")
+async def get_tradier_open_orders(request: Request) -> dict[str, Any]:
+    payload = await _build_active_payload(request)
+    return {
+        "as_of": payload.get("as_of"),
+        "source": payload.get("source", "tradier"),
+        "orders": payload.get("orders") or [],
+        "source_health": payload.get("source_health") or {},
+    }
+
+
+@router.get("/account")
+async def get_tradier_account(request: Request) -> dict[str, Any]:
+    settings = request.app.state.trading_service.settings
+    if not settings.TRADIER_TOKEN or not settings.TRADIER_ACCOUNT_ID:
+        return {
+            "as_of": _utc_iso_now(),
+            "source": "tradier",
+            "account": {},
+            "error": "Tradier not configured",
+        }
+
+    try:
+        account_payload = await request.app.state.tradier_client.get_balances()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to load account balances from Tradier: {exc}") from exc
+
+    return {
+        "as_of": _utc_iso_now(),
+        "source": "tradier",
+        "account": account_payload,
+        "source_health": request.app.state.base_data_service.get_source_health_snapshot(),
+    }

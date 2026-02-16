@@ -36,15 +36,18 @@ window.BenTradePages.initTradeWorkbench = function initTradeWorkbench(rootEl){
   const suggestionsEl = scope.querySelector('#wbSuggestions');
   const sourceHealthEl = scope.querySelector('#wbSourceHealth');
   const scenarioListEl = scope.querySelector('#wbScenarioList');
+  const pageNotesMountEl = scope.querySelector('#wbPageNotesMount');
   const legPreviewEl = scope.querySelector('#wbLegPreview');
   const keyPreviewEl = scope.querySelector('#wbKeyPreview');
   const analysisStatusEl = scope.querySelector('#wbAnalysisStatus');
   const errorEl = scope.querySelector('#wbError');
   const importNoticeEl = scope.querySelector('#wbImportNotice');
 
-  if(!symbolEl || !expirationEl || !strategyEl || !multiplierEl || !analyzeBtn || !resultEl || !suggestionsEl || !scenarioListEl || !sourceHealthEl || !legPreviewEl || !keyPreviewEl || !analysisStatusEl){
+  if(!symbolEl || !expirationEl || !strategyEl || !multiplierEl || !analyzeBtn || !resultEl || !suggestionsEl || !scenarioListEl || !sourceHealthEl || !pageNotesMountEl || !legPreviewEl || !keyPreviewEl || !analysisStatusEl){
     return;
   }
+
+  window.BenTradeNotes?.attachNotes?.(pageNotesMountEl, 'notes:page:trade-testing');
 
   const ANALYZABLE_STRATEGIES = new Set([
     'credit_put_spread',

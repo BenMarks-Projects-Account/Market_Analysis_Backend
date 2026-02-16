@@ -14,14 +14,17 @@ window.BenTradePages.initPortfolioRisk = function initPortfolioRisk(rootEl){
   const underlyingBody = scope.querySelector('#prUnderlyingBody');
   const bucketBody = scope.querySelector('#prBucketBody');
   const scenariosEl = scope.querySelector('#prScenarios');
-  const notesEl = scope.querySelector('#prNotes');
+  const notesEl = scope.querySelector('#prNotesSystem');
+  const notesMountEl = scope.querySelector('#prNotesMount');
   const modalEl = scope.querySelector('#prDetailModal');
   const modalBody = scope.querySelector('#prDetailBody');
   const closeBtn = scope.querySelector('#prDetailCloseBtn');
 
-  if(!refreshBtn || !runScenarioBtn || !totalsEl || !underlyingBody || !bucketBody || !scenariosEl || !notesEl || !modalEl || !modalBody || !closeBtn){
+  if(!refreshBtn || !runScenarioBtn || !totalsEl || !underlyingBody || !bucketBody || !scenariosEl || !notesEl || !notesMountEl || !modalEl || !modalBody || !closeBtn){
     return;
   }
+
+  window.BenTradeNotes?.attachNotes?.(notesMountEl, 'notes:page:portfolio-risk');
 
   let payload = null;
 
