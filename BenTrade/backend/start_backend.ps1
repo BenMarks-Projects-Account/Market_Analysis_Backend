@@ -73,6 +73,12 @@ Write-Host "Upgrading pip and installing requirements (this may take a moment)..
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 
+Write-Host "Preflight: verifying /api/stock/scan route is registered..."
+python -c "from fastapi.testclient import TestClient; from app.main import create_app; import sys; c=TestClient(create_app()); paths=(c.get('/openapi.json').json() or {}).get('paths', {}); ok='/api/stock/scan' in paths; print(f'ROUTE_CHECK /api/stock/scan -> {ok}'); sys.exit(0 if ok else 3)"
+if ($LASTEXITCODE -ne 0) {
+    throw "Preflight failed: /api/stock/scan is not registered. Aborting backend startup."
+}
+
 Stop-StaleBackendProcesses -Port 5000
 
 Write-Host "Starting FastAPI app (uvicorn app.main:app) on port 5000..."

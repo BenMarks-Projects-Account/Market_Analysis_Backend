@@ -1,0 +1,84 @@
+<div class="view-wrap">
+  <div class="stock-layout">
+    <section class="stock-panel stock-main">
+      <div class="stock-toolbar">
+        <div class="stock-inputs">
+          <input id="stockSymbol" type="text" value="SPY" maxlength="12" placeholder="Ticker" />
+          <select id="stockRange">
+            <option value="1mo">1 Month</option>
+            <option value="3mo">3 Months</option>
+            <option value="6mo" selected>6 Months</option>
+            <option value="1y">1 Year</option>
+          </select>
+          <button id="stockRefreshBtn" class="btn">Refresh</button>
+        </div>
+        <div class="stock-chips" id="stockQuickChips">
+          <button class="btn" data-symbol="SPY">SPY</button>
+          <button class="btn" data-symbol="QQQ">QQQ</button>
+          <button class="btn" data-symbol="IWM">IWM</button>
+          <button class="btn" data-symbol="AAPL">AAPL</button>
+          <button class="btn" data-symbol="MSFT">MSFT</button>
+        </div>
+        <div class="stock-inputs" id="stockAddRow">
+          <input id="stockAddSymbol" type="text" maxlength="12" placeholder="Add symbol" />
+          <button id="stockAddBtn" class="btn">Add Stock</button>
+        </div>
+        <div class="stock-chips" id="stockModeChips">
+          <button id="stockSummaryModeBtn" class="btn">Summary</button>
+          <button id="stockScannerModeBtn" class="btn">Scanner</button>
+        </div>
+      </div>
+
+      <div id="stockError" class="active-error" style="display:none;"></div>
+
+      <details class="stock-card" id="stockDebugStrip" open>
+        <summary class="stock-card-title" style="cursor:pointer;">Debug Strip (Temporary)</summary>
+        <div id="stockDebugBody" class="stock-notes"></div>
+      </details>
+
+      <div id="stockSummaryPanel">
+        <div class="stock-summary-grid" id="stockSummaryGrid"></div>
+
+        <div class="stock-card">
+          <div class="stock-card-title">Price History</div>
+          <svg id="stockSparkline" viewBox="0 0 800 200" preserveAspectRatio="none"></svg>
+          <div id="stockRecentCloses" class="stock-notes" style="margin-top:8px;"></div>
+        </div>
+
+        <div class="stock-card">
+          <div class="stock-card-title">Indicators</div>
+          <div id="stockIndicators" class="stock-indicators"></div>
+        </div>
+
+        <div class="stock-card">
+          <div class="stock-card-title">Options Context</div>
+          <div id="stockOptionsContext" class="stock-indicators"></div>
+        </div>
+      </div>
+
+      <div class="stock-card">
+        <div class="stock-card-title">Scanner</div>
+        <div class="workbench-actions">
+          <button id="stockRunScanBtn" class="btn">Run Scan</button>
+        </div>
+        <div id="stockScannerResults" class="stock-notes"></div>
+      </div>
+    </section>
+
+    <aside class="stock-panel stock-side">
+      <div class="stock-card">
+        <div class="stock-card-title">Idea Actions</div>
+        <div class="workbench-actions">
+          <button id="stockOpenScannerBtn" class="btn">Open in Scanner</button>
+          <button id="stockSendWorkbenchBtn" class="btn">Send a candidate to Workbench</button>
+        </div>
+        <div id="stockCandidatePreview" class="stock-candidate-preview"></div>
+      </div>
+
+      <div class="stock-card">
+        <div class="stock-card-title">Notes</div>
+        <div id="stockNotes" class="stock-notes"></div>
+      </div>
+    </aside>
+  </div>
+</div>

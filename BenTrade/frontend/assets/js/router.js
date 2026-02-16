@@ -7,32 +7,39 @@
       title: "Credit Spread Analysis"
     },
     "active-trade": {
-      view: "dashboards/active-trade-dashboard.view.html",
-      init: () => window.BenTrade?.initPlaceholderDashboard?.({
-        title: "Active Trade Dashboard"
-      }),
+      view: "dashboards/active_trades.html",
+      init: () => window.BenTradePages?.initActiveTrades?.(document.getElementById('view')),
       title: "Active Trade Dashboard"
     },
     "trade-testing": {
-      view: "dashboards/trade-testing-workbench.view.html",
-      init: () => window.BenTrade?.initPlaceholderDashboard?.({
-        title: "Trade Testing Workbench"
-      }),
+      view: "dashboards/trade_workbench.html",
+      init: () => window.BenTradePages?.initTradeWorkbench?.(document.getElementById('view')),
       title: "Trade Testing Workbench"
     },
     "stock-analysis": {
-      view: "dashboards/stock-analysis-dashboard.view.html",
-      init: () => window.BenTrade?.initPlaceholderDashboard?.({
-        title: "Stock Analysis Dashboard"
-      }),
+      view: "dashboards/stock_analysis.html",
+      init: () => window.BenTradePages?.initStockAnalysis?.(document.getElementById('view')),
       title: "Stock Analysis Dashboard"
     },
     "risk-capital": {
-      view: "dashboards/risk-capital-management-dashboard.view.html",
-      init: () => window.BenTrade?.initPlaceholderDashboard?.({
-        title: "Risk & Capital Management Dashboard"
-      }),
+      view: "dashboards/risk_capital.html",
+      init: () => window.BenTradePages?.initRiskCapital?.(document.getElementById('view')),
       title: "Risk & Capital Management Dashboard"
+    },
+    "portfolio-risk": {
+      view: "dashboards/portfolio_risk.html",
+      init: () => window.BenTradePages?.initPortfolioRisk?.(document.getElementById('view')),
+      title: "Portfolio Risk Matrix"
+    },
+    "trade-lifecycle": {
+      view: "dashboards/trade_lifecycle.html",
+      init: () => window.BenTradePages?.initTradeLifecycle?.(document.getElementById('view')),
+      title: "Trade Lifecycle"
+    },
+    "strategy-analytics": {
+      view: "dashboards/strategy_analytics.html",
+      init: () => window.BenTradePages?.initStrategyAnalytics?.(document.getElementById('view')),
+      title: "Strategy Analytics"
     }
   };
 
@@ -61,6 +68,7 @@
 
     setHeroSubtitle(r.title);
     try{ r.init && r.init(); } catch(e){ console.error(e); }
+    try{ window.attachMetricTooltips && window.attachMetricTooltips(viewEl); } catch(e){ console.error(e); }
     setActive(routeKey in routes ? routeKey : "credit-spread");
   }
 

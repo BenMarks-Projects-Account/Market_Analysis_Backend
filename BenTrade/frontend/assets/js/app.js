@@ -304,34 +304,6 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
             }
         }
 
-        function createTooltip(metricKey, extraText){
-            const base = {
-                max_profit: 'Maximum profit for one contract if the spread expires worthless. This is the net credit received.',
-                max_loss: 'Maximum loss for one contract if the spread moves against you. Equals spread width minus net credit.',
-                probability: "Probability of profit (POP) - the likelihood that the trade will be profitable at expiration.",
-                return_on_risk: "Maximum profit divided by maximum loss. Higher values indicate better risk-reward ratios.",
-                expected_value: 'Expected value for one contract based on probability-weighted outcomes. Positive EV suggests long-term profitability.',
-                kelly_fraction: "Optimal position size as a fraction of capital using Kelly Criterion. Values >0 are recommended.",
-                break_even: "The underlying price at expiration where the trade breaks even (neither profit nor loss).",
-                dte: "Days to expiration - time remaining until the options expire.",
-                expected_move: "1-standard deviation expected price move of the underlying based on implied volatility.",
-                iv_rv_ratio: "Ratio of implied volatility to realized volatility. >1 suggests options are expensive.",
-                trade_quality_score: "Composite score (0-100%) combining probability of profit, return on risk, and IV rank.",
-                iv_rank: "IV Rank (0-1) comparing current IV to provided historic low/high — higher means relatively expensive options.",
-                short_strike_z: "Distance from spot to short strike measured in 1σ expected moves (Z). Larger positive Z means more buffer.",
-                bid_ask_spread_pct: "Bid/Ask spread as a percent of mid — lower values indicate tighter liquidity and cheaper execution.",
-                strike_distance_pct: "Short strike distance from spot expressed as a percent of the underlying price.",
-                rsi14: "14-period RSI — measures recent momentum (0-100). Values >70 typically overbought, <30 oversold.",
-                realized_vol_20d: "20-day realized volatility (annualized) computed from recent price history.",
-                market_regime: "Simple market regime label combining trend and volatility (e.g., 'bullish trend, moderate volatility').",
-            };
-            let text = base[metricKey] || "No description available.";
-            if(extraText){
-                text += `\n\n${extraText}`;
-            }
-            return `<span class="tooltip-inline">${escapeHtml(text)}</span>`;
-        }
-
         function escapeHtml(s){
             if(s === null || s === undefined) return '';
             return String(s)
@@ -568,51 +540,51 @@ const html = `
                                         <div class="section-title">CORE METRICS</div>
                                         <div class="metric-grid">
                                             <div class="metric">
-                                                <div class="metric-label">Max Profit${createTooltip('max_profit')}</div>
+                                                <div class="metric-label" data-metric="max_profit">Max Profit</div>
                                                 <div class="metric-value positive">${fmtNumber(contractDollars(trade, 'max_profit_per_contract', 'max_profit_per_share', 'max_profit'),2,'$')}</div>
                                             </div>
                                             <div class="metric">
-                                                <div class="metric-label">Max Loss${createTooltip('max_loss')}</div>
+                                                <div class="metric-label" data-metric="max_loss">Max Loss</div>
                                                 <div class="metric-value negative">${fmtNumber(contractDollars(trade, 'max_loss_per_contract', 'max_loss_per_share', 'max_loss'),2,'$')}</div>
                                             </div>
                                             <div class="metric">
-                                                <div class="metric-label">Probability${createTooltip('probability')}</div>
+                                                <div class="metric-label" data-metric="pop">Probability</div>
                                                 <div class="metric-value neutral">${fmtPercent(trade.p_win_used,1)}</div>
                                             </div>
                                             <div class="metric">
-                                                <div class="metric-label">Return on Risk${createTooltip('return_on_risk')}</div>
+                                                <div class="metric-label" data-metric="return_on_risk">Return on Risk</div>
                                                 <div class="metric-value ${trade.return_on_risk != null && trade.return_on_risk > 0.2 ? 'positive' : 'neutral'}">${fmtPercent(trade.return_on_risk,1)}</div>
                                             </div>
                                             <div class="metric">
-                                                <div class="metric-label">Expected Value${createTooltip('expected_value')}</div>
+                                                <div class="metric-label" data-metric="ev">Expected Value</div>
                                                 <div class="metric-value ${contractDollars(trade, 'ev_per_contract', 'ev_per_share', 'expected_value') != null ? (contractDollars(trade, 'ev_per_contract', 'ev_per_share', 'expected_value') > 0 ? 'positive' : 'negative') : 'neutral'}">${fmtNumber(contractDollars(trade, 'ev_per_contract', 'ev_per_share', 'expected_value'),2,'$')}</div>
                                             </div>
                                             <div class="metric">
-                                                <div class="metric-label">Kelly Fraction${createTooltip('kelly_fraction')}</div>
+                                                <div class="metric-label" data-metric="kelly_fraction">Kelly Fraction</div>
                                                 <div class="metric-value ${trade.kelly_fraction != null ? (trade.kelly_fraction > 0 ? 'positive' : 'negative') : 'neutral'}">${fmtPercent(trade.kelly_fraction,1)}</div>
                                             </div>
                                             <div class="metric">
-                                                <div class="metric-label">IV Rank${createTooltip('iv_rank')}</div>
+                                                <div class="metric-label" data-metric="iv_rank">IV Rank</div>
                                                 <div class="metric-value ${trade.iv_rank != null && trade.iv_rank > 0.5 ? 'positive' : 'neutral'}">${fmtPercent(trade.iv_rank,1)}</div>
                                             </div>
                                             <div class="metric">
-                                                <div class="metric-label">Short Strike Z${createTooltip('short_strike_z')}</div>
+                                                <div class="metric-label" data-metric="short_strike_z">Short Strike Z</div>
                                                 <div class="metric-value ${trade.short_strike_z != null && trade.short_strike_z > 1 ? 'positive' : 'neutral'}">${fmtNumber(trade.short_strike_z,2,'','')}</div>
                                             </div>
                                             <div class="metric">
-                                                <div class="metric-label">Bid-Ask %${createTooltip('bid_ask_spread_pct')}</div>
+                                                <div class="metric-label" data-metric="bid_ask_spread_pct">Bid-Ask %</div>
                                                 <div class="metric-value ${trade.bid_ask_spread_pct != null && trade.bid_ask_spread_pct < 0.1 ? 'positive' : 'neutral'}">${fmtPercent(trade.bid_ask_spread_pct,2)}</div>
                                             </div>
                                             <div class="metric">
-                                                <div class="metric-label">Strike Dist %${createTooltip('strike_distance_pct')}</div>
+                                                <div class="metric-label" data-metric="strike_distance_pct">Strike Dist %</div>
                                                 <div class="metric-value">${fmtPercent(trade.strike_distance_pct,2)}</div>
                                             </div>
                                             <div class="metric">
-                                                <div class="metric-label">RSI14${createTooltip('rsi14')}</div>
+                                                <div class="metric-label" data-metric="rsi_14">RSI14</div>
                                                 <div class="metric-value ${trade.rsi14 != null && trade.rsi14 > 60 ? 'negative' : 'neutral'}">${fmtNumber(trade.rsi14,1,'','')}</div>
                                             </div>
                                             <div class="metric">
-                                                <div class="metric-label">RV (20d)${createTooltip('realized_vol_20d')}</div>
+                                                <div class="metric-label" data-metric="realized_vol_20d">RV (20d)</div>
                                                 <div class="metric-value">${fmtPercent(trade.realized_vol_20d,2)}</div>
                                             </div>
                                         </div>
@@ -622,27 +594,27 @@ const html = `
                                         <div class="section-title">TRADE DETAILS</div>
                                         <div class="trade-details">
                                             <div class="detail-row">
-                                                <span class="detail-label">Break Even ${createTooltip('break_even')}</span>
+                                                <span class="detail-label" data-metric="break_even">Break Even</span>
                                                 <span class="detail-value">${fmtNumber(trade.break_even,2,'$')}</span>
                                             </div>
                                             <div class="detail-row">
-                                                <span class="detail-label">Days to Expiration ${createTooltip('dte')}</span>
+                                                <span class="detail-label" data-metric="dte">Days to Expiration</span>
                                                 <span class="detail-value">${trade.dte ?? 'N/A'}</span>
                                             </div>
                                             <div class="detail-row">
-                                                <span class="detail-label">Expected Move ${createTooltip('expected_move')}</span>
+                                                <span class="detail-label" data-metric="expected_move_1w">Expected Move</span>
                                                 <span class="detail-value">${fmtNumber(trade.expected_move,2,'','')}</span>
                                             </div>
                                             <div class="detail-row">
-                                                <span class="detail-label">IV/RV Ratio ${createTooltip('iv_rv_ratio')}</span>
+                                                <span class="detail-label" data-metric="iv_rv_ratio">IV/RV Ratio</span>
                                                 <span class="detail-value">${fmtNumber(trade.iv_rv_ratio,2,'','')}</span>
                                             </div>
                                             <div class="detail-row">
-                                                <span class="detail-label">Trade Quality Score ${createTooltip('trade_quality_score')}</span>
+                                                <span class="detail-label" data-metric="trade_quality_score">Trade Quality Score</span>
                                                 <span class="detail-value">${fmtPercent(trade.trade_quality_score,1)}</span>
                                             </div>
                                             <div class="detail-row">
-                                                <span class="detail-label">Market Regime ${createTooltip('market_regime')}</span>
+                                                <span class="detail-label" data-metric="market_regime">Market Regime</span>
                                                 <span class="detail-value">${trade.market_regime || 'N/A'}</span>
                                             </div>
                                         </div>
@@ -657,6 +629,10 @@ const html = `
                                 <div class="trade-actions-row">
                                     <button class="btn btn-exec" onclick="executeTrade(${idx}); event.stopPropagation();">Execute trade</button>
                                     <button class="btn btn-reject" onclick="manualReject(${idx}); event.stopPropagation();">Reject</button>
+                                    <button class="btn" onclick="sendToWorkbench(${idx}); event.stopPropagation();">Send to Workbench</button>
+                                    <button class="btn" onclick="lifecycleAction(${idx}, 'WATCHLIST'); event.stopPropagation();">Add to Watchlist</button>
+                                    <button class="btn" onclick="lifecycleAction(${idx}, 'OPEN'); event.stopPropagation();">Mark Open</button>
+                                    <button class="btn" onclick="lifecycleAction(${idx}, 'CLOSE'); event.stopPropagation();">Close</button>
                                 </div>
                             </div>
                         </div>
@@ -666,7 +642,9 @@ const html = `
 
             content.innerHTML = html;
 
-            attachTooltipHandlers();
+            if(window.attachMetricTooltips){
+                window.attachMetricTooltips(content);
+            }
 
             window.toggleTrade = function(idx){
                 const body = doc.getElementById(`tradeBody-${idx}`);
@@ -691,6 +669,104 @@ const html = `
                 }
             };
 
+            window.sendToWorkbench = function(idx){
+                const trade = window.currentTrades && window.currentTrades[idx] ? window.currentTrades[idx] : null;
+                if(!trade) return;
+
+                const helper = window.BenTradeUtils?.tradeKey;
+                const symbol = String(trade.underlying || trade.underlying_symbol || trade.symbol || '').trim().toUpperCase();
+                const expirationRaw = trade.expiration;
+                const expiration = expirationRaw === null || expirationRaw === undefined || String(expirationRaw).trim() === '' ? 'NA' : String(expirationRaw).trim();
+                const spread = String(trade.spread_type || trade.strategy || '').trim().toLowerCase();
+                const strategy = spread === 'call_credit' || spread === 'credit_call_spread' ? 'credit_call_spread' : 'credit_put_spread';
+
+                const shortStrike = Number(trade.short_strike);
+                const longStrike = Number(trade.long_strike);
+                const input = {
+                    symbol,
+                    expiration,
+                    strategy,
+                    short_strike: Number.isFinite(shortStrike) ? shortStrike : trade.short_strike,
+                    long_strike: Number.isFinite(longStrike) ? longStrike : trade.long_strike,
+                    contractsMultiplier: Number(trade.contractsMultiplier || 100) || 100,
+                };
+
+                const computedKey = helper?.tradeKey
+                    ? helper.tradeKey({
+                        underlying: input.symbol,
+                        expiration: input.expiration,
+                        spread_type: input.strategy,
+                        short_strike: input.short_strike,
+                        long_strike: input.long_strike,
+                        dte: trade.dte ?? 'NA',
+                    })
+                    : String(trade._trade_key || trade.trade_key || `${input.symbol}|${input.expiration}|${input.strategy}|${input.short_strike}|${input.long_strike}|${trade.dte ?? 'NA'}`);
+
+                const payload = {
+                    from: 'credit_spread_analysis',
+                    ts: new Date().toISOString(),
+                    input,
+                    trade_key: computedKey,
+                    note: trade.model_evaluation?.summary || '',
+                };
+
+                if(api?.postLifecycleEvent){
+                    api.postLifecycleEvent({
+                        event: 'WATCHLIST',
+                        trade_key: computedKey,
+                        source: 'scanner',
+                        trade,
+                        reason: 'send_to_workbench',
+                    }).catch(() => {});
+                }
+
+                localStorage.setItem('bentrade_workbench_handoff_v1', JSON.stringify(payload));
+                location.hash = '#/trade-testing';
+            };
+
+            window.lifecycleAction = async function(idx, eventName){
+                const trade = window.currentTrades && window.currentTrades[idx] ? window.currentTrades[idx] : null;
+                if(!trade || !api?.postLifecycleEvent) return;
+
+                const helper = window.BenTradeUtils?.tradeKey;
+                const symbol = String(trade.underlying || trade.underlying_symbol || trade.symbol || '').trim().toUpperCase();
+                const expiration = String(trade.expiration || '').trim() || 'NA';
+                const strategy = String(trade.spread_type || trade.strategy || '').trim() || 'NA';
+
+                const computedKey = helper?.tradeKey
+                    ? helper.tradeKey({
+                        underlying: symbol,
+                        expiration,
+                        spread_type: strategy,
+                        short_strike: trade.short_strike,
+                        long_strike: trade.long_strike,
+                        dte: trade.dte ?? 'NA',
+                    })
+                    : String(trade._trade_key || trade.trade_key || `${symbol}|${expiration}|${strategy}|${trade.short_strike}|${trade.long_strike}|${trade.dte ?? 'NA'}`);
+
+                let reason = '';
+                const payload = { ...trade };
+                if(String(eventName || '').toUpperCase() === 'CLOSE'){
+                    const input = window.prompt('Optional realized P&L (number):', '');
+                    if(input !== null && String(input).trim() !== ''){
+                        const value = Number(input);
+                        if(Number.isFinite(value)) payload.realized_pnl = value;
+                    }
+                    reason = 'manual_close';
+                }
+
+                try{
+                    await api.postLifecycleEvent({
+                        event: String(eventName || '').toUpperCase(),
+                        trade_key: computedKey,
+                        source: 'scanner',
+                        trade: payload,
+                        reason,
+                    });
+                }catch(_err){
+                }
+            };
+
             window.manualReject = async function(idx){
                 const trade = window.currentTrades && window.currentTrades[idx] ? window.currentTrades[idx] : null;
                 if(trade && window.currentReportFile && api?.persistRejectDecision){
@@ -707,6 +783,35 @@ const html = `
                         console.warn('[BenTrade] Failed to persist manual reject', err);
                     }
                 }
+
+                if(trade && api?.postLifecycleEvent){
+                    try{
+                        const helper = window.BenTradeUtils?.tradeKey;
+                        const symbol = String(trade.underlying || trade.underlying_symbol || trade.symbol || '').trim().toUpperCase();
+                        const expiration = String(trade.expiration || '').trim() || 'NA';
+                        const strategy = String(trade.spread_type || trade.strategy || '').trim() || 'NA';
+                        const computedKey = helper?.tradeKey
+                            ? helper.tradeKey({
+                                underlying: symbol,
+                                expiration,
+                                spread_type: strategy,
+                                short_strike: trade.short_strike,
+                                long_strike: trade.long_strike,
+                                dte: trade.dte ?? 'NA',
+                            })
+                            : String(trade._trade_key || trade.trade_key || `${symbol}|${expiration}|${strategy}|${trade.short_strike}|${trade.long_strike}|${trade.dte ?? 'NA'}`);
+
+                        await api.postLifecycleEvent({
+                            event: 'REJECT',
+                            trade_key: computedKey,
+                            source: 'scanner',
+                            trade,
+                            reason: 'manual_reject',
+                        });
+                    }catch(_err){
+                    }
+                }
+
                 const card = document.querySelector(`.trade-card[data-idx="${idx}"]`);
                 if(card) card.remove();
                 if(window.currentTrades && window.currentTrades[idx]){
@@ -796,60 +901,6 @@ const html = `
                 chev.textContent = isCollapsed ? '▸' : '▾';
             });
 }
-
-function attachTooltipHandlers(){
-            const labels = document.querySelectorAll('.metric-label, .detail-label');
-            labels.forEach(label => {
-                const tip = label.querySelector('.tooltip-inline');
-                if(!tip) return;
-
-                function show(){
-                    tip.style.display = 'block';
-                    tip.style.visibility = 'hidden';
-                    tip.style.position = 'fixed';
-                    tip.style.left = '-9999px';
-                    tip.style.top = '-9999px';
-
-                    const tipRect = tip.getBoundingClientRect();
-                    const labelRect = label.getBoundingClientRect();
-                    const card = label.closest('.trade-card') || document.body;
-                    const cardRect = card.getBoundingClientRect();
-
-                    const gap = 8;
-                    let desiredLeft = labelRect.right + gap;
-                    if(desiredLeft + tipRect.width + gap > cardRect.right){
-                        desiredLeft = labelRect.left - tipRect.width - gap;
-                    }
-                    if(desiredLeft < cardRect.left + gap) desiredLeft = cardRect.left + gap;
-                    if(desiredLeft + tipRect.width > cardRect.right - gap) desiredLeft = cardRect.right - tipRect.width - gap;
-
-                    let desiredTop = labelRect.top + (labelRect.height - tipRect.height)/2;
-                    if(desiredTop < cardRect.top + gap) desiredTop = cardRect.top + gap;
-                    if(desiredTop + tipRect.height + gap > cardRect.bottom) desiredTop = cardRect.bottom - tipRect.height - gap;
-
-                    try{ card.appendChild(tip); } catch(e){}
-                    tip.style.position = 'absolute';
-                    tip.style.left = `${Math.round(desiredLeft - cardRect.left)}px`;
-                    tip.style.top = `${Math.round(desiredTop - cardRect.top)}px`;
-                    tip.style.visibility = 'visible';
-                    tip.style.opacity = '1';
-                    tip.style.pointerEvents = 'auto';
-                }
-
-                function hide(){
-                    tip.style.visibility = 'hidden';
-                    tip.style.opacity = '0';
-                    tip.style.pointerEvents = 'none';
-                    tip.style.display = '';
-                }
-
-                label.removeEventListener('mouseenter', label._tipEnter);
-                label.removeEventListener('mouseleave', label._tipLeave);
-                label._tipEnter = show; label._tipLeave = hide;
-                label.addEventListener('mouseenter', show);
-                label.addEventListener('mouseleave', hide);
-            });
-        }
 
         fileSelect.addEventListener('change', applyUnderlyingFilter);
         reportSelect.addEventListener('change', (e) => {

@@ -1,0 +1,144 @@
+<div class="view-wrap">
+  <div class="risk-layout">
+    <section class="risk-panel risk-left">
+      <div class="risk-card">
+        <div class="risk-card-title">Risk Policy</div>
+        <div class="risk-form-grid">
+          <label>Portfolio Size
+            <input id="riskPortfolioSize" type="number" step="100" />
+          </label>
+          <label>Max Total Risk %
+            <input id="riskMaxTotalPct" type="number" step="0.001" min="0" />
+          </label>
+          <label>Max Symbol Risk %
+            <input id="riskMaxSymbolPct" type="number" step="0.001" min="0" />
+          </label>
+          <label>Max Trade Risk %
+            <input id="riskMaxTradePct" type="number" step="0.001" min="0" />
+          </label>
+          <label data-metric="dte">Max DTE
+            <input id="riskMaxDte" type="number" step="1" min="0" />
+          </label>
+          <label>Min Cash Reserve %
+            <input id="riskMinCashReservePct" type="number" step="0.1" min="0" />
+          </label>
+          <label>Max Position Size %
+            <input id="riskMaxPositionSizePct" type="number" step="0.1" min="0" />
+          </label>
+          <label>Default Contracts Cap
+            <input id="riskDefaultContractsCap" type="number" step="1" min="0" />
+          </label>
+          <label>Max Risk Per Trade
+            <input id="riskMaxRiskPerTrade" type="number" step="1" min="0" />
+          </label>
+          <label>Max Risk Total
+            <input id="riskMaxRiskTotal" type="number" step="1" min="0" />
+          </label>
+          <label>Max Concurrent Trades
+            <input id="riskMaxConcurrentTrades" type="number" step="1" min="0" />
+          </label>
+          <label>Max Risk Per Underlying
+            <input id="riskMaxRiskPerUnderlying" type="number" step="1" min="0" />
+          </label>
+          <label>Max Same Expiration Risk
+            <input id="riskMaxSameExpirationRisk" type="number" step="1" min="0" />
+          </label>
+          <label>Max Short Strike Distance Sigma
+            <input id="riskMaxShortStrikeDistanceSigma" type="number" step="0.1" min="0" />
+          </label>
+          <label>Min Open Interest
+            <input id="riskMinOpenInterest" type="number" step="1" min="0" />
+          </label>
+          <label>Min Volume
+            <input id="riskMinVolume" type="number" step="1" min="0" />
+          </label>
+          <label>Max Bid/Ask Spread %
+            <input id="riskMaxBidAskSpreadPct" type="number" step="0.1" min="0" />
+          </label>
+          <label data-metric="pop">Min POP
+            <input id="riskMinPop" type="number" step="0.01" min="0" />
+          </label>
+          <label data-metric="ev_to_risk">Min EV/Risk
+            <input id="riskMinEvToRisk" type="number" step="0.01" min="0" />
+          </label>
+          <label data-metric="return_on_risk">Min Return on Risk
+            <input id="riskMinReturnOnRisk" type="number" step="0.01" min="0" />
+          </label>
+          <label data-metric="iv_rv_ratio">Max IV/RV For Buying
+            <input id="riskMaxIvRvRatioForBuying" type="number" step="0.01" min="0" />
+          </label>
+          <label data-metric="iv_rv_ratio">Min IV/RV For Selling
+            <input id="riskMinIvRvRatioForSelling" type="number" step="0.01" min="0" />
+          </label>
+          <label>Notes
+            <textarea id="riskPolicyNotes" rows="3"></textarea>
+          </label>
+        </div>
+        <div class="workbench-actions">
+          <button id="riskSavePolicyBtn" class="btn">Save Policy</button>
+          <button id="riskRecommendedDefaultsBtn" class="btn">Recommended Defaults</button>
+          <button id="riskRefreshBtn" class="btn">Refresh Snapshot</button>
+        </div>
+      </div>
+
+      <div id="riskError" class="active-error" style="display:none;"></div>
+
+      <div class="risk-card">
+        <div class="risk-card-title">Hard Limits</div>
+        <div id="riskWarningsHard" class="risk-warnings"></div>
+      </div>
+
+      <div class="risk-card">
+        <div class="risk-card-title">Soft Gates</div>
+        <div id="riskWarningsSoft" class="risk-warnings"></div>
+      </div>
+    </section>
+
+    <section class="risk-panel risk-main">
+      <div class="risk-card">
+        <div class="risk-card-title">Exposure Snapshot</div>
+        <div id="riskSnapshotMeta" class="risk-meta"></div>
+        <div class="risk-progress-wrap">
+          <div class="risk-progress-label" id="riskProgressLabel">--</div>
+          <div class="risk-progress-bar">
+            <div id="riskProgressFill" class="risk-progress-fill"></div>
+          </div>
+        </div>
+        <div id="riskStats" class="stock-summary-grid"></div>
+      </div>
+
+      <div class="risk-card">
+        <div class="risk-card-title">Risk by Underlying</div>
+        <div id="riskByUnderlying" class="risk-underlyings"></div>
+      </div>
+
+      <div class="risk-card">
+        <div class="risk-card-title">Trades</div>
+        <div class="risk-table-wrap">
+          <table class="risk-table">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Trade Key</th>
+                <th data-metric="estimated_risk">Estimated Risk</th>
+                <th data-metric="dte">DTE</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="riskTradesBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="riskModal" class="active-modal" style="display:none;">
+    <div class="active-modal-card">
+      <div class="active-modal-header">
+        <span class="active-modal-title">Risk Breakdown</span>
+        <button id="riskModalCloseBtn" class="btn">Close</button>
+      </div>
+      <div id="riskModalBody"></div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,44 @@
+<div class="view-wrap">
+  <div class="stock-card">
+    <div class="stock-toolbar">
+      <div class="stock-chips" id="lcTabs">
+        <button class="btn" data-state="WATCHLIST">Watchlist</button>
+        <button class="btn" data-state="OPEN">Open</button>
+        <button class="btn" data-state="MANAGED">Managed</button>
+        <button class="btn" data-state="CLOSED">Closed</button>
+        <button class="btn" data-state="KNOWLEDGE_REJECTED">Rejected</button>
+      </div>
+      <div class="stock-inputs">
+        <button id="lcRefreshBtn" class="btn">Refresh</button>
+      </div>
+    </div>
+
+    <div id="lcError" class="active-error" style="display:none;"></div>
+
+    <div class="risk-table-wrap">
+      <table class="risk-table">
+        <thead>
+          <tr>
+            <th>Trade Key</th>
+            <th>Symbol</th>
+            <th>Strategy</th>
+            <th>State</th>
+            <th>Updated</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="lcTradesBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="lcHistoryModal" class="active-modal" style="display:none;">
+    <div class="active-modal-card">
+      <div class="active-modal-header">
+        <span class="active-modal-title">Lifecycle History</span>
+        <button id="lcHistoryCloseBtn" class="btn">Close</button>
+      </div>
+      <div id="lcHistoryBody" class="stock-notes"></div>
+    </div>
+  </div>
+</div>

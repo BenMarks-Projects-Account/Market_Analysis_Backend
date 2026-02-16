@@ -1,0 +1,74 @@
+<div class="view-wrap">
+  <div class="stock-layout">
+    <section class="stock-panel stock-main">
+      <div class="stock-toolbar">
+        <div class="stock-inputs">
+          <button id="prRefreshBtn" class="btn">Refresh</button>
+          <button id="prRunScenarioBtn" class="btn">Run Scenarios</button>
+        </div>
+      </div>
+
+      <div id="prError" class="active-error" style="display:none;"></div>
+      <div id="prWarnings" class="stock-notes" style="margin-bottom:12px;"></div>
+
+      <div class="stock-summary-grid" id="prPortfolioTotals"></div>
+
+      <div class="stock-card">
+        <div class="stock-card-title">By Underlying</div>
+        <div class="risk-table-wrap">
+          <table class="risk-table">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th data-metric="delta">Delta</th>
+                <th data-metric="gamma">Gamma</th>
+                <th data-metric="theta">Theta</th>
+                <th data-metric="vega">Vega</th>
+                <th data-metric="estimated_risk">Risk</th>
+                <th>Trades</th>
+              </tr>
+            </thead>
+            <tbody id="prUnderlyingBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="stock-card">
+        <div class="stock-card-title">By Expiration Bucket</div>
+        <div class="risk-table-wrap">
+          <table class="risk-table">
+            <thead>
+              <tr>
+                <th>Bucket</th>
+                <th data-metric="estimated_risk">Risk</th>
+                <th>Trades</th>
+              </tr>
+            </thead>
+            <tbody id="prBucketBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <aside class="stock-panel stock-side">
+      <div class="stock-card">
+        <div class="stock-card-title">Scenarios</div>
+        <div id="prScenarios" class="stock-notes"></div>
+      </div>
+      <div class="stock-card">
+        <div class="stock-card-title">Notes</div>
+        <div id="prNotes" class="stock-notes"></div>
+      </div>
+    </aside>
+  </div>
+
+  <div id="prDetailModal" class="active-modal" style="display:none;">
+    <div class="active-modal-card">
+      <div class="active-modal-header">
+        <span class="active-modal-title">Underlying Detail</span>
+        <button id="prDetailCloseBtn" class="btn">Close</button>
+      </div>
+      <div id="prDetailBody"></div>
+    </div>
+  </div>
+</div>

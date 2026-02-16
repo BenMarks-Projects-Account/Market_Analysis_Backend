@@ -12,19 +12,50 @@
 
   <link rel="stylesheet" href="assets/css/app.css">
   <style>
-    /* App shell tweaks: keep BenTrade theme, host dashboards inside iframe */
-    .shell{ max-width:1860px; margin:0 auto; padding:10px 14px; }
+    .shell{
+      max-width:1860px;
+      margin:0 auto;
+      padding:10px 14px;
+      height:100vh;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+    }
     .shell-layout{
       display:grid;
-      grid-template-columns: 260px minmax(0, 1fr) 300px;
+      grid-template-columns:260px minmax(0, 1fr) 320px;
       gap:18px;
       align-items:stretch;
       margin-top:10px;
-      height: calc(100vh - 60px);
-      min-width: 0;
+      flex:1 1 auto;
+      min-height:0;
     }
-    @media (max-width: 1200px){ .shell-layout{ grid-template-columns: 240px minmax(0, 1fr) 280px; } }
-    @media (max-width: 980px){ .shell-layout{ grid-template-columns: 1fr; } }
+    .shell-layout > .sidebar{
+      min-height:0;
+      overflow:hidden;
+    }
+    .shell-layout > .main{
+      flex:1 1 auto;
+      min-width:0;
+      min-height:0;
+      overflow:auto;
+    }
+    .shell-layout > .diagnostic-sidebar{
+      flex:0 0 auto;
+      width:320px;
+      min-width:320px;
+      min-height:0;
+      overflow:auto;
+    }
+    @media (max-width: 1200px){
+      .shell-layout{ grid-template-columns:240px minmax(0, 1fr) 300px; }
+      .shell-layout > .diagnostic-sidebar{ width:300px; min-width:300px; }
+    }
+    @media (max-width: 980px){
+      .shell-layout{ grid-template-columns:220px minmax(0, 1fr); }
+      .shell-layout > .diagnostic-sidebar{ display:none; }
+    }
 
     .dash-frame{
       width:100%;
@@ -42,8 +73,8 @@
     .nav-link.disabled{ opacity:0.45; cursor:not-allowed; }
     .nav-link.disabled:hover{ filter:none; transform:none; }
   
-    #view{ min-width:0; }
-    .view-wrap{ width:100%; }
+    #view{ min-width:0; min-height:0; display:block; height:auto; overflow:visible; }
+    .view-wrap{ width:100%; min-height:0; }
 </style>
 </head>
 <body>
@@ -63,6 +94,9 @@
           <a class="banner-nav-link" href="#/trade-testing" data-route="trade-testing">Trade Testing</a>
           <a class="banner-nav-link" href="#/stock-analysis" data-route="stock-analysis">Stock Analysis</a>
           <a class="banner-nav-link" href="#/risk-capital" data-route="risk-capital">Risk & Capital</a>
+          <a class="banner-nav-link" href="#/portfolio-risk" data-route="portfolio-risk">Portfolio Risk</a>
+          <a class="banner-nav-link" href="#/trade-lifecycle" data-route="trade-lifecycle">Lifecycle</a>
+          <a class="banner-nav-link" href="#/strategy-analytics" data-route="strategy-analytics">Analytics</a>
         </nav>
       </div>
       <div class="titlebar-right" aria-hidden="true"></div>
@@ -99,6 +133,21 @@
             <span class="nav-dot"></span>
             Risk & Capital Management
           </a>
+
+          <a class="nav-link" href="#/portfolio-risk" data-route="portfolio-risk">
+            <span class="nav-dot"></span>
+            Portfolio Risk Matrix
+          </a>
+
+          <a class="nav-link" href="#/trade-lifecycle" data-route="trade-lifecycle">
+            <span class="nav-dot"></span>
+            Trade Lifecycle
+          </a>
+
+          <a class="nav-link" href="#/strategy-analytics" data-route="strategy-analytics">
+            <span class="nav-dot"></span>
+            Strategy Analytics
+          </a>
         </div>
       </aside>
 
@@ -126,9 +175,19 @@
 
   <script src="assets/js/state/session_state.js?v=20260215a"></script>
   <script src="assets/js/api/client.js?v=20260215a"></script>
+  <script src="assets/js/utils/tradeKey.js?v=20260216a"></script>
+  <script src="assets/js/metrics/glossary.js?v=20260215a"></script>
+  <script src="assets/js/ui/tooltip.js?v=20260215a"></script>
   <script src="assets/js/ui/trade_card.js?v=20260215a"></script>
   <script src="assets/js/ui/source_health.js?v=20260215a"></script>
   <script src="assets/js/pages/credit_spread.js?v=20260215a"></script>
+  <script src="assets/js/pages/active_trades.js?v=20260215a"></script>
+  <script src="assets/js/pages/trade_workbench.js?v=20260216a"></script>
+  <script src="assets/js/pages/stock_analysis.js?v=20260216a"></script>
+  <script src="assets/js/pages/risk_capital.js?v=20260216a"></script>
+  <script src="assets/js/pages/portfolio_risk.js?v=20260215b"></script>
+  <script src="assets/js/pages/trade_lifecycle.js?v=20260215b"></script>
+  <script src="assets/js/pages/strategy_analytics.js?v=20260215b"></script>
   <script src="assets/js/app.js?v=20260213b"></script>
   <script src="assets/js/router.js?v=20260213b"></script>
 </body>

@@ -132,6 +132,40 @@ class TradierClient:
         url = self.account_endpoint("positions")
         return await request_json(self.http_client, "GET", url, headers=self._headers)
 
-    async def get_orders(self) -> dict[str, Any]:
+    async def get_orders(self, status: str | None = None) -> dict[str, Any]:
         url = self.account_endpoint("orders")
-        return await request_json(self.http_client, "GET", url, headers=self._headers)
+        params: dict[str, Any] = {}
+        if status:
+            params["status"] = status
+        return await request_json(self.http_client, "GET", url, headers=self._headers, params=params or None)
+
+    async def get_quotes(self, symbols: list[str]) -> dict[str, Any]:
+        normalized = [str(symbol or "").upper().strip() for symbol in (symbols or []) if str(symbol or "").strip()]
+        if not normalized:
+            return {}
+
+        key = "tradier:quotes:" + ",".join(sorted(set(normalized)))
+        url = f"{self.settings.TRADIER_BASE_URL}/markets/quotes"
+
+        async def _load() -> dict[str, Any]:
+            payload = await request_json(
+                self.http_client,
+                "GET",
+                url,
+                params={"symbols": ",".join(sorted(set(normalized)))},
+                headers=self._headers,
+            )
+            quote_obj = (payload.get("quotes") or {}).get("quote")
+            if isinstance(quote_obj, dict):
+                quote_obj = [quote_obj]
+
+            out: dict[str, Any] = {}
+            for item in quote_obj or []:
+                if not isinstance(item, dict):
+                    continue
+                symbol = str(item.get("symbol") or "").upper()
+                if symbol:
+                    out[symbol] = item
+            return out
+
+        return await self.cache.get_or_set(key, self.settings.QUOTE_CACHE_TTL_SECONDS, _load)

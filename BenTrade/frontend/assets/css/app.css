@@ -137,12 +137,40 @@
         /* #content becomes the scrollable flex child */
         #content{ flex:1 1 auto; min-height:0; overflow:auto; }
 
-        /* Styled scrollbar for the trade panel (WebKit) */
-        #content::-webkit-scrollbar{ width:12px; }
-        #content::-webkit-scrollbar-track{ background: linear-gradient(180deg, rgba(0,0,0,0.06), rgba(0,0,0,0.02)); border-radius:8px; }
-        #content::-webkit-scrollbar-thumb{ background: linear-gradient(180deg, rgba(0,234,255,0.18), rgba(0,234,255,0.34)); border-radius:8px; border:2px solid rgba(0,0,0,0.06); }
-        /* Firefox scrollbar */
-        #content{ scrollbar-width: thin; scrollbar-color: rgba(0,234,255,0.34) rgba(0,0,0,0.06); }
+                /* Quantum-themed scrollbar (global across existing scrollable containers) */
+                *{
+                        scrollbar-width: thin;
+                        scrollbar-color: rgba(0,234,255,0.44) rgba(2,8,16,0.72);
+                }
+                *::-webkit-scrollbar{
+                        width:12px;
+                        height:12px;
+                }
+                *::-webkit-scrollbar-track{
+                        background:
+                            linear-gradient(180deg, rgba(3,9,18,0.84), rgba(2,7,14,0.72));
+                        border-radius:10px;
+                        border:1px solid rgba(0,234,255,0.10);
+                        box-shadow: inset 0 0 0 1px rgba(0,234,255,0.04);
+                }
+                *::-webkit-scrollbar-thumb{
+                        background:
+                            linear-gradient(180deg, rgba(0,234,255,0.70), rgba(0,234,255,0.38));
+                        border-radius:10px;
+                        border:2px solid rgba(3,9,18,0.70);
+                        box-shadow: 0 0 14px rgba(0,234,255,0.22);
+                }
+                *::-webkit-scrollbar-thumb:hover{
+                        background:
+                            linear-gradient(180deg, rgba(0,234,255,0.88), rgba(0,234,255,0.52));
+                }
+                *::-webkit-scrollbar-thumb:active{
+                        background:
+                            linear-gradient(180deg, rgba(0,234,255,0.96), rgba(0,234,255,0.60));
+                }
+                *::-webkit-scrollbar-corner{
+                        background: rgba(2,7,14,0.72);
+                }
         @media (max-width: 980px){
             .app-layout{ grid-template-columns: 1fr; }
         }
@@ -443,6 +471,52 @@
         .metric{background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.02)}
 
         .metric-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;position:relative}
+
+        .metric-label[data-metric], .statLabel[data-metric], .detail-label[data-metric], th[data-metric]{
+            cursor:help;
+            text-decoration-line: underline;
+            text-decoration-style: dotted;
+            text-decoration-color: rgba(0,234,255,0.45);
+            text-underline-offset: 2px;
+        }
+
+        .metric-tooltip{
+            position: fixed;
+            z-index: 4000;
+            min-width: 220px;
+            max-width: min(360px, calc(100vw - 16px));
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(0,234,255,0.28);
+            background: linear-gradient(180deg, rgba(6,12,22,0.96), rgba(4,8,18,0.94));
+            box-shadow: 0 12px 34px rgba(0,0,0,0.58), 0 0 28px rgba(0,234,255,0.18);
+            color: #dbfbff;
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(4px);
+            transition: opacity .12s ease, transform .12s ease;
+        }
+        .metric-tooltip.is-open{ opacity:1; transform: translateY(0); }
+        .metric-tooltip-title{ font-size:12px; font-weight:700; color:var(--accent-cyan); margin-bottom:4px; }
+        .metric-tooltip-line{ font-size:12px; line-height:1.35; color:#ddf9ff; margin-bottom:4px; }
+        .metric-tooltip-sub{ font-size:11px; line-height:1.3; color:rgba(205,240,248,0.88); }
+
+        .metric-tip-toggle{
+            margin-left:6px;
+            border-radius:999px;
+            width:16px;
+            height:16px;
+            border:1px solid rgba(0,234,255,0.35);
+            background: rgba(0,234,255,0.12);
+            color: rgba(0,234,255,0.95);
+            font-size:10px;
+            line-height:1;
+            font-weight:700;
+            cursor:pointer;
+            padding:0;
+            vertical-align:middle;
+        }
+        .metric-tip-toggle:hover{ filter:brightness(1.12); }
 
         .tooltip-inline{
             visibility:hidden;opacity:0;transition:opacity .14s ease,transform .14s ease;pointer-events:none;
@@ -905,17 +979,18 @@
 
 /* ---- SPA layout fixes for proper scrolling ---- */
 .view-wrap {
-  height: 100%;
+        height: auto;
+        min-height: 0;
+        display: block;
 }
 .dashboard-layout {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
+    height: auto;
+        min-height: 0;
+        display: block;
 }
 .dashboard-layout main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
+        min-height: 0;
+        display: block;
 }
 
 /* ---- SPA safety overrides (force full-width banner + 3-up trade grid even if wrapper is missing) ---- */
@@ -965,18 +1040,34 @@ main.main,
   width: 100% !important;
   max-width: none !important;
     min-width: 0 !important;
+    min-height: 0 !important;
+}
+
+.shell-layout > .main,
+main.main{
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+#view{
+    display: block !important;
+    height: auto !important;
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
 }
 
 .diagnostic-sidebar{
     min-width: 0;
+    min-height: 0;
 }
 
 .diagnosticPanel{
-    min-height: calc(100vh - 170px);
-    max-height: calc(100vh - 170px);
-    position: sticky;
-    top: 0;
-    overflow-y: auto;
+    min-height: 0;
+    max-height: none;
+    height: 100%;
+    position: static;
+    overflow: auto;
     padding: 16px;
     border-radius: 18px;
     border: 1px solid rgba(0,234,255,0.20);
@@ -1332,5 +1423,518 @@ main.main,
     height:auto;
     display:block;
     filter: drop-shadow(0 0 20px rgba(0,234,255,0.18));
+}
+
+/* ===== Active Trades dashboard ===== */
+.active-toolbar{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:14px;
+    padding:12px;
+    border-radius:12px;
+    border:1px solid rgba(0,234,255,0.18);
+    background: var(--select-bg);
+    box-shadow: 0 10px 28px rgba(0,0,0,0.42), inset 0 0 0 1px rgba(0,234,255,0.08);
+}
+
+.active-toolbar-left,
+.active-toolbar-right{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+}
+
+.active-auto-toggle{
+    display:inline-flex;
+    gap:6px;
+    align-items:center;
+    color:var(--muted);
+    font-size:12px;
+    letter-spacing:0.04em;
+}
+
+.active-live-badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:58px;
+    padding:6px 10px;
+    border-radius:999px;
+    border:1px solid rgba(255,79,102,0.45);
+    color:#ffd2da;
+    font-size:11px;
+    font-weight:800;
+    letter-spacing:0.1em;
+    background: rgba(255,79,102,0.12);
+}
+
+.active-live-badge.is-live{
+    border-color: rgba(126,247,184,0.5);
+    color:#d6ffe8;
+    background: rgba(126,247,184,0.16);
+    box-shadow: 0 0 18px rgba(126,247,184,0.22);
+}
+
+.active-search{
+    width:220px;
+    padding:9px 12px;
+    border-radius:10px;
+    border:1px solid rgba(0,234,255,0.24);
+    color:var(--text);
+    background: var(--select-bg);
+}
+
+.active-error{
+    margin-bottom:12px;
+    padding:10px 12px;
+    border-radius:10px;
+    border:1px solid rgba(255,79,102,0.35);
+    color:#ffd2da;
+    background: rgba(255,79,102,0.10);
+}
+
+.active-list{
+    display:grid;
+    gap:14px;
+}
+
+.active-trade-card{
+    overflow:hidden;
+}
+
+.active-trade-header{
+    align-items:flex-start;
+}
+
+.active-trade-actions{
+    display:flex;
+    gap:10px;
+    margin-top:12px;
+    margin-bottom:8px;
+}
+
+.active-legs{
+    border-top:1px dashed rgba(0,234,255,0.16);
+    margin-top:10px;
+    padding-top:10px;
+}
+
+.active-legs.is-collapsed{
+    display:none;
+}
+
+.active-empty-tron{
+    min-height: 320px;
+    border:1px solid rgba(0,234,255,0.2);
+    border-radius:16px;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    align-items:center;
+    gap:8px;
+    background:
+      radial-gradient(520px 160px at 50% 30%, rgba(0,234,255,0.20), transparent 72%),
+      linear-gradient(180deg, rgba(4,8,16,0.82), rgba(2,5,12,0.92));
+    box-shadow: 0 20px 60px rgba(0,0,0,0.52), inset 0 0 0 1px rgba(0,234,255,0.08);
+}
+
+.active-empty-title{
+    font-family:'Orbitron',sans-serif;
+    letter-spacing:0.22em;
+    color:var(--cyan);
+    text-shadow: 0 0 22px rgba(0,234,255,0.3);
+}
+
+.active-empty-sub{
+    color:var(--muted);
+}
+
+.active-modal{
+    position:fixed;
+    inset:0;
+    z-index:2800;
+    display:none;
+    align-items:center;
+    justify-content:center;
+    background: rgba(2,6,18,0.75);
+    backdrop-filter: blur(6px);
+}
+
+.active-modal-card{
+    width:min(520px, 92vw);
+    border-radius:14px;
+    border:1px solid rgba(0,234,255,0.22);
+    background: linear-gradient(180deg, rgba(6,10,18,0.94), rgba(4,8,16,0.88));
+    box-shadow: 0 24px 70px rgba(0,0,0,0.58), 0 0 24px rgba(0,234,255,0.14);
+    padding:14px;
+}
+
+.active-modal-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:12px;
+}
+
+.active-modal-title{
+    font-family:'Orbitron',sans-serif;
+    text-transform:uppercase;
+    letter-spacing:0.14em;
+    color:var(--cyan);
+    font-size:12px;
+}
+
+.active-modal-row{
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    padding:8px 0;
+    border-bottom:1px dashed rgba(0,234,255,0.14);
+}
+
+.active-modal-row:last-child{ border-bottom:none; }
+
+.active-modal-note{
+    color:var(--muted);
+    padding:8px 0;
+}
+
+/* ===== Trade Workbench ===== */
+.trade-workbench-layout{
+    display:grid;
+    grid-template-columns: 320px minmax(0, 1fr) 360px;
+    gap:14px;
+    min-height: 0;
+}
+
+.workbench-column{
+    min-width:0;
+    min-height:0;
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+}
+
+.workbench-panel{
+    border:1px solid rgba(0,234,255,0.18);
+    border-radius:14px;
+    background: linear-gradient(180deg, rgba(6,10,18,0.78), rgba(2,6,12,0.88));
+    box-shadow: 0 16px 44px rgba(0,0,0,0.52), inset 0 0 0 1px rgba(0,234,255,0.08);
+    padding:12px;
+}
+
+.workbench-title{
+    font-family:'Orbitron',sans-serif;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    font-size:11px;
+    color:var(--cyan);
+    margin-bottom:10px;
+}
+
+.workbench-form-grid{
+    display:grid;
+    gap:10px;
+}
+
+.workbench-form-grid label{
+    display:grid;
+    gap:6px;
+    color:var(--muted);
+    font-size:12px;
+}
+
+.workbench-form-grid textarea,
+.workbench-form-grid input,
+.workbench-form-grid select{
+    width:100%;
+}
+
+.workbench-actions{
+    margin-top:10px;
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+}
+
+.workbench-result,
+.workbench-suggestions,
+.workbench-scenarios{
+    display:grid;
+    gap:10px;
+}
+
+.workbench-suggestion,
+.workbench-scenario{
+    border:1px solid rgba(0,234,255,0.16);
+    border-radius:12px;
+    padding:10px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.008));
+}
+
+.workbench-suggestion.active{
+    border-color: rgba(0,234,255,0.34);
+    box-shadow: 0 0 24px rgba(0,234,255,0.15);
+}
+
+.workbench-key{
+    color:var(--muted);
+    font-size:11px;
+    margin-top:6px;
+    word-break:break-all;
+}
+
+.workbench-scenario-name{
+    color:var(--text);
+    font-weight:700;
+}
+
+.workbench-scenario-notes{
+    margin-top:6px;
+    color:var(--muted);
+    font-size:12px;
+}
+
+.workbench-suggestion-actions{
+    margin-top:8px;
+    display:flex;
+    gap:8px;
+}
+
+@media (max-width: 1500px){
+    .trade-workbench-layout{
+        grid-template-columns: 300px minmax(0, 1fr) 320px;
+    }
+}
+
+@media (max-width: 1200px){
+    .trade-workbench-layout{
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ===== Stock Analysis ===== */
+.stock-layout{
+    display:grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    gap:14px;
+    min-height:0;
+    align-items:start;
+}
+
+.stock-panel{
+    min-width:0;
+    min-height:0;
+}
+
+.stock-main,
+.stock-side{
+    height:auto;
+}
+
+.stock-toolbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+    margin-bottom:12px;
+}
+
+.stock-inputs,
+.stock-chips{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+}
+
+.stock-summary-grid,
+.stock-indicators{
+    display:grid;
+    gap:10px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.stock-card{
+    border:1px solid rgba(0,234,255,0.18);
+    border-radius:14px;
+    background: linear-gradient(180deg, rgba(6,10,18,0.78), rgba(2,6,12,0.88));
+    box-shadow: 0 16px 44px rgba(0,0,0,0.52), inset 0 0 0 1px rgba(0,234,255,0.08);
+    padding:12px;
+    margin-bottom:12px;
+}
+
+.stock-card-title{
+    font-family:'Orbitron',sans-serif;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    font-size:11px;
+    color:var(--cyan);
+    margin-bottom:10px;
+}
+
+#stockSparkline{
+    width:100%;
+    height:220px;
+    border:1px solid rgba(0,234,255,0.14);
+    border-radius:10px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.008));
+}
+
+.stock-candidate-preview{
+    margin-top:10px;
+}
+
+.stock-notes{
+    display:grid;
+    gap:6px;
+}
+
+.stock-note{
+    color:var(--muted);
+    font-size:12px;
+}
+
+@media (max-width: 1280px){
+    .stock-layout{
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 980px){
+    .stock-summary-grid,
+    .stock-indicators{
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* ===== Risk & Capital ===== */
+.risk-layout{
+    display:grid;
+    grid-template-columns: 360px minmax(0, 1fr);
+    gap:14px;
+    min-height:0;
+}
+
+.risk-panel{ min-width:0; min-height:0; }
+
+.risk-card{
+    border:1px solid rgba(0,234,255,0.18);
+    border-radius:14px;
+    background: linear-gradient(180deg, rgba(6,10,18,0.78), rgba(2,6,12,0.88));
+    box-shadow: 0 16px 44px rgba(0,0,0,0.52), inset 0 0 0 1px rgba(0,234,255,0.08);
+    padding:12px;
+    margin-bottom:12px;
+}
+
+.risk-card-title{
+    font-family:'Orbitron',sans-serif;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    font-size:11px;
+    color:var(--cyan);
+    margin-bottom:10px;
+}
+
+.risk-form-grid{
+    display:grid;
+    gap:10px;
+}
+
+.risk-form-grid label{
+    display:grid;
+    gap:6px;
+    color:var(--muted);
+    font-size:12px;
+}
+
+.risk-meta{
+    color:var(--muted);
+    font-size:12px;
+    margin-bottom:10px;
+}
+
+.risk-progress-wrap{ margin-bottom:12px; }
+
+.risk-progress-label{
+    color:var(--text);
+    font-size:12px;
+    margin-bottom:6px;
+}
+
+.risk-progress-bar{
+    width:100%;
+    height:12px;
+    border-radius:999px;
+    border:1px solid rgba(0,234,255,0.22);
+    background: rgba(255,255,255,0.03);
+    overflow:hidden;
+}
+
+.risk-progress-fill{
+    height:100%;
+    width:0%;
+    background: linear-gradient(90deg, rgba(0,234,255,0.75), rgba(126,247,184,0.85));
+    box-shadow: 0 0 16px rgba(0,234,255,0.3);
+}
+
+.risk-underlyings,
+.risk-warnings{
+    display:grid;
+    gap:8px;
+}
+
+.risk-table-wrap{
+    overflow:auto;
+    border:1px solid rgba(0,234,255,0.16);
+    border-radius:10px;
+}
+
+.risk-table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:12px;
+}
+
+.risk-table th,
+.risk-table td{
+    padding:10px;
+    border-bottom:1px dashed rgba(0,234,255,0.12);
+    text-align:left;
+    color:var(--text);
+}
+
+.risk-table th{
+    font-family:'Orbitron',sans-serif;
+    font-size:10px;
+    letter-spacing:0.10em;
+    text-transform:uppercase;
+    color:var(--muted);
+    background: rgba(255,255,255,0.02);
+}
+
+.risk-row{ cursor:pointer; }
+
+.risk-row:hover{
+    background: rgba(0,234,255,0.08);
+}
+
+.risk-key-cell{
+    max-width:340px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
+@media (max-width: 1280px){
+    .risk-layout{
+        grid-template-columns: 1fr;
+    }
 }
 

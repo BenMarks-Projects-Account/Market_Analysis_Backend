@@ -6,6 +6,8 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from app.utils.trade_key import trade_key
+
 
 class DecisionService:
     def __init__(self, results_dir: Path) -> None:
@@ -15,13 +17,14 @@ class DecisionService:
 
     @staticmethod
     def build_trade_key(trade: dict[str, Any]) -> str:
-        underlying = str(trade.get("underlying") or trade.get("underlying_symbol") or "").upper()
-        expiration = str(trade.get("expiration") or "")
-        spread_type = str(trade.get("spread_type") or "")
-        short_strike = str(trade.get("short_strike") or "")
-        long_strike = str(trade.get("long_strike") or "")
-        dte = str(trade.get("dte") or "")
-        return f"{underlying}|{expiration}|{spread_type}|{short_strike}|{long_strike}|{dte}"
+        return trade_key(
+            underlying=trade.get("underlying") or trade.get("underlying_symbol"),
+            expiration=trade.get("expiration"),
+            spread_type=trade.get("spread_type") or trade.get("strategy"),
+            short_strike=trade.get("short_strike"),
+            long_strike=trade.get("long_strike"),
+            dte=trade.get("dte"),
+        )
 
     def _decision_path(self, report_file: str) -> Path:
         report_name = Path(report_file).name

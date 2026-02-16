@@ -1,0 +1,124 @@
+<div class="view-wrap">
+  <div class="trade-workbench-layout">
+    <section class="workbench-column workbench-left">
+      <div class="workbench-panel">
+        <div class="workbench-title">Trade Builder</div>
+        <div class="workbench-form-grid">
+          <label>Symbol
+            <input id="wbSymbol" type="text" value="SPY" maxlength="12" />
+          </label>
+          <label>Expiration
+            <input id="wbExpiration" type="date" />
+          </label>
+          <label>Strategy
+            <select id="wbStrategy">
+              <option value="credit_put_spread">Credit Put Spread</option>
+              <option value="credit_call_spread">Credit Call Spread</option>
+              <option value="debit_put_spread">Debit Put Spread</option>
+              <option value="debit_call_spread">Debit Call Spread</option>
+              <option value="iron_condor">Iron Condor</option>
+              <option value="iron_butterfly">Iron Butterfly</option>
+              <option value="long_call">Long Call</option>
+              <option value="long_put">Long Put</option>
+              <option value="covered_call">Covered Call</option>
+              <option value="cash_secured_put">Cash Secured Put</option>
+            </select>
+          </label>
+
+          <div id="wbSpreadFields" class="workbench-field-group">
+            <label>Short Strike
+              <input id="wbShortStrike" type="number" step="0.5" />
+            </label>
+            <label>Long Strike
+              <input id="wbLongStrike" type="number" step="0.5" />
+            </label>
+          </div>
+
+          <div id="wbSingleFields" class="workbench-field-group" style="display:none;">
+            <label>Strike
+              <input id="wbStrike" type="number" step="0.5" />
+            </label>
+          </div>
+
+          <div id="wbCondorFields" class="workbench-field-group" style="display:none;">
+            <label>Put Short Strike
+              <input id="wbPutShortStrike" type="number" step="0.5" />
+            </label>
+            <label>Put Long Strike
+              <input id="wbPutLongStrike" type="number" step="0.5" />
+            </label>
+            <label>Call Short Strike
+              <input id="wbCallShortStrike" type="number" step="0.5" />
+            </label>
+            <label>Call Long Strike
+              <input id="wbCallLongStrike" type="number" step="0.5" />
+            </label>
+          </div>
+
+          <div id="wbFlyFields" class="workbench-field-group" style="display:none;">
+            <label>Center Strike
+              <input id="wbCenterStrike" type="number" step="0.5" />
+            </label>
+          </div>
+
+          <label>Contracts Multiplier
+            <input id="wbMultiplier" type="number" step="1" value="100" />
+          </label>
+        </div>
+        <div class="workbench-actions">
+          <button id="wbAnalyzeBtn" class="btn">Analyze</button>
+          <button id="wbMutateBtn" class="btn">Mutate (3)</button>
+        </div>
+      </div>
+
+      <div class="workbench-panel">
+        <div class="workbench-title">Save Scenario</div>
+        <div class="workbench-form-grid">
+          <label>Scenario Name
+            <input id="wbScenarioName" type="text" placeholder="e.g. SPY weekly put ladder" />
+          </label>
+          <label>Notes
+            <textarea id="wbScenarioNotes" rows="3" placeholder="Optional notes"></textarea>
+          </label>
+        </div>
+        <div class="workbench-actions">
+          <button id="wbSaveScenarioBtn" class="btn">Save Scenario</button>
+        </div>
+      </div>
+
+      <div id="wbError" class="active-error" style="display:none;"></div>
+      <div id="wbImportNotice" class="active-error" style="display:none;"></div>
+    </section>
+
+    <section class="workbench-column workbench-center">
+      <div class="workbench-panel">
+        <div class="workbench-title">Leg Preview</div>
+        <div id="wbLegPreview" class="workbench-leg-preview"></div>
+      </div>
+      <div class="workbench-panel">
+        <div class="workbench-title">Workbench Trade Key</div>
+        <div id="wbKeyPreview" class="workbench-key"></div>
+        <div id="wbAnalysisStatus" class="active-modal-note"></div>
+      </div>
+      <div class="workbench-panel">
+        <div class="workbench-title">Analysis Result</div>
+        <div id="wbResult" class="workbench-result"></div>
+      </div>
+      <div class="workbench-panel">
+        <div class="workbench-title">Mutated Suggestions</div>
+        <div id="wbSuggestions" class="workbench-suggestions"></div>
+      </div>
+    </section>
+
+    <section class="workbench-column workbench-right">
+      <div class="workbench-panel">
+        <div class="workbench-title">Source Health</div>
+        <div id="wbSourceHealth"></div>
+      </div>
+      <div class="workbench-panel">
+        <div class="workbench-title">Scenario Library</div>
+        <div id="wbScenarioList" class="workbench-scenarios"></div>
+      </div>
+    </section>
+  </div>
+</div>

@@ -1,0 +1,42 @@
+<!-- Active Trades Dashboard (basic functionality) -->
+<div class="view-wrap">
+  <div class="dashboard-layout">
+    <main class="main">
+      <div class="active-toolbar">
+        <div class="active-toolbar-left">
+          <button id="activeRefreshBtn" class="btn">Refresh</button>
+          <label class="active-auto-toggle">
+            <input id="activeAutoRefresh" type="checkbox" />
+            Auto 30s
+          </label>
+          <span id="activeLiveBadge" class="active-live-badge">STALE</span>
+        </div>
+        <div class="active-toolbar-right">
+          <select id="activeUnderlyingFilter">
+            <option value="ALL">All underlyings</option>
+          </select>
+          <select id="activeStatusFilter">
+            <option value="ALL">All status</option>
+            <option value="OPEN">OPEN</option>
+            <option value="CLOSING">CLOSING</option>
+            <option value="CLOSED">CLOSED</option>
+          </select>
+          <input id="activeSearch" class="active-search" type="text" placeholder="Search symbol/strategy" />
+        </div>
+      </div>
+
+      <div id="activeError" class="active-error" style="display:none;"></div>
+      <div id="activeList" class="active-list"></div>
+    </main>
+  </div>
+
+  <div id="activeCloseModal" class="active-modal" style="display:none;">
+    <div class="active-modal-card">
+      <div class="active-modal-header">
+        <span class="active-modal-title">Simulate Close (Paper-Only)</span>
+        <button id="activeCloseModalBtn" class="btn">Close</button>
+      </div>
+      <div id="activeModalBody" class="active-modal-body"></div>
+    </div>
+  </div>
+</div>

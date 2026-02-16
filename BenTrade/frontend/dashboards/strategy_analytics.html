@@ -1,0 +1,59 @@
+<div class="view-wrap">
+  <div class="stock-card">
+    <div class="stock-toolbar">
+      <div class="stock-inputs">
+        <select id="saRange">
+          <option value="30d">30d</option>
+          <option value="90d" selected>90d</option>
+          <option value="180d">180d</option>
+        </select>
+        <button id="saRefreshBtn" class="btn">Refresh</button>
+      </div>
+    </div>
+    <div id="saError" class="active-error" style="display:none;"></div>
+    <div id="saKpis" class="stock-summary-grid"></div>
+  </div>
+
+  <div class="stock-card">
+    <div class="stock-card-title">Equity Curve</div>
+    <svg id="saEquityCurve" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
+  </div>
+
+  <div class="stock-layout">
+    <section class="stock-panel stock-main">
+      <div class="stock-card">
+        <div class="stock-card-title">By Strategy</div>
+        <div class="risk-table-wrap">
+          <table class="risk-table">
+            <thead>
+              <tr><th>Strategy</th><th>Trades</th><th data-metric="win_rate">Win Rate</th><th data-metric="avg_pnl">Avg P&L</th><th data-metric="total_pnl">Total P&L</th></tr>
+            </thead>
+            <tbody id="saStrategyBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="stock-card">
+        <div class="stock-card-title" data-metric="ev_to_risk">EV vs Realized</div>
+        <div id="saEvList" class="stock-notes"></div>
+      </div>
+    </section>
+
+    <aside class="stock-panel stock-side">
+      <div class="stock-card">
+        <div class="stock-card-title">By Underlying</div>
+        <div class="risk-table-wrap">
+          <table class="risk-table">
+            <thead>
+              <tr><th>Symbol</th><th>Trades</th><th data-metric="avg_pnl">Avg P&L</th><th data-metric="total_pnl">Total P&L</th></tr>
+            </thead>
+            <tbody id="saUnderlyingBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="stock-card">
+        <div class="stock-card-title">Notes</div>
+        <div id="saNotes" class="stock-notes"></div>
+      </div>
+    </aside>
+  </div>
+</div>
