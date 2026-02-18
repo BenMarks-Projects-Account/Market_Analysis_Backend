@@ -25,6 +25,11 @@ class ButterfliesStrategyPlugin:
         return max(lo, min(hi, value))
 
     @staticmethod
+    def _normal_cdf(x: float) -> float:
+        """Standard normal cumulative distribution function."""
+        return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+    @staticmethod
     def _strike_map(contracts: list[Any], option_type: str) -> dict[float, Any]:
         out: dict[float, Any] = {}
         for leg in contracts:
@@ -337,13 +342,13 @@ class ButterfliesStrategyPlugin:
                     upper_mid = ((upper_bid or 0.0) + (upper_ask or upper_bid or 0.0)) / 2.0
                     total_debit = lower_mid + upper_mid - (2.0 * center_mid)
 
-                if total_debit is None or total_debit <= 0:
+                if total_debit is None or total_debit < 0.05:
                     continue
 
                 max_profit = max(wing_width - total_debit, 0.0) * 100.0
                 max_loss = total_debit * 100.0
-                break_even_low = center - total_debit
-                break_even_high = center + total_debit
+                break_even_low = lower + total_debit
+                break_even_high = upper - total_debit
 
                 gamma_lower = safe_float(getattr(lower_leg, "gamma", None)) or 0.0
                 gamma_center = safe_float(getattr(center_leg, "gamma", None)) or 0.0
@@ -439,7 +444,29 @@ class ButterfliesStrategyPlugin:
                 price = max(0.01, center - (3.0 * expected_move) + (idx * (6.0 * expected_move / 30.0)))
                 sampled.append((price, payoff_at(price)))
 
-            probability_touch_center, expected_value = self._distribution_probs(center, expected_move, sampled)
+            probability_touch_center, _ = self._distribution_probs(center, expected_move, sampled)
+
+            # Proper POP: probability stock lands between break-evens at expiration
+            if expected_move > 0 and break_even_low is not None and break_even_high is not None:
+                z_high = (break_even_high - spot) / expected_move
+                z_low = (break_even_low - spot) / expected_move
+                pop = self._clamp(self._normal_cdf(z_high) - self._normal_cdf(z_low))
+            else:
+                pop = 0.0
+
+            # Proper EV via numerical integration over normal distribution
+            n_ev_steps = 201
+            half_range = 4.0 * max(expected_move, spot * 0.01)
+            ev_step = (2.0 * half_range) / (n_ev_steps - 1)
+            sigma = max(expected_move, 0.01)
+            ev_sum = 0.0
+            for ev_idx in range(n_ev_steps):
+                p_point = max(0.01, spot - half_range + ev_idx * ev_step)
+                z_ev = (p_point - spot) / sigma
+                pdf_w = math.exp(-0.5 * z_ev * z_ev) / (sigma * math.sqrt(2.0 * math.pi))
+                ev_sum += payoff_at(p_point) * pdf_w * ev_step
+            expected_value = ev_sum
+
             center_alignment = self._clamp(1.0 - (abs(spot - center) / max(expected_move * 1.25, 0.25)))
 
             min_oi = min([m[0] for m in leg_metrics]) if leg_metrics else 0
@@ -510,7 +537,8 @@ class ButterfliesStrategyPlugin:
                     "peak_profit_at_center": peak_profit_at_center,
                     "payoff_slope": payoff_slope,
                     "probability_of_touch_center": probability_touch_center,
-                    "p_win_used": probability_touch_center,
+                    "pop_butterfly": pop,
+                    "p_win_used": pop,
                     "expected_value": expected_value,
                     "ev_per_contract": expected_value,
                     "ev_per_share": expected_value / 100.0,

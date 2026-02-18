@@ -222,9 +222,10 @@ window.BenTradePages.initHome = function initHome(rootEl){
   function normalizeTradeIdea(row, source){
     const symbol = normalizeSymbol(row?.underlying || row?.underlying_symbol || row?.symbol);
     const score = toNumber(row?.composite_score ?? row?.trade_quality_score ?? row?.scanner_score ?? row?.score) ?? 0;
-    const ev = toNumber(row?.ev_per_share ?? row?.expected_value ?? row?.ev ?? row?.edge);
-    const pop = toNumber(row?.p_win_used ?? row?.pop_delta_approx ?? row?.probability_of_profit ?? row?.pop);
-    const ror = toNumber(row?.return_on_risk ?? row?.ror);
+    const comp = (row?.computed && typeof row.computed === 'object') ? row.computed : {};
+    const ev = toNumber(comp?.expected_value ?? row?.ev_per_contract ?? row?.expected_value ?? row?.ev_per_share ?? row?.ev ?? row?.edge);
+    const pop = toNumber(comp?.pop ?? row?.p_win_used ?? row?.pop_delta_approx ?? row?.probability_of_profit ?? row?.pop);
+    const ror = toNumber(comp?.return_on_risk ?? row?.return_on_risk ?? row?.ror);
     const strategy = String(row?.spread_type || row?.strategy || row?.recommended_strategy || source?.label || 'idea');
     const recommendation = String(row?.model_evaluation?.recommendation || row?.recommendation || 'N/A');
 
@@ -243,10 +244,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   function computeRor(raw){
-    const direct = toNumber(raw?.return_on_risk ?? raw?.ror);
+    const comp = (raw?.computed && typeof raw.computed === 'object') ? raw.computed : {};
+    const direct = toNumber(comp?.return_on_risk ?? raw?.return_on_risk ?? raw?.ror);
     if(direct !== null) return direct;
-    const maxProfit = toNumber(raw?.max_profit_per_share ?? raw?.max_profit ?? raw?.max_profit_per_contract);
-    const maxLoss = toNumber(raw?.max_loss_per_share ?? raw?.max_loss ?? raw?.max_loss_per_contract);
+    const maxProfit = toNumber(comp?.max_profit ?? raw?.max_profit_per_contract ?? raw?.max_profit_per_share ?? raw?.max_profit);
+    const maxLoss = toNumber(comp?.max_loss ?? raw?.max_loss_per_contract ?? raw?.max_loss_per_share ?? raw?.max_loss);
     if(maxProfit !== null && maxLoss !== null && maxLoss > 0){
       return maxProfit / maxLoss;
     }
@@ -277,12 +279,14 @@ window.BenTradePages.initHome = function initHome(rootEl){
       ror = null;
       notes.push('Not computed for equities ideas yet.');
     }else{
-      ev = toNumber(row?.key_metrics?.ev_to_risk ?? row?.key_metrics?.ev ?? row?.ev_to_risk ?? raw?.ev_to_risk ?? row?.ev);
+      // Prefer per-contract EV from computed (unified with scanner), then key_metrics, then legacy flat fields
+      const comp = (raw?.computed && typeof raw.computed === 'object') ? raw.computed : {};
+      ev = toNumber(comp?.expected_value ?? row?.key_metrics?.ev_to_risk ?? row?.key_metrics?.ev ?? row?.ev_to_risk ?? raw?.ev_to_risk ?? row?.ev);
       if(ev === null){
-        ev = toNumber(row?.ev_per_share ?? raw?.ev_per_share ?? row?.key_metrics?.ev_per_share ?? raw?.expected_value ?? raw?.ev ?? row?.edge ?? row?.ev ?? row?.expected_value);
+        ev = toNumber(raw?.ev_per_contract ?? raw?.expected_value ?? raw?.ev ?? row?.ev_per_share ?? raw?.ev_per_share ?? row?.edge ?? row?.expected_value);
       }
 
-      pop = toNumber(row?.p_win_used ?? raw?.p_win_used ?? row?.key_metrics?.pop ?? row?.pop);
+      pop = toNumber(comp?.pop ?? row?.p_win_used ?? raw?.p_win_used ?? row?.key_metrics?.pop ?? row?.pop);
       if(pop === null){
         pop = toNumber(row?.pop_delta_approx ?? raw?.pop_delta_approx ?? row?.probability_of_profit ?? row?.probability_of_profit ?? row?.pop ?? raw?.pop);
       }

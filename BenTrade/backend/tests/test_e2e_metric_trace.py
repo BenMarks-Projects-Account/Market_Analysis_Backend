@@ -241,3 +241,103 @@ class TestEndToEndTraceLineage:
         ]
         assert not core_missing, f"Core metrics missing: {core_missing}"
         assert not lineage["unavailable_warnings"], f"Got warnings: {lineage['unavailable_warnings']}"
+
+
+class TestPerShareToPerContractConversion:
+    """computed.max_profit/max_loss must always hold per-contract $ values."""
+
+    def _per_share_only_trade(self) -> dict[str, Any]:
+        """Trade with per-share metrics but NO per-contract (legacy report shape)."""
+        return {
+            "spread_type": "call_credit",
+            "underlying": "SPY",
+            "short_strike": 687.0,
+            "long_strike": 692.0,
+            "dte": 3,
+            "net_credit": 1.67,
+            "width": 5.0,
+            "max_profit_per_share": 1.67,
+            "max_loss_per_share": 3.33,
+            "break_even": 688.67,
+            "return_on_risk": 0.5015,
+            "p_win_used": 0.7265,
+            "ev_per_share": 0.3025,
+            "kelly_fraction": 0.181,
+            "expiration": "2026-02-20",
+            "underlying_price": 681.55,
+            "short_delta_abs": 0.2735,
+            "implied_vol": 0.2,
+            "iv": 0.2,
+            "open_interest": 4137,
+            "volume": 3483,
+        }
+
+    def test_report_trade_per_contract(self) -> None:
+        """_normalize_report_trade must convert per-share → per-contract."""
+        from app.api.routes_reports import _normalize_report_trade
+
+        trade = self._per_share_only_trade()
+        normalized = _normalize_report_trade(trade)
+        computed = normalized.get("computed", {})
+
+        assert computed["max_profit"] == pytest.approx(167.0, abs=0.01)
+        assert computed["max_loss"] == pytest.approx(333.0, abs=0.01)
+        assert computed["expected_value"] == pytest.approx(30.25, abs=0.01)
+
+    def test_strategy_service_per_contract(self) -> None:
+        """strategy_service._normalize_trade must convert per-share → per-contract."""
+        trade = self._per_share_only_trade()
+        trade["rank_score"] = 25.0
+
+        svc = StrategyService(
+            base_data_service=MagicMock(),
+            results_dir=Path("/tmp/test_trace"),
+        )
+        normalized = svc._normalize_trade("credit_spread", "2026-02-20", trade)
+        computed = normalized.get("computed", {})
+
+        assert computed["max_profit"] == pytest.approx(167.0, abs=0.01)
+        assert computed["max_loss"] == pytest.approx(333.0, abs=0.01)
+        assert computed["expected_value"] == pytest.approx(30.25, abs=0.01)
+
+    def test_build_computed_metrics_per_contract(self) -> None:
+        """build_computed_metrics must convert per-share → per-contract."""
+        trade = self._per_share_only_trade()
+        cm = build_computed_metrics(trade)
+
+        assert cm["max_profit"] == pytest.approx(167.0, abs=0.01)
+        assert cm["max_loss"] == pytest.approx(333.0, abs=0.01)
+        assert cm["expected_value"] == pytest.approx(30.25, abs=0.01)
+
+    def test_null_stays_null(self) -> None:
+        """Absent metrics must stay None, not coerce to 0."""
+        trade = {
+            "spread_type": "put_credit",
+            "underlying": "SPY",
+            "short_strike": 655.0,
+            "long_strike": 650.0,
+            "dte": 7,
+            "expiration": "2026-02-23",
+        }
+        cm = build_computed_metrics(trade)
+        assert cm["max_profit"] is None
+        assert cm["max_loss"] is None
+        assert cm["expected_value"] is None
+        assert cm["pop"] is None
+        assert cm["return_on_risk"] is None
+        assert cm["kelly_fraction"] is None
+
+    def test_per_contract_not_doubled(self) -> None:
+        """When per-contract already exists, don't multiply again."""
+        trade = self._per_share_only_trade()
+        trade["max_profit_per_contract"] = 167.0
+        trade["max_loss_per_contract"] = 333.0
+        trade["ev_per_contract"] = 30.25
+
+        from app.api.routes_reports import _normalize_report_trade
+
+        normalized = _normalize_report_trade(trade)
+        computed = normalized.get("computed", {})
+        assert computed["max_profit"] == pytest.approx(167.0, abs=0.01)
+        assert computed["max_loss"] == pytest.approx(333.0, abs=0.01)
+        assert computed["expected_value"] == pytest.approx(30.25, abs=0.01)

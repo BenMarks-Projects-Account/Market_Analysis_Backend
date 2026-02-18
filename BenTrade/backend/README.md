@@ -39,7 +39,7 @@ Visit `http://127.0.0.1:5000/` in your browser.
 python -m pytest tests/ -q
 ```
 
-85 tests covering trade key canonicalization, metric computation, API routes, ingress validation, and more.
+108 tests covering trade key canonicalization, metric computation, strategy metrics audit, API routes, ingress validation, and more.
 
 ### 3. API Usage
 
@@ -98,6 +98,17 @@ Each enriched trade includes:
 - Bid-ask spread %
 - Market regime classification
 - RSI-14, SMA-20/50, realized vol 20d
+
+### Metric Correctness by Strategy
+
+| Strategy | max_profit | max_loss | POP | EV | RoR | kelly | break_even |
+|---|---|---|---|---|---|---|---|
+| credit_spread | ✅ CreditSpread model | ✅ Real | ✅ Delta-derived | ✅ Real | ✅ Real | ✅ Real | ✅ Real |
+| debit_spreads | ✅ Per-contract | ✅ Per-contract | ⚠️ implied_prob (debit/width) | ⚠️ Heuristic | ✅ Real | — N/A | ✅ Real |
+| butterflies | ✅ Per-contract | ✅ Per-contract | ✅ Normal CDF (break-evens) | ✅ Numerical integration | ✅ Real | — N/A | ✅ Real (lower+debit / upper−debit) |
+| iron_condor | ✅ Per-contract | ✅ Per-contract | ✅ Normal CDF (break-evens) | ✅ POP-derived | ✅ Real | — N/A | ✅ Real |
+| income | ✅ Per-contract | ✅ Per-contract | ⚠️ 1−delta approx | ✅ POP-derived | ✅ Real | — N/A | ✅ Real |
+| calendars | — None (unknowable) | ✅ Net debit | — None | — None | — None | — N/A | ⚠️ Rough est. |
 
 ### Computed Metrics Contract
 All trades include:

@@ -25,6 +25,11 @@ class IronCondorStrategyPlugin:
         return max(lo, min(hi, value))
 
     @staticmethod
+    def _normal_cdf(x: float) -> float:
+        """Standard normal cumulative distribution function."""
+        return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+    @staticmethod
     def _realized_vol(prices: list[float]) -> float | None:
         if len(prices) < 25:
             return None
@@ -243,9 +248,18 @@ class IronCondorStrategyPlugin:
             call_distance = max(0.0, float(row.get("call_short_strike") or 0.0) - spot)
             em_ratio = min(put_distance, call_distance) / expected_move if expected_move > 0 else 0.0
 
-            pop_put = self._clamp(put_distance / max(expected_move * 2.0, 0.01))
-            pop_call = self._clamp(call_distance / max(expected_move * 2.0, 0.01))
-            pop_approx = self._clamp(0.45 + (0.35 * min(pop_put, pop_call)))
+            # POP via normal CDF: probability stock ends between break-evens
+            if expected_move > 0:
+                z_high = (break_even_high - spot) / expected_move
+                z_low = (break_even_low - spot) / expected_move
+                pop_approx = self._clamp(self._normal_cdf(z_high) - self._normal_cdf(z_low))
+            else:
+                pop_approx = 0.5
+
+            # EV from POP-based formula
+            ev_per_contract = pop_approx * (total_credit * 100.0) - (1.0 - pop_approx) * max_loss
+            ev_per_share = ev_per_contract / 100.0
+            ev_to_risk = ev_per_contract / max_loss if max_loss > 0 else 0.0
 
             vega_short = abs(safe_float(getattr(put_short_leg, "vega", None)) or 0.0) + abs(safe_float(getattr(call_short_leg, "vega", None)) or 0.0)
             vega_long = abs(safe_float(getattr(put_long_leg, "vega", None)) or 0.0) + abs(safe_float(getattr(call_long_leg, "vega", None)) or 0.0)
@@ -365,7 +379,10 @@ class IronCondorStrategyPlugin:
                     "volume": min_vol,
                     "bid_ask_spread_pct": self._clamp((liquidity_worst_spread / max(total_credit, 0.01)), 0.0, 9.99),
                     "iv_rv_ratio": iv_rv_ratio,
-                    "ev_to_risk": (rank_score * 0.20),
+                    "ev_to_risk": ev_to_risk,
+                    "ev_per_contract": ev_per_contract,
+                    "ev_per_share": ev_per_share,
+                    "expected_value": ev_per_contract,
                     "return_on_risk": return_on_risk,
                     "rank_score": rank_score,
                     "trade_key": condor_key,

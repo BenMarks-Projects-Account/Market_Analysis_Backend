@@ -294,6 +294,10 @@ class IncomeStrategyPlugin:
 
             assignment_risk_score = self._clamp(assignment_raw)
 
+            # Proper EV from POP-based formula
+            ev_per_contract = pop_est * max_profit - (1.0 - pop_est) * max_loss
+            ev_per_share = ev_per_contract / 100.0
+
             oi = int(safe_float(getattr(leg, "open_interest", None)) or 0)
             volume = int(safe_float(getattr(leg, "volume", None)) or 0)
             spread = max(0.0, (ask or bid or 0.0) - (bid or 0.0))
@@ -367,9 +371,9 @@ class IncomeStrategyPlugin:
                     "volume": volume,
                     "bid_ask_spread_pct": self._clamp(spread / max(premium, 0.05), 0.0, 9.99),
                     "event_risk_flag": event_risk_flag,
-                    "ev_per_contract": (rank_score - 0.5) * 100.0,
-                    "ev_per_share": rank_score - 0.5,
-                    "expected_value": (rank_score - 0.5) * 100.0,
+                    "ev_per_contract": ev_per_contract,
+                    "ev_per_share": ev_per_share,
+                    "expected_value": ev_per_contract,
                     "p_win_used": pop_est,
                     "rank_score": rank_score,
                     "collateral_per_contract": collateral_per_contract,

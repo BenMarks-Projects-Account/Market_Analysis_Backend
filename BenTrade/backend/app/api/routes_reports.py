@@ -164,15 +164,33 @@ def _normalize_report_trade(row: dict, expiration_hint: str | None = None) -> di
                 return value
         return None
 
+    multiplier = _to_float(trade.get("contractsMultiplier") or trade.get("contracts_multiplier")) or 100.0
+
     expected_value_contract = _first_number("ev_per_contract", "expected_value", "ev")
     if expected_value_contract is None:
         ev_share = _first_number("ev_per_share")
         if ev_share is not None:
-            expected_value_contract = ev_share * 100.0
+            expected_value_contract = ev_share * multiplier
+
+    max_profit_contract = _first_number("max_profit_per_contract")
+    if max_profit_contract is None:
+        mp_share = _first_number("max_profit_per_share")
+        if mp_share is not None:
+            max_profit_contract = mp_share * multiplier
+        else:
+            max_profit_contract = _first_number("max_profit")
+
+    max_loss_contract = _first_number("max_loss_per_contract")
+    if max_loss_contract is None:
+        ml_share = _first_number("max_loss_per_share")
+        if ml_share is not None:
+            max_loss_contract = ml_share * multiplier
+        else:
+            max_loss_contract = _first_number("max_loss")
 
     computed = {
-        "max_profit": _first_number("max_profit_per_contract", "max_profit_per_share", "max_profit"),
-        "max_loss": _first_number("max_loss_per_contract", "max_loss_per_share", "max_loss"),
+        "max_profit": max_profit_contract,
+        "max_loss": max_loss_contract,
         "pop": _first_number("p_win_used", "pop_delta_approx", "pop_approx", "probability_of_touch_center", "implied_prob_profit", "pop"),
         "return_on_risk": _first_number("return_on_risk", "ror"),
         "expected_value": expected_value_contract,
