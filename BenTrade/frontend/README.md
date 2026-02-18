@@ -20,14 +20,14 @@ Served by the FastAPI backend at `http://127.0.0.1:5000/`.
 |---|---|---|
 | `home` | `home.html` | Opportunity Engine — top trades across all strategies |
 | `credit-spread` | `credit-spread.view.html` | Credit spread scanner results |
-| `stock-analysis` | `stock-analysis-dashboard.view.html` | Per-symbol stock analysis |
+| `stock-analysis` | `stock_analysis.html` | Per-symbol stock analysis |
 | `stock_scanner` | `stock_scanner.html` | Multi-symbol scanner |
-| `active-trades` | `active-trade-dashboard.view.html` | Active positions monitor |
+| `active-trades` | `active_trades.html` | Active positions monitor |
 | `trade_lifecycle` | `trade_lifecycle.html` | Trade preview → submit flow |
 | `portfolio_risk` | `portfolio_risk.html` | Portfolio-level risk dashboard |
-| `risk_capital` | `risk-capital-management-dashboard.view.html` | Risk capital management |
+| `risk_capital` | `risk_capital.html` | Risk capital management |
 | `data_health` | `data_health.html` | Data source health + validation events |
-| `trade_workbench` | `trade-testing-workbench.view.html` | Trade testing workbench |
+| `trade_workbench` | `trade_workbench.html` | Trade testing workbench |
 | `strategy_analytics` | `strategy_analytics.html` | Strategy performance analytics |
 | `admin_data_workbench` | `admin_data_workbench.html` | Data Workbench drill-down |
 

@@ -191,7 +191,6 @@ backend/
 │   │   │   ├── butterflies.py
 │   │   │   ├── calendars.py
 │   │   │   └── income.py
-│   │   ├── strategy_scanner/       # Scanner defaults + aliases
 │   │   ├── evaluation/             # Gates, scoring, ranking
 │   │   └── ...
 │   ├── trading/                # Order execution layer

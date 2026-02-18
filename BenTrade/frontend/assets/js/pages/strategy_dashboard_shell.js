@@ -520,8 +520,6 @@ window.BenTradeStrategyShell = (function(){
     rootEl.dataset.strategyId = state.activeConfig.strategyId;
     rootEl.dataset.strategyTitle = state.activeConfig.title;
 
-    window.BenTrade?.initCreditSpread?.(rootEl);
-
     try{
       const host = rootEl.querySelector('.file-selector');
       buildForm(host, state.activeConfig);
