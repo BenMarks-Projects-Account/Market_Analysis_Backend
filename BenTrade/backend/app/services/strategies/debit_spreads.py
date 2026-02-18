@@ -192,6 +192,9 @@ class DebitSpreadsStrategyPlugin:
         min_oi = int(policy.get("min_open_interest") or 100)
         min_vol = int(policy.get("min_volume") or 20)
 
+        # Pre-compute realized vol once per unique snapshot to avoid redundant math
+        _rv_cache: dict[int, float | None] = {}
+
         out: list[dict[str, Any]] = []
 
         for candidate in candidates:
@@ -232,8 +235,11 @@ class DebitSpreadsStrategyPlugin:
             debit_as_pct = debit / width if width > 0 else 1.0
             implied_prob_profit = self._clamp(1.0 - debit_as_pct)
 
-            prices_history = snapshot.get("prices_history") or []
-            rv = self._realized_vol_from_prices([float(x) for x in prices_history if self._to_float(x) is not None])
+            snap_id = id(snapshot)
+            if snap_id not in _rv_cache:
+                prices_history = snapshot.get("prices_history") or []
+                _rv_cache[snap_id] = self._realized_vol_from_prices([float(x) for x in prices_history if self._to_float(x) is not None])
+            rv = _rv_cache[snap_id]
             iv = safe_float(getattr(long_leg, "iv", None))
             if iv is None:
                 iv = safe_float(getattr(short_leg, "iv", None))

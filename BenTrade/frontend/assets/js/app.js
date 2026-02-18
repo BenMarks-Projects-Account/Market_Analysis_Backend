@@ -1,16 +1,7 @@
 ﻿// BenTrade — Shared execution modal (used by strategy dashboards)
 window.BenTradeExecutionModal = window.BenTradeExecutionModal || (function(){
-    function toNumber(value){
-        if(value === null || value === undefined || value === '') return null;
-        const n = Number(value);
-        return Number.isFinite(n) ? n : null;
-    }
-
-    function fmtMoney(value){
-        const n = toNumber(value);
-        if(n === null) return 'N/A';
-        return `${n >= 0 ? '+' : '-'}$${Math.abs(n).toFixed(2)}`;
-    }
+    const toNumber = window.BenTradeUtils.format.toNumber;
+    const fmtMoney  = window.BenTradeUtils.format.money;
 
     function tradeDetailsHtml(trade){
         const row = (trade && typeof trade === 'object') ? trade : {};

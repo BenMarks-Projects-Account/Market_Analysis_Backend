@@ -43,24 +43,11 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl){
     return String(trade?.trade_key || trade?.trade_id || index);
   }
 
-  function fmtNumber(value, decimals = 2){
-    if(value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
-    return Number(value).toFixed(decimals);
-  }
-
-  function fmtMoney(value){
-    if(value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
-    const n = Number(value);
-    const sign = n >= 0 ? '+' : '-';
-    return `${sign}$${Math.abs(n).toFixed(2)}`;
-  }
-
-  function fmtPct(value){
-    if(value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
-    const n = Number(value) * 100;
-    const sign = n >= 0 ? '+' : '-';
-    return `${sign}${Math.abs(n).toFixed(1)}%`;
-  }
+  /* shared module delegates */
+  const _fmt = window.BenTradeUtils.format;
+  const fmtNumber = _fmt.num;
+  const fmtMoney  = _fmt.money;
+  const fmtPct    = _fmt.signedPct;
 
   function setLiveBadge(asOf){
     if(!liveBadgeEl) return;

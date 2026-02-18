@@ -210,6 +210,9 @@ class IncomeStrategyPlugin:
         payload = inputs.get("request") or {}
         policy = inputs.get("policy") or {}
 
+        # Pre-compute realized vol once per unique snapshot to avoid redundant math
+        _rv_cache: dict[int, float | None] = {}
+
         min_annualized_yield = self._to_float(payload.get("min_annualized_yield"))
         if min_annualized_yield is None:
             min_annualized_yield = 0.10
@@ -264,8 +267,12 @@ class IncomeStrategyPlugin:
 
             delta_abs = abs(safe_float(getattr(leg, "delta", None)) or 0.0)
             iv = safe_float(getattr(leg, "iv", None))
-            prices = [float(x) for x in (row.get("snapshot") or {}).get("prices_history", []) if self._to_float(x) is not None]
-            rv = self._realized_vol(prices)
+            snapshot = row.get("snapshot") or {}
+            snap_id = id(snapshot)
+            if snap_id not in _rv_cache:
+                prices = [float(x) for x in snapshot.get("prices_history", []) if self._to_float(x) is not None]
+                _rv_cache[snap_id] = self._realized_vol(prices)
+            rv = _rv_cache[snap_id]
             iv_rv_ratio = (iv / rv) if iv not in (None, 0) and rv not in (None, 0) else None
             vol_for_em = iv if iv not in (None, 0) else rv
             expected_move = (spot * float(vol_for_em) * math.sqrt(dte / 365.0)) if vol_for_em not in (None, 0) and dte > 0 else None

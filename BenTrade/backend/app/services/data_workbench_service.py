@@ -7,6 +7,7 @@ from typing import Any
 
 from app.services.validation_events import ValidationEventsService
 from app.utils.computed_metrics import apply_metrics_contract
+from app.utils.normalize import normalize_trade
 from app.utils.trade_key import canonicalize_strategy_id, canonicalize_trade_key, normalize_strike, trade_key
 
 
@@ -122,50 +123,8 @@ class DataWorkbenchService:
 
     @staticmethod
     def _normalize_trade_payload(trade_payload: dict[str, Any], *, expiration_hint: str | None = None) -> dict[str, Any]:
-        trade = dict(trade_payload or {})
-
-        underlying = str(
-            trade.get("underlying")
-            or trade.get("underlying_symbol")
-            or trade.get("symbol")
-            or ""
-        ).upper()
-        if underlying:
-            trade["underlying"] = underlying
-            trade["underlying_symbol"] = underlying
-            trade["symbol"] = underlying
-
-        expiration = str(trade.get("expiration") or expiration_hint or "NA").strip() or "NA"
-        trade["expiration"] = expiration
-
-        strategy_raw = trade.get("strategy_id") or trade.get("spread_type") or trade.get("strategy")
-        canonical_strategy, _alias_mapped, _provided = canonicalize_strategy_id(strategy_raw)
-        strategy_id = canonical_strategy or str(strategy_raw or "NA").strip().lower() or "NA"
-        trade["strategy_id"] = strategy_id
-        trade["spread_type"] = strategy_id
-        trade["strategy"] = strategy_id
-
-        dte = trade.get("dte")
-        short = trade.get("short_strike") if trade.get("short_strike") not in (None, "") else trade.get("strike")
-        long = trade.get("long_strike") if trade.get("long_strike") not in (None, "") else "NA"
-
-        key = str(trade.get("trade_key") or "").strip()
-        if key:
-            key = canonicalize_trade_key(key)
-        else:
-            key = trade_key(
-                underlying=underlying,
-                expiration=expiration,
-                spread_type=strategy_id,
-                short_strike=short,
-                long_strike=long,
-                dte=dte,
-            )
-        trade["trade_key"] = key
-        trade["trade_id"] = key
-        trade.pop("_trade_key", None)
-
-        return apply_metrics_contract(trade)
+        """Normalize via the shared builder.  Produces the full canonical shape."""
+        return normalize_trade(trade_payload, expiration=expiration_hint)
 
     @staticmethod
     def _to_float(value: Any) -> float | None:

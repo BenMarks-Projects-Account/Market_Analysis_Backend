@@ -194,6 +194,9 @@ class IronCondorStrategyPlugin:
         payload = inputs.get("request") or {}
         policy = inputs.get("policy") or {}
 
+        # Pre-compute realized vol once per unique snapshot to avoid redundant math
+        _rv_cache: dict[int, float | None] = {}
+
         out: list[dict[str, Any]] = []
         for row in candidates:
             put_short_leg = row.get("put_short_leg")
@@ -279,8 +282,12 @@ class IronCondorStrategyPlugin:
             iv_values = [v for v in iv_values if v is not None]
             iv_avg = (sum(iv_values) / len(iv_values)) if iv_values else None
 
-            prices = [float(x) for x in (row.get("snapshot") or {}).get("prices_history", []) if self._to_float(x) is not None]
-            rv = self._realized_vol(prices)
+            snapshot = row.get("snapshot") or {}
+            snap_id = id(snapshot)
+            if snap_id not in _rv_cache:
+                prices = [float(x) for x in snapshot.get("prices_history", []) if self._to_float(x) is not None]
+                _rv_cache[snap_id] = self._realized_vol(prices)
+            rv = _rv_cache[snap_id]
             iv_rv_ratio = (iv_avg / rv) if iv_avg not in (None, 0) and rv not in (None, 0) else None
 
             tail_risk_score = self._clamp(1.0 - min(put_distance, call_distance) / max(expected_move * 2.5, 0.01))

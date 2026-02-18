@@ -117,51 +117,19 @@ window.BenTradePages.initHome = function initHome(rootEl){
     errorEl.textContent = String(text);
   }
 
-  function toNumber(value){
-    if(value === null || value === undefined || value === '') return null;
-    const n = Number(value);
-    return Number.isFinite(n) ? n : null;
-  }
-
-  function fmt(value, digits = 2){
-    const n = toNumber(value);
-    if(n === null) return '0.00';
-    return n.toFixed(digits);
-  }
-
-  function fmtSigned(value, digits = 2){
-    const n = toNumber(value);
-    if(n === null) return '0.00';
-    const text = n.toFixed(digits);
-    return n > 0 ? `+${text}` : text;
-  }
-
-  function fmtPct(value, digits = 2){
-    const n = toNumber(value);
-    if(n === null) return '0.00%';
-    return `${n >= 0 ? '+' : ''}${(n * 100).toFixed(digits)}%`;
-  }
-
-  function toPctString(value, digits = 1){
-    const n = toNumber(value);
-    if(n === null) return '0.0%';
-    return `${n.toFixed(digits)}%`;
-  }
+  /* ── shared module delegates ── */
+  const _fmtLib = window.BenTradeUtils.format;
+  const _accessor = window.BenTradeUtils.tradeAccessor;
+  const _card    = window.BenTradeTradeCard;
+  const toNumber = _fmtLib.toNumber;
+  const fmt      = _fmtLib.num;
+  const fmtSigned = _fmtLib.signed;
+  const fmtPct   = _fmtLib.signedPct;
+  const toPctString = _fmtLib.pct;
+  const metricMissingReason = _card.metricMissingReason;
 
   function normalizeSymbol(value){
     return String(value || '').trim().toUpperCase();
-  }
-
-  function metricMissingReason(sourceType, metric){
-    const type = String(sourceType || '').toLowerCase();
-    const key = String(metric || '').toLowerCase();
-    if(type === 'stock'){
-      if(key === 'ev') return 'EV not computed for equities';
-      if(key === 'pop') return 'POP not computed for equities';
-      if(key === 'ror') return 'RoR not computed for equities';
-      return 'Not computed for equities';
-    }
-    return 'Missing from source payload';
   }
 
   function isLikelyOptionsStrategy(value){
@@ -385,14 +353,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     };
   }
 
-  function escapeHtml(value){
-    return String(value || '')
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;');
-  }
+  const escapeHtml = _fmtLib.escapeHtml;
 
   function opportunityKey(idea, idx){
     const symbol = normalizeSymbol(idea?.symbol || idea?.trade?.underlying || idea?.trade?.symbol || 'N/A');
@@ -625,14 +586,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     }
   }
 
-  function metricValueOrMissing(value, formatter, reason){
-    const hasValue = toNumber(value) !== null;
-    if(hasValue){
-      return formatter(value);
-    }
-    const why = String(reason || 'Metric unavailable for this pick');
-    return `<span class="home-missing-wrap">— <span class="home-missing-hint" title="${why}">?</span></span>`;
-  }
+  const metricValueOrMissing = _card.metricValueOrMissing;
 
   function renderSourceHealth(snapshot){
     if(!sourceHealthEl){

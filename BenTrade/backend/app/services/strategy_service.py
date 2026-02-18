@@ -17,6 +17,7 @@ from app.services.strategies.iron_condor import IronCondorStrategyPlugin
 from app.services.validation_events import ValidationEventsService
 from app.utils.computed_metrics import apply_metrics_contract
 from app.utils.dates import dte_ceil
+from app.utils.normalize import normalize_trade, strategy_label
 from app.utils.trade_key import canonicalize_strategy_id, canonicalize_trade_key, trade_key
 
 
@@ -89,25 +90,7 @@ class StrategyService:
 
     @staticmethod
     def _strategy_label(strategy_id: str) -> str:
-        key = str(strategy_id or "").strip().lower()
-        labels = {
-            "put_credit_spread": "Put Credit Spread",
-            "call_credit_spread": "Call Credit Spread",
-            "put_debit": "Put Debit Spread",
-            "call_debit": "Call Debit Spread",
-            "iron_condor": "Iron Condor",
-            "butterfly_debit": "Debit Butterfly",
-            "calendar_spread": "Calendar Spread",
-            "calendar_call_spread": "Call Calendar Spread",
-            "calendar_put_spread": "Put Calendar Spread",
-            "csp": "Cash Secured Put",
-            "covered_call": "Covered Call",
-            "income": "Income Strategy",
-            "single": "Single Option",
-            "long_call": "Long Call",
-            "long_put": "Long Put",
-        }
-        return labels.get(key, key.replace("_", " ").title() or "Trade")
+        return strategy_label(strategy_id)
 
     @staticmethod
     def _utc_now_iso() -> str:
@@ -447,27 +430,28 @@ class StrategyService:
         return [clean[0]]
 
     def _normalize_trade(self, strategy_id: str, expiration: str, trade: dict[str, Any]) -> dict[str, Any]:
-        normalized = dict(trade or {})
-        normalized["strategyId"] = strategy_id
+        """Thin wrapper around the shared ``normalize_trade`` builder.
 
-        symbol = str(
-            normalized.get("underlying")
-            or normalized.get("underlying_symbol")
-            or normalized.get("symbol")
-            or ""
-        ).upper()
-        if symbol:
-            normalized["underlying"] = symbol
-            normalized["underlying_symbol"] = symbol
-            normalized["symbol"] = symbol
-
+        Adds validation-event logging for alias mapping and non-canonical
+        trade keys — side-effects that belong to the scanner service, not
+        the shared normalizer.
+        """
+        # Capture pre-normalization state for validation-event logging.
         raw_spread_type = (
-            normalized.get("spread_type")
-            or normalized.get("strategy")
-            or strategy_id
+            trade.get("spread_type") or trade.get("strategy") or strategy_id
         )
-        spread_type, alias_mapped, provided_strategy = canonicalize_strategy_id(raw_spread_type)
-        spread_type = spread_type or str(strategy_id)
+        _, alias_mapped, provided_strategy = canonicalize_strategy_id(raw_spread_type)
+        provided_key = str(trade.get("trade_key") or "").strip()
+
+        normalized = normalize_trade(
+            trade,
+            strategy_id=strategy_id,
+            expiration=expiration,
+            derive_dte=True,
+        )
+
+        # Log validation events specific to the scanner pipeline.
+        spread_type = normalized.get("strategy_id") or strategy_id
         if alias_mapped:
             try:
                 self.validation_events.append_event(
@@ -481,61 +465,8 @@ class StrategyService:
                 )
             except Exception:
                 pass
-        normalized["spread_type"] = spread_type
-        normalized["strategy"] = spread_type
-        normalized["strategy_id"] = spread_type
 
-        exp = str(normalized.get("expiration") or expiration or "").strip() or "NA"
-        normalized["expiration"] = exp
-
-        dte_value = normalized.get("dte")
-        if dte_value in (None, "") and exp not in ("", "NA"):
-            try:
-                dte_value = dte_ceil(exp)
-            except Exception:
-                dte_value = None
-        normalized["dte"] = dte_value
-
-        def _derive_key_strikes(row: dict[str, Any]) -> tuple[Any, Any]:
-            short = row.get("short_strike")
-            long = row.get("long_strike")
-            if short not in (None, "") or long not in (None, ""):
-                return short, long
-
-            if spread_type == "iron_condor":
-                return (
-                    f"P{row.get('put_short_strike') or 'NA'}|C{row.get('call_short_strike') or 'NA'}",
-                    f"P{row.get('put_long_strike') or 'NA'}|C{row.get('call_long_strike') or 'NA'}",
-                )
-
-            if spread_type == "butterfly_debit":
-                center = row.get("center_strike") or row.get("short_strike") or "NA"
-                lower = row.get("lower_strike") or "NA"
-                upper = row.get("upper_strike") or "NA"
-                return center, f"L{lower}|U{upper}"
-
-            if spread_type in {"csp", "covered_call", "single", "long_call", "long_put"}:
-                strike = row.get("strike") or row.get("short_strike") or "NA"
-                return strike, "NA"
-
-            return short, long
-
-        key_short_strike, key_long_strike = _derive_key_strikes(normalized)
-        if normalized.get("short_strike") in (None, ""):
-            normalized["short_strike"] = key_short_strike
-        if normalized.get("long_strike") in (None, ""):
-            normalized["long_strike"] = key_long_strike
-
-        provided_key = str(normalized.get("trade_key") or "").strip()
-        generated_key = trade_key(
-            underlying=symbol,
-            expiration=exp,
-            spread_type=spread_type,
-            short_strike=key_short_strike,
-            long_strike=key_long_strike,
-            dte=dte_value,
-        )
-        tkey = canonicalize_trade_key(provided_key) if provided_key else generated_key
+        tkey = normalized.get("trade_key") or ""
         if provided_key and tkey != provided_key:
             try:
                 self.validation_events.append_event(
@@ -550,122 +481,6 @@ class StrategyService:
                 )
             except Exception:
                 pass
-        normalized["trade_key"] = tkey
-        if "_trade_key" in normalized:
-            normalized.pop("_trade_key", None)
-
-        if normalized.get("composite_score") is None and normalized.get("rank_score") is not None:
-            normalized["composite_score"] = normalized.get("rank_score")
-
-        multiplier = self._to_float(normalized.get("contractsMultiplier") or normalized.get("contracts_multiplier")) or 100.0
-
-        expected_value_contract = self._first_number(
-            normalized,
-            "ev_per_contract",
-            "expected_value",
-            "ev",
-        )
-        if expected_value_contract is None:
-            ev_share = self._first_number(normalized, "ev_per_share")
-            if ev_share is not None:
-                expected_value_contract = ev_share * multiplier
-
-        max_profit_contract = self._first_number(normalized, "max_profit_per_contract")
-        if max_profit_contract is None:
-            mp_share = self._first_number(normalized, "max_profit_per_share")
-            if mp_share is not None:
-                max_profit_contract = mp_share * multiplier
-            else:
-                max_profit_contract = self._first_number(normalized, "max_profit")
-
-        max_loss_contract = self._first_number(normalized, "max_loss_per_contract")
-        if max_loss_contract is None:
-            ml_share = self._first_number(normalized, "max_loss_per_share")
-            if ml_share is not None:
-                max_loss_contract = ml_share * multiplier
-            else:
-                max_loss_contract = self._first_number(normalized, "max_loss")
-
-        computed = {
-            "max_profit": max_profit_contract,
-            "max_loss": max_loss_contract,
-            "pop": self._first_number(normalized, "p_win_used", "pop_delta_approx", "pop_approx", "probability_of_touch_center", "implied_prob_profit", "pop"),
-            "return_on_risk": self._first_number(normalized, "return_on_risk", "ror"),
-            "expected_value": expected_value_contract,
-            "kelly_fraction": self._first_number(normalized, "kelly_fraction"),
-            "iv_rank": self._first_number(normalized, "iv_rank"),
-            "short_strike_z": self._first_number(normalized, "short_strike_z"),
-            "bid_ask_pct": self._first_number(normalized, "bid_ask_spread_pct"),
-            "strike_dist_pct": self._first_number(normalized, "strike_distance_pct", "strike_distance_vs_expected_move", "expected_move_ratio"),
-            "rsi14": self._first_number(normalized, "rsi14", "rsi_14"),
-            "rv_20d": self._first_number(normalized, "realized_vol_20d", "rv_20d"),
-            "open_interest": self._first_number(normalized, "open_interest"),
-            "volume": self._first_number(normalized, "volume"),
-        }
-        details = {
-            "break_even": self._first_number(normalized, "break_even", "break_even_low"),
-            "dte": self._first_number(normalized, "dte"),
-            "expected_move": self._first_number(normalized, "expected_move", "expected_move_near"),
-            "iv_rv_ratio": self._first_number(normalized, "iv_rv_ratio"),
-            "trade_quality_score": self._first_number(normalized, "trade_quality_score"),
-            "market_regime": str(normalized.get("market_regime") or normalized.get("regime") or "").strip() or None,
-        }
-
-        dte_front = self._first_number(normalized, "dte_near")
-        dte_back = self._first_number(normalized, "dte_far")
-        pills = {
-            "strategy_label": self._strategy_label(str(normalized.get("strategy_id") or normalized.get("spread_type") or "")),
-            "dte": details["dte"],
-            "pop": computed["pop"],
-            "oi": computed["open_interest"],
-            "vol": computed["volume"],
-            "regime_label": details["market_regime"],
-        }
-        if dte_front is not None and dte_back is not None:
-            pills["dte_front"] = dte_front
-            pills["dte_back"] = dte_back
-            pills["dte_label"] = f"DTE {int(dte_front) if float(dte_front).is_integer() else dte_front}/{int(dte_back) if float(dte_back).is_integer() else dte_back}"
-
-        normalized["computed"] = computed
-        normalized["details"] = details
-        normalized["pills"] = pills
-        normalized = apply_metrics_contract(normalized)
-
-        if normalized.get("p_win_used") is None and computed["pop"] is not None:
-            normalized["p_win_used"] = computed["pop"]
-        if normalized.get("return_on_risk") is None and computed["return_on_risk"] is not None:
-            normalized["return_on_risk"] = computed["return_on_risk"]
-        if normalized.get("expected_value") is None and computed["expected_value"] is not None:
-            normalized["expected_value"] = computed["expected_value"]
-        if normalized.get("ev_per_contract") is None and computed["expected_value"] is not None:
-            normalized["ev_per_contract"] = computed["expected_value"]
-        if normalized.get("bid_ask_spread_pct") is None and computed["bid_ask_pct"] is not None:
-            normalized["bid_ask_spread_pct"] = computed["bid_ask_pct"]
-        if normalized.get("strike_distance_pct") is None and computed["strike_dist_pct"] is not None:
-            normalized["strike_distance_pct"] = computed["strike_dist_pct"]
-        if normalized.get("rsi14") is None and computed["rsi14"] is not None:
-            normalized["rsi14"] = computed["rsi14"]
-        if normalized.get("realized_vol_20d") is None and computed["rv_20d"] is not None:
-            normalized["realized_vol_20d"] = computed["rv_20d"]
-        if normalized.get("iv_rv_ratio") is None and details["iv_rv_ratio"] is not None:
-            normalized["iv_rv_ratio"] = details["iv_rv_ratio"]
-        if normalized.get("trade_quality_score") is None and details["trade_quality_score"] is not None:
-            normalized["trade_quality_score"] = details["trade_quality_score"]
-        if not str(normalized.get("market_regime") or "").strip() and details["market_regime"] is not None:
-            normalized["market_regime"] = details["market_regime"]
-
-        if computed["pop"] is None:
-            self._upsert_warning(normalized, "POP_NOT_IMPLEMENTED_FOR_STRATEGY")
-        if pills["regime_label"] is None:
-            self._upsert_warning(normalized, "REGIME_UNAVAILABLE")
-        if computed["max_profit"] is None:
-            self._upsert_warning(normalized, "MAX_PROFIT_UNAVAILABLE")
-        if computed["max_loss"] is None:
-            self._upsert_warning(normalized, "MAX_LOSS_UNAVAILABLE")
-        if computed["expected_value"] is None:
-            self._upsert_warning(normalized, "EXPECTED_VALUE_UNAVAILABLE")
-        if computed["return_on_risk"] is None:
-            self._upsert_warning(normalized, "RETURN_ON_RISK_UNAVAILABLE")
 
         return normalized
 

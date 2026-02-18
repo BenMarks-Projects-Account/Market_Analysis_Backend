@@ -4,12 +4,20 @@ from typing import Any, Awaitable, Callable
 
 
 class TTLCache:
-    def __init__(self) -> None:
+    def __init__(self, maxsize: int = 1024) -> None:
         self._store: dict[str, tuple[float, Any]] = {}
         self._lock = asyncio.Lock()
+        self._maxsize = maxsize
 
     def _is_expired(self, expires_at: float) -> bool:
         return expires_at <= time.time()
+
+    def _evict_expired(self) -> None:
+        """Remove all expired entries (must be called under lock)."""
+        now = time.time()
+        expired = [k for k, (exp, _) in self._store.items() if exp <= now]
+        for k in expired:
+            del self._store[k]
 
     async def get(self, key: str) -> Any | None:
         async with self._lock:
@@ -24,6 +32,12 @@ class TTLCache:
 
     async def set(self, key: str, value: Any, ttl_seconds: int) -> None:
         async with self._lock:
+            if len(self._store) >= self._maxsize and key not in self._store:
+                self._evict_expired()
+                # If still at capacity after purging expired, drop oldest entry
+                if len(self._store) >= self._maxsize:
+                    oldest_key = min(self._store, key=lambda k: self._store[k][0])
+                    del self._store[oldest_key]
             self._store[key] = (time.time() + ttl_seconds, value)
 
     async def get_or_set(

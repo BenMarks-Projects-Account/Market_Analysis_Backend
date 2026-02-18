@@ -112,26 +112,12 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
     throw (lastError || new Error('Scanner endpoint unavailable'));
   }
 
-  function fmtNum(value, digits){
-    const n = Number(value);
-    if(!Number.isFinite(n)) return 'N/A';
-    return n.toFixed(digits);
-  }
-
-  function fmtPct(value, digits){
-    const n = Number(value);
-    if(!Number.isFinite(n)) return 'N/A';
-    return `${(n * 100).toFixed(digits)}%`;
-  }
-
-  function esc(value){
-    return String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
+  // Shared utilities
+  const fmt = window.BenTradeUtils.format;
+  const card = window.BenTradeTradeCard;
+  const fmtNum = fmt.num;
+  const fmtPct = fmt.pct;
+  const esc = fmt.escapeHtml;
 
   function ideaKey(row){
     const symbol = String(row?.symbol || '').toUpperCase();
@@ -274,32 +260,24 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
 
           <div id="tradeBody-${idx}" class="trade-collapsible ${collapsedNow ? 'is-collapsed' : ''}">
             <div class="trade-body">
-              <div class="section section-core">
-                <div class="section-title">CORE METRICS</div>
-                <div class="metric-grid">
-                  <div class="metric"><div class="metric-label">Price</div><div class="metric-value neutral">${fmtNum(row?.price, 2)}</div></div>
-                  <div class="metric"><div class="metric-label">Composite</div><div class="metric-value positive">${fmtNum(row?.composite_score, 1)}</div></div>
-                  <div class="metric"><div class="metric-label">Trend Score</div><div class="metric-value neutral">${fmtNum(row?.trend_score, 1)}</div></div>
-                  <div class="metric"><div class="metric-label">Momentum</div><div class="metric-value neutral">${fmtNum(row?.momentum_score, 1)}</div></div>
-                  <div class="metric"><div class="metric-label">Volatility</div><div class="metric-value neutral">${fmtNum(row?.volatility_score, 1)}</div></div>
-                  <div class="metric"><div class="metric-label">RSI14</div><div class="metric-value neutral">${fmtNum(metrics?.rsi14, 1)}</div></div>
-                  <div class="metric"><div class="metric-label">RV20</div><div class="metric-value neutral">${fmtPct(metrics?.rv20, 1)}</div></div>
-                  <div class="metric"><div class="metric-label">IV/RV</div><div class="metric-value neutral">${fmtNum(metrics?.iv_rv_ratio, 2)}</div></div>
-                </div>
-              </div>
+              ${card.section('CORE METRICS', card.metricGrid([
+                { label: 'Price', value: fmtNum(row?.price, 2), cssClass: 'neutral' },
+                { label: 'Composite', value: fmtNum(row?.composite_score, 1), cssClass: 'positive' },
+                { label: 'Trend Score', value: fmtNum(row?.trend_score, 1), cssClass: 'neutral' },
+                { label: 'Momentum', value: fmtNum(row?.momentum_score, 1), cssClass: 'neutral' },
+                { label: 'Volatility', value: fmtNum(row?.volatility_score, 1), cssClass: 'neutral' },
+                { label: 'RSI14', value: fmtNum(metrics?.rsi14, 1), cssClass: 'neutral', dataMetric: 'rsi_14' },
+                { label: 'RV20', value: fmtPct(metrics?.rv20, 1), cssClass: 'neutral', dataMetric: 'realized_vol_20d' },
+                { label: 'IV/RV', value: fmtNum(metrics?.iv_rv_ratio, 2), cssClass: 'neutral', dataMetric: 'iv_rv_ratio' },
+              ]), 'section-core')}
 
-              <div class="section section-details">
-                <div class="section-title">IDEA DETAILS</div>
-                <div class="trade-details">
-                  <div class="detail-row"><span class="detail-label">Signals</span><span class="detail-value">${esc(signalsText)}</span></div>
-                  <div class="detail-row"><span class="detail-label">Trend</span><span class="detail-value">${esc(row?.trend || 'range')}</span></div>
-                  <div class="detail-row"><span class="detail-label">1D Change</span><span class="detail-value">${fmtPct(metrics?.price_change_1d, 2)}</span></div>
-                  <div class="detail-row"><span class="detail-label">20D Change</span><span class="detail-value">${fmtPct(metrics?.price_change_20d, 2)}</span></div>
-                  <div class="detail-row"><span class="detail-label">52W Range</span><span class="detail-value">${fmtNum(metrics?.low_52w, 2)} — ${fmtNum(metrics?.high_52w, 2)}</span></div>
-                  <div class="detail-row" style="display:block;"><span class="detail-label">Thesis</span><ul class="key-factors">${thesis.map(v => `<li>${esc(v)}</li>`).join('') || '<li>No thesis notes</li>'}</ul></div>
-                  <div class="detail-row" style="display:block;"><span class="detail-label">Sparkline (24 bars, % from start)</span><div class="stock-note" style="margin-top:4px;">${esc(sparklineText)}</div></div>
-                </div>
-              </div>
+              ${card.section('IDEA DETAILS', card.detailRows([
+                { label: 'Signals', value: esc(signalsText) },
+                { label: 'Trend', value: esc(row?.trend || 'range') },
+                { label: '1D Change', value: fmtPct(metrics?.price_change_1d, 2) },
+                { label: '20D Change', value: fmtPct(metrics?.price_change_20d, 2) },
+                { label: '52W Range', value: fmtNum(metrics?.low_52w, 2) + ' — ' + fmtNum(metrics?.high_52w, 2) },
+              ]) + '<div class="detail-row" style="display:block;"><span class="detail-label">Thesis</span><ul class="key-factors">' + (thesis.map(v => `<li>${esc(v)}</li>`).join('') || '<li>No thesis notes</li>') + '</ul></div><div class="detail-row" style="display:block;"><span class="detail-label">Sparkline (24 bars, % from start)</span><div class="stock-note" style="margin-top:4px;">' + esc(sparklineText) + '</div></div>', 'section-details')}
 
               <div class="section section-details">
                 <div class="section-title">NOTES</div>

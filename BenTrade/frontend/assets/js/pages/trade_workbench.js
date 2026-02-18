@@ -99,10 +99,7 @@ window.BenTradePages.initTradeWorkbench = function initTradeWorkbench(rootEl){
     return Number.isFinite(n) ? String(n).replace(/\.0+$/, '') : String(value);
   }
 
-  function toNumber(value){
-    const n = Number(value);
-    return Number.isFinite(n) ? n : null;
-  }
+  const toNumber = window.BenTradeUtils.format.toNumber;
 
   function setError(text){
     if(!errorEl) return;
@@ -372,15 +369,8 @@ window.BenTradePages.initTradeWorkbench = function initTradeWorkbench(rootEl){
     `).join('');
   }
 
-  function fmt(value, decimals = 2){
-    if(value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
-    return Number(value).toFixed(decimals);
-  }
-
-  function fmtPct(value){
-    if(value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
-    return `${(Number(value) * 100).toFixed(1)}%`;
-  }
+  const fmt    = window.BenTradeUtils.format.num;
+  const fmtPct  = window.BenTradeUtils.format.pct;
 
   function renderTradeCard(trade){
     if(!trade){
