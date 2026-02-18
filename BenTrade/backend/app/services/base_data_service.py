@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -9,6 +10,7 @@ from app.clients.tradier_client import TradierClient
 from app.clients.yahoo_client import YahooClient
 from app.models.schemas import OptionContract
 from app.utils.http import UpstreamError
+from app.utils.validation import clamp, parse_expiration, validate_bid_ask, validate_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -225,22 +227,63 @@ class BaseDataService:
         if value in (None, ""):
             return None
         try:
-            return float(value)
+            parsed = float(value)
         except (TypeError, ValueError):
             return None
+        if not math.isfinite(parsed):
+            return None
+        return parsed
 
     @staticmethod
     def _to_int(value: Any) -> int | None:
         if value in (None, ""):
             return None
         try:
-            return int(value)
+            parsed = float(value)
         except (TypeError, ValueError):
             return None
+        if not math.isfinite(parsed):
+            return None
+        try:
+            return int(parsed)
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    @staticmethod
+    def _normalize_symbol(symbol: Any) -> str | None:
+        return validate_symbol(symbol)
+
+    @staticmethod
+    def _parse_expiration(expiration: Any) -> tuple[str | None, int | None]:
+        return parse_expiration(expiration)
+
+    def _mark_validation_warning(self, source: str, message: str) -> None:
+        logger.warning("event=ingress_validation_warning source=%s message=%s", source, message)
+        self._mark_failure(
+            source,
+            UpstreamError(
+                f"validation warning: {message}",
+                details={"status_code": 429},
+            ),
+        )
+
+    def _validate_quote_sanity(self, source: str, quote: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+        if not isinstance(quote, dict):
+            return {}, ["quote payload not an object"]
+
+        cleaned = dict(quote)
+        bid, ask, raw_warnings = validate_bid_ask(cleaned.get("bid"), cleaned.get("ask"))
+        warnings = [f"quote {warning.lower()}" for warning in raw_warnings]
+        cleaned["bid"] = bid
+        cleaned["ask"] = ask
+
+        return cleaned, warnings
 
     @staticmethod
     def _normalize_iv(value: float | None) -> float | None:
         if value is None:
+            return None
+        if not math.isfinite(value):
             return None
         if value > 1.0:
             return value / 100.0
@@ -271,42 +314,97 @@ class BaseDataService:
                 continue
 
             strike = self._to_float(row.get("strike"))
-            expiration = str(row.get("expiration_date") or row.get("expiration") or "")
+            expiration_raw = str(row.get("expiration_date") or row.get("expiration") or "")
+            expiration, _ = self._parse_expiration(expiration_raw)
             if strike is None or not expiration:
+                self._mark_validation_warning("tradier", "chain row missing/invalid strike or expiration")
                 continue
+
+            bid, ask, quote_warnings = validate_bid_ask(row.get("bid"), row.get("ask"))
+            for warning in quote_warnings:
+                self._mark_validation_warning("tradier", f"chain row {warning.lower()}")
+            if "ASK_LT_BID" in quote_warnings:
+                continue
+
+            delta = self._to_float(greeks.get("delta")) if isinstance(greeks, dict) else None
+            delta, delta_warning = clamp(
+                delta,
+                minimum=-1.0,
+                maximum=1.0,
+                field="delta",
+                warning_code="DELTA_CLAMP",
+            )
+            if delta_warning:
+                self._mark_validation_warning("tradier", f"chain row {delta_warning}")
+
+            open_interest = self._to_int(row.get("open_interest"))
+            open_interest, oi_warning = clamp(
+                open_interest,
+                minimum=0,
+                field="open_interest",
+                warning_code="OI_CLAMP",
+            )
+            if oi_warning:
+                self._mark_validation_warning("tradier", f"chain row {oi_warning}")
+            open_interest = int(open_interest) if open_interest is not None else None
+
+            volume = self._to_int(row.get("volume"))
+            volume, volume_warning = clamp(
+                volume,
+                minimum=0,
+                field="volume",
+                warning_code="VOLUME_CLAMP",
+            )
+            if volume_warning:
+                self._mark_validation_warning("tradier", f"chain row {volume_warning}")
+            volume = int(volume) if volume is not None else None
+
+            iv = self._normalize_iv(iv)
+            if iv is None and row.get("iv") not in (None, ""):
+                self._mark_validation_warning("tradier", "chain row iv non-finite")
 
             normalized.append(
                 OptionContract(
                     option_type=raw_type,
                     strike=strike,
                     expiration=expiration,
-                    bid=self._to_float(row.get("bid")),
-                    ask=self._to_float(row.get("ask")),
-                    open_interest=self._to_int(row.get("open_interest")),
-                    volume=self._to_int(row.get("volume")),
-                    delta=self._to_float(greeks.get("delta")) if isinstance(greeks, dict) else None,
-                    iv=self._normalize_iv(iv),
+                    bid=bid,
+                    ask=ask,
+                    open_interest=open_interest,
+                    volume=volume,
+                    delta=delta,
+                    iv=iv,
                     symbol=row.get("symbol"),
                 )
             )
         return normalized
 
     async def get_underlying_price(self, symbol: str) -> float | None:
+        normalized_symbol = self._normalize_symbol(symbol)
+        if not normalized_symbol:
+            self._mark_validation_warning("tradier", "invalid symbol")
+            self._mark_validation_warning("finnhub", "invalid symbol")
+            return None
+
         try:
-            quote = await self.tradier_client.get_quote(symbol)
+            quote = await self.tradier_client.get_quote(normalized_symbol)
             self._mark_success("tradier", http_status=200, message="quote ok")
         except Exception as exc:
             self._mark_failure("tradier", exc)
             quote = {}
+
+        quote, quote_warnings = self._validate_quote_sanity("tradier", quote)
+        for warning in quote_warnings:
+            self._mark_validation_warning("tradier", warning)
 
         for field in ("last", "close", "mark", "bid", "ask"):
             value = self._to_float(quote.get(field))
             if value is not None:
                 return value
 
-        logger.info("event=underlying_fallback symbol=%s source=finnhub", symbol.upper())
+        logger.info("event=underlying_fallback symbol=%s source=finnhub", normalized_symbol)
         try:
-            fb = await self.finnhub_client.get_quote(symbol)
+            fb = await self.finnhub_client.get_quote(normalized_symbol)
             self._mark_success("finnhub", http_status=200, message="quote fallback ok")
         except Exception as exc:
             self._mark_failure("finnhub", exc)
@@ -319,9 +417,21 @@ class BaseDataService:
         return None
 
     async def get_snapshot(self, symbol: str) -> dict[str, Any]:
-        underlying_task = asyncio.create_task(self.get_underlying_price(symbol))
+        normalized_symbol = self._normalize_symbol(symbol)
+        warnings: list[str] = []
+        if not normalized_symbol:
+            warnings.append("invalid symbol")
+            return {
+                "symbol": str(symbol or "").upper(),
+                "underlying_price": None,
+                "vix": None,
+                "prices_history": [],
+                "warnings": warnings,
+            }
+
+        underlying_task = asyncio.create_task(self.get_underlying_price(normalized_symbol))
         vix_task = asyncio.create_task(self.fred_client.get_latest_series_value())
-        candles_task = asyncio.create_task(self.get_prices_history(symbol, lookback_days=365))
+        candles_task = asyncio.create_task(self.get_prices_history(normalized_symbol, lookback_days=365))
 
         underlying_price, vix, candles = await asyncio.gather(
             underlying_task, vix_task, candles_task, return_exceptions=True
@@ -338,25 +448,32 @@ class BaseDataService:
         closes = [float(x) for x in (candles or []) if x is not None]
 
         return {
-            "symbol": symbol.upper(),
+            "symbol": normalized_symbol,
             "underlying_price": underlying_price,
             "vix": vix,
             "prices_history": closes[-160:],
+            "warnings": warnings,
         }
 
     async def get_prices_history(self, symbol: str, lookback_days: int = 365) -> list[float]:
+        normalized_symbol = self._normalize_symbol(symbol)
+        if not normalized_symbol:
+            self._mark_validation_warning("yahoo", "invalid symbol")
+            self._mark_validation_warning("tradier", "invalid symbol")
+            return []
+
         try:
-            closes = await self.yahoo_client.get_daily_closes(symbol, period="1y")
+            closes = await self.yahoo_client.get_daily_closes(normalized_symbol, period="1y")
             if closes:
                 self._mark_success("yahoo", http_status=200, message="history ok")
                 return [float(x) for x in closes if x is not None]
             self._mark_failure("yahoo", UpstreamError("Yahoo returned empty history", details={"status_code": 429}))
-            logger.warning("event=prices_history_empty symbol=%s source=yahoo", symbol.upper())
+            logger.warning("event=prices_history_empty symbol=%s source=yahoo", normalized_symbol)
         except Exception as exc:
             self._mark_failure("yahoo", exc)
             logger.warning(
                 "event=prices_history_unavailable symbol=%s source=yahoo error=%s",
-                symbol.upper(),
+                normalized_symbol,
                 str(exc),
             )
 
@@ -364,7 +481,7 @@ class BaseDataService:
         start_date = end_date - timedelta(days=lookback_days)
         try:
             fallback = await self.tradier_client.get_daily_closes(
-                symbol,
+                normalized_symbol,
                 start_date=start_date.isoformat(),
                 end_date=end_date.isoformat(),
             )
@@ -374,7 +491,7 @@ class BaseDataService:
             self._mark_failure("tradier", exc)
             logger.warning(
                 "event=prices_history_unavailable symbol=%s source=tradier error=%s",
-                symbol.upper(),
+                normalized_symbol,
                 str(exc),
             )
             return []
@@ -398,10 +515,20 @@ class BaseDataService:
             raise
 
     async def get_analysis_inputs(self, symbol: str, expiration: str, include_prices_history: bool = True) -> dict[str, Any]:
-        quote_task = asyncio.create_task(self.get_underlying_price(symbol))
-        chain_task = asyncio.create_task(self._get_chain_with_health(symbol, expiration=expiration, greeks=True))
+        normalized_symbol = self._normalize_symbol(symbol)
+        if not normalized_symbol:
+            self._mark_validation_warning("tradier", "invalid symbol")
+            raise ValueError("invalid symbol")
+
+        normalized_expiration, dte = self._parse_expiration(expiration)
+        if not normalized_expiration or dte is None or dte < 0:
+            self._mark_validation_warning("tradier", "invalid expiration")
+            raise ValueError("invalid expiration")
+
+        quote_task = asyncio.create_task(self.get_underlying_price(normalized_symbol))
+        chain_task = asyncio.create_task(self._get_chain_with_health(normalized_symbol, expiration=normalized_expiration, greeks=True))
         vix_task = asyncio.create_task(self._get_vix_with_health())
-        candles_task = asyncio.create_task(self.get_prices_history(symbol, lookback_days=365)) if include_prices_history else None
+        candles_task = asyncio.create_task(self.get_prices_history(normalized_symbol, lookback_days=365)) if include_prices_history else None
 
         if candles_task is not None:
             underlying_price, chain_raw, candles_raw, vix = await asyncio.gather(
@@ -427,16 +554,16 @@ class BaseDataService:
         if isinstance(candles_raw, Exception):
             logger.warning(
                 "event=analysis_candles_unavailable symbol=%s expiration=%s error=%s",
-                symbol.upper(),
-                expiration,
+                normalized_symbol,
+                normalized_expiration,
                 str(candles_raw),
             )
             candles_raw = []
         if isinstance(vix, Exception):
             logger.warning(
                 "event=analysis_vix_unavailable symbol=%s expiration=%s error=%s",
-                symbol.upper(),
-                expiration,
+                normalized_symbol,
+                normalized_expiration,
                 str(vix),
             )
             vix = None
@@ -446,8 +573,8 @@ class BaseDataService:
 
         logger.info(
             "event=analysis_inputs_loaded symbol=%s expiration=%s contracts=%d closes=%d",
-            symbol.upper(),
-            expiration,
+            normalized_symbol,
+            normalized_expiration,
             len(contracts),
             len(closes),
         )

@@ -6,6 +6,7 @@ from typing import Any
 from requests.exceptions import RequestException
 
 from app.models.trade_contract import TradeContract
+from app.utils.validation import parse_expiration
 
 
 class LocalModelUnavailableError(RuntimeError):
@@ -73,7 +74,13 @@ def _coerce_stock_model_output(candidate: Any) -> dict[str, Any] | None:
     trade_ideas: list[dict[str, Any]] = []
     for row in trade_ideas_raw:
         if isinstance(row, dict):
-            trade_ideas.append(dict(row))
+            idea = dict(row)
+            expiration_raw = idea.get("expiration") or idea.get("expiration_date") or idea.get("expiry")
+            if expiration_raw not in (None, ""):
+                expiration, dte = parse_expiration(expiration_raw)
+                if expiration is None or (dte is not None and dte < 0):
+                    continue
+            trade_ideas.append(idea)
 
     return {
         "recommendation": recommendation,

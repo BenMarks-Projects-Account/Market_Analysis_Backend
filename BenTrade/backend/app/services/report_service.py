@@ -17,7 +17,9 @@ from app.services.evaluation.ranking import sort_trades_by_rank as sort_trades_b
 from app.services.evaluation.scoring import compute_composite_score as compute_composite_score_contract
 from app.services.evaluation.types import EvaluationContext
 from app.services.ranking import safe_float as rank_safe_float
+from app.services.validation_events import emit_validation_event
 from app.utils.dates import dte_ceil
+from app.utils.trade_key import canonicalize_strategy_id, canonicalize_trade_key, trade_key
 
 try:
     from common.quant_analysis import CreditSpread, enrich_trades_batch
@@ -979,6 +981,79 @@ class ReportService:
         )
         accepted_contracts = [TradeContract.from_dict(trade) for trade in accepted]
         accepted = [trade.to_dict() for trade in sort_trades_by_rank_contracts(accepted_contracts)]
+
+        for tr in accepted:
+            symbol = str(tr.get("underlying") or tr.get("underlying_symbol") or tr.get("symbol") or "").upper()
+            if symbol:
+                tr["underlying"] = symbol
+                tr["underlying_symbol"] = symbol
+                tr["symbol"] = symbol
+
+            exp = str(tr.get("expiration") or "").strip() or "NA"
+            tr["expiration"] = exp
+
+            dte = tr.get("dte")
+            if dte in (None, "") and exp not in ("", "NA"):
+                try:
+                    dte = dte_ceil(exp)
+                except Exception:
+                    dte = None
+            tr["dte"] = dte
+
+            strategy = tr.get("strategy_id") or tr.get("spread_type") or tr.get("strategy")
+            canonical_strategy, alias_mapped, provided_strategy = canonicalize_strategy_id(strategy)
+            canonical_strategy = canonical_strategy or str(strategy or "").strip().lower() or "NA"
+            if alias_mapped:
+                emit_validation_event(
+                    severity="warn",
+                    code="TRADE_STRATEGY_ALIAS_MAPPED",
+                    message="Report trade strategy alias mapped to canonical strategy_id",
+                    context={
+                        "strategy_id": canonical_strategy,
+                        "provided_strategy": provided_strategy,
+                    },
+                )
+            tr["strategy_id"] = canonical_strategy
+            tr["spread_type"] = canonical_strategy
+            tr["strategy"] = canonical_strategy
+
+            short_strike = tr.get("short_strike")
+            long_strike = tr.get("long_strike")
+            if canonical_strategy == "iron_condor" and short_strike in (None, "") and long_strike in (None, ""):
+                short_strike = f"P{tr.get('put_short_strike') or 'NA'}|C{tr.get('call_short_strike') or 'NA'}"
+                long_strike = f"P{tr.get('put_long_strike') or 'NA'}|C{tr.get('call_long_strike') or 'NA'}"
+            elif canonical_strategy == "butterfly_debit" and short_strike in (None, "") and long_strike in (None, ""):
+                short_strike = tr.get("center_strike") or tr.get("short_strike") or "NA"
+                long_strike = f"L{tr.get('lower_strike') or 'NA'}|U{tr.get('upper_strike') or 'NA'}"
+            elif canonical_strategy in {"csp", "covered_call", "single", "long_call", "long_put"} and short_strike in (None, ""):
+                short_strike = tr.get("strike") or "NA"
+                long_strike = long_strike if long_strike not in (None, "") else "NA"
+
+            tr["short_strike"] = short_strike
+            tr["long_strike"] = long_strike
+
+            provided_key = str(tr.get("trade_key") or "").strip()
+            generated_key = trade_key(
+                underlying=symbol,
+                expiration=exp,
+                spread_type=canonical_strategy,
+                short_strike=short_strike,
+                long_strike=long_strike,
+                dte=dte,
+            )
+            canonical_key = canonicalize_trade_key(provided_key) if provided_key else generated_key
+            if provided_key and canonical_key != provided_key:
+                emit_validation_event(
+                    severity="warn",
+                    code="TRADE_KEY_NON_CANONICAL",
+                    message="Report trade_key was rewritten to canonical format",
+                    context={
+                        "trade_key": canonical_key,
+                        "provided_trade_key": provided_key,
+                    },
+                )
+            tr["trade_key"] = canonical_key
+
         for idx, tr in enumerate(accepted, start=1):
             tr["rank_in_report"] = idx
 

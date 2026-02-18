@@ -8,9 +8,17 @@ window.BenTradeStrategyShell = (function(){
     nativeEventSource: null,
   };
 
+  function isTruthy(value){
+    if(typeof value === 'boolean') return value;
+    const text = String(value || '').trim().toLowerCase();
+    return text === '1' || text === 'true' || text === 'yes' || text === 'on';
+  }
+
   function isStrategyRouteActive(){
     const hash = String(window.location.hash || '').toLowerCase();
     return hash.startsWith('#/strategy-')
+      || hash.startsWith('#/credit-spread')
+      || hash.startsWith('#credit-spread')
       || hash.startsWith('#/debit-spreads')
       || hash.startsWith('#debit-spreads')
       || hash.startsWith('#/iron-condor')
@@ -108,12 +116,16 @@ window.BenTradeStrategyShell = (function(){
       if(cfg && mapped === '/api/generate'){
         const endpoint = cfg.endpoint || {};
         mapped = endpoint.generateSse || `/api/strategies/${encodeURIComponent(cfg.strategyId)}/generate`;
-        const filters = cfg.currentFilters || {};
         const qp = new URLSearchParams();
-        Object.entries(filters).forEach(([key, value]) => {
-          if(value === null || value === undefined || value === '') return;
-          qp.set(String(key), String(value));
-        });
+        const advancedEnabled = !!cfg.advancedEnabled;
+        qp.set('advanced_enabled', advancedEnabled ? 'true' : 'false');
+        if(advancedEnabled){
+          const filters = cfg.currentFilters || {};
+          Object.entries(filters).forEach(([key, value]) => {
+            if(value === null || value === undefined || value === '') return;
+            qp.set(String(key), String(value));
+          });
+        }
         const suffix = qp.toString();
         if(suffix){
           mapped = `${mapped}${mapped.includes('?') ? '&' : '?'}${suffix}`;
@@ -284,6 +296,22 @@ window.BenTradeStrategyShell = (function(){
 
     const fieldWrap = document.createElement('div');
     fieldWrap.style.display = 'flex';
+      const advancedToggleWrap = document.createElement('label');
+      advancedToggleWrap.style.display = 'inline-flex';
+      advancedToggleWrap.style.alignItems = 'center';
+      advancedToggleWrap.style.gap = '8px';
+      advancedToggleWrap.style.fontSize = '13px';
+      advancedToggleWrap.style.color = 'rgba(215,251,255,0.96)';
+
+      const advancedToggle = document.createElement('input');
+      advancedToggle.type = 'checkbox';
+      advancedToggle.checked = !!config.advancedEnabled;
+
+      const advancedText = document.createElement('span');
+      advancedText.textContent = 'Use Advanced Filters';
+      advancedToggleWrap.appendChild(advancedToggle);
+      advancedToggleWrap.appendChild(advancedText);
+
     fieldWrap.style.gap = '8px';
     fieldWrap.style.flexWrap = 'wrap';
 
@@ -367,6 +395,7 @@ window.BenTradeStrategyShell = (function(){
     why.appendChild(summary);
     why.appendChild(list);
 
+    controls.appendChild(advancedToggleWrap);
     controls.appendChild(btnDefaults);
     controls.appendChild(btnGenerateDefaults);
     controls.appendChild(btnReset);
@@ -377,6 +406,23 @@ window.BenTradeStrategyShell = (function(){
     host.appendChild(row);
 
     const sticky = { ...(config.defaultFilters || {}) };
+
+    const setAdvancedEnabled = (enabled) => {
+      const on = !!enabled;
+      state.activeConfig.advancedEnabled = on;
+      fieldWrap.style.display = on ? 'flex' : 'none';
+      btnDefaults.style.display = on ? '' : 'none';
+      btnReset.style.display = on ? '' : 'none';
+      why.style.display = on ? '' : 'none';
+      const sharedToggle = document.getElementById('manualFiltersEnabled');
+      if(sharedToggle){
+        sharedToggle.checked = on;
+      }
+      const sharedPanel = document.getElementById('manualFiltersPanel');
+      if(sharedPanel){
+        sharedPanel.style.display = 'none';
+      }
+    };
 
     const writeFiltersFromInputs = () => {
       const next = { ...sticky };
@@ -410,14 +456,39 @@ window.BenTradeStrategyShell = (function(){
     };
 
     row.querySelectorAll('input,select').forEach((el) => {
+      if(el === advancedToggle) return;
       el.addEventListener('change', writeFiltersFromInputs);
       el.addEventListener('input', writeFiltersFromInputs);
     });
+
+    advancedToggle.addEventListener('change', () => {
+      setAdvancedEnabled(advancedToggle.checked);
+      if(!advancedToggle.checked){
+        state.activeConfig.currentFilters = { ...(config.defaultFilters || {}) };
+      }
+    });
+
+    const sharedAdvancedToggle = document.getElementById('manualFiltersEnabled');
+    if(sharedAdvancedToggle){
+      const label = sharedAdvancedToggle.closest('label');
+      const textSpan = label ? label.querySelector('span') : null;
+      if(textSpan) textSpan.textContent = 'Use Advanced Filters';
+      sharedAdvancedToggle.checked = !!state.activeConfig.advancedEnabled;
+      if(!sharedAdvancedToggle.dataset.shellBound){
+        sharedAdvancedToggle.dataset.shellBound = '1';
+        sharedAdvancedToggle.addEventListener('change', () => {
+          advancedToggle.checked = !!sharedAdvancedToggle.checked;
+          setAdvancedEnabled(advancedToggle.checked);
+        });
+      }
+    }
 
     btnDefaults.addEventListener('click', applyDefaults);
     btnReset.addEventListener('click', clearInputs);
     btnGenerateDefaults.addEventListener('click', () => {
       applyDefaults();
+      advancedToggle.checked = false;
+      setAdvancedEnabled(false);
       const genBtn = document.getElementById('genBtn');
       if(genBtn){
         genBtn.click();
@@ -425,6 +496,7 @@ window.BenTradeStrategyShell = (function(){
     });
 
     applyDefaults();
+    setAdvancedEnabled(!!config.advancedEnabled);
   }
 
   function mount(rootEl, config){
@@ -442,6 +514,7 @@ window.BenTradeStrategyShell = (function(){
       metricColumns: Array.isArray(config.metricColumns) ? config.metricColumns : [],
       filterMode: String(config?.filterMode || ''),
       currentFilters: { ...(config.defaultFilters || {}) },
+      advancedEnabled: isTruthy(config?.advancedEnabled),
     };
 
     rootEl.dataset.strategyId = state.activeConfig.strategyId;
@@ -463,6 +536,21 @@ window.BenTradeStrategyShell = (function(){
 
 window.BenTradePages.initStrategyDashboard = function initStrategyDashboard(rootEl, config){
   return window.BenTradeStrategyShell?.mount?.(rootEl, config || {});
+};
+
+window.BenTradePages.initCreditSpreads = function initCreditSpreads(rootEl){
+  return window.BenTradePages.initStrategyDashboard(rootEl, {
+    strategyId: 'credit_spread',
+    title: 'Credit Spread Analysis',
+    endpoint: {
+      reports: '/api/strategies/credit_spread/reports',
+      generateSse: '/api/strategies/credit_spread/generate',
+    },
+    defaultFilters: {},
+    metricColumns: ['pop', 'ev', 'return_on_risk', 'max_loss', 'iv_rv_ratio', 'rank_score'],
+    filterMode: 'credit-spread',
+    advancedEnabled: false,
+  });
 };
 
 window.BenTradePages.initStrategyCreditPut = function initStrategyCreditPut(rootEl){

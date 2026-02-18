@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.models.schemas import SpreadAnalyzeRequest, SpreadCandidate
-from app.utils.trade_key import trade_key
+from app.utils.trade_key import canonicalize_strategy_id, canonicalize_trade_key, trade_key
 
 router = APIRouter(prefix="/api/workbench", tags=["workbench"])
 
@@ -50,18 +50,39 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _strategy_to_spread(strategy: str) -> str:
+def _strategy_to_spread(strategy: str) -> tuple[str, str, bool]:
     key = str(strategy or "").strip().lower()
+    canonical, alias_mapped, _ = canonicalize_strategy_id(key)
+    target = canonical or key
     mapping = {
-        "credit_put_spread": "put_credit",
-        "credit_call_spread": "call_credit",
-        "debit_put_spread": "put_credit",
-        "debit_call_spread": "call_credit",
+        "put_credit": "put_credit",
+        "call_credit": "call_credit",
+        "put_credit_spread": "put_credit",
+        "call_credit_spread": "call_credit",
+        "put_debit": "put_credit",
+        "call_debit": "call_credit",
     }
-    spread_strategy = mapping.get(key)
+    spread_strategy = mapping.get(target)
     if not spread_strategy:
         raise HTTPException(status_code=400, detail="strategy is under construction for analysis")
-    return spread_strategy
+    return spread_strategy, target, alias_mapped
+
+
+def _emit_alias_event(request: Request, *, strategy_id: str, provided_strategy: str) -> None:
+    if strategy_id == provided_strategy:
+        return
+    try:
+        request.app.state.validation_events.append_event(
+            severity="warn",
+            code="TRADE_STRATEGY_ALIAS_MAPPED",
+            message="Workbench strategy alias mapped to canonical strategy_id",
+            context={
+                "strategy_id": strategy_id,
+                "provided_strategy": provided_strategy,
+            },
+        )
+    except Exception:
+        return
 
 
 def _to_float(value: Any) -> float | None:
@@ -122,10 +143,11 @@ def _input_trade_key(payload: WorkbenchAnalyzeRequest) -> str:
     short_part = parts.get("short_strike", payload.short_strike if payload.short_strike is not None else payload.strike)
     long_part = parts.get("long_strike", payload.long_strike)
 
+    canonical_strategy, _, _ = canonicalize_strategy_id(payload.strategy)
     return trade_key(
         underlying=payload.symbol,
         expiration=payload.expiration,
-        spread_type=payload.strategy,
+        spread_type=canonical_strategy,
         short_strike=short_part,
         long_strike=long_part,
         dte=dte,
@@ -134,7 +156,9 @@ def _input_trade_key(payload: WorkbenchAnalyzeRequest) -> str:
 
 @router.post("/analyze")
 async def analyze_workbench_trade(payload: WorkbenchAnalyzeRequest, request: Request) -> dict:
-    spread_strategy = _strategy_to_spread(payload.strategy)
+    spread_strategy, canonical_strategy, alias_mapped = _strategy_to_spread(payload.strategy)
+    if alias_mapped:
+        _emit_alias_event(request, strategy_id=canonical_strategy, provided_strategy=str(payload.strategy or "").strip().lower())
     normalized_short, normalized_long = _normalize_candidate(
         spread_strategy,
         payload.short_strike,
@@ -159,8 +183,9 @@ async def analyze_workbench_trade(payload: WorkbenchAnalyzeRequest, request: Req
         raise HTTPException(status_code=404, detail="No matching enriched trade found")
 
     trade = dict(enriched[0])
-    trade["strategy"] = payload.strategy
-    trade["spread_type"] = payload.strategy
+    trade["strategy"] = canonical_strategy
+    trade["spread_type"] = canonical_strategy
+    trade["strategy_id"] = canonical_strategy
     trade["expiration"] = payload.expiration
     trade["underlying"] = str(payload.symbol or "").upper()
     trade["underlying_symbol"] = str(payload.symbol or "").upper()
@@ -177,11 +202,12 @@ async def analyze_workbench_trade(payload: WorkbenchAnalyzeRequest, request: Req
     trade["trade_key"] = trade_key(
         underlying=trade.get("underlying") or payload.symbol,
         expiration=payload.expiration,
-        spread_type=payload.strategy,
+        spread_type=canonical_strategy,
         short_strike=short_key_part,
         long_strike=long_key_part,
         dte=trade.get("dte"),
     )
+    trade["trade_key"] = canonicalize_trade_key(trade["trade_key"])
     trade["workbench_key_parts"] = {
         "short_strike": short_key_part,
         "long_strike": long_key_part,
@@ -214,7 +240,7 @@ async def save_workbench_scenario(payload: WorkbenchScenarioCreateRequest, reque
         "name": scenario_name,
         "created_at": _utc_now_iso(),
         "input": payload.input.model_dump(by_alias=True),
-        "trade_key": _input_trade_key(payload.input),
+        "trade_key": canonicalize_trade_key(_input_trade_key(payload.input)),
         "notes": str(payload.notes or ""),
     }
 

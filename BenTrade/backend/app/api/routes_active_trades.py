@@ -304,7 +304,7 @@ def _build_active_trades(positions: list[dict[str, Any]], orders: list[dict[str,
             if basis > 0:
                 unrealized_pct = unrealized / basis
 
-        strategy = "credit_put_spread" if option_type == "put" else "credit_call_spread"
+        strategy = "put_credit_spread" if option_type == "put" else "call_credit_spread"
         dte = _compute_dte(expiration)
         stable_key = trade_key(
             underlying=underlying,
@@ -327,6 +327,7 @@ def _build_active_trades(positions: list[dict[str, Any]], orders: list[dict[str,
                 "trade_id": stable_key,
                 "symbol": underlying,
                 "strategy": strategy,
+                "strategy_id": strategy,
                 "spread_type": strategy,
                 "short_strike": short_leg.get("strike"),
                 "long_strike": long_leg.get("strike"),
@@ -410,6 +411,7 @@ def _build_active_trades(positions: list[dict[str, Any]], orders: list[dict[str,
                 "trade_id": stable_key,
                 "symbol": underlying,
                 "strategy": "single",
+                "strategy_id": "single",
                 "spread_type": "single",
                 "short_strike": pos.get("strike"),
                 "long_strike": None,

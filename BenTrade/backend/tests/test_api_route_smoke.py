@@ -162,3 +162,10 @@ def test_route_presence_and_top_level_shapes() -> None:
     r_snapshot = client.get("/api/risk/snapshot")
     assert r_snapshot.status_code == 200
     assert "exposure" in r_snapshot.json()
+
+    r_data_health = client.get("/api/admin/data-health")
+    assert r_data_health.status_code == 200
+    payload = r_data_health.json()
+    assert "source_health" in payload
+    assert "validation_events" in payload
+    assert "rollups" in payload

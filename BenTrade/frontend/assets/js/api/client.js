@@ -235,6 +235,10 @@ window.BenTradeApi = (function(){
     });
   }
 
+  function getAdminDataHealth(){
+    return jsonFetch('/api/admin/data-health');
+  }
+
   return {
     listReports,
     getReport,
@@ -272,5 +276,6 @@ window.BenTradeApi = (function(){
     listStrategyReports,
     getStrategyReport,
     generateStrategyReport,
+    getAdminDataHealth,
   };
 })();

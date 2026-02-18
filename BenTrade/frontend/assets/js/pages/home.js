@@ -91,7 +91,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     { id: 'butterflies', label: 'Butterflies', route: '#/butterflies' },
   ];
   const PLAYBOOK_ROUTES = {
-    credit_put_spread: '#/strategy-credit-put',
+    credit_put_spread: '#/credit-spread',
     covered_call: '#/income',
     debit_call_spread: '#/debit-spreads',
     iron_condor: '#/strategy-iron-condor',
@@ -99,7 +99,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     cash_secured_put_far_otm: '#/income',
     calendar: '#/calendar',
     hedges: '#/portfolio-risk',
-    short_put_spreads_near_spot: '#/strategy-credit-put',
+    short_put_spreads_near_spot: '#/credit-spread',
     iron_condor_tight: '#/strategy-iron-condor',
     credit_spreads_wider: '#/credit-spread',
     butterflies: '#/butterflies',
@@ -416,8 +416,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
   function routeForOpportunity(idea){
     if(!idea || idea.sourceType === 'stock') return '#/stock-analysis';
     const strategy = String(idea?.strategy || idea?.trade?.spread_type || idea?.trade?.strategy || '').toLowerCase();
-    if(strategy.includes('credit_put')) return '#/strategy-credit-put';
-    if(strategy.includes('credit_call')) return '#/strategy-credit-call';
+    if(strategy.includes('credit_put')) return '#/credit-spread';
+    if(strategy.includes('credit_call')) return '#/credit-spread';
     if(strategy.includes('credit_spread')) return '#/credit-spread';
     if(strategy.includes('iron_condor')) return '#/strategy-iron-condor';
     if(strategy.includes('debit')) return '#/debit-spreads';

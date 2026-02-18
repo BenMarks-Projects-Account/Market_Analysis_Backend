@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from app.utils.trade_key import trade_key
+from app.utils.trade_key import canonicalize_spread_type, canonicalize_strategy_id, canonicalize_trade_key, trade_key
+from app.services.validation_events import ValidationEventsService
 
 
 _EVENT_TO_STATE: dict[str, str] = {
@@ -29,6 +31,7 @@ class TradeLifecycleService:
         self.results_dir = results_dir
         self.results_dir.mkdir(parents=True, exist_ok=True)
         self.ledger_path = self.results_dir / "trade_ledger.jsonl"
+        self.validation_events = ValidationEventsService(results_dir=self.results_dir)
         self._lock = RLock()
 
     @staticmethod
@@ -40,9 +43,46 @@ class TradeLifecycleService:
         if value in (None, ""):
             return None
         try:
-            return float(value)
+            parsed = float(value)
         except (TypeError, ValueError):
             return None
+        if not math.isfinite(parsed):
+            return None
+        return parsed
+
+    @staticmethod
+    def _sanitize_finite(value: Any, *, path: str = "payload", warnings: list[str] | None = None) -> Any:
+        if isinstance(value, bool) or value is None:
+            return value
+        if isinstance(value, (int, float)):
+            parsed = float(value)
+            if math.isfinite(parsed):
+                return value
+            if warnings is not None:
+                warnings.append(f"NON_FINITE:{path}")
+            return None
+        if isinstance(value, list):
+            out: list[Any] = []
+            for index, item in enumerate(value):
+                out.append(
+                    TradeLifecycleService._sanitize_finite(
+                        item,
+                        path=f"{path}[{index}]",
+                        warnings=warnings,
+                    )
+                )
+            return out
+        if isinstance(value, dict):
+            out_dict: dict[str, Any] = {}
+            for key, val in value.items():
+                key_name = str(key)
+                out_dict[key_name] = TradeLifecycleService._sanitize_finite(
+                    val,
+                    path=f"{path}.{key_name}",
+                    warnings=warnings,
+                )
+            return out_dict
+        return value
 
     @staticmethod
     def _normalize_event(value: Any) -> str:
@@ -56,8 +96,6 @@ class TradeLifecycleService:
     @staticmethod
     def _extract_trade_key(value: Any, payload: dict[str, Any]) -> str:
         supplied = str(value or payload.get("trade_key") or payload.get("trade_id") or "").strip()
-        if supplied:
-            return supplied
 
         underlying = payload.get("underlying") or payload.get("underlying_symbol") or payload.get("symbol")
         expiration = payload.get("expiration")
@@ -66,14 +104,57 @@ class TradeLifecycleService:
         long_strike = payload.get("long_strike")
         dte = payload.get("dte")
 
-        return trade_key(
-            underlying=underlying,
-            expiration=expiration,
-            spread_type=spread_type,
-            short_strike=short_strike,
-            long_strike=long_strike,
-            dte=dte,
-        )
+        if any(
+            item not in (None, "")
+            for item in (underlying, expiration, spread_type, short_strike, long_strike, dte)
+        ):
+            return trade_key(
+                underlying=underlying,
+                expiration=expiration,
+                spread_type=spread_type,
+                short_strike=short_strike,
+                long_strike=long_strike,
+                dte=dte,
+            )
+        return canonicalize_trade_key(supplied)
+
+    @staticmethod
+    def _canonicalize_payload(payload: dict[str, Any], warnings: list[str]) -> dict[str, Any]:
+        out = dict(payload)
+
+        raw_spread = out.get("spread_type") or out.get("strategy")
+        canonical_spread, alias_mapped, _ = canonicalize_strategy_id(raw_spread)
+        if canonical_spread:
+            if str(out.get("spread_type") or "").strip().lower() != canonical_spread:
+                warnings.append("SPREAD_TYPE_CANONICALIZED")
+            if alias_mapped:
+                warnings.append("TRADE_STRATEGY_ALIAS_MAPPED")
+            out["spread_type"] = canonical_spread
+            out["strategy"] = canonical_spread
+
+        if out.get("model_evaluation") is None:
+            out["model_status"] = "unavailable"
+            warnings.append("MODEL_UNAVAILABLE")
+
+        return out
+
+    def _emit_validation_event(
+        self,
+        *,
+        severity: str,
+        code: str,
+        message: str,
+        context: dict[str, Any] | None = None,
+    ) -> None:
+        try:
+            self.validation_events.append_event(
+                severity=severity,
+                code=code,
+                message=message,
+                context=context,
+            )
+        except Exception:
+            return
 
     def append_event(
         self,
@@ -90,8 +171,21 @@ class TradeLifecycleService:
         if normalized_event not in _ALLOWED_EVENTS:
             raise ValueError(f"Unsupported lifecycle event: {normalized_event}")
 
+        write_warnings: list[str] = []
         event_payload = payload if isinstance(payload, dict) else {}
+        event_payload = self._canonicalize_payload(event_payload, write_warnings)
+        event_payload = self._sanitize_finite(event_payload, warnings=write_warnings)
+
+        supplied_key = str(trade_key_value or event_payload.get("trade_key") or "").strip()
         resolved_key = self._extract_trade_key(trade_key_value, event_payload)
+        supplied_parts = supplied_key.split("|") if supplied_key else []
+        if len(supplied_parts) == 6:
+            _, alias_mapped, _ = canonicalize_strategy_id(supplied_parts[2])
+            if alias_mapped:
+                write_warnings.append("TRADE_STRATEGY_ALIAS_MAPPED")
+        if supplied_key and supplied_key != resolved_key:
+            write_warnings.append("TRADE_KEY_NON_CANONICAL")
+
         if not resolved_key or resolved_key == "NA|NA|NA|NA|NA|NA":
             raise ValueError("trade_key is required")
 
@@ -107,6 +201,53 @@ class TradeLifecycleService:
                 "note": str(note or ""),
             },
         }
+        if write_warnings:
+            record["warnings"] = sorted(set(write_warnings))
+
+        for warning in write_warnings:
+            if warning == "TRADE_KEY_NON_CANONICAL":
+                self._emit_validation_event(
+                    severity="warn",
+                    code="TRADE_KEY_NON_CANONICAL",
+                    message="Trade key was rewritten to canonical format",
+                    context={
+                        "source": self._normalize_source(source),
+                        "trade_key": resolved_key,
+                        "provided_trade_key": supplied_key,
+                    },
+                )
+            elif warning == "MODEL_UNAVAILABLE":
+                self._emit_validation_event(
+                    severity="warn",
+                    code="MODEL_UNAVAILABLE",
+                    message="Model evaluation unavailable; treated as operational",
+                    context={
+                        "source": self._normalize_source(source),
+                        "trade_key": resolved_key,
+                    },
+                )
+            elif warning == "TRADE_STRATEGY_ALIAS_MAPPED":
+                self._emit_validation_event(
+                    severity="warn",
+                    code="TRADE_STRATEGY_ALIAS_MAPPED",
+                    message="Inbound strategy alias mapped to canonical strategy_id",
+                    context={
+                        "source": self._normalize_source(source),
+                        "trade_key": resolved_key,
+                        "strategy_id": str((event_payload or {}).get("strategy") or (event_payload or {}).get("spread_type") or ""),
+                    },
+                )
+            elif warning.startswith("NON_FINITE:"):
+                self._emit_validation_event(
+                    severity="error",
+                    code="NUMERIC_NONFINITE",
+                    message="Non-finite numeric value was sanitized before ledger persistence",
+                    context={
+                        "source": self._normalize_source(source),
+                        "trade_key": resolved_key,
+                        "path": warning.split(":", 1)[1] if ":" in warning else "payload",
+                    },
+                )
 
         line = json.dumps(record, ensure_ascii=False)
         with self._lock:
@@ -196,7 +337,7 @@ class TradeLifecycleService:
         return [row for row in rows if str(row.get("state") or "").upper() == target]
 
     def get_trade_history(self, trade_key_value: str) -> dict[str, Any]:
-        key = str(trade_key_value or "").strip()
+        key = canonicalize_trade_key(trade_key_value)
         events = [event for event in self.list_events() if str(event.get("trade_key") or "") == key]
         events.sort(key=lambda item: str(item.get("ts") or ""))
 

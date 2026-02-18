@@ -175,8 +175,6 @@
   const routeMeta = {
     "home": { title: "Home Dashboard", group: "Home", subgroup: "Market Overview", description: "Command center" },
     "credit-spread": { title: "Credit Spread Analysis", group: "Analysis", subgroup: "Options", description: "Credit Spreads" },
-    "strategy-credit-put": { title: "Strategy Dashboard • Credit Put", group: "Analysis", subgroup: "Options → Credit Spreads", description: "Put wing" },
-    "strategy-credit-call": { title: "Strategy Dashboard • Credit Call", group: "Analysis", subgroup: "Options → Credit Spreads", description: "Call wing" },
     "strategy-iron-condor": { title: "Strategy Dashboard • Iron Condor", group: "Analysis", subgroup: "Options → Premium Selling", description: "Iron Condor" },
     "iron-condor": { title: "Iron Condor Analysis", group: "Analysis", subgroup: "Options → Premium Selling", description: "Iron Condor" },
     "debit-spreads": { title: "Debit Spread Analysis", group: "Analysis", subgroup: "Options → Directional", description: "Long premium" },
@@ -191,6 +189,8 @@
     "portfolio-risk": { title: "Portfolio Risk Matrix", group: "Risk", subgroup: "Institutional controls", description: "Greeks + scenarios" },
     "trade-lifecycle": { title: "Trade Lifecycle", group: "Lifecycle", subgroup: "Process & journaling", description: "States + history" },
     "strategy-analytics": { title: "Strategy Analytics", group: "Lifecycle", subgroup: "Process & journaling", description: "Performance + attribution" },
+    "admin-data-health": { title: "Data Health", group: "Admin", subgroup: "Operations", description: "Provider + validation health" },
+    "admin/data-workbench": { title: "Data Workbench", group: "Admin", subgroup: "Operations", description: "Trade JSON + card inspection" },
   };
 
   const routes = {
@@ -201,18 +201,8 @@
     },
     "credit-spread": {
       view: "dashboards/credit-spread.view.html",
-      init: () => (window.BenTradePages?.initCreditSpread || window.BenTrade?.initCreditSpread)?.(document.getElementById('view')),
+      init: () => (window.BenTradePages?.initCreditSpreads || window.BenTradePages?.initCreditSpread || window.BenTrade?.initCreditSpread)?.(document.getElementById('view')),
       title: routeMeta["credit-spread"].title
-    },
-    "strategy-credit-put": {
-      view: "dashboards/credit-spread.view.html",
-      init: () => window.BenTradePages?.initStrategyCreditPut?.(document.getElementById('view')),
-      title: routeMeta["strategy-credit-put"].title
-    },
-    "strategy-credit-call": {
-      view: "dashboards/credit-spread.view.html",
-      init: () => window.BenTradePages?.initStrategyCreditCall?.(document.getElementById('view')),
-      title: routeMeta["strategy-credit-call"].title
     },
     "strategy-iron-condor": {
       view: "dashboards/credit-spread.view.html",
@@ -283,6 +273,16 @@
       view: "dashboards/strategy_analytics.html",
       init: () => window.BenTradePages?.initStrategyAnalytics?.(document.getElementById('view')),
       title: routeMeta["strategy-analytics"].title
+    },
+    "admin-data-health": {
+      view: "dashboards/data_health.html",
+      init: () => window.BenTradePages?.initDataHealth?.(document.getElementById('view')),
+      title: routeMeta["admin-data-health"].title
+    },
+    "admin/data-workbench": {
+      view: "dashboards/admin_data_workbench.html",
+      init: () => window.BenTradePages?.initAdminDataWorkbench?.(document.getElementById('view')),
+      title: routeMeta["admin/data-workbench"].title
     }
   };
 
@@ -352,9 +352,11 @@
   function routeFromHash(){
     const hash = location.hash || "#/home";
     if(hash.startsWith('#/')){
-      return (hash.split('/')[1] || 'home').trim();
+      const raw = hash.slice(2);
+      const pathOnly = raw.split('?')[0] || 'home';
+      return pathOnly.trim() || 'home';
     }
-    return hash.replace(/^#/, '').trim() || 'home';
+    return (hash.replace(/^#/, '').split('?')[0] || '').trim() || 'home';
   }
 
   function navigate(){

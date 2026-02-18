@@ -1,21 +1,65 @@
-# BenTrade Web App (No-framework, multi-dashboard structure)
+# BenTrade Frontend
+
+> Last updated: 2026-02-17
+
+Vanilla JS single-page application — no framework, no build step.
 
 ## Run
-Open `index.html` in your browser.
 
-## Structure
-- `index.html` = App shell (header + left nav + iframe router)
-- `dashboards/credit-spread.html` = Your existing dashboard
-- `assets/css/app.css` = Shared theme/styles
-- `assets/js/app.js` = Shared dashboard logic (used by credit-spread.html)
+Served by the FastAPI backend at `http://127.0.0.1:5000/`.
 
-## Add a new dashboard
-1. Copy `dashboards/credit-spread.html` to `dashboards/<new>.html`
-2. Update the title and any unique markup
-3. Add the route in `index.html` (routes map)
-4. Add a nav link with `data-route="<new>"`
+## Architecture
 
+- **SPA Router**: `assets/js/router.js` loads `dashboards/*.view.html` fragments into `#view` via `fetch`.
+- **App Shell**: `index.html` provides header, left nav, and `#view` container.
+- **No build step**: Plain ES modules imported directly in the browser.
 
-## SPA routing (no iframe)
-- `index.html` loads `dashboards/*.view.html` into `#view` via fetch.
-- Add routes in `assets/js/router.js`.
+## Dashboards
+
+| Route | File | Description |
+|---|---|---|
+| `home` | `home.html` | Opportunity Engine — top trades across all strategies |
+| `credit-spread` | `credit-spread.view.html` | Credit spread scanner results |
+| `stock-analysis` | `stock-analysis-dashboard.view.html` | Per-symbol stock analysis |
+| `stock_scanner` | `stock_scanner.html` | Multi-symbol scanner |
+| `active-trades` | `active-trade-dashboard.view.html` | Active positions monitor |
+| `trade_lifecycle` | `trade_lifecycle.html` | Trade preview → submit flow |
+| `portfolio_risk` | `portfolio_risk.html` | Portfolio-level risk dashboard |
+| `risk_capital` | `risk-capital-management-dashboard.view.html` | Risk capital management |
+| `data_health` | `data_health.html` | Data source health + validation events |
+| `trade_workbench` | `trade-testing-workbench.view.html` | Trade testing workbench |
+| `strategy_analytics` | `strategy_analytics.html` | Strategy performance analytics |
+| `admin_data_workbench` | `admin_data_workbench.html` | Data Workbench drill-down |
+
+## JS Module Structure
+
+```
+assets/js/
+├── app.js              # Shared dashboard logic
+├── router.js           # SPA route → view loader
+├── api/                # Backend API client wrappers
+├── pages/              # Per-dashboard JS modules (home.js, etc.)
+├── ui/                 # Reusable UI components (trade_card.js, etc.)
+├── stores/             # Client-side data stores
+├── state/              # Reactive state management
+├── strategies/         # Strategy-specific rendering
+├── metrics/            # Metric display helpers
+└── utils/              # Shared utilities
+```
+
+## Trade Cards
+
+Trade results render as cards via `ui/trade_card.js`. Each card displays:
+- Strategy label, ticker, expiration
+- Strike range with spread width
+- Pill badges: DTE, POP, OI, Volume, Regime
+- Computed metrics table (max profit/loss, EV, RoR, kelly, break-even)
+
+Cards consume the `pills` + `computed_metrics` contract from the backend API.
+
+## Add a New Dashboard
+
+1. Create `dashboards/<name>.view.html` with the view fragment
+2. Add routing entry in `assets/js/router.js`
+3. Add a nav link with `data-route="<name>"` in `index.html`
+4. (Optional) Create `assets/js/pages/<name>.js` for dashboard-specific logic

@@ -1,0 +1,44 @@
+<div class="view-wrap">
+  <div class="admin-workbench-page">
+    <div class="admin-workbench-toolbar">
+      <input id="adminWorkbenchTradeKeyInput" type="text" placeholder="Paste canonical trade_key (e.g. QQQ|2026-03-20|put_credit|510|500|31)" />
+      <button id="adminWorkbenchLoadBtn" class="btn" type="button">Load</button>
+      <button id="adminWorkbenchRecentBtn" class="btn" type="button">Refresh Recent</button>
+      <div id="adminWorkbenchMeta" class="stock-note"></div>
+    </div>
+
+    <div id="adminWorkbenchError" class="admin-workbench-error"></div>
+
+    <div id="adminWorkbenchEmpty" class="admin-workbench-empty" style="display:none;">
+      Enter a trade_key and press Load to inspect the trade JSON and details card.
+      <div id="adminWorkbenchRecent" class="admin-workbench-recent"></div>
+    </div>
+
+    <div id="adminWorkbenchLayout" class="admin-workbench-layout">
+      <section class="admin-workbench-panel">
+        <div class="admin-workbench-panel-head">
+          <div class="admin-workbench-panel-title">Trade JSON</div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <label class="stock-note" style="display:flex; align-items:center; gap:6px; margin:0;">
+              <input id="adminWorkbenchRawToggle" type="checkbox" />
+              Open raw
+            </label>
+            <button id="adminWorkbenchCopyJsonBtn" class="btn" type="button">Copy JSON</button>
+          </div>
+        </div>
+        <div class="admin-workbench-json-wrap">
+          <pre id="adminWorkbenchJson" class="admin-workbench-json">{}</pre>
+        </div>
+      </section>
+
+      <section class="admin-workbench-panel">
+        <div class="admin-workbench-panel-head">
+          <div class="admin-workbench-panel-title">Trade Details</div>
+        </div>
+        <div id="adminWorkbenchTradeCard" class="admin-workbench-card-wrap">
+          <div class="loading">No trade loaded yet.</div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>

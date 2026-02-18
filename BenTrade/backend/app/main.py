@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.api.routes_frontend import router as frontend_router
+from app.api.routes_admin import router as admin_router
 from app.api.routes_health import router as health_router
 from app.api.routes_options import router as options_router
 from app.api.routes_active_trades import router as active_trades_router
@@ -43,6 +44,7 @@ from app.services.stock_analysis_service import StockAnalysisService
 from app.services.spread_service import SpreadService
 from app.services.strategy_service import StrategyService
 from app.services.trade_lifecycle_service import TradeLifecycleService
+from app.services.validation_events import ValidationEventsService
 from app.storage.repository import InMemoryTradingRepository
 from app.trading.paper_broker import PaperBroker
 from app.trading.service import TradingService
@@ -103,6 +105,7 @@ def create_app() -> FastAPI:
     )
     report_service = ReportService(base_data_service=base_data_service, results_dir=results_dir)
     decision_service = DecisionService(results_dir=results_dir)
+    validation_events_service = ValidationEventsService(results_dir=results_dir)
     trading_repository = InMemoryTradingRepository()
     paper_broker = PaperBroker()
     tradier_broker = TradierBroker(
@@ -135,6 +138,7 @@ def create_app() -> FastAPI:
     app.state.recommendation_service = recommendation_service
     app.state.report_service = report_service
     app.state.decision_service = decision_service
+    app.state.validation_events = validation_events_service
     app.state.trading_repository = trading_repository
     app.state.trading_service = trading_service
     app.state.backend_dir = backend_dir
@@ -160,6 +164,7 @@ def create_app() -> FastAPI:
     app.include_router(strategy_analytics_router)
     app.include_router(reports_router)
     app.include_router(decisions_router)
+    app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
     app.include_router(frontend_router)
 
     @app.exception_handler(UpstreamError)

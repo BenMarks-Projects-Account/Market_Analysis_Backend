@@ -66,19 +66,8 @@ window.BenTradePages.initTradeWorkbench = function initTradeWorkbench(rootEl){
     const event = String(eventName || '').toUpperCase();
     if(!event) return;
 
-    const tradeKey = String(
-      trade.trade_key
-      || trade._trade_key
-      || computeTradeKey({
-        symbol: trade.underlying || trade.underlying_symbol,
-        expiration: trade.expiration,
-        strategy: trade.strategy || trade.spread_type,
-        short_strike: trade.short_strike,
-        long_strike: trade.long_strike,
-        dte: trade.dte,
-      })
-      || ''
-    );
+    const tradeKey = String(trade.trade_key || '').trim();
+    if(!tradeKey) return;
 
     const payloadTrade = { ...trade };
     if(event === 'CLOSE'){
@@ -795,7 +784,7 @@ window.BenTradePages.initTradeWorkbench = function initTradeWorkbench(rootEl){
                 long_strike: payloadLegacy.long_strike,
                 contractsMultiplier: payloadLegacy.contractsMultiplier,
               },
-              trade_key: payloadLegacy.preview_trade_key || '',
+              trade_key: payloadLegacy.trade_key || payloadLegacy.preview_trade_key || '',
               note: '',
             };
             hydrateFromInput(legacyHandoff.input);

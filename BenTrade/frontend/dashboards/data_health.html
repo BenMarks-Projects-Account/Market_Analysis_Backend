@@ -1,0 +1,48 @@
+<div class="view-wrap">
+  <div class="stock-card">
+    <div class="stock-toolbar">
+      <div class="stock-inputs">
+        <button id="dhRefreshBtn" class="btn">Refresh</button>
+      </div>
+    </div>
+    <div id="dhError" class="active-error" style="display:none;"></div>
+  </div>
+
+  <div class="stock-card">
+    <div class="stock-card-title">Provider Health</div>
+    <div id="dhProviderTiles" class="stock-summary-grid"></div>
+  </div>
+
+  <div class="stock-layout">
+    <section class="stock-panel stock-main">
+      <div class="stock-card">
+        <div class="stock-card-title">Recent Validation Events</div>
+        <div class="risk-table-wrap">
+          <table class="risk-table">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Severity</th>
+                <th>Code</th>
+                <th>Symbol / Trade Key</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody id="dhEventsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <aside class="stock-panel stock-side">
+      <div class="stock-card">
+        <div class="stock-card-title">Top Validation Codes</div>
+        <div id="dhTopCodes" class="stock-notes"></div>
+      </div>
+      <div class="stock-card">
+        <div class="stock-card-title">Severity Totals</div>
+        <div id="dhSeverityCounts" class="stock-notes"></div>
+      </div>
+    </aside>
+  </div>
+</div>

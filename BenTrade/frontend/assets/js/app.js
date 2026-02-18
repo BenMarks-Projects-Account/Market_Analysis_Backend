@@ -116,6 +116,13 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
     const reportSelect = scope.querySelector('#reportSelect');
   const fileSelect = scope.querySelector('#fileSelect');
   const content = scope.querySelector('#content');
+        const manualFiltersEnabled = scope.querySelector('#manualFiltersEnabled');
+        const manualFiltersPanel = scope.querySelector('#manualFiltersPanel');
+        const tradeCountsBar = scope.querySelector('#tradeCountsBar');
+        const manualFilterPill = scope.querySelector('#manualFilterPill');
+        const mfUseDefaultsBtn = scope.querySelector('#mfUseDefaultsBtn');
+        const mfApplyBtn = scope.querySelector('#mfApplyBtn');
+        const mfResetBtn = scope.querySelector('#mfResetBtn');
     if(!reportSelect || !fileSelect || !content){
         console.warn('[BenTrade] CreditSpread view not mounted (missing #reportSelect/#fileSelect/#content).');
     return;
@@ -150,6 +157,172 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
             localStorage.setItem(UNDERLYING_KEY, symbol || 'ALL');
         }
 
+        const manualFilterDefaults = window.BenTradeStrategyDefaults?.getStrategyDefaults?.('credit_spread') || {
+            dte_min: 7,
+            dte_max: 21,
+            expected_move_multiple: 1.0,
+            width_min: 1,
+            width_max: 5,
+            min_pop: 0.65,
+            min_ev_to_risk: 0.02,
+            max_bid_ask_spread_pct: 1.5,
+            min_open_interest: 500,
+            min_volume: 50,
+        };
+
+        const manualFilterFieldMap = {
+            dte_min: scope.querySelector('#mfDteMin'),
+            dte_max: scope.querySelector('#mfDteMax'),
+            expected_move_multiple: scope.querySelector('#mfExpMoveX'),
+            width_min: scope.querySelector('#mfWidthMin'),
+            width_max: scope.querySelector('#mfWidthMax'),
+            min_pop: scope.querySelector('#mfMinPop'),
+            min_ev_to_risk: scope.querySelector('#mfMinEvRisk'),
+            max_bid_ask_spread_pct: scope.querySelector('#mfMaxSpreadPct'),
+            min_open_interest: scope.querySelector('#mfMinOi'),
+            min_volume: scope.querySelector('#mfMinVol'),
+        };
+
+        let fullTradeList = [];
+        let filteredTradeList = [];
+        let manualFiltersApplied = false;
+        let appliedManualFilters = null;
+
+        function toFilterNumber(value){
+            if(value === null || value === undefined || value === '') return null;
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : null;
+        }
+
+        function readManualFilterInputs(){
+            const values = {};
+            Object.keys(manualFilterFieldMap).forEach((key) => {
+                const input = manualFilterFieldMap[key];
+                values[key] = toFilterNumber(input?.value);
+            });
+            return values;
+        }
+
+        function setManualFilterInputs(values){
+            const source = (values && typeof values === 'object') ? values : {};
+            Object.entries(manualFilterFieldMap).forEach(([key, input]) => {
+                if(!input) return;
+                const value = source[key];
+                input.value = (value === null || value === undefined) ? '' : String(value);
+            });
+        }
+
+        function clearManualFilterInputs(){
+            Object.values(manualFilterFieldMap).forEach((input) => {
+                if(input) input.value = '';
+            });
+        }
+
+        function setManualFilterPanelVisible(enabled){
+            if(!manualFiltersPanel) return;
+            manualFiltersPanel.style.display = enabled ? 'block' : 'none';
+        }
+
+        function computeTradeWidth(trade){
+            const directWidth = toFilterNumber(trade?.width);
+            if(directWidth !== null) return directWidth;
+            const shortStrike = toFilterNumber(trade?.short_strike);
+            const longStrike = toFilterNumber(trade?.long_strike);
+            if(shortStrike !== null && longStrike !== null) return Math.abs(shortStrike - longStrike);
+            return null;
+        }
+
+        function composeFilterStatusText(filters){
+            if(!filters || typeof filters !== 'object') return 'Filters active';
+            const parts = [];
+            if(filters.dte_min !== null || filters.dte_max !== null){
+                parts.push(`DTE ${filters.dte_min ?? '—'}–${filters.dte_max ?? '—'}`);
+            }
+            if(filters.min_pop !== null) parts.push(`POP ≥ ${filters.min_pop}`);
+            if(filters.min_ev_to_risk !== null) parts.push(`EV/Risk ≥ ${filters.min_ev_to_risk}`);
+            if(filters.min_open_interest !== null) parts.push(`OI ≥ ${filters.min_open_interest}`);
+            if(filters.min_volume !== null) parts.push(`Vol ≥ ${filters.min_volume}`);
+            return parts.length ? `Filters active: ${parts.join(', ')}` : 'Filters active';
+        }
+
+        function passesManualFilters(trade, filters){
+            const dte = toFilterNumber(trade?.dte);
+            if(filters.dte_min !== null && (dte === null || dte < filters.dte_min)) return false;
+            if(filters.dte_max !== null && (dte === null || dte > filters.dte_max)) return false;
+
+            const shortStrikeZ = toFilterNumber(trade?.short_strike_z);
+            if(filters.expected_move_multiple !== null && (shortStrikeZ === null || Math.abs(shortStrikeZ) < filters.expected_move_multiple)) return false;
+
+            const width = computeTradeWidth(trade);
+            if(filters.width_min !== null && (width === null || width < filters.width_min)) return false;
+            if(filters.width_max !== null && (width === null || width > filters.width_max)) return false;
+
+            const pop = toFilterNumber(trade?.p_win_used ?? trade?.pop_delta_approx);
+            if(filters.min_pop !== null && (pop === null || pop < filters.min_pop)) return false;
+
+            const evToRisk = toFilterNumber(trade?.ev_to_risk);
+            if(filters.min_ev_to_risk !== null && (evToRisk === null || evToRisk < filters.min_ev_to_risk)) return false;
+
+            const spreadPct = toFilterNumber(trade?.bid_ask_spread_pct);
+            if(filters.max_bid_ask_spread_pct !== null && (spreadPct === null || (spreadPct * 100) > filters.max_bid_ask_spread_pct)) return false;
+
+            const openInterest = toFilterNumber(trade?.open_interest);
+            if(filters.min_open_interest !== null && (openInterest === null || openInterest < filters.min_open_interest)) return false;
+
+            const volume = toFilterNumber(trade?.volume);
+            if(filters.min_volume !== null && (volume === null || volume < filters.min_volume)) return false;
+
+            return true;
+        }
+
+        function isManualFilterEnabled(){
+            return !!manualFiltersEnabled?.checked;
+        }
+
+        function renderCountsAndFilterStatus(totalCount, displayedCount){
+            const total = Number.isFinite(Number(totalCount)) ? Number(totalCount) : 0;
+            const shown = Number.isFinite(Number(displayedCount)) ? Number(displayedCount) : 0;
+
+            if(tradeCountsBar){
+                const lines = [`Trades loaded: ${total}`];
+                if(isManualFilterEnabled() && manualFiltersApplied){
+                    lines.push(`Trades after filters: ${shown}`);
+                }
+                tradeCountsBar.textContent = lines.join(' • ');
+            }
+
+            if(!manualFilterPill) return;
+            if(!(isManualFilterEnabled() && manualFiltersApplied && appliedManualFilters)){
+                manualFilterPill.style.display = 'none';
+                manualFilterPill.innerHTML = '';
+                return;
+            }
+
+            const text = composeFilterStatusText(appliedManualFilters);
+            manualFilterPill.style.display = 'block';
+            manualFilterPill.innerHTML = `
+                <div style="display:inline-flex;align-items:center;gap:10px;padding:6px 10px;border-radius:999px;border:1px solid rgba(0,234,255,0.34);background:rgba(5,18,26,0.75);box-shadow:0 0 10px rgba(0,234,255,0.14);color:rgba(210,248,255,0.96);font-size:12px;">
+                    <span>${text}</span>
+                    <button id="manualFilterClearBtn" class="btn" type="button" style="padding:4px 8px;font-size:11px;">Clear</button>
+                </div>
+            `;
+            const clearBtn = manualFilterPill.querySelector('#manualFilterClearBtn');
+            if(clearBtn){
+                clearBtn.addEventListener('click', () => {
+                    manualFiltersApplied = false;
+                    appliedManualFilters = null;
+                    clearManualFilterInputs();
+                    applyUnderlyingFilter();
+                });
+            }
+        }
+
+        function applyManualFiltersToTrades(trades){
+            const rows = Array.isArray(trades) ? trades : [];
+            if(!(isManualFilterEnabled() && manualFiltersApplied && appliedManualFilters)) return rows;
+            return rows.filter((trade) => passesManualFilters(trade, appliedManualFilters));
+        }
+
         let pendingGeneratedReport = null;
 
         function currentRouteKey(){
@@ -164,8 +337,6 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
 
         function moduleIdFromRoute(trades){
             const route = currentRouteKey();
-            if(route === 'strategy-credit-put') return 'credit_put';
-            if(route === 'strategy-credit-call') return 'credit_call';
             if(route === 'debit-spreads') return 'debit_spreads';
             if(route === 'iron-condor' || route === 'strategy-iron-condor') return 'iron_condor';
             if(route === 'butterflies') return 'butterflies';
@@ -224,8 +395,6 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
 
         function moduleIdForManualReject(trade){
             const route = currentRouteKey();
-            if(route === 'strategy-credit-put') return 'credit_put';
-            if(route === 'strategy-credit-call') return 'credit_call';
             if(route === 'debit-spreads') return 'debit_spreads';
             if(route === 'iron-condor' || route === 'strategy-iron-condor') return 'iron_condor';
             if(route === 'butterflies') return 'butterflies';
@@ -261,18 +430,22 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
         }
 
         function applyUnderlyingFilter(){
-            if(!Array.isArray(window.currentTrades)){
+            if(!Array.isArray(fullTradeList)){
                 displayTrades([]);
+                renderCountsAndFilterStatus(0, 0);
                 return;
             }
             const selected = fileSelect.value || 'ALL';
             setSelectedUnderlying(selected);
-            if(selected === 'ALL'){
-                displayTrades(window.currentTrades);
-                return;
+
+            let tradesByUnderlying = fullTradeList;
+            if(selected !== 'ALL'){
+                tradesByUnderlying = fullTradeList.filter(trade => getTradeUnderlying(trade) === selected);
             }
-            const filtered = window.currentTrades.filter(trade => getTradeUnderlying(trade) === selected);
-            displayTrades(filtered);
+
+            filteredTradeList = applyManualFiltersToTrades(tradesByUnderlying);
+            displayTrades(filteredTradeList);
+            renderCountsAndFilterStatus(fullTradeList.length, filteredTradeList.length);
         }
 
         function setReportsLoading(){
@@ -349,7 +522,14 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
 
         function normalizeReportPayload(payload){
             if(Array.isArray(payload)){
-                return { trades: payload, reportStats: buildStatsFromTrades(payload), diagnostics: {}, sourceHealth: {} };
+                return {
+                    trades: payload,
+                    reportStats: buildStatsFromTrades(payload),
+                    diagnostics: {},
+                    sourceHealth: {},
+                    debugStageCounts: {},
+                    validationWarnings: [],
+                };
             }
             if(payload && typeof payload === 'object'){
                 if(Array.isArray(payload.trades)){
@@ -362,11 +542,19 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
                     const sourceHealth = (payload.source_health && typeof payload.source_health === 'object')
                         ? payload.source_health
                         : ((diagnostics.source_health && typeof diagnostics.source_health === 'object') ? diagnostics.source_health : {});
-                    return { trades: payload.trades, reportStats, diagnostics, sourceHealth };
+
+                    const debugStageCounts = (payload.debug_stage_counts && typeof payload.debug_stage_counts === 'object')
+                        ? payload.debug_stage_counts
+                        : ((diagnostics.debug_stage_counts && typeof diagnostics.debug_stage_counts === 'object') ? diagnostics.debug_stage_counts : {});
+                    const validationWarnings = Array.isArray(payload.validation_warnings)
+                        ? payload.validation_warnings
+                        : (Array.isArray(diagnostics.validation_warnings) ? diagnostics.validation_warnings : []);
+
+                    return { trades: payload.trades, reportStats, diagnostics, sourceHealth, debugStageCounts, validationWarnings };
                 }
-                return { trades: [], reportStats: {}, diagnostics: payload, sourceHealth: {} };
+                return { trades: [], reportStats: {}, diagnostics: payload, sourceHealth: {}, debugStageCounts: {}, validationWarnings: [] };
             }
-            return { trades: [], reportStats: {}, diagnostics: {}, sourceHealth: {} };
+            return { trades: [], reportStats: {}, diagnostics: {}, sourceHealth: {}, debugStageCounts: {}, validationWarnings: [] };
         }
 
         function formatReportName(filename) {
@@ -416,7 +604,7 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
 
                 const response = await fetch(`/api/reports/${filename}`);
                 const payload = await response.json();
-                const { trades, reportStats, diagnostics, sourceHealth } = normalizeReportPayload(payload);
+                const { trades, reportStats, diagnostics, sourceHealth, debugStageCounts, validationWarnings } = normalizeReportPayload(payload);
                 console.log('[ui] loaded trades count:', Array.isArray(trades) ? trades.length : 'N/A', trades);
 
                 function toFloat(x){
@@ -452,10 +640,8 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
                 const filtered = Array.isArray(trades) ? trades.filter(passesQualityGate) : trades;
                 const keyedFiltered = Array.isArray(filtered)
                     ? filtered.map((trade) => {
-                        const tradeKey = tradeCardUi?.buildTradeKey
-                            ? tradeCardUi.buildTradeKey(trade)
-                            : `${String(trade?.underlying || trade?.underlying_symbol || '').toUpperCase()}|${trade?.expiration || ''}|${trade?.spread_type || ''}|${trade?.short_strike || ''}|${trade?.long_strike || ''}|${trade?.dte || ''}`;
-                        return { ...trade, _trade_key: tradeKey };
+                        const tradeKey = String(trade?.trade_key || '').trim();
+                        return tradeKey ? { ...trade, trade_key: tradeKey } : trade;
                     })
                     : filtered;
 
@@ -475,22 +661,29 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
                 }
 
                 const persistedFiltered = Array.isArray(keyedFiltered)
-                    ? keyedFiltered.filter(trade => !persistedRejected.has(String(trade._trade_key || '')))
+                    ? keyedFiltered.filter(trade => !persistedRejected.has(String(trade.trade_key || '')))
                     : keyedFiltered;
 
-                window.currentTrades = persistedFiltered;
+                fullTradeList = Array.isArray(persistedFiltered) ? [...persistedFiltered] : [];
+                filteredTradeList = [...fullTradeList];
+                window.currentTrades = filteredTradeList;
                 window.currentReportFile = filename;
-                if(session?.setCurrentTrades) session.setCurrentTrades(persistedFiltered);
+                if(session?.setCurrentTrades) session.setCurrentTrades(fullTradeList);
                 if(session?.setCurrentReportFile) session.setCurrentReportFile(filename);
                 setSelectedReport(filename);
+
+                manualFiltersApplied = false;
+                appliedManualFilters = null;
+                setManualFilterPanelVisible(false);
+                clearManualFilterInputs();
 
                 if(Array.isArray(trades) && filtered.length !== trades.length){
                     console.log(`[ui] filtered out ${trades.length - filtered.length} rejected trade(s)`);
                 }
 
-                populateUnderlyingOptions(persistedFiltered);
+                populateUnderlyingOptions(fullTradeList);
                 applyUnderlyingFilter();
-                renderDiagnosticPanel({ reportStats, diagnostics, sourceHealth, trades });
+                renderDiagnosticPanel({ reportStats, diagnostics, sourceHealth, trades, debugStageCounts, validationWarnings });
                 recordSessionRunFromPayload(filename, payload, trades);
                 window.BenTradeSourceHealthStore?.fetchSourceHealth?.({ force: true }).catch(() => {});
             } catch (error) {
@@ -513,17 +706,20 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
 
         // --------- Formatters ----------
         function fmtNumber(v, decimals = 2, prefix = '$', suffix = ''){
-            if (v === null || v === undefined || Number.isNaN(Number(v))) return 'N/A';
-            return (prefix || '') + Number(v).toFixed(decimals) + (suffix || '');
+            const numeric = toNumeric(v);
+            if (numeric === null) return 'N/A';
+            return (prefix || '') + numeric.toFixed(decimals) + (suffix || '');
         }
 
         function fmtPercent(v, decimals = 1){
-            if (v === null || v === undefined || Number.isNaN(Number(v))) return 'N/A';
-            return (Number(v) * 100).toFixed(decimals) + '%';
+            const numeric = toNumeric(v);
+            if (numeric === null) return 'N/A';
+            return (numeric * 100).toFixed(decimals) + '%';
         }
 
         function toNumeric(value){
-            if(value === null || value === undefined || value === '') return null;
+            if(value === null || value === undefined || typeof value === 'boolean') return null;
+            if(typeof value === 'string' && value.trim() === '') return null;
             const num = Number(value);
             return Number.isFinite(num) ? num : null;
         }
@@ -654,27 +850,152 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
                     <div class="statValue">${stat.value}</div>
                 </div>
             `).join('');
+
+            renderScanDiagnosticsPanel(payload);
+        }
+
+        function ensureScanDiagnosticsHost(){
+            const fileSelector = scope.querySelector('.file-selector');
+            if(!fileSelector) return null;
+
+            let panel = doc.getElementById('scanDiagnosticsPanel');
+            if(panel) return panel;
+
+            panel = doc.createElement('details');
+            panel.id = 'scanDiagnosticsPanel';
+            panel.style.marginTop = '10px';
+            panel.style.border = '1px solid rgba(0,220,255,0.18)';
+            panel.style.borderRadius = '10px';
+            panel.style.background = 'rgba(3,10,18,0.45)';
+            panel.style.padding = '8px 10px';
+
+            const summary = doc.createElement('summary');
+            summary.textContent = 'Scan Diagnostics';
+            summary.style.cursor = 'pointer';
+            summary.style.fontSize = '12px';
+            summary.style.color = 'rgba(210,248,255,0.96)';
+
+            const body = doc.createElement('div');
+            body.id = 'scanDiagnosticsBody';
+            body.style.marginTop = '8px';
+            body.style.fontSize = '12px';
+            body.style.color = 'rgba(190,236,244,0.94)';
+
+            panel.appendChild(summary);
+            panel.appendChild(body);
+            fileSelector.appendChild(panel);
+            return panel;
+        }
+
+        function renderScanDiagnosticsPanel(payload){
+            const panel = ensureScanDiagnosticsHost();
+            if(!panel) return;
+            const body = doc.getElementById('scanDiagnosticsBody');
+            if(!body) return;
+
+            const stageCounts = (payload.debugStageCounts && typeof payload.debugStageCounts === 'object')
+                ? payload.debugStageCounts
+                : ((payload.diagnostics && typeof payload.diagnostics.debug_stage_counts === 'object') ? payload.diagnostics.debug_stage_counts : {});
+            const warnings = Array.isArray(payload.validationWarnings)
+                ? payload.validationWarnings
+                : (Array.isArray(payload.diagnostics?.validation_warnings) ? payload.diagnostics.validation_warnings : []);
+
+            const stageEntries = Object.entries(stageCounts || {});
+            const warningRows = warnings.slice(-8);
+
+            const stagesHtml = stageEntries.length
+                ? `<div style="display:flex;flex-wrap:wrap;gap:6px;">${stageEntries.map(([stage, count]) => `
+                    <span style="padding:3px 8px;border-radius:999px;border:1px solid rgba(0,234,255,0.28);background:rgba(5,18,26,0.68);color:rgba(210,248,255,0.95);">
+                        ${escapeHtml(stage)}: ${escapeHtml(String(count))}
+                    </span>
+                `).join('')}</div>`
+                : '<div style="opacity:0.8;">No stage counts reported.</div>';
+
+            const warningsHtml = warningRows.length
+                ? `<div style="margin-top:8px;display:grid;gap:6px;">${warningRows.map((row) => {
+                    const code = escapeHtml(String(row?.code || row?.warning_code || 'WARN'));
+                    const message = escapeHtml(String(row?.message || row?.detail || 'Validation warning'));
+                    return `<div style="padding:6px 8px;border:1px solid rgba(255,215,0,0.35);border-radius:8px;background:rgba(46,36,10,0.45);color:rgba(255,235,160,0.96);"><strong>${code}</strong> — ${message}</div>`;
+                }).join('')}</div>`
+                : '<div style="margin-top:8px;opacity:0.8;">No validation warnings.</div>';
+
+            body.innerHTML = `
+                <div style="font-size:11px;opacity:0.85;margin-bottom:4px;">Stage counts</div>
+                ${stagesHtml}
+                <div style="font-size:11px;opacity:0.85;margin-top:10px;">Last validation warnings</div>
+                ${warningsHtml}
+            `;
         }
 
         function contractDollars(trade, contractField, shareField, fallbackField){
-            const contractValue = Number(trade?.[contractField]);
-            if(Number.isFinite(contractValue)) return contractValue;
+            const computed = (trade && typeof trade.computed === 'object') ? trade.computed : {};
+            if(contractField === 'max_profit_per_contract'){
+                const n = toNumeric(computed.max_profit);
+                if(n !== null) return n;
+            }
+            if(contractField === 'max_loss_per_contract'){
+                const n = toNumeric(computed.max_loss);
+                if(n !== null) return n;
+            }
+            if(fallbackField === 'expected_value'){
+                const n = toNumeric(computed.expected_value);
+                if(n !== null) return n;
+            }
 
-            const shareValue = Number(trade?.[shareField]);
-            if(Number.isFinite(shareValue)) return shareValue * 100;
+            const contractValue = toNumeric(trade?.[contractField]);
+            if(contractValue !== null) return contractValue;
 
-            const fallbackValue = Number(trade?.[fallbackField]);
-            if(Number.isFinite(fallbackValue)) return fallbackValue;
+            const shareValue = toNumeric(trade?.[shareField]);
+            if(shareValue !== null) return shareValue * 100;
+
+            const fallbackValue = toNumeric(trade?.[fallbackField]);
+            if(fallbackValue !== null) return fallbackValue;
 
             return null;
         }
 
-        function getProb(trade){
-            // priority: p_win_used -> pop_delta_approx -> null
-            const v = (trade.p_win_used != null) ? trade.p_win_used :
-                      (trade.pop_delta_approx != null) ? trade.pop_delta_approx :
-                      null;
-            return v;
+        function metricNumber(trade, computedKey, ...legacyKeys){
+            const computed = (trade && typeof trade.computed === 'object') ? trade.computed : {};
+            const fromComputed = toNumeric(computed?.[computedKey]);
+            if(fromComputed !== null) return fromComputed;
+            for(const key of legacyKeys){
+                const value = toNumeric(trade?.[key]);
+                if(value !== null) return value;
+            }
+            return null;
+        }
+
+        function runMetricFormattingSanityCheck(){
+            if(window.__benTradeMetricNullSanityChecked) return;
+            window.__benTradeMetricNullSanityChecked = true;
+
+            const emptyTrade = { computed: {}, details: {} };
+            const checks = [
+                fmtNumber(contractDollars(emptyTrade, 'max_profit_per_contract', 'max_profit_per_share', 'max_profit'), 2, '$') === 'N/A',
+                fmtNumber(contractDollars(emptyTrade, 'max_loss_per_contract', 'max_loss_per_share', 'max_loss'), 2, '$') === 'N/A',
+                fmtPercent(metricNumber(emptyTrade, 'pop', 'p_win_used', 'pop_delta_approx', 'pop_approx'), 1) === 'N/A',
+                fmtPercent(metricNumber(emptyTrade, 'return_on_risk', 'return_on_risk'), 1) === 'N/A',
+                fmtNumber(contractDollars(emptyTrade, 'ev_per_contract', 'ev_per_share', 'expected_value'), 2, '$') === 'N/A',
+                fmtPercent(metricNumber(emptyTrade, 'kelly_fraction', 'kelly_fraction'), 1) === 'N/A',
+                fmtPercent(metricNumber(emptyTrade, 'iv_rank', 'iv_rank'), 1) === 'N/A',
+                fmtPercent(metricNumber(emptyTrade, 'strike_dist_pct', 'strike_distance_pct', 'strike_distance_vs_expected_move', 'expected_move_ratio'), 2) === 'N/A',
+            ];
+
+            if(!checks.every(Boolean)){
+                console.warn('[dev-sanity] Missing computed metrics should render as N/A, not 0.');
+            }
+        }
+        runMetricFormattingSanityCheck();
+
+        function detailValue(trade, detailsKey, ...legacyKeys){
+            const details = (trade && typeof trade.details === 'object') ? trade.details : {};
+            const fromDetails = details?.[detailsKey];
+            if(fromDetails !== null && fromDetails !== undefined && String(fromDetails).trim() !== '') return fromDetails;
+            for(const key of legacyKeys){
+                const value = trade?.[key];
+                if(value !== null && value !== undefined && String(value).trim() !== '') return value;
+            }
+            return null;
         }
 
         function formatTradeType(type) {
@@ -683,29 +1004,76 @@ window.BenTrade.initCreditSpread = function initCreditSpread(rootEl){
             if(key === 'call_credit' || key === 'credit_call_spread') return '📈 Call Credit Spread';
             if(key === 'debit_call_spread') return '📈 Call Debit Spread';
             if(key === 'debit_put_spread') return '📉 Put Debit Spread';
+            if(key === 'call_debit') return '📈 Call Debit Spread';
+            if(key === 'put_debit') return '📉 Put Debit Spread';
             if(key === 'iron_condor') return '🦅 Iron Condor';
+            if(key === 'butterfly_debit' || key === 'debit_butterfly') return '🦋 Debit Butterfly';
             if(key === 'debit_call_butterfly') return '🦋 Call Debit Butterfly';
             if(key === 'debit_put_butterfly') return '🦋 Put Debit Butterfly';
             if(key === 'iron_butterfly') return '🦋 Iron Butterfly';
             if(key === 'calendar_call_spread') return '🗓️ Call Calendar Spread';
             if(key === 'calendar_put_spread') return '🗓️ Put Calendar Spread';
-            if(key === 'cash_secured_put') return '💵 Cash Secured Put';
+            if(key === 'cash_secured_put' || key === 'csp') return '💵 Cash Secured Put';
             if(key === 'covered_call') return '📞 Covered Call';
             return String(type || 'Spread');
+        }
+
+        function extractTradeWarning(trade){
+            if(trade?.data_warning) return 'WARN';
+            const warnings = trade?.validation_warnings;
+            if(Array.isArray(warnings) && warnings.length) return 'WARN';
+            if(Array.isArray(trade?.warnings) && trade.warnings.length) return 'WARN';
+            return '';
+        }
+
+        function renderTradePills(trade){
+            const pillsPayload = (trade && typeof trade.pills === 'object') ? trade.pills : {};
+            const strategy = String(pillsPayload.strategy_label || '').trim() || 'Strategy';
+            const dteLabel = String(pillsPayload.dte_label || '').trim();
+            const dteFront = toNumeric(pillsPayload.dte_front);
+            const dteBack = toNumeric(pillsPayload.dte_back);
+            const dte = toNumeric(pillsPayload.dte);
+            const dteText = dteLabel
+                ? dteLabel
+                : (dteFront !== null && dteBack !== null)
+                    ? `DTE ${Math.round(dteFront)}/${Math.round(dteBack)}`
+                    : (dte === null ? 'DTE —' : `DTE ${Math.round(dte)}`);
+            const pop = toNumeric(pillsPayload.pop);
+            const popText = pop === null ? 'POP N/A' : `POP ${pop.toFixed(2)}`;
+            const oi = toNumeric(pillsPayload.oi);
+            const vol = toNumeric(pillsPayload.vol);
+            const liqText = `${oi === null ? 'OI —' : `OI ${Math.round(oi)}`}/${vol === null ? 'Vol —' : `Vol ${Math.round(vol)}`}`;
+            const regime = String(pillsPayload.regime_label || '').trim();
+            const regimeText = regime || 'Regime N/A';
+            const warn = extractTradeWarning(trade);
+
+            const mk = (text, warnPill = false) => `<span style="padding:3px 8px;border-radius:999px;border:1px solid ${warnPill ? 'rgba(255,215,0,0.40)' : 'rgba(0,234,255,0.28)'};background:${warnPill ? 'rgba(46,36,10,0.50)' : 'rgba(5,18,26,0.70)'};color:${warnPill ? 'rgba(255,235,160,0.96)' : 'rgba(210,248,255,0.95)'};font-size:11px;line-height:1;">${escapeHtml(text)}</span>`;
+
+            const pills = [
+                mk(strategy),
+                mk(dteText),
+                mk(popText),
+                mk(liqText),
+                mk(regimeText),
+            ];
+            if(warn) pills.push(mk(warn, true));
+            return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">${pills.join('')}</div>`;
         }
 
         
                 // Display trades in a nice grid
         function displayTrades(trades) {
-            console.log('[ui] displayTrades, trades[0] keys:', trades && trades[0] ? Object.keys(trades[0]) : 'none');
+                    const safeTrades = Array.isArray(trades) ? trades : [];
+                    window.currentTrades = safeTrades;
+                    console.log('[ui] displayTrades, trades[0] keys:', safeTrades && safeTrades[0] ? Object.keys(safeTrades[0]) : 'none');
 
             
             window._collapsed = window._collapsed || {};
             // Default ALL trades to collapsed on first render
-            trades.forEach((_, i) => { if (window._collapsed[i] === undefined) window._collapsed[i] = true; });
+                    safeTrades.forEach((_, i) => { if (window._collapsed[i] === undefined) window._collapsed[i] = true; });
 const html = `
                 <div class="trades-grid">
-                    ${trades.map((trade, idx) => `
+                            ${safeTrades.map((trade, idx) => `
                         <div class="trade-card" data-idx="${idx}">
                             <div class="trade-header trade-header-click" onclick="toggleTrade(${idx})" role="button" aria-label="Toggle trade">
                                 <div class="trade-header-left"><span id="chev-${idx}" class="chev">${window._collapsed && window._collapsed[idx] === false ? "▾" : "▸"}</span></div>
@@ -731,6 +1099,11 @@ const html = `
                                         })()}
                                         <span class="underlying-price">(${fmtNumber(trade.underlying_price,2,'','')})</span>
                                     </div>
+                                    ${renderTradePills(trade)}
+                                    <div style="margin-top:4px;display:flex;align-items:center;gap:6px;opacity:0.76;font-size:10.5px;">
+                                        <span>ID: ${escapeHtml(String(trade.trade_key || trade._trade_key || 'N/A'))}</span>
+                                        <button class="btn" style="padding:1px 5px;font-size:10px;min-height:20px;line-height:1;" onclick="copyTradeId(${idx}); event.stopPropagation();" title="Copy trade ID" aria-label="Copy trade ID">⧉</button>
+                                    </div>
                                     <div class="trade-rank-line">Rank Score: ${fmtPercent((trade.rank_score ?? trade.composite_score), 1)}</div>
                                 </div>
                                 <div class="trade-header-right">
@@ -753,11 +1126,11 @@ const html = `
                                             </div>
                                             <div class="metric">
                                                 <div class="metric-label" data-metric="pop">Probability</div>
-                                                <div class="metric-value neutral">${fmtPercent(trade.p_win_used,1)}</div>
+                                                <div class="metric-value neutral">${fmtPercent(metricNumber(trade, 'pop', 'p_win_used', 'pop_delta_approx', 'pop_approx'),1)}</div>
                                             </div>
                                             <div class="metric">
                                                 <div class="metric-label" data-metric="return_on_risk">Return on Risk</div>
-                                                <div class="metric-value ${trade.return_on_risk != null && trade.return_on_risk > 0.2 ? 'positive' : 'neutral'}">${fmtPercent(trade.return_on_risk,1)}</div>
+                                                <div class="metric-value ${metricNumber(trade, 'return_on_risk', 'return_on_risk') != null && metricNumber(trade, 'return_on_risk', 'return_on_risk') > 0.2 ? 'positive' : 'neutral'}">${fmtPercent(metricNumber(trade, 'return_on_risk', 'return_on_risk'),1)}</div>
                                             </div>
                                             <div class="metric">
                                                 <div class="metric-label" data-metric="ev">Expected Value</div>
@@ -765,31 +1138,31 @@ const html = `
                                             </div>
                                             <div class="metric">
                                                 <div class="metric-label" data-metric="kelly_fraction">Kelly Fraction</div>
-                                                <div class="metric-value ${trade.kelly_fraction != null ? (trade.kelly_fraction > 0 ? 'positive' : 'negative') : 'neutral'}">${fmtPercent(trade.kelly_fraction,1)}</div>
+                                                <div class="metric-value ${metricNumber(trade, 'kelly_fraction', 'kelly_fraction') != null ? (metricNumber(trade, 'kelly_fraction', 'kelly_fraction') > 0 ? 'positive' : 'negative') : 'neutral'}">${fmtPercent(metricNumber(trade, 'kelly_fraction', 'kelly_fraction'),1)}</div>
                                             </div>
                                             <div class="metric">
                                                 <div class="metric-label" data-metric="iv_rank">IV Rank</div>
-                                                <div class="metric-value ${trade.iv_rank != null && trade.iv_rank > 0.5 ? 'positive' : 'neutral'}">${fmtPercent(trade.iv_rank,1)}</div>
+                                                <div class="metric-value ${metricNumber(trade, 'iv_rank', 'iv_rank') != null && metricNumber(trade, 'iv_rank', 'iv_rank') > 0.5 ? 'positive' : 'neutral'}">${fmtPercent(metricNumber(trade, 'iv_rank', 'iv_rank'),1)}</div>
                                             </div>
                                             <div class="metric">
                                                 <div class="metric-label" data-metric="short_strike_z">Short Strike Z</div>
-                                                <div class="metric-value ${trade.short_strike_z != null && trade.short_strike_z > 1 ? 'positive' : 'neutral'}">${fmtNumber(trade.short_strike_z,2,'','')}</div>
+                                                <div class="metric-value ${metricNumber(trade, 'short_strike_z', 'short_strike_z') != null && metricNumber(trade, 'short_strike_z', 'short_strike_z') > 1 ? 'positive' : 'neutral'}">${fmtNumber(metricNumber(trade, 'short_strike_z', 'short_strike_z'),2,'','')}</div>
                                             </div>
                                             <div class="metric">
                                                 <div class="metric-label" data-metric="bid_ask_spread_pct">Bid-Ask %</div>
-                                                <div class="metric-value ${trade.bid_ask_spread_pct != null && trade.bid_ask_spread_pct < 0.1 ? 'positive' : 'neutral'}">${fmtPercent(trade.bid_ask_spread_pct,2)}</div>
+                                                <div class="metric-value ${metricNumber(trade, 'bid_ask_pct', 'bid_ask_spread_pct') != null && metricNumber(trade, 'bid_ask_pct', 'bid_ask_spread_pct') < 0.1 ? 'positive' : 'neutral'}">${fmtPercent(metricNumber(trade, 'bid_ask_pct', 'bid_ask_spread_pct'),2)}</div>
                                             </div>
                                             <div class="metric">
                                                 <div class="metric-label" data-metric="strike_distance_pct">Strike Dist %</div>
-                                                <div class="metric-value">${fmtPercent(trade.strike_distance_pct,2)}</div>
+                                                <div class="metric-value">${fmtPercent(metricNumber(trade, 'strike_dist_pct', 'strike_distance_pct', 'strike_distance_vs_expected_move', 'expected_move_ratio'),2)}</div>
                                             </div>
                                             <div class="metric">
                                                 <div class="metric-label" data-metric="rsi_14">RSI14</div>
-                                                <div class="metric-value ${trade.rsi14 != null && trade.rsi14 > 60 ? 'negative' : 'neutral'}">${fmtNumber(trade.rsi14,1,'','')}</div>
+                                                <div class="metric-value ${metricNumber(trade, 'rsi14', 'rsi14', 'rsi_14') != null && metricNumber(trade, 'rsi14', 'rsi14', 'rsi_14') > 60 ? 'negative' : 'neutral'}">${fmtNumber(metricNumber(trade, 'rsi14', 'rsi14', 'rsi_14'),1,'','')}</div>
                                             </div>
                                             <div class="metric">
                                                 <div class="metric-label" data-metric="realized_vol_20d">RV (20d)</div>
-                                                <div class="metric-value">${fmtPercent(trade.realized_vol_20d,2)}</div>
+                                                <div class="metric-value">${fmtPercent(metricNumber(trade, 'rv_20d', 'realized_vol_20d', 'rv_20d'),2)}</div>
                                             </div>
                                         </div>
                                     </div>
@@ -804,7 +1177,7 @@ const html = `
                                                     if(spreadType === 'iron_condor' || spreadType === 'debit_call_butterfly' || spreadType === 'debit_put_butterfly' || spreadType === 'iron_butterfly'){
                                                         return `${fmtNumber(trade.break_even_low,2,'$')} / ${fmtNumber(trade.break_even_high,2,'$')}`;
                                                     }
-                                                    return fmtNumber(trade.break_even,2,'$');
+                                                    return fmtNumber(detailValue(trade, 'break_even', 'break_even'),2,'$');
                                                 })()}</span>
                                             </div>
                                             ${String(trade.spread_type || trade.strategy || '').toLowerCase() === 'iron_condor' ? `
@@ -841,23 +1214,23 @@ const html = `
                                             ` : ''}
                                             <div class="detail-row">
                                                 <span class="detail-label" data-metric="dte">Days to Expiration</span>
-                                                <span class="detail-value">${trade.dte ?? 'N/A'}</span>
+                                                <span class="detail-value">${detailValue(trade, 'dte', 'dte') ?? 'N/A'}</span>
                                             </div>
                                             <div class="detail-row">
                                                 <span class="detail-label" data-metric="expected_move_1w">Expected Move</span>
-                                                <span class="detail-value">${fmtNumber(trade.expected_move,2,'','')}</span>
+                                                <span class="detail-value">${fmtNumber(detailValue(trade, 'expected_move', 'expected_move', 'expected_move_near'),2,'','')}</span>
                                             </div>
                                             <div class="detail-row">
                                                 <span class="detail-label" data-metric="iv_rv_ratio">IV/RV Ratio</span>
-                                                <span class="detail-value">${fmtNumber(trade.iv_rv_ratio,2,'','')}</span>
+                                                <span class="detail-value">${fmtNumber(detailValue(trade, 'iv_rv_ratio', 'iv_rv_ratio'),2,'','')}</span>
                                             </div>
                                             <div class="detail-row">
                                                 <span class="detail-label" data-metric="trade_quality_score">Trade Quality Score</span>
-                                                <span class="detail-value">${fmtPercent(trade.trade_quality_score,1)}</span>
+                                                <span class="detail-value">${fmtPercent(detailValue(trade, 'trade_quality_score', 'trade_quality_score'),1)}</span>
                                             </div>
                                             <div class="detail-row">
                                                 <span class="detail-label" data-metric="market_regime">Market Regime</span>
-                                                <span class="detail-value">${trade.market_regime || 'N/A'}</span>
+                                                <span class="detail-value">${detailValue(trade, 'market_regime', 'market_regime', 'regime') || 'N/A'}</span>
                                             </div>
                                         </div>
                                     </div>
@@ -876,6 +1249,7 @@ const html = `
                                     <button class="btn btn-exec" onclick="executeTrade(${idx}); event.stopPropagation();">Execute trade</button>
                                     <button class="btn btn-reject" onclick="manualReject(${idx}); event.stopPropagation();">Reject</button>
                                     <button class="btn" onclick="sendToWorkbench(${idx}); event.stopPropagation();">Send to Workbench</button>
+                                    <button class="btn" onclick="openDataWorkbench(${idx}); event.stopPropagation();">Data Workbench</button>
                                     <button class="btn" onclick="lifecycleAction(${idx}, 'WATCHLIST'); event.stopPropagation();">Add to Watchlist</button>
                                     <button class="btn" onclick="lifecycleAction(${idx}, 'OPEN'); event.stopPropagation();">Mark Open</button>
                                     <button class="btn" onclick="lifecycleAction(${idx}, 'CLOSE'); event.stopPropagation();">Close</button>
@@ -892,24 +1266,27 @@ const html = `
                 window.attachMetricTooltips(content);
             }
 
-            trades.forEach((trade, idx) => {
+            safeTrades.forEach((trade, idx) => {
                 const host = doc.getElementById(`tradeNotes-${idx}`);
                 if(!host || !window.BenTradeNotes?.attachNotes) return;
 
-                const helper = window.BenTradeUtils?.tradeKey;
                 const symbol = String(trade.underlying || trade.underlying_symbol || trade.symbol || '').trim().toUpperCase();
                 const expiration = String(trade.expiration || '').trim() || 'NA';
                 const strategy = String(trade.spread_type || trade.strategy || '').trim() || 'NA';
-                const tradeKey = helper?.tradeKey
-                    ? helper.tradeKey({
-                        underlying: symbol,
-                        expiration,
-                        spread_type: strategy,
-                        short_strike: trade.short_strike,
-                        long_strike: trade.long_strike,
-                        dte: trade.dte ?? 'NA',
-                    })
-                    : String(trade._trade_key || trade.trade_key || `${symbol}|${expiration}|${strategy}|${trade.short_strike}|${trade.long_strike}|${trade.dte ?? 'NA'}`);
+                const tradeKey = String(trade.trade_key || '').trim() || (
+                    helper?.tradeKey
+                        ? helper.tradeKey({
+                            underlying: symbol,
+                            expiration,
+                            spread_type: strategy,
+                            short_strike: trade.short_strike,
+                            long_strike: trade.long_strike,
+                            dte: trade.dte ?? 'NA',
+                        })
+                        : ''
+                );
+
+                if(!tradeKey) return;
 
                 window.BenTradeNotes.attachNotes(host, `notes:trade:${tradeKey}`);
             });
@@ -937,6 +1314,12 @@ const html = `
                 const trade = window.currentTrades && window.currentTrades[idx] ? window.currentTrades[idx] : null;
                 if(!trade) return;
 
+                const tradeKey = String(trade.trade_key || '').trim();
+                if(!tradeKey){
+                    showToast('Missing trade ID for workbench handoff');
+                    return;
+                }
+
                 const helper = window.BenTradeUtils?.tradeKey;
                 const symbol = String(trade.underlying || trade.underlying_symbol || trade.symbol || '').trim().toUpperCase();
                 const expirationRaw = trade.expiration;
@@ -946,13 +1329,16 @@ const html = `
                 if(spread === 'call_credit' || spread === 'credit_call_spread') strategy = 'credit_call_spread';
                 else if(spread === 'debit_call_spread') strategy = 'debit_call_spread';
                 else if(spread === 'debit_put_spread') strategy = 'debit_put_spread';
+                else if(spread === 'call_debit') strategy = 'debit_call_spread';
+                else if(spread === 'put_debit') strategy = 'debit_put_spread';
                 else if(spread === 'iron_condor') strategy = 'iron_condor';
+                else if(spread === 'butterfly_debit' || spread === 'debit_butterfly') strategy = 'debit_call_butterfly';
                 else if(spread === 'debit_call_butterfly') strategy = 'debit_call_butterfly';
                 else if(spread === 'debit_put_butterfly') strategy = 'debit_put_butterfly';
                 else if(spread === 'iron_butterfly') strategy = 'iron_butterfly';
                 else if(spread === 'calendar_call_spread') strategy = 'calendar_call_spread';
                 else if(spread === 'calendar_put_spread') strategy = 'calendar_put_spread';
-                else if(spread === 'cash_secured_put') strategy = 'cash_secured_put';
+                else if(spread === 'cash_secured_put' || spread === 'csp') strategy = 'cash_secured_put';
                 else if(spread === 'covered_call') strategy = 'covered_call';
 
                 const shortStrike = Number(trade.short_strike);
@@ -978,29 +1364,18 @@ const html = `
                     contractsMultiplier: Number(trade.contractsMultiplier || 100) || 100,
                 };
 
-                const computedKey = helper?.tradeKey
-                    ? helper.tradeKey({
-                        underlying: input.symbol,
-                        expiration: input.expiration,
-                        spread_type: input.strategy,
-                        short_strike: input.short_strike,
-                        long_strike: input.long_strike,
-                        dte: trade.dte ?? 'NA',
-                    })
-                    : String(trade._trade_key || trade.trade_key || `${input.symbol}|${input.expiration}|${input.strategy}|${input.short_strike}|${input.long_strike}|${trade.dte ?? 'NA'}`);
-
                 const payload = {
                     from: 'credit_spread_analysis',
                     ts: new Date().toISOString(),
                     input,
-                    trade_key: computedKey,
+                    trade_key: tradeKey,
                     note: trade.model_evaluation?.summary || '',
                 };
 
                 if(api?.postLifecycleEvent){
                     api.postLifecycleEvent({
                         event: 'WATCHLIST',
-                        trade_key: computedKey,
+                        trade_key: tradeKey,
                         source: 'scanner',
                         trade,
                         reason: 'send_to_workbench',
@@ -1011,25 +1386,44 @@ const html = `
                 location.hash = '#/trade-testing';
             };
 
+            window.openDataWorkbench = function(idx){
+                const trade = window.currentTrades && window.currentTrades[idx] ? window.currentTrades[idx] : null;
+                if(!trade) return;
+
+                const navigate = tradeCardUi?.openDataWorkbenchByTrade;
+                const ok = typeof navigate === 'function'
+                    ? navigate(trade, {
+                        onMissingTradeKey: () => {
+                            showToast('Trade ID unavailable');
+                            console.warn('[validation][TRADE_ID_UNAVAILABLE] Data Workbench navigation requires trade.trade_key', {
+                                context: 'scanner_trade_card',
+                                trade,
+                            });
+                        },
+                    })
+                    : false;
+
+                if(ok) return;
+
+                const key = String(trade.trade_key || '').trim();
+                if(!key){
+                    showToast('Trade ID unavailable');
+                    console.warn('[validation][TRADE_ID_UNAVAILABLE] Data Workbench navigation requires trade.trade_key', {
+                        context: 'scanner_trade_card',
+                        trade,
+                    });
+                    return;
+                }
+
+                location.hash = `#/admin/data-workbench?trade_key=${encodeURIComponent(key)}`;
+            };
+
             window.lifecycleAction = async function(idx, eventName){
                 const trade = window.currentTrades && window.currentTrades[idx] ? window.currentTrades[idx] : null;
                 if(!trade || !api?.postLifecycleEvent) return;
 
-                const helper = window.BenTradeUtils?.tradeKey;
-                const symbol = String(trade.underlying || trade.underlying_symbol || trade.symbol || '').trim().toUpperCase();
-                const expiration = String(trade.expiration || '').trim() || 'NA';
-                const strategy = String(trade.spread_type || trade.strategy || '').trim() || 'NA';
-
-                const computedKey = helper?.tradeKey
-                    ? helper.tradeKey({
-                        underlying: symbol,
-                        expiration,
-                        spread_type: strategy,
-                        short_strike: trade.short_strike,
-                        long_strike: trade.long_strike,
-                        dte: trade.dte ?? 'NA',
-                    })
-                    : String(trade._trade_key || trade.trade_key || `${symbol}|${expiration}|${strategy}|${trade.short_strike}|${trade.long_strike}|${trade.dte ?? 'NA'}`);
+                const tradeKey = String(trade.trade_key || '').trim();
+                if(!tradeKey) return;
 
                 let reason = '';
                 const payload = { ...trade };
@@ -1045,7 +1439,7 @@ const html = `
                 try{
                     await api.postLifecycleEvent({
                         event: String(eventName || '').toUpperCase(),
-                        trade_key: computedKey,
+                        trade_key: tradeKey,
                         source: 'scanner',
                         trade: payload,
                         reason,
@@ -1058,7 +1452,7 @@ const html = `
                 const trade = window.currentTrades && window.currentTrades[idx] ? window.currentTrades[idx] : null;
                 if(trade && window.currentReportFile && api?.persistRejectDecision){
                     try{
-                        const tradeKey = trade._trade_key || (tradeCardUi?.buildTradeKey ? tradeCardUi.buildTradeKey(trade) : null);
+                        const tradeKey = String(trade.trade_key || '').trim();
                         if(tradeKey){
                             await api.persistRejectDecision({
                                 report_file: window.currentReportFile,
@@ -1073,24 +1467,12 @@ const html = `
 
                 if(trade && api?.postLifecycleEvent){
                     try{
-                        const helper = window.BenTradeUtils?.tradeKey;
-                        const symbol = String(trade.underlying || trade.underlying_symbol || trade.symbol || '').trim().toUpperCase();
-                        const expiration = String(trade.expiration || '').trim() || 'NA';
-                        const strategy = String(trade.spread_type || trade.strategy || '').trim() || 'NA';
-                        const computedKey = helper?.tradeKey
-                            ? helper.tradeKey({
-                                underlying: symbol,
-                                expiration,
-                                spread_type: strategy,
-                                short_strike: trade.short_strike,
-                                long_strike: trade.long_strike,
-                                dte: trade.dte ?? 'NA',
-                            })
-                            : String(trade._trade_key || trade.trade_key || `${symbol}|${expiration}|${strategy}|${trade.short_strike}|${trade.long_strike}|${trade.dte ?? 'NA'}`);
+                        const tradeKey = String(trade.trade_key || '').trim();
+                        if(!tradeKey) return;
 
                         await api.postLifecycleEvent({
                             event: 'REJECT',
-                            trade_key: computedKey,
+                            trade_key: tradeKey,
                             source: 'scanner',
                             trade,
                             reason: 'manual_reject',
@@ -1107,6 +1489,18 @@ const html = `
 
                 const moduleId = moduleIdForManualReject(trade || {});
                 window.BenTradeSessionStatsStore?.recordReject?.(moduleId, 1);
+            };
+
+            window.copyTradeId = async function(idx){
+                const trade = window.currentTrades && window.currentTrades[idx] ? window.currentTrades[idx] : null;
+                const key = String(trade?.trade_key || trade?._trade_key || '').trim();
+                if(!key) return;
+                try{
+                    await navigator.clipboard.writeText(key);
+                    showToast('Trade ID copied');
+                }catch(_err){
+                    showToast('Copy failed');
+                }
             };
 
             window.analyzeTrade = async function(idx){
@@ -1193,6 +1587,50 @@ const html = `
 }
 
         fileSelect.addEventListener('change', applyUnderlyingFilter);
+
+        const manualFilteringAvailable = false;
+        if(manualFiltersPanel) manualFiltersPanel.style.display = 'none';
+        if(manualFilterPill) manualFilterPill.style.display = 'none';
+
+        if(manualFiltersEnabled && manualFilteringAvailable){
+            manualFiltersEnabled.checked = false;
+            setManualFilterPanelVisible(false);
+            manualFiltersEnabled.addEventListener('change', () => {
+                const enabled = isManualFilterEnabled();
+                setManualFilterPanelVisible(enabled);
+                if(!enabled){
+                    manualFiltersApplied = false;
+                    appliedManualFilters = null;
+                    clearManualFilterInputs();
+                }
+                applyUnderlyingFilter();
+            });
+        }
+
+        if(mfUseDefaultsBtn && manualFilteringAvailable){
+            mfUseDefaultsBtn.addEventListener('click', () => {
+                setManualFilterInputs(manualFilterDefaults);
+            });
+        }
+
+        if(mfApplyBtn && manualFilteringAvailable){
+            mfApplyBtn.addEventListener('click', () => {
+                if(!isManualFilterEnabled()) return;
+                appliedManualFilters = readManualFilterInputs();
+                manualFiltersApplied = true;
+                applyUnderlyingFilter();
+            });
+        }
+
+        if(mfResetBtn && manualFilteringAvailable){
+            mfResetBtn.addEventListener('click', () => {
+                clearManualFilterInputs();
+                manualFiltersApplied = false;
+                appliedManualFilters = null;
+                applyUnderlyingFilter();
+            });
+        }
+
         reportSelect.addEventListener('change', (e) => {
             const filename = e.target.value;
             if(!filename){

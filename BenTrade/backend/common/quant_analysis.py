@@ -19,6 +19,8 @@ import sys
 import os
 from datetime import datetime
 
+from app.services.validation_events import emit_validation_event
+
 SpreadType = Literal["put_credit", "call_credit"]
 
 
@@ -256,9 +258,11 @@ class CreditSpread:
         ev = self.expected_value_per_share(p_win=p_win)
         return ev / self.max_loss_per_share
 
-    def annualized_ror(self) -> float:
+    def annualized_ror(self) -> float | None:
         """Annualized return on risk (ROR) assuming max profit over dte (optimistic upper-bound)."""
         self.validate()
+        if self.dte < 10:
+            return None
         return annualized_return(self.return_on_risk, self.dte)
 
     # --- Kelly sizing ---
@@ -360,7 +364,22 @@ class CreditSpread:
                 out["kelly_fraction"] = self.kelly_fraction(p_win=use_p_win_n)
                 out["trade_quality_score"] = self.trade_quality_score(p_win=use_p_win_n, iv_rank_value=iv_rank_value)
 
-        out["annualized_ror_upper_bound"] = self.annualized_ror()
+        annualized = self.annualized_ror()
+        out["annualized_ror_upper_bound"] = annualized
+        if annualized is None and self.dte < 10:
+            out["validation_warnings"] = ["ANNUALIZE_SHORT_DTE"]
+            emit_validation_event(
+                severity="warn",
+                code="ANNUALIZE_SHORT_DTE",
+                message="Skipped annualized_ror_upper_bound for short DTE (<10)",
+                context={
+                    "spread_type": self.spread_type,
+                    "underlying_price": self.underlying_price,
+                    "short_strike": self.short_strike,
+                    "long_strike": self.long_strike,
+                    "dte": self.dte,
+                },
+            )
         return out
 
 
@@ -588,19 +607,43 @@ def classify_market_regime(
     }
 
 
+# Canonical spread-type aliases accepted by enrich_trade / CreditSpread
+_CREDIT_SPREAD_TYPE_MAP: Dict[str, SpreadType] = {
+    "put_credit": "put_credit",
+    "call_credit": "call_credit",
+    "put_credit_spread": "put_credit",
+    "call_credit_spread": "call_credit",
+    "credit_put_spread": "put_credit",
+    "credit_call_spread": "call_credit",
+}
+
+
+def _resolve_credit_spread_type(raw: Optional[str]) -> Optional[SpreadType]:
+    """Map any accepted credit-spread alias to the internal SpreadType literal."""
+    if raw is None:
+        return None
+    return _CREDIT_SPREAD_TYPE_MAP.get(str(raw).strip().lower())
+
+
 def strike_distance_stddev(
-    spread_type: SpreadType,
+    spread_type: str,
     price: float,
     short_strike: float,
     em_1sigma: float,
 ) -> Optional[float]:
     if em_1sigma is None or em_1sigma <= 0:
         return None
-    if spread_type == "put_credit":
+    resolved = _resolve_credit_spread_type(spread_type) or spread_type
+    if resolved == "put_credit":
         return (price - short_strike) / em_1sigma
-    elif spread_type == "call_credit":
+    elif resolved == "call_credit":
         return (short_strike - price) / em_1sigma
     return None
+
+
+import logging as _logging
+
+_enrich_log = _logging.getLogger("bentrade.enrich_trade")
 
 
 def enrich_trade(
@@ -612,9 +655,16 @@ def enrich_trade(
     iv_high: Optional[float] = None,
 ) -> Dict[str, Any]:
     t = dict(trade)
-    spread_type: SpreadType = t.get("spread_type") or t.get("type")
-    if spread_type not in ("put_credit", "call_credit"):
-        raise ValueError("trade must include spread_type: 'put_credit' or 'call_credit'")
+    raw_spread = t.get("spread_type") or t.get("type") or t.get("strategy")
+    spread_type: Optional[SpreadType] = _resolve_credit_spread_type(raw_spread)
+    if spread_type is None:
+        raise ValueError(
+            f"trade must include a recognized credit-spread spread_type "
+            f"(got {raw_spread!r}). Accepted: {sorted(_CREDIT_SPREAD_TYPE_MAP)}"
+        )
+    # Store resolved internal type for CreditSpread usage while keeping
+    # the caller's canonical name in the output dict.
+    t["spread_type"] = raw_spread  # preserve original canonical label
 
     # Preserve ticker/underlying symbol if provided (e.g., 'SPY') so UI can show it
     symbol = t.get('underlying') or t.get('symbol') or t.get('ticker')
@@ -684,6 +734,76 @@ def enrich_trade(
             t["vix"] = vix
 
     t["strike_distance_pct"] = abs(short_strike - price) / price if price != 0 else None
+
+    # ── Core CreditSpread metric computation ──────────────────────────
+    # This was previously missing: enrich_trade only added market-context
+    # features but never computed the CreditSpread-derived metrics that the
+    # UI displays (max_profit, max_loss, break_even, POP, EV, RoR, kelly).
+    long_strike_f = None
+    try:
+        long_strike_f = float(t["long_strike"])
+    except (KeyError, TypeError, ValueError):
+        pass
+
+    net_credit = None
+    try:
+        net_credit = float(t["net_credit"])
+    except (KeyError, TypeError, ValueError):
+        pass
+
+    if long_strike_f is not None and net_credit is not None and net_credit > 0:
+        try:
+            cs = CreditSpread(
+                spread_type=spread_type,
+                underlying_price=price,
+                short_strike=short_strike,
+                long_strike=long_strike_f,
+                net_credit=net_credit,
+                dte=dte,
+                short_delta_abs=float(t["short_delta_abs"]) if t.get("short_delta_abs") is not None else None,
+                implied_vol=iv,
+                realized_vol=rv,
+            )
+            summary = cs.summary(iv_rank_value=t.get("iv_rank"))
+            # Merge computed metrics into the enriched dict.  Never
+            # overwrite values the caller already provided.
+            for key, value in summary.items():
+                if key in t and t[key] is not None:
+                    continue
+                t[key] = value
+
+            # Promote per-share values to per-contract (* multiplier) so
+            # downstream code finds them under the expected keys.
+            multiplier = float(t.get("contractsMultiplier") or t.get("contracts_multiplier") or 100)
+            if t.get("max_profit_per_contract") is None and t.get("max_profit_per_share") is not None:
+                t["max_profit_per_contract"] = t["max_profit_per_share"] * multiplier
+            if t.get("max_loss_per_contract") is None and t.get("max_loss_per_share") is not None:
+                t["max_loss_per_contract"] = t["max_loss_per_share"] * multiplier
+            if t.get("ev_per_contract") is None and t.get("ev_per_share") is not None:
+                t["ev_per_contract"] = t["ev_per_share"] * multiplier
+
+            _enrich_log.debug(
+                "CreditSpread metrics computed  trade_key=%s  max_profit=%.4f  max_loss=%.4f  "
+                "pop=%.4f  ev_per_share=%.4f  ror=%.4f  kelly=%.4f  break_even=%.2f",
+                t.get("trade_key", "?"),
+                t.get("max_profit_per_share") or 0,
+                t.get("max_loss_per_share") or 0,
+                t.get("p_win_used") or t.get("pop_delta_approx") or 0,
+                t.get("ev_per_share") or 0,
+                t.get("return_on_risk") or 0,
+                t.get("kelly_fraction") or 0,
+                t.get("break_even") or 0,
+            )
+        except Exception as exc:
+            _enrich_log.warning("CreditSpread metric computation failed: %s", exc)
+            t.setdefault("data_warning", f"CreditSpread metrics unavailable: {exc}")
+    else:
+        missing = []
+        if long_strike_f is None:
+            missing.append("long_strike")
+        if net_credit is None or (net_credit is not None and net_credit <= 0):
+            missing.append("net_credit>0")
+        _enrich_log.debug("Skipping CreditSpread metrics – missing: %s", ", ".join(missing))
 
     return t
 

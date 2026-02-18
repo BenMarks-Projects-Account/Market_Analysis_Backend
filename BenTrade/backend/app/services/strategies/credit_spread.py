@@ -87,7 +87,7 @@ class CreditSpreadStrategyPlugin:
                 {
                     "short_leg": short_leg,
                     "long_leg": chosen_long,
-                    "strategy": "credit_put_spread",
+                    "strategy": "put_credit_spread",
                     "width": width,
                     "snapshot": snapshot,
                 }
@@ -129,8 +129,8 @@ class CreditSpreadStrategyPlugin:
 
             base_trades.append(
                 {
-                    "spread_type": "put_credit",
-                    "strategy": "credit_put_spread",
+                    "spread_type": "put_credit_spread",
+                    "strategy": "put_credit_spread",
                     "underlying": symbol,
                     "underlying_symbol": symbol,
                     "expiration": expiration,
