@@ -5,12 +5,16 @@ window.BenTradePages.initHome = function initHome(rootEl){
   const scope = rootEl || doc;
   const api = window.BenTradeApi;
 
+  /*
+   * Do NOT add selectors for Source Health, Session Stats, or Strategy Leaderboard here.
+   * Those are GLOBAL-ONLY panels rendered in the global right info bar (index.html / sessionStats.js).
+   */
   const regimeStripEl = scope.querySelector('#homeRegimeStrip');
   const regimeComponentsEl = scope.querySelector('#homeRegimeComponents');
   const playbookChipsEl = scope.querySelector('#homePlaybookChips');
   const scanPresetEl = scope.querySelector('#homeScanPreset');
   const runQueueBtnEl = scope.querySelector('#homeRunQueueBtn');
-  const stopQueueBtnEl = scope.querySelector('#homeStopQueueBtn');
+  const stopQueueBtnEl = scope.querySelector('#homeStopQueueBtn');  // may be null (removed from DOM)
   const queueProgressEl = scope.querySelector('#homeQueueProgress');
   const queueCurrentEl = scope.querySelector('#homeQueueCurrent');
   const queueCountEl = scope.querySelector('#homeQueueCount');
@@ -24,8 +28,6 @@ window.BenTradePages.initHome = function initHome(rootEl){
   const sectorBarsEl = scope.querySelector('#homeSectorBars');
   const scannerOpportunitiesEl = scope.querySelector('#homeScannerOpportunities');
   const symbolUniverseEl = scope.querySelector('#homeSymbolUniverse');
-  const strategyRowsEl = scope.querySelector('#homeStrategyRows');
-  const strategyMiniEl = scope.querySelector('#homeStrategyMini');
   const riskTilesEl = scope.querySelector('#homeRiskTiles');
   const macroTilesEl = scope.querySelector('#homeMacroTiles');
   const strategyPlaybookEl = scope.querySelector('#homeStrategyPlaybook');
@@ -35,18 +37,26 @@ window.BenTradePages.initHome = function initHome(rootEl){
   const refreshingBadgeEl = scope.querySelector('#homeRefreshingBadge');
   const lastUpdatedEl = scope.querySelector('#homeLastUpdated');
   const vixChartEl = scope.querySelector('#homeVixChart');
-  const sourceHealthEl = scope.querySelector('#homeSourceHealth');
   const errorEl = scope.querySelector('#homeError');
   const regimeModelBtnEl = scope.querySelector('#homeRegimeModelBtn');
   const regimeModelOutputEl = scope.querySelector('#homeRegimeModelOutput');
+  const activeTradesCountEl = scope.querySelector('#homeActiveTradesCount');
+  const equityCurveEl = scope.querySelector('#homeEquityCurve');
+  const equityCurveEmptyEl = scope.querySelector('#homeEquityCurveEmpty');
 
-  if(!regimeStripEl || !regimeComponentsEl || !playbookChipsEl || !scanPresetEl || !runQueueBtnEl || !stopQueueBtnEl || !queueProgressEl || !queueCurrentEl || !queueCountEl || !queueSpinnerEl || !queueLogEl || !scanStatusEl || !scanErrorEl || !signalHubEl || !indexTilesEl || !spyChartEl || !sectorBarsEl || !scannerOpportunitiesEl || !strategyRowsEl || !strategyMiniEl || !riskTilesEl || !macroTilesEl || !strategyPlaybookEl || !fullRefreshBtnEl || !refreshBtnEl || !refreshingBadgeEl || !lastUpdatedEl || !vixChartEl || !errorEl){
+  if(!regimeStripEl || !regimeComponentsEl || !playbookChipsEl || !scanPresetEl || !runQueueBtnEl || !queueProgressEl || !queueCurrentEl || !queueCountEl || !queueSpinnerEl || !queueLogEl || !scanStatusEl || !scanErrorEl || !signalHubEl || !indexTilesEl || !spyChartEl || !sectorBarsEl || !scannerOpportunitiesEl || !riskTilesEl || !macroTilesEl || !strategyPlaybookEl || !fullRefreshBtnEl || !refreshBtnEl || !refreshingBadgeEl || !lastUpdatedEl || !vixChartEl || !errorEl){
     return;
   }
 
   let latestOpportunities = [];
   const opportunityModelState = new Map();
   const devLoggedCards = new Set();
+
+  /* ── OE card state (mirrors scanner shell's _expandState + currentTrades) ── */
+  const _oeExpandState = {};
+  let _oeTradesForActions = [];   // parallel array to top[] – raw scannerTrade objects
+  let _oeTopIdeas = [];           // normalized ideas for action handlers
+  const _mapper = window.BenTradeOptionTradeCardModel;
 
   /* ── Symbol Universe Selector (home scan queue) ── */
   let _homeSymbolSelector = null;
@@ -312,7 +322,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
   function normalizeTradeIdea(row, source){
     const symbol = normalizeSymbol(row?.symbol);
-    const score = toNumber(row?.composite_score ?? row?.trade_quality_score ?? row?.score) ?? 0;
+    const score = _fmtLib.normalizeScore(row?.composite_score ?? row?.trade_quality_score ?? row?.score) ?? 0;
     const comp = (row?.computed && typeof row.computed === 'object') ? row.computed : {};
     const ev = toNumber(comp?.expected_value ?? row?.ev ?? row?.edge);
     const pop = toNumber(comp?.pop ?? row?.pop);
@@ -357,7 +367,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     const strategy = String(row?.strategy || raw?.strategy_id || raw?.type || raw?.recommended_strategy || 'idea');
     const strategySuggestsOptions = isLikelyOptionsStrategy(strategy);
     const isStock = !strategySuggestsOptions && (inferredSource === 'stock' || String(row?.source || '').toLowerCase().includes('stock scanner'));
-    const rank = toNumber(row?.rank ?? row?.score ?? row?.rank_score ?? raw?.rank_score ?? raw?.composite_score ?? raw?.trade_quality_score) ?? 0;
+    const rank = _fmtLib.normalizeScore(row?.rank ?? row?.score ?? row?.rank_score ?? raw?.rank_score ?? raw?.composite_score ?? raw?.trade_quality_score) ?? 0;
 
     let ev = null;
     let pop = null;
@@ -476,6 +486,50 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   const escapeHtml = _fmtLib.escapeHtml;
+
+  /**
+   * toScannerTrade — Adapter: converts an Opportunity Engine idea into
+   * the raw trade shape expected by BenTradeOptionTradeCardModel.map().
+   * The mapper reads from .computed, .details, root-level keys, etc.
+   * We shallow-copy to avoid mutating the source idea.
+   *
+   * For stock scanner candidates the raw object has a completely different
+   * shape (no computed/details/legs/strikes).  We bridge it here so that
+   * the 4-tier metric resolver in the card model picks up stock-specific
+   * metrics just like option trades.
+   */
+  function toScannerTrade(idea){
+    const raw = idea.trade && typeof idea.trade === 'object' ? { ...idea.trade } : {};
+    if(!raw.symbol)      raw.symbol      = String(idea.symbol || '');
+    if(!raw.strategy_id) raw.strategy_id = String(idea.strategy || raw.spread_type || raw.strategy || '');
+
+    /* ── Stock candidate bridge ── */
+    const isStock = idea.sourceType === 'stock' || raw.type === 'stock_buy';
+    if(isStock){
+      raw.strategy_id = raw.strategy_id || 'stock_buy';
+      raw.trade_key   = raw.trade_key || raw.idea_key || `${raw.symbol}|STOCK|stock_scanner`;
+      raw.underlying_price = raw.underlying_price ?? raw.price ?? null;
+      if(!raw.trend) raw.trend = raw.trend || idea.trend || '';
+
+      /* Surface stock scores into 'computed' so the 4-tier resolver
+         finds them at tier-1 (same as option trades). */
+      const m = raw.metrics && typeof raw.metrics === 'object' ? raw.metrics : {};
+      raw.computed = Object.assign({}, raw.computed || {}, {
+        rank_score:       raw.composite_score ?? null,
+        trend_score:      raw.trend_score ?? null,
+        momentum_score:   raw.momentum_score ?? null,
+        volatility_score: raw.volatility_score ?? null,
+        pullback_score:   raw.pullback_score ?? null,
+        catalyst_score:   raw.catalyst_score ?? null,
+        rsi14:            m.rsi14 ?? null,
+        ema20:            m.ema20 ?? null,
+        sma50:            m.sma50 ?? null,
+        iv_rv_ratio:      m.iv_rv_ratio ?? null,
+      });
+    }
+
+    return raw;
+  }
 
   function opportunityKey(idea, idx){
     const symbol = normalizeSymbol(idea?.symbol || idea?.trade?.symbol || idea?.trade?.underlying || 'N/A');
@@ -706,54 +760,49 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
   const metricValueOrMissing = _card.metricValueOrMissing;
 
-  function renderSourceHealth(snapshot){
-    if(!sourceHealthEl){
-      return;
-    }
-    const entries = Object.entries(snapshot || {});
-    if(!entries.length){
-      sourceHealthEl.innerHTML = '<div class="stock-note">No source snapshot available.</div>';
-      return;
-    }
-    const nameMap = { finnhub: 'Finnhub', polygon: 'Polygon', tradier: 'Tradier', fred: 'FRED' };
-    sourceHealthEl.innerHTML = entries.map(([key, value]) => {
-      const status = String(value?.status || '').toLowerCase();
-      const dotClass = status === 'ok' ? 'status-green' : (status === 'down' ? 'status-red' : 'status-yellow');
-      const label = nameMap[String(key || '').toLowerCase()] || String(key || '').toUpperCase();
-      const message = String(value?.message || 'No message');
-      return `
-        <div class="diagnosticRow">
-          <span class="diagnosticLabel">${label}</span>
-          <span class="status-wrap" tabindex="0">
-            <span class="status-dot ${dotClass}"></span>
-            <span class="status-tooltip">${message}</span>
-          </span>
-        </div>
-      `;
-    }).join('');
-  }
+  /* renderSourceHealth — REMOVED: Source Health is global-only (index.html / source_health.js) */
 
   function renderChart(svgEl, history, options){
-    const points = Array.isArray(history) ? history.map((row) => toNumber(row?.close)).filter((v) => v !== null) : [];
+    const rows = Array.isArray(history) ? history : [];
+    const points = rows.map((row) => toNumber(row?.close)).filter((v) => v !== null);
     if(!points.length){
       svgEl.innerHTML = '';
       return;
     }
 
+    /* ── Parse dates (if present) ── */
+    const dates = rows.map((row) => {
+      if(!row?.date) return null;
+      const d = new Date(row.date + 'T00:00:00');
+      return isNaN(d.getTime()) ? null : d;
+    });
+    const hasDates = dates.length === points.length && dates[0] !== null && dates[dates.length - 1] !== null;
+
     const width = 800;
     const height = 220;
-    const margin = { top: 12, right: 12, bottom: 22, left: 52 };
+    const margin = { top: 12, right: 12, bottom: hasDates ? 36 : 22, left: 52 };
     const plotW = width - margin.left - margin.right;
     const plotH = height - margin.top - margin.bottom;
     const min = Math.min(...points);
     const max = Math.max(...points);
     const span = Math.max(max - min, 0.0001);
 
-    const xFor = (index) => margin.left + (index / Math.max(points.length - 1, 1)) * plotW;
     const yFor = (value) => margin.top + (1 - ((value - min) / span)) * plotH;
+
+    /* ── X scale ── */
+    let xFor;
+    if(hasDates){
+      const t0 = dates[0].getTime();
+      const t1 = dates[dates.length - 1].getTime();
+      const tSpan = Math.max(t1 - t0, 1);
+      xFor = (index) => margin.left + ((dates[index].getTime() - t0) / tSpan) * plotW;
+    } else {
+      xFor = (index) => margin.left + (index / Math.max(points.length - 1, 1)) * plotW;
+    }
 
     const path = points.map((value, index) => `${index === 0 ? 'M' : 'L'} ${xFor(index).toFixed(2)} ${yFor(value).toFixed(2)}`).join(' ');
 
+    /* ── Y ticks / grid ── */
     const yTicks = Array.from({ length: 4 }, (_, idx) => {
       const ratio = idx / 3;
       const value = max - (span * ratio);
@@ -763,11 +812,53 @@ window.BenTradePages.initHome = function initHome(rootEl){
     const yGrid = yTicks.map((tick) => `<line x1="${margin.left}" y1="${tick.y.toFixed(2)}" x2="${(width - margin.right).toFixed(2)}" y2="${tick.y.toFixed(2)}" stroke="rgba(0,234,255,0.12)" stroke-width="1"></line>`).join('');
     const yLabels = yTicks.map((tick) => `<text x="${(margin.left - 8).toFixed(2)}" y="${(tick.y + 3).toFixed(2)}" text-anchor="end" fill="rgba(215,251,255,0.85)" font-size="10">${Number(tick.value).toFixed(2)}</text>`).join('');
 
+    /* ── X ticks (weekly, only when dates are available) ── */
+    let xGrid = '';
+    let xLabels = '';
+    if(hasDates){
+      const t0 = dates[0].getTime();
+      const t1 = dates[dates.length - 1].getTime();
+      const tSpan = Math.max(t1 - t0, 1);
+      const xPixel = (ms) => margin.left + ((ms - t0) / tSpan) * plotW;
+
+      /* Find first Monday on or after the start date */
+      const start = new Date(dates[0]);
+      const dayOfWeek = start.getDay();          // 0=Sun … 6=Sat
+      const daysToMon = dayOfWeek === 0 ? 1 : (dayOfWeek <= 1 ? (1 - dayOfWeek) : (8 - dayOfWeek));
+      const firstMon = new Date(start);
+      firstMon.setDate(firstMon.getDate() + daysToMon);
+
+      /* Determine tick interval — keep ~6-12 visible labels */
+      const totalWeeks = Math.round((t1 - t0) / (7 * 86400000));
+      let weekStep = 1;
+      if(totalWeeks > 36) weekStep = 4;
+      else if(totalWeeks > 18) weekStep = 2;
+
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const tickLines = [];
+      const tickLabels = [];
+      let cursor = new Date(firstMon);
+      while(cursor.getTime() <= t1){
+        const px = xPixel(cursor.getTime());
+        if(px >= margin.left && px <= width - margin.right){
+          const yBottom = height - margin.bottom;
+          tickLines.push(`<line x1="${px.toFixed(2)}" y1="${margin.top}" x2="${px.toFixed(2)}" y2="${yBottom.toFixed(2)}" stroke="rgba(0,234,255,0.08)" stroke-width="1"></line>`);
+          tickLabels.push(`<text x="${px.toFixed(2)}" y="${(yBottom + 14).toFixed(2)}" text-anchor="middle" fill="rgba(215,251,255,0.7)" font-size="9">${monthNames[cursor.getMonth()]} ${cursor.getDate()}</text>`);
+        }
+        cursor.setDate(cursor.getDate() + 7 * weekStep);
+      }
+      xGrid = tickLines.join('');
+      xLabels = tickLabels.join('');
+    }
+
+    svgEl.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svgEl.innerHTML = `
       ${yGrid}
+      ${xGrid}
       <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${(height - margin.bottom).toFixed(2)}" stroke="rgba(0,234,255,0.45)" stroke-width="1"></line>
       <line x1="${margin.left}" y1="${(height - margin.bottom).toFixed(2)}" x2="${(width - margin.right).toFixed(2)}" y2="${(height - margin.bottom).toFixed(2)}" stroke="rgba(0,234,255,0.45)" stroke-width="1"></line>
       ${yLabels}
+      ${xLabels}
       <path d="${path}" fill="none" stroke="${options?.stroke || 'rgba(0,234,255,0.95)'}" stroke-width="3"></path>
     `;
   }
@@ -894,7 +985,21 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
   function renderScannerOpportunities(ideas){
     latestOpportunities = Array.isArray(ideas) ? ideas.slice() : [];
-    const top = latestOpportunities.slice(0, 5).map((idea, idx) => {
+    const tc = _card;              // BenTradeTradeCard building blocks
+    const TOP = window.BenTradeScannerOrchestrator?.TOP_N || 9;
+
+    /* ── Playbook-weighted re-sort (does NOT alter raw scanner scores) ── */
+    const pbScorer = window.BenTradePlaybookScoring;
+    let sortedIdeas = latestOpportunities;
+    let pbNormalized = null;
+    if(pbScorer && (_latestPlaybookPayload || _latestRegimePayload)){
+      pbNormalized = pbScorer.normalizePlaybook(_latestPlaybookPayload, _latestRegimePayload);
+      if(pbNormalized.primary.size > 0 || pbNormalized.avoid.size > 0){
+        sortedIdeas = pbScorer.sortByPlaybook(latestOpportunities, pbNormalized);
+      }
+    }
+
+    const top = sortedIdeas.slice(0, TOP).map((idea, idx) => {
       const normalized = normalizeOpportunity(idea, idea?.sourceType);
       logOpportunityInstrumentationOnce(normalized, idx);
       const key = opportunityKey(normalized, idx);
@@ -908,6 +1013,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
         };
       }
       normalized._opKey = key;
+      /* Carry playbook metadata (from sortByPlaybook's _pb annotation) for UI */
+      if(idea._pb) normalized._pb = idea._pb;
       return normalized;
     });
 
@@ -929,68 +1036,97 @@ window.BenTradePages.initHome = function initHome(rootEl){
       return;
     }
 
-    /* ── Populated state — up to 5 pick cards ── */
-    scannerOpportunitiesEl.innerHTML = `
-      <div class="home-opp-count stock-note">${top.length} Pick${top.length !== 1 ? 's' : ''}</div>
-    ` + top.map((idea, idx) => {
-      const isStock = idea.sourceType === 'stock';
-      const typeBadge = isStock ? 'Stock Buy' : 'Option Trade';
-      const badgeClass = isStock ? 'home-opp-badge-stock' : 'home-opp-badge-option';
+    /* ── Populated state — render scanner-style trade cards ── */
+    /* Build scannerTrade objects (parallel to top[]) for mapper-based actions.
+       Also enforce the tradeKey safety check here.
+       
+       ROOT CAUSE FIX: pbIndicator was appended as a sibling div AFTER the
+       .trade-card div.  Both became separate CSS Grid children of
+       .home-scanner-opportunities, doubling the grid item count and causing
+       every other visual slot to be a tiny pb-indicator instead of a card
+       (the "alternating missing cards" bug).  Fix: inject pbIndicator
+       INSIDE the .trade-card wrapper by replacing its closing </div>. */
+    _oeTradesForActions = [];
+    _oeTopIdeas = [];
+    const cardsHtml = [];
+    const seenTradeKeys = new Set();
 
-      /* Thesis / summary bullets — up to 3 */
-      const thesis = Array.isArray(idea.trade?.thesis) ? idea.trade.thesis.slice(0, 3) : [];
-      const bulletsHtml = thesis.length
-        ? thesis.map((t) => `<li>${escapeHtml(String(t))}</li>`).join('')
-        : '<li>No thesis available</li>';
+    top.forEach((idea, rawIdx) => {
+      const scannerTrade = toScannerTrade(idea);
+      const tradeKey = String(scannerTrade.trade_key || '').trim();
 
-      /* Key metrics row */
-      let metricsHtml = '';
-      if(isStock){
-        metricsHtml = `
-          <span>Price ${metricValueOrMissing(idea.key_metrics?.price, (v) => fmt(v, 2), '—')}</span>
-          <span>RSI ${metricValueOrMissing(idea.key_metrics?.rsi14, (v) => fmt(v, 1), '—')}</span>
-          <span>Trend ${idea.key_metrics?.trend || '—'}</span>
-          <span>IV/RV ${metricValueOrMissing(idea.key_metrics?.iv_rv_ratio, (v) => fmt(v, 2), '—')}${idea.key_metrics?.iv_rv_flag ? ` (${idea.key_metrics.iv_rv_flag})` : ''}</span>
-        `;
-      } else {
-        metricsHtml = `
-          <span>EV ${metricValueOrMissing(idea.ev, (v) => fmtSigned(v, 2), metricMissingReason(idea.sourceType, 'ev'))}</span>
-          <span>POP ${metricValueOrMissing(idea.pop, (v) => fmtPct(v, 1), metricMissingReason(idea.sourceType, 'pop'))}</span>
-          <span>RoR ${metricValueOrMissing(idea.ror, (v) => fmtPct(v, 1), metricMissingReason(idea.sourceType, 'ror'))}</span>
-        `;
+      /* Safety check: exclude cards with no tradeKey and log a warning */
+      if(!tradeKey && idea.sourceType !== 'stock'){
+        console.warn('[OE] Excluding opportunity without trade_key:', idea.symbol, idea.strategy);
+        return;
       }
 
-      /* Model summary */
-      const modelText = escapeHtml(formatModelSummary(idea.model || { status: 'not_run' }));
+      /* Deduplicate by tradeKey — first occurrence wins (highest adjusted score) */
+      const dedupeKey = tradeKey || `${idea.symbol}|${idea.strategy}|${rawIdx}`;
+      if(seenTradeKeys.has(dedupeKey)){
+        console.warn('[OE] Skipping duplicate trade_key:', dedupeKey);
+        return;
+      }
+      seenTradeKeys.add(dedupeKey);
 
-      /* Trade key for copy */
-      const ideaTradeKey = String(idea.trade?.trade_key || idea.trade?._trade_key || `${idea.symbol || 'N/A'}|NA|${idea.strategy || 'idea'}|NA|NA|NA`);
-      const copyBtnHtml = _card?.copyTradeKeyButton ? _card.copyTradeKeyButton(ideaTradeKey) : '';
+      const cardIdx = _oeTradesForActions.length;
+      _oeTradesForActions.push(scannerTrade);
+      _oeTopIdeas.push(idea);
 
-      return `
-        <div class="home-opp-card" data-idx="${idx}">
-          <div class="home-opp-card-head">
-            <div class="home-opp-card-title">
-              <span class="qtPill">${idea.symbol}</span>
-              <span class="home-opp-badge ${badgeClass}">${typeBadge}</span>
-            </div>
-            <div class="home-opp-card-score">${fmt(idea.rank, 1)}</div>
-          </div>
-          <div class="trade-key-wrap" style="margin:2px 0 4px;"><span class="trade-key-label" style="font-size:10px;color:rgba(230,251,255,0.5);font-family:monospace;word-break:break-all;">${escapeHtml(ideaTradeKey)}</span>${copyBtnHtml}</div>
-          <ul class="home-opp-card-bullets">${bulletsHtml}</ul>
-          <div class="home-opp-card-metrics">${metricsHtml}</div>
-          <div class="home-opp-card-model stock-note">Model: ${modelText}</div>
-          <div class="home-opp-card-actions">
-            <button type="button" class="btn qtButton" data-action="analysis" data-idx="${idx}">Open Analysis</button>
-            <button type="button" class="btn qtButton" data-action="workbench" data-idx="${idx}">Send to Testing Workbench</button>
-            ${!isStock ? `<button type="button" class="btn qtButton" data-action="execute" data-idx="${idx}">Execute</button>` : ''}
-            ${!isStock ? `<button type="button" class="btn qtButton" data-action="run-model" data-idx="${idx}">${idea.model?.status === 'running' ? 'Running…' : 'Run Model'}</button>` : ''}
-          </div>
-        </div>
-      `;
-    }).join('');
+      let cardHtml = tc.renderFullCard(scannerTrade, cardIdx, {
+        strategyHint: String(idea.strategy || scannerTrade.strategy_id || '').toLowerCase(),
+        rankOverride: _fmtLib.normalizeScore(idea.rank ?? idea.score) ?? null,
+        modelStatus:  idea.model?.status === 'running' ? 'running' : null,
+        expandState:  _oeExpandState,
+      });
 
-    /* ── Action button wiring ── */
+      /* Playbook lane indicator — injected INSIDE the .trade-card wrapper
+         (before its closing </div>) so it stays a single CSS Grid child. */
+      if(idea._pb && pbScorer){
+        const pb = idea._pb;
+        const summary = pbScorer.reasonSummary(pb);
+        if(summary){
+          const laneColors = {
+            primary: 'rgba(0,220,120,0.85)',
+            secondary: 'rgba(0,180,255,0.85)',
+            avoid: 'rgba(255,90,90,0.85)',
+            neutral: 'rgba(180,180,200,0.65)',
+          };
+          const color = laneColors[pb.lane] || laneColors.neutral;
+          const laneLabel = (pb.lane || 'neutral').charAt(0).toUpperCase() + (pb.lane || 'neutral').slice(1);
+          const dot = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};margin-right:5px;vertical-align:middle;"></span>`;
+          const pbIndicator = `<div class="pb-lane-indicator" style="font-size:10px;color:${color};padding:2px 10px 4px;line-height:1.3;" title="${_fmtLib.escapeHtml(summary)}">${dot}${_fmtLib.escapeHtml(laneLabel)}${pb.multiplier !== 1 ? ' \u00B7 Adj ' + pb.adjustedScore.toFixed(1) + '%' : ''}</div>`;
+          /* Insert before the final </div> of .trade-card */
+          cardHtml = cardHtml.replace(/<\/div>\s*$/, pbIndicator + '</div>');
+        }
+      }
+      cardsHtml.push(cardHtml);
+    });
+
+    if(!cardsHtml.length){
+      scannerOpportunitiesEl.innerHTML = `
+        <div class="home-opp-empty">
+          <div class="home-opp-empty-icon" aria-hidden="true">📡</div>
+          <div class="home-opp-empty-text">No valid opportunities (all missing trade keys).</div>
+        </div>`;
+      return;
+    }
+
+    scannerOpportunitiesEl.innerHTML = `
+      <div class="home-opp-count stock-note">${cardsHtml.length} Pick${cardsHtml.length !== 1 ? 's' : ''}</div>
+      ${cardsHtml.join('')}
+    `;
+
+    /* ── Action wiring — mirrors strategy_dashboard_shell.js exactly ── */
+
+    /* Collapse/expand persistence via <details> toggle */
+    scannerOpportunitiesEl.querySelectorAll('details.trade-card-collapse').forEach((details) => {
+      details.addEventListener('toggle', () => {
+        const tk = details.dataset.tradeKey || details.closest('.trade-card')?.dataset?.tradeKey;
+        if(tk) _oeExpandState[tk] = details.open;
+      });
+    });
+
     /* Copy trade key buttons */
     scannerOpportunitiesEl.querySelectorAll('[data-copy-trade-key]').forEach((copyBtn) => {
       copyBtn.addEventListener('click', (e) => {
@@ -1000,79 +1136,86 @@ window.BenTradePages.initHome = function initHome(rootEl){
       });
     });
 
+    /* Action buttons — use mapper model + buildTradeActionPayload (identical to scanner shell) */
     scannerOpportunitiesEl.querySelectorAll('button[data-action]').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
         const action = String(btn.getAttribute('data-action') || '');
-        const idx = Number(btn.getAttribute('data-idx'));
-        const idea = top[idx];
-        if(!idea) return;
+        const cardEl = btn.closest('.trade-card');
+        const cardIdx = cardEl ? parseInt(cardEl.dataset.idx, 10) : -1;
+        const trade = _oeTradesForActions[cardIdx];
+        const idea = _oeTopIdeas[cardIdx];
+        if(!trade || !idea) return;
 
-        if(action === 'analysis'){
-          openAnalysisForOpportunity(idea);
-          return;
-        }
-
-        if(action === 'run-model'){
-          if(idea.sourceType === 'stock') return;
-          const opKey = String(idea?._opKey || opportunityKey(idea, idx));
-          runModelForOpportunity(idea, (modelState) => {
-            opportunityModelState.set(opKey, modelState);
-            renderScannerOpportunities(latestOpportunities);
-          }, 'home_opportunities').catch(() => {});
-          return;
-        }
+        /* Map through canonical mapper — identical to scanner shell */
+        const strategyHint = String(idea.strategy || trade.strategy_id || '').toLowerCase();
+        const model = _mapper ? _mapper.map(trade, strategyHint) : null;
+        const payload = (_mapper && model) ? _mapper.buildTradeActionPayload(model) : {};
 
         if(action === 'execute'){
-          openExecuteForOpportunity(idea);
+          if(window.BenTradeExecutionModal && window.BenTradeExecutionModal.open){
+            window.BenTradeExecutionModal.open(trade, payload);
+          } else if(typeof window.executeTrade === 'function'){
+            window.executeTrade(trade);
+          }
+          return;
+        }
+
+        if(action === 'reject'){
+          const body = {
+            trade_key: payload.tradeKey || '',
+            symbol: payload.symbol || '',
+            strategy: payload.strategyId || '',
+            action: 'reject',
+          };
+          fetch('/api/decisions/reject', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          }).then(res => {
+            if(res.ok){
+              if(cardEl) cardEl.classList.add('manually-rejected');
+              btn.disabled = true;
+              btn.textContent = 'Rejected';
+            }
+          }).catch(() => {});
+          return;
+        }
+
+        if(action === 'model-analysis'){
+          const qs = new URLSearchParams({
+            symbol: payload.symbol || '',
+            strategy: payload.strategyId || '',
+            trade_key: payload.tradeKey || '',
+          });
+          window.location.hash = '#/admin/model-analysis?' + qs.toString();
           return;
         }
 
         if(action === 'workbench'){
-          sendToWorkbenchForOpportunity(idea, '#/trade-testing');
+          if(payload.tradeKey){
+            window.location.hash = '#/admin/data-workbench?trade_key=' + encodeURIComponent(payload.tradeKey);
+          } else if(tc.openDataWorkbenchByTrade){
+            tc.openDataWorkbenchByTrade(trade);
+          }
+          return;
+        }
+
+        if(action === 'data-workbench'){
+          if(tc.openDataWorkbenchByTrade){
+            tc.openDataWorkbenchByTrade(trade);
+          } else if(payload.tradeKey){
+            window.location.hash = '#/admin/data-workbench?trade_key=' + encodeURIComponent(payload.tradeKey);
+          }
           return;
         }
       });
     });
   }
 
-  function renderStrategyBoard(sessionState){
-    const byModule = sessionState?.by_module || {};
-    const rows = [
-      ['Credit Put', byModule.credit_put],
-      ['Credit Call', byModule.credit_call],
-      ['Debit Spreads', byModule.debit_spreads],
-      ['Iron Condor', byModule.iron_condor],
-      ['Butterflies', byModule.butterflies],
-      ['Calendar', byModule.calendar],
-      ['Income', byModule.income],
-      ['Stock Scanner', byModule.stock_scanner],
-    ];
-
-    strategyRowsEl.innerHTML = rows.map(([label, row]) => {
-      const quality = toNumber(row?.avg_quality_score);
-      const qualityText = quality === null ? 'N/A' : `${quality.toFixed(1)}%`;
-      const rorVal = toNumber(row?.avg_return_on_risk);
-      const rorText = rorVal === null ? 'N/A' : fmtPct(rorVal, 1);
-      return `
-      <tr>
-        <td>${label}</td>
-        <td>${qualityText}</td>
-        <td>${rorText}</td>
-        <td>${Number(row?.accepted_trades || 0)}</td>
-      </tr>
-    `;
-    }).join('');
-
-    const mini = rows.map(([label, row]) => {
-      const score = toNumber(row?.avg_quality_score) ?? 0;
-      return { label, score };
-    });
-    strategyMiniEl.innerHTML = mini.map((row) => {
-      // avg_quality_score is on 0–100 scale; clamp directly for bar width
-      const width = Math.max(2, Math.round(Math.min(Math.max(row.score, 0), 100)));
-      return `<div class="home-mini-row"><span>${row.label}</span><div class="home-mini-track"><div class="home-mini-fill" style="width:${width}%;"></div></div></div>`;
-    }).join('');
-  }
+  /* renderStrategyBoard — REMOVED: Strategy Leaderboard is global-only (index.html / sessionStats.js) */
 
   function renderSignalHub(universePayload){
     const items = Array.isArray(universePayload?.items) ? universePayload.items : [];
@@ -1092,12 +1235,12 @@ window.BenTradePages.initHome = function initHome(rootEl){
     const targetRows = [bySymbol.get('SPY'), ...sectorRows].filter(Boolean);
     signalHubEl.innerHTML = targetRows.map((row) => {
       const symbol = String(row?.symbol || 'N/A').toUpperCase();
-      const score = Number((row?.composite || {}).score || 0);
+      const score = _fmtLib.normalizeScore((row?.composite || {}).score) ?? 0;
       const label = String((row?.composite || {}).label || 'Neutral');
       const positives = (Array.isArray(row?.signals) ? row.signals : []).filter((item) => item?.value).slice(0, 4);
       return `
         <div class="home-signal-row">
-          <div class="home-signal-head"><span class="qtPill">${symbol}</span> <span class="stock-note">${label} ${score.toFixed(1)}</span></div>
+          <div class="home-signal-head"><span class="qtPill">${symbol}</span> <span class="stock-note">${label} ${score.toFixed(1)}%</span></div>
           <div class="home-signal-chips">
             ${positives.length ? positives.map((item) => `<span class="qtPill" data-metric="${String(item.id || '')}">${String(item.id || '').replaceAll('_', ' ')}</span>`).join('') : '<span class="stock-note">No active signals</span>'}
           </div>
@@ -1133,6 +1276,70 @@ window.BenTradePages.initHome = function initHome(rootEl){
       <div class="statTile"><div class="statLabel">Capital at Risk</div><div class="statValue">$${fmt(capitalAtRisk, 0)}</div></div>
       <div class="statTile"><div class="statLabel">Risk Utilization</div><div class="statValue">${utilization === null ? '0.00%' : `${(utilization * 100).toFixed(2)}%`}</div></div>
     `;
+  }
+
+  /* ── Active Trades per-strategy bubble counts ── */
+  function renderActiveTradesCount(activeTradesPayload){
+    if(!activeTradesCountEl) return;
+    const trades = Array.isArray(activeTradesPayload?.active_trades) ? activeTradesPayload.active_trades : [];
+    const buckets = {
+      credit_put: 0, credit_call: 0, debit_spreads: 0, iron_condor: 0,
+      butterflies: 0, calendar: 0, income: 0, stock_scanner: 0,
+    };
+    trades.forEach(t => {
+      const sid = (t?.strategy_id || t?.strategy || '').toLowerCase().replace(/[\s-]/g, '_');
+      if(sid in buckets) buckets[sid]++;
+      else if(sid.includes('put')) buckets.credit_put++;
+      else if(sid.includes('call') && !sid.includes('iron')) buckets.credit_call++;
+    });
+    const labels = {
+      credit_put: 'Credit Put', credit_call: 'Credit Call', debit_spreads: 'Debit Spreads',
+      iron_condor: 'Iron Condor', butterflies: 'Butterflies', calendar: 'Calendar',
+      income: 'Income', stock_scanner: 'Stocks',
+    };
+    const total = trades.length;
+    activeTradesCountEl.innerHTML = `<div class="statTile"><div class="statLabel">Total</div><div class="statValue">${total}</div></div>`
+      + Object.keys(buckets).map(k =>
+        `<div class="statTile"><div class="statLabel">${labels[k]}</div><div class="statValue">${buckets[k]}</div></div>`
+      ).join('');
+  }
+
+  /* renderSessionStats — REMOVED: Session Stats is global-only (index.html / sessionStats.js) */
+
+  /* ── Equity Curve ── */
+  function renderEquityCurve(activeTradesPayload){
+    if(!equityCurveEl) return;
+    // Build a best-effort equity series from active trades sorted by open date
+    const trades = Array.isArray(activeTradesPayload?.active_trades) ? activeTradesPayload.active_trades : [];
+    let equitySeries = [];
+    if(trades.length >= 2){
+      // Sort by opened_at / created_at ascending, accumulate P&L
+      const sorted = trades
+        .map(t => {
+          const comp = (t?.computed && typeof t.computed === 'object') ? t.computed : {};
+          const pnl = toNumber(comp?.unrealized_pnl ?? comp?.pnl ?? t?.pnl) || 0;
+          const dateStr = t?.opened_at || t?.created_at || '';
+          return { date: dateStr, pnl };
+        })
+        .filter(r => r.date)
+        .sort((a, b) => a.date.localeCompare(b.date));
+      if(sorted.length >= 2){
+        let cumulative = 0;
+        equitySeries = sorted.map(r => {
+          cumulative += r.pnl;
+          return { close: cumulative };
+        });
+      }
+    }
+    if(equitySeries.length >= 2){
+      if(equityCurveEmptyEl) equityCurveEmptyEl.style.display = 'none';
+      equityCurveEl.style.display = '';
+      renderChart(equityCurveEl, equitySeries, { stroke: 'rgba(126,247,184,0.92)' });
+    } else {
+      // Show empty state
+      if(equityCurveEmptyEl) equityCurveEmptyEl.style.display = '';
+      equityCurveEl.style.display = 'none';
+    }
   }
 
   function renderMacro(macro, spySummary){
@@ -1237,12 +1444,6 @@ window.BenTradePages.initHome = function initHome(rootEl){
     const data = (payload.data && typeof payload.data === 'object') ? payload.data : {};
     const meta = (payload.meta && typeof payload.meta === 'object') ? payload.meta : {};
 
-    const sessionState = data.sessionStats || window.BenTradeSessionStatsStore?.getState?.() || {
-      total_candidates: 0,
-      accepted_trades: 0,
-      by_module: {},
-    };
-
     const regimePayload = data.regime || {};
     const spySummary = data.spy || emptySummary('SPY');
     const vixSummary = data.vix || emptySummary('VIXY');
@@ -1254,7 +1455,6 @@ window.BenTradePages.initHome = function initHome(rootEl){
     const ideas = Array.isArray(data.opportunities) ? data.opportunities : [];
     const indexSummaries = data.indexSummaries || Object.fromEntries(INDEX_SYMBOLS.map((symbol) => [symbol, emptySummary(symbol)]));
     const sectorSummaries = data.sectors || {};
-    const sourceHealth = data.sourceHealth || regimePayload?.source_health || spySummary?.source_health || riskSnapshot?.source_health || {};
 
     // Stash regime + playbook for on-demand model analysis (auto-refresh safe)
     _latestRegimePayload = regimePayload;
@@ -1270,10 +1470,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
     } else {
       renderPlaybookFallback('Playbook unavailable');
     }
-    renderStrategyBoard(sessionState);
+    /* Source Health / Session Stats / Strategy Leaderboard are global-only — not rendered here */
     renderRisk(riskSnapshot, activeTradesPayload);
+    renderActiveTradesCount(activeTradesPayload);
+    renderEquityCurve(activeTradesPayload);
     renderMacro(macro, spySummary);
-    renderSourceHealth(sourceHealth);
 
     renderChart(spyChartEl, spySummary?.history || [], { stroke: 'rgba(0,234,255,0.95)' });
     renderChart(vixChartEl, vixSummary?.history || [], { stroke: 'rgba(255,199,88,0.95)' });
@@ -1304,8 +1505,6 @@ window.BenTradePages.initHome = function initHome(rootEl){
         opportunities: [],
         indexSummaries: Object.fromEntries(INDEX_SYMBOLS.map((symbol) => [symbol, emptySummary(symbol)])),
         sectors: {},
-        sessionStats: window.BenTradeSessionStatsStore?.getState?.() || { total_candidates: 0, accepted_trades: 0, by_module: {} },
-        sourceHealth: {},
       },
       meta: { last_success_at: null, errors: [], partial: false },
     };
@@ -1512,7 +1711,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
       fn: () => {
         const orchestrator = window.BenTradeScannerOrchestrator;
         if(!orchestrator) return Promise.reject(new Error('Scanner orchestrator unavailable'));
+        const currentLevel = String(scanPresetEl?.value || 'balanced');
         return orchestrator.runScannerSuite({
+          filterLevel: currentLevel,
           logFn: pushLog,
           onStepComplete: ({ label, ok, tradeCount }) => {
             if(overlay?.isOpen?.()){
@@ -1720,6 +1921,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     }
 
     const preset = String(scanPresetEl.value || 'balanced');
+    const filterLevel = preset;   // dropdown now selects filter strictness level
     const scannerIds = orchestrator.presetToScannerIds(preset);
     const total = scannerIds.length;
     const runId = ++queueState.runId;
@@ -1730,14 +1932,14 @@ window.BenTradePages.initHome = function initHome(rootEl){
     queueState.isRunning = true;
     queueState.stopRequested = false;
     runQueueBtnEl.disabled = true;
-    stopQueueBtnEl.disabled = false;
+    if(stopQueueBtnEl) stopQueueBtnEl.disabled = false;
     scanPresetEl.disabled = true;
     setScanError('');
     setScanStatus('');
     queueLogLines.splice(0, queueLogLines.length);
     renderQueueLog();
 
-    appendQueueLog(`Queue preset: ${preset.replaceAll('_', ' ')} (${total} scanners)`);
+    appendQueueLog(`Queue level: ${preset} (${total} scanners)`);
     setQueueProgress({ current: 'Starting scanner suite...', completed: 0, total, running: true });
 
     try{
@@ -1746,6 +1948,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
       const result = await orchestrator.runScannerSuite({
         scannerIds,
         symbols: selectedSymbols.length ? selectedSymbols : undefined,
+        filterLevel,
         logFn: (text) => {
           appendQueueLog(text);
           pushLog(text);
@@ -1798,7 +2001,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
         queueState.isRunning = false;
         queueState.stopRequested = false;
         runQueueBtnEl.disabled = false;
-        stopQueueBtnEl.disabled = true;
+        if(stopQueueBtnEl) stopQueueBtnEl.disabled = true;
         scanPresetEl.disabled = false;
       }
     }
@@ -2025,9 +2228,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
     });
   });
 
-  stopQueueBtnEl.addEventListener('click', () => {
-    stopScanQueue();
-  });
+  if(stopQueueBtnEl){
+    stopQueueBtnEl.addEventListener('click', () => {
+      stopScanQueue();
+    });
+  }
 
   resetQueueProgress();
 

@@ -659,14 +659,21 @@ class StockAnalysisService:
         ticker = str(symbol or "SPY").strip().upper() or "SPY"
         notes: list[str] = []
 
-        history_all = await self.base_data_service.get_prices_history(ticker, lookback_days=365)
-        history_all = [float(x) for x in (history_all or []) if x is not None]
+        dated_history_all = await self.base_data_service.get_prices_history_dated(ticker, lookback_days=365)
+        # Filter out any None/invalid close values
+        dated_history_all = [
+            bar for bar in (dated_history_all or [])
+            if bar.get("close") is not None
+        ]
+        # Flat close list for indicator calculations
+        history_all = [float(bar["close"]) for bar in dated_history_all]
 
         if not history_all:
             notes.append("Price history unavailable from primary/fallback providers.")
 
         points = self._range_to_points(range_key)
         history = history_all[-points:] if history_all else []
+        dated_history = dated_history_all[-points:] if dated_history_all else []
 
         last = history[-1] if history else None
         prev_close = history[-2] if len(history) > 1 else None
@@ -769,7 +776,7 @@ class StockAnalysisService:
                 "range_high": max(history) if history else None,
                 "range_low": min(history) if history else None,
             },
-            "history": [{"idx": idx, "close": value} for idx, value in enumerate(history)],
+            "history": [{"date": bar.get("date"), "close": bar["close"]} for bar in dated_history],
             "indicators": {
                 "rsi14": rsi14,
                 "sma20": sma20,

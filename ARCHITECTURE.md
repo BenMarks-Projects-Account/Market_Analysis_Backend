@@ -1,6 +1,6 @@
 # BenTrade Architecture Snapshot
 
-> Last updated: 2026-02-18
+> Last updated: 2026-02-19
 
 ## High-Level Pipeline
 
@@ -45,9 +45,29 @@ Company data (Finnhub)   ──┘              │
 4. Backend routes to paper or live broker (`paper_broker.py` or `tradier_broker.py`).
 
 ### 5) Homepage Opportunity Engine
-1. `home.js` loads latest reports from each strategy source.
-2. Trades are merged, normalized via `normalizeOpportunity()`, and ranked.
-4. Metrics resolved from `computed_metrics`, top-level fields, or `key_metrics` (multi-fallback).
+1. `scannerOrchestrator.js` runs scanners sequentially with per-scanner timeout + retry/backoff.
+2. Results normalized via `normalizeResult()`, sorted by score, top 9 returned.
+3. `home.js` renders opportunity cards using the shared `OptionTradeCardModel` mapper + `TradeCard` building blocks — same pattern as scanner dashboards.
+4. Stock candidates get a compact card variant; option trades get the full config-driven card.
+5. Retry logic: up to 3 retries with exponential backoff (2s → 4s → 8s) for 429 / 5xx errors.
+6. Per-level timeout multipliers: strict 0.8×, conservative 1.0×, balanced 1.0×, wide 1.4×.
+
+### 5c) Playbook-Weighted OE Scoring
+- **Module**: `frontend/assets/js/stores/playbookScoring.js` (`window.BenTradePlaybookScoring`)
+- Applies regime-playbook penalties to raw scanner scores for OE **selection order only**.
+- Raw scanner scores are **never mutated**; the adjustment is used purely for ranking.
+- **Penalty multipliers**: Avoid → ×0.60, Not in playbook → ×0.85, Primary/Secondary match → ×1.00.
+- **Tie-breaking** (within 0.1 tolerance): Primary lane > Secondary lane > higher liquidity > higher RoR.
+- **Data source**: Enriched playbook (`_latestPlaybookPayload` from `/api/playbook`) preferred; falls back to regime `suggested_playbook`.
+- **Strategy aliasing**: ALIAS_MAP bridges scanner IDs (e.g. `credit_spread`, `calendars`) to playbook IDs (e.g. `put_credit_spread`, `calendar`).
+- **UI**: Small colored lane indicator below each OE card (Primary=green, Secondary=blue, Avoid=red, Neutral=gray) with hover tooltip showing base→adjusted score.
+- **Tests**: `backend/tests/test_playbook_scoring.js` (43 assertions, Node.js-runnable).
+
+### 5b) Home Dashboard Layout
+- **Top**: Market Regime + Playbook (full-width)
+- **Main**: Single-column data rows (Index+Macro, SPY+VIX charts, Sectors+Signal Hub, Portfolio Snapshot with Equity Curve)
+- **Bottom**: Opportunity Engine (full-width, 3-wide card grid at desktop, responsive 2→1 columns)
+- **Note**: Source Health, Session Stats, and Strategy Leaderboard are GLOBAL-ONLY panels rendered in the persistent right info bar (`index.html` `<aside class="diagnostic-sidebar">`). Home Dashboard does NOT render these.
 
 
 All strategy identifiers go through `canonicalize_strategy_id()` in `app/utils/trade_key.py`.
@@ -204,6 +224,8 @@ SPA with no framework — vanilla JS modules.
 | Strategy card config | `frontend/assets/js/config/strategy_card_config.js` |
 | Option trade card model | `frontend/assets/js/models/option_trade_card_model.js` |
 | Home / Opportunity Engine | `frontend/assets/js/pages/home.js` |
+| Scanner Orchestrator | `frontend/assets/js/stores/scannerOrchestrator.js` |
+| Scanner Filter Profiles | `frontend/assets/js/strategies/profiles.js` |
 | Strategy dashboard shell | `frontend/assets/js/pages/strategy_dashboard_shell.js` |
 | API client | `frontend/assets/js/api/client.js` |
 | Strategy defaults | `frontend/assets/js/strategies/defaults.js` |

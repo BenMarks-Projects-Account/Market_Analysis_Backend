@@ -246,6 +246,146 @@ window.BenTradeTradeCard = (function(){
   }
 
   /* ================================================================
+   *  renderFullCard — Canonical trade card renderer.
+   *
+   *  Produces the exact same collapsible trade card HTML used on
+   *  scanner pages.  Both scanner dashboards and Opportunity Engine
+   *  call this single function — never duplicate this rendering.
+   *
+   *  @param {object} rawTrade      — raw API trade object
+   *  @param {number} idx           — card index (used in data-idx)
+   *  @param {object} [opts]
+   *  @param {string}  [opts.strategyHint]  — strategy ID hint for mapper
+   *  @param {object}  [opts.expandState]   — { tradeKey: boolean }
+   *  @param {boolean} [opts.debugTrades]   — show debug warnings
+   *  @param {string}  [opts.modelStatus]   — 'running' → "Running…" label
+   *  @param {number|null} [opts.rankOverride] — fallback rank when trade
+   *                                             has no rank_score field
+   *  @returns {string} HTML
+   * ================================================================ */
+  function renderFullCard(rawTrade, idx, opts){
+    var o = opts || {};
+    var mapper = window.BenTradeOptionTradeCardModel;
+    if(!mapper){
+      return '<div class="trade-card" data-idx="' + idx + '" style="margin-bottom:14px;display:flex;flex-direction:column;">'
+        + '<div class="trade-body" style="padding:8px;font-size:12px;color:var(--muted);">Mapper unavailable</div></div>';
+    }
+
+    var fmtLib = window.BenTradeUtils.format;
+    var esc = fmtLib.escapeHtml || function(v){ return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
+    var fmtNum = fmtLib.num;
+    var expandState = o.expandState || {};
+    var debugTrades = !!o.debugTrades;
+
+    /* 1. Map through canonical mapper */
+    var model = mapper.map(rawTrade, o.strategyHint || '');
+    var h = model.header;
+
+    /* 2. Rank badge */
+    var rankDesc = { key: 'rank_score', computedKey: 'rank_score', rootFallbacks: ['composite_score'] };
+    var rankVal = mapper.resolveMetric(rawTrade, rankDesc);
+    if(rankVal === null && o.rankOverride != null) rankVal = o.rankOverride;
+    var rankBadge = rankVal !== null
+      ? '<span class="trade-rank-badge" style="font-size:14px;font-weight:700;color:var(--accent-cyan);background:rgba(0,220,255,0.08);border:1px solid rgba(0,220,255,0.24);border-radius:8px;padding:3px 10px;white-space:nowrap;">Score ' + fmtLib.formatScore(rankVal, 1) + '</span>'
+      : '';
+
+    /* 3. Header badges */
+    var symbolBadge = model.symbol ? pill(model.symbol) : '';
+    var dteBadge    = model.dte !== null ? pill(model.dte + ' DTE') : '';
+
+    var strikes = [
+      model.shortStrike !== null ? 'Short ' + model.shortStrike : null,
+      model.longStrike  !== null ? 'Long ' + model.longStrike   : null,
+      model.width       !== null ? 'Width ' + model.width        : null,
+    ].filter(Boolean).join(' \u00B7 ');
+
+    var premiumText = model.netPremium !== null
+      ? model.netPremiumLabel + ': $' + fmtNum(model.netPremium, 2)
+      : '';
+
+    /* 3a. Subtitle parts — build from available data */
+    var subtitleParts = [];
+    if(h.expiration) subtitleParts.push(esc(h.expiration) + (model.dte !== null ? ' (' + model.dte + ' DTE)' : ''));
+    if(strikes) subtitleParts.push(esc(strikes));
+    if(premiumText) subtitleParts.push(esc(premiumText));
+    /* Fallback for equity / stock trades: show underlying price + trend */
+    if(!subtitleParts.length && model.underlyingPrice !== null){
+      subtitleParts.push('$' + fmtNum(model.underlyingPrice, 2));
+    }
+    if(!subtitleParts.length && !h.expiration && !strikes){
+      /* Stock / no-leg trade — pull trend from raw data */
+      var rawTrend = rawTrade.trend || (rawTrade.computed && rawTrade.computed.trend) || '';
+      if(rawTrend) subtitleParts.push(esc(String(rawTrend)));
+    }
+    var subtitleText = subtitleParts.join(' \u00B7 ');
+
+    var tradeKeyDisplay = model.tradeKey
+      ? '<span class="trade-key-wrap"><span class="trade-key-label" style="font-size:10px;color:rgba(230,251,255,0.5);font-family:monospace;word-break:break-all;">'
+        + esc(model.tradeKey) + '</span>' + copyTradeKeyButton(model.tradeKey) + '</span>'
+      : '';
+
+    /* 4. Core metrics (only resolved values) */
+    var resolvedCore = model.coreMetrics.filter(function(m){ return m.value !== null; });
+    var coreGridItems = resolvedCore.map(function(m){
+      return { label: m.label, value: m.display, cssClass: m.tone, dataMetric: m.dataMetric };
+    });
+    var coreHtml = resolvedCore.length > 0
+      ? section('CORE METRICS', metricGrid(coreGridItems), 'section-core')
+      : '';
+
+    /* 5. Detail fields (only resolved values) */
+    var detailHtml = '';
+    var resolvedDetails = model.detailFields.filter(function(m){ return m.value !== null; });
+    if(resolvedDetails.length > 0){
+      var detailItems = resolvedDetails.map(function(m){
+        return { label: m.label, value: m.display, dataMetric: m.dataMetric };
+      });
+      detailHtml = section('TRADE DETAILS', detailRows(detailItems), 'section-details');
+    }
+
+    /* 6. Action buttons — 3 rows, identical to scanner pages */
+    var tradeKeyAttr = model.tradeKey ? ' data-trade-key="' + esc(model.tradeKey) + '"' : '';
+    var modelBtnLabel = (o.modelStatus === 'running') ? 'Running\u2026' : 'Run Model Analysis';
+    var actionsHtml = '<div class="trade-actions">'
+      + '<div class="run-row"><button class="btn btn-run btn-action" data-action="model-analysis"' + tradeKeyAttr + ' title="Run model analysis on this trade">' + modelBtnLabel + '</button></div>'
+      + '<div class="actions-row"><button class="btn btn-exec btn-action" data-action="execute"' + tradeKeyAttr + ' title="Open execution modal">Execute Trade</button>'
+      + '<button class="btn btn-reject btn-action" data-action="reject"' + tradeKeyAttr + ' title="Reject this trade">Reject</button></div>'
+      + '<div class="actions-row"><button class="btn btn-action" data-action="workbench"' + tradeKeyAttr + ' title="Send to Testing Workbench">Send to Testing Workbench</button>'
+      + '<button class="btn btn-action" data-action="data-workbench"' + tradeKeyAttr + ' title="Send to Data Workbench">Send to Data Workbench</button></div>'
+      + '</div>';
+
+    /* 7. Debug warnings */
+    var warnHtml = '';
+    if(debugTrades && model.missingKeys.length > 0){
+      warnHtml = '<div class="trade-debug-warn" style="font-size:10px;color:#ffbb33;margin-top:4px;opacity:0.8;">Missing: ' + esc(model.missingKeys.join(', ')) + '</div>';
+    }
+
+    /* 8. Collapse state */
+    var isExpanded = model.tradeKey ? (expandState[model.tradeKey] === true) : false;
+    var openAttr = isExpanded ? ' open' : '';
+
+    /* Chevron SVG */
+    var chevronSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+
+    /* 9. Full card HTML */
+    return '<div class="trade-card" data-idx="' + idx + '"' + tradeKeyAttr + ' style="margin-bottom:14px;display:flex;flex-direction:column;">'
+      + '<details class="trade-card-collapse"' + tradeKeyAttr + openAttr + '>'
+      + '<summary class="trade-summary"><div class="trade-header trade-header-click">'
+      + '<div class="trade-header-left"><span class="chev">' + chevronSvg + '</span></div>'
+      + '<div class="trade-header-center">'
+      + '<div class="trade-type" style="display:flex;align-items:center;gap:8px;justify-content:center;">' + symbolBadge + ' ' + dteBadge + ' ' + esc(model.strategyLabel) + '</div>'
+      + '<div class="trade-subtitle">' + subtitleText + '</div>'
+      + (tradeKeyDisplay ? '<div style="text-align:center;">' + tradeKeyDisplay + '</div>' : '')
+      + '</div>'
+      + '<div class="trade-header-right">' + rankBadge + '</div>'
+      + '</div></summary>'
+      + '<div class="trade-body" style="flex:1 1 auto;">' + coreHtml + detailHtml + warnHtml + '</div>'
+      + '</details>'
+      + actionsHtml
+      + '</div>';
+  }
+
+  /* ================================================================
    *  PUBLIC API
    * ================================================================ */
 
@@ -266,5 +406,7 @@ window.BenTradeTradeCard = (function(){
     metricValueOrMissing: metricValueOrMissing,
     formatTradeType: formatTradeType,
     metricMissingReason: metricMissingReason,
+    // Canonical card renderer
+    renderFullCard: renderFullCard,
   };
 })();

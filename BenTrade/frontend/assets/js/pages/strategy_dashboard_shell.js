@@ -626,7 +626,7 @@ window.BenTradeStrategyShell = (function(){
       const rankDesc = { key: 'rank_score', computedKey: 'rank_score', rootFallbacks: ['composite_score'] };
       const rankVal  = _mapper.resolveMetric(trade, rankDesc);
       const rankBadge = rankVal !== null
-        ? `<span class="trade-rank-badge" style="font-size:14px;font-weight:700;color:var(--accent-cyan);background:rgba(0,220,255,0.08);border:1px solid rgba(0,220,255,0.24);border-radius:8px;padding:3px 10px;white-space:nowrap;">Score ${fmt.num(rankVal, 1)}%</span>`
+        ? `<span class="trade-rank-badge" style="font-size:14px;font-weight:700;color:var(--accent-cyan);background:rgba(0,220,255,0.08);border:1px solid rgba(0,220,255,0.24);border-radius:8px;padding:3px 10px;white-space:nowrap;">Score ${fmt.formatScore(rankVal, 1)}</span>`
         : '';
 
       /* 3. Header badges — symbol · DTE */

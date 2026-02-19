@@ -290,3 +290,11 @@ class PolygonClient:
 
         bars = await self.get_aggregates_ohlc(ticker, start_date=start, end_date=today)
         return [b["close"] for b in bars]
+
+    async def get_daily_closes_dated(self, ticker: str, lookback_days: int = 365) -> list[dict[str, Any]]:
+        """Return daily bars as ``[{"date": "YYYY-MM-DD", "close": float}, ...]``."""
+        today = date.today()
+        start = date.fromordinal(max(today.toordinal() - lookback_days, 1))
+
+        bars = await self.get_aggregates_ohlc(ticker, start_date=start, end_date=today)
+        return [{"date": b["date"], "close": b["close"]} for b in bars]

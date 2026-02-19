@@ -440,7 +440,8 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
 
     scannerResultsEl.innerHTML = list.map((item, idx) => {
       const symbol = String(item?.symbol || 'N/A').toUpperCase();
-      const score = Number(item?.scanner_score || 0).toFixed(2);
+      const _globalFmt = window.BenTradeUtils && window.BenTradeUtils.format;
+      const score = _globalFmt ? _globalFmt.formatScore(item?.scanner_score, 1) : Number(item?.scanner_score || 0).toFixed(2);
       const trend = String(item?.signals?.trend || 'range');
       const ivrv = item?.signals?.iv_rv_ratio;
       const suggested = strategySuggestion(item);

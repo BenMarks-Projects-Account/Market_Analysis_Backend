@@ -186,6 +186,14 @@ window.BenTradeSessionStatsStore = (function(){
     return n.toFixed(digits);
   }
 
+  /** Delegate to the shared format lib for canonical score display. */
+  function fmtScore(raw){
+    const lib = window.BenTradeUtils && window.BenTradeUtils.format;
+    if(lib && lib.formatScore) return lib.formatScore(raw, 1);
+    const n = toNumber(raw);
+    return n === null ? 'N/A' : `${n.toFixed(1)}%`;
+  }
+
   function renderPanel(){
     const grid = document.getElementById('reportStatsGrid');
     const title = document.getElementById('sessionStatsTitle');
@@ -210,8 +218,8 @@ window.BenTradeSessionStatsStore = (function(){
       ['Accepted trades/ideas', String(snapshot.accepted_trades)],
       ['Rejected', String(snapshot.rejected_trades)],
       ['Acceptance rate', fmtPercent(snapshot.acceptance_rate, 1)],
-      ['Best score', snapshot.best_score === null ? 'N/A' : `${snapshot.best_score.toFixed(1)}%`],
-      ['Avg quality score', snapshot.avg_quality_score === null ? 'N/A' : `${snapshot.avg_quality_score.toFixed(1)}%`],
+      ['Best score', snapshot.best_score === null ? 'N/A' : fmtScore(snapshot.best_score)],
+      ['Avg quality score', snapshot.avg_quality_score === null ? 'N/A' : fmtScore(snapshot.avg_quality_score)],
       ['Avg return on risk', snapshot.avg_return_on_risk === null ? 'N/A' : fmtPercent(snapshot.avg_return_on_risk, 1)],
       ['Session runs', String(snapshot.runs)],
     ];
@@ -233,8 +241,41 @@ window.BenTradeSessionStatsStore = (function(){
     }
   }
 
+  /* ── Strategy Leaderboard (global right info bar) ── */
+  const LEADERBOARD_LABELS = {
+    credit_put: 'Credit Put', credit_call: 'Credit Call', debit_spreads: 'Debit Spreads',
+    iron_condor: 'Iron Condor', butterflies: 'Butterflies', calendar: 'Calendar',
+    income: 'Income', stock_scanner: 'Stock Scanner',
+  };
+
+  function renderLeaderboard(){
+    const rowsEl = document.getElementById('globalStrategyRows');
+    const miniEl = document.getElementById('globalStrategyMini');
+    if(!rowsEl) return;
+    const snapshot = computeViewState();
+    const byModule = snapshot.by_module || {};
+    const rows = MODULE_IDS.map(id => [LEADERBOARD_LABELS[id] || id, byModule[id]]);
+
+    rowsEl.innerHTML = rows.map(([label, row]) => {
+      const quality = toNumber(row?.avg_quality_score);
+      const qualityText = quality === null ? 'N/A' : fmtScore(quality);
+      const rorVal = toNumber(row?.avg_return_on_risk);
+      const rorText = rorVal === null ? 'N/A' : fmtPercent(rorVal, 1);
+      return `<tr><td>${label}</td><td>${qualityText}</td><td>${rorText}</td><td>${clampNonNegative(row?.accepted_trades || 0)}</td></tr>`;
+    }).join('');
+
+    if(miniEl){
+      miniEl.innerHTML = rows.map(([label, row]) => {
+        const score = toNumber(row?.avg_quality_score) ?? 0;
+        const width = Math.max(2, Math.round(Math.min(Math.max(score, 0), 100)));
+        return `<div class="home-mini-row"><span>${label}</span><div class="home-mini-track"><div class="home-mini-fill" style="width:${width}%;"></div></div></div>`;
+      }).join('');
+    }
+  }
+
   function notify(){
     renderPanel();
+    renderLeaderboard();
     const snapshot = computeViewState();
     listeners.forEach((listener) => {
       try{ listener(snapshot); }catch(_err){}
@@ -462,5 +503,6 @@ window.BenTradeSessionStatsStore = (function(){
     recordReject,
     recordHomeRefresh,
     renderPanel,
+    renderLeaderboard,
   };
 })();

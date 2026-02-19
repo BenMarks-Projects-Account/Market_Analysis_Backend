@@ -94,7 +94,7 @@ window.BenTradeOptionTradeCardModel = (function () {
       case 'pct':     return fmt.pct(value, 1);
       case 'dollars': return fmt.dollars(value, 2);
       case 'money':   return fmt.money(value);
-      case 'score':   return fmt.num(value, 1) + '%';
+      case 'score':   return fmt.formatScore(value, 1);
       case 'int':     return fmt.num(value, 0);
       case 'num':     return fmt.num(value, 2);
       default:        return fmt.num(value, 2);
