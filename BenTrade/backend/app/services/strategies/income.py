@@ -103,7 +103,7 @@ class IncomeStrategyPlugin:
                 candidates.append(
                     {
                         "strategy": "income",
-                        "spread_type": "cash_secured_put",
+                        "spread_type": "csp",
                         "symbol": symbol,
                         "expiration": expiration,
                         "dte": dte,
@@ -133,7 +133,7 @@ class IncomeStrategyPlugin:
                     candidates.append(
                         {
                             "strategy": "income",
-                            "spread_type": "cash_secured_put",
+                            "spread_type": "csp",
                             "symbol": symbol,
                             "expiration": expiration,
                             "dte": dte,
@@ -284,7 +284,7 @@ class IncomeStrategyPlugin:
             annualized_yield = (premium / max(strike, 0.01)) * (365.0 / max(dte, 1))
             premium_per_day = (premium * 100.0) / max(dte, 1)
 
-            if spread_type == "cash_secured_put":
+            if spread_type == "csp":
                 downside_buffer = self._clamp((spot - strike) / max(spot, 0.01), 0.0, 0.99)
                 break_even = strike - premium
                 max_profit = premium * 100.0

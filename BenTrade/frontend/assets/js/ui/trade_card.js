@@ -26,17 +26,17 @@ window.BenTradeTradeCard = (function(){
     var util = window.BenTradeUtils?.tradeKey;
     if(util?.tradeKey){
       return util.tradeKey({
-        underlying: safe.underlying || safe.underlying_symbol || safe.symbol,
+        underlying: safe.symbol || safe.underlying || safe.underlying_symbol,
         expiration: safe.expiration,
-        spread_type: safe.spread_type || safe.strategy,
+        spread_type: safe.strategy_id || safe.spread_type || safe.strategy,
         short_strike: safe.short_strike,
         long_strike: safe.long_strike,
         dte: safe.dte,
       });
     }
-    var underlying = String(safe.underlying || safe.underlying_symbol || '').toUpperCase();
+    var underlying = String(safe.symbol || safe.underlying || safe.underlying_symbol || '').toUpperCase();
     var expiration = String(safe.expiration || '');
-    var spreadType = String(safe.spread_type || safe.strategy || '');
+    var spreadType = String(safe.strategy_id || safe.spread_type || safe.strategy || '');
     var shortStrike = String(safe.short_strike ?? '');
     var longStrike = String(safe.long_strike ?? '');
     var dte = String(safe.dte ?? '');
@@ -195,6 +195,57 @@ window.BenTradeTradeCard = (function(){
   }
 
   /* ================================================================
+   *  COPY TRADE KEY — shared clipboard helper
+   * ================================================================ */
+
+  /**
+   * Copy a trade key string to the clipboard and flash a "Copied" tooltip
+   * on the triggering element.
+   * @param {string} tradeKey
+   * @param {HTMLElement} [triggerEl] — optional button to flash feedback on
+   */
+  function copyTradeKey(tradeKey, triggerEl){
+    var text = String(tradeKey || '').trim();
+    if(!text) return;
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).catch(function(){});
+    }else{
+      // Fallback for HTTP / older browsers
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      try{ document.execCommand('copy'); }catch(_e){}
+      document.body.removeChild(ta);
+    }
+    // Flash "Copied!" feedback
+    if(triggerEl){
+      var prev = triggerEl.textContent;
+      triggerEl.textContent = 'Copied!';
+      triggerEl.classList.add('copy-flash');
+      setTimeout(function(){
+        triggerEl.textContent = prev;
+        triggerEl.classList.remove('copy-flash');
+      }, 1200);
+    }
+  }
+
+  /**
+   * Build a small copy-to-clipboard button HTML snippet.
+   * @param {string} tradeKey — the key value to copy
+   * @returns {string} HTML button string (or '' if no key)
+   */
+  function copyTradeKeyButton(tradeKey){
+    var text = String(tradeKey || '').trim();
+    if(!text) return '';
+    return '<button type="button" class="btn-copy-trade-key" data-copy-trade-key="'
+      + fmt.escapeHtml(text)
+      + '" title="Copy trade key to clipboard" aria-label="Copy trade key">\u2398</button>';
+  }
+
+  /* ================================================================
    *  PUBLIC API
    * ================================================================ */
 
@@ -203,6 +254,9 @@ window.BenTradeTradeCard = (function(){
     resolveTradeKey: resolveTradeKey,
     buildTradeKey: buildTradeKey,
     openDataWorkbenchByTrade: openDataWorkbenchByTrade,
+    // Copy trade key
+    copyTradeKey: copyTradeKey,
+    copyTradeKeyButton: copyTradeKeyButton,
     // Shared building blocks
     toneClass: toneClass,
     metricGrid: metricGrid,

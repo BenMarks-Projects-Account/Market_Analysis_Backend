@@ -101,8 +101,8 @@ class DebitSpreadsStrategyPlugin:
                             continue
                         candidates.append(
                             {
-                                "strategy": "debit_call_spread",
-                                "spread_type": "debit_call_spread",
+                                "strategy": "call_debit",
+                                "spread_type": "call_debit",
                                 "symbol": symbol,
                                 "expiration": expiration,
                                 "dte": dte,
@@ -132,8 +132,8 @@ class DebitSpreadsStrategyPlugin:
                             continue
                         candidates.append(
                             {
-                                "strategy": "debit_put_spread",
-                                "spread_type": "debit_put_spread",
+                                "strategy": "put_debit",
+                                "spread_type": "put_debit",
                                 "symbol": symbol,
                                 "expiration": expiration,
                                 "dte": dte,
@@ -203,7 +203,7 @@ class DebitSpreadsStrategyPlugin:
             if long_leg is None or short_leg is None:
                 continue
 
-            strategy = str(candidate.get("strategy") or "debit_call_spread")
+            strategy = str(candidate.get("strategy") or "call_debit")
             symbol = str(candidate.get("symbol") or "").upper()
             expiration = str(candidate.get("expiration") or "")
             dte = int(candidate.get("dte") or 0)
@@ -231,7 +231,7 @@ class DebitSpreadsStrategyPlugin:
 
             long_strike = float(candidate.get("long_strike") or 0.0)
             short_strike = float(candidate.get("short_strike") or 0.0)
-            break_even = (long_strike + debit) if strategy == "debit_call_spread" else (long_strike - debit)
+            break_even = (long_strike + debit) if strategy == "call_debit" else (long_strike - debit)
             debit_as_pct = debit / width if width > 0 else 1.0
             implied_prob_profit = self._clamp(1.0 - debit_as_pct)
 

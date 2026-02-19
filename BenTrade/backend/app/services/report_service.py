@@ -19,6 +19,7 @@ from app.services.evaluation.types import EvaluationContext
 from app.services.ranking import safe_float as rank_safe_float
 from app.services.validation_events import emit_validation_event
 from app.utils.dates import dte_ceil
+from app.utils.strategy_id_resolver import resolve_strategy_id_or_none
 from app.utils.trade_key import canonicalize_strategy_id, canonicalize_trade_key, trade_key
 
 try:
@@ -1001,7 +1002,9 @@ class ReportService:
             tr["dte"] = dte
 
             strategy = tr.get("strategy_id") or tr.get("spread_type") or tr.get("strategy")
-            canonical_strategy, alias_mapped, provided_strategy = canonicalize_strategy_id(strategy)
+            # Single resolver: emits STRATEGY_ALIAS_USED for aliases.
+            canonical_strategy = resolve_strategy_id_or_none(strategy)
+            _, alias_mapped, provided_strategy = canonicalize_strategy_id(strategy)
             canonical_strategy = canonical_strategy or str(strategy or "").strip().lower() or "NA"
             if alias_mapped:
                 emit_validation_event(

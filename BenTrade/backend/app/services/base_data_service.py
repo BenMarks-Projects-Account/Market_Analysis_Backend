@@ -6,8 +6,8 @@ from typing import Any
 
 from app.clients.finnhub_client import FinnhubClient
 from app.clients.fred_client import FredClient
+from app.clients.polygon_client import PolygonClient
 from app.clients.tradier_client import TradierClient
-from app.clients.yahoo_client import YahooClient
 from app.models.schemas import OptionContract
 from app.utils.http import UpstreamError
 from app.utils.validation import clamp, parse_expiration, validate_bid_ask, validate_symbol
@@ -20,16 +20,16 @@ class BaseDataService:
         self,
         tradier_client: TradierClient,
         finnhub_client: FinnhubClient,
-        yahoo_client: YahooClient,
         fred_client: FredClient,
+        polygon_client: PolygonClient | None = None,
     ) -> None:
         self.tradier_client = tradier_client
         self.finnhub_client = finnhub_client
-        self.yahoo_client = yahoo_client
         self.fred_client = fred_client
+        self.polygon_client = polygon_client
         self._source_health: dict[str, dict[str, Any]] = {
             "finnhub": self._new_source_state(),
-            "yahoo": self._new_source_state(),
+            "polygon": self._new_source_state(),
             "tradier": self._new_source_state(),
             "fred": self._new_source_state(),
         }
@@ -45,8 +45,11 @@ class BaseDataService:
         if key == "fred":
             api_key = str(getattr(self.fred_client.settings, "FRED_KEY", "") or "").strip()
             return bool(api_key)
-        if key == "yahoo":
-            return True
+        if key == "polygon":
+            if self.polygon_client is None:
+                return False
+            api_key = str(getattr(self.polygon_client.settings, "POLYGON_API_KEY", "") or "").strip()
+            return bool(api_key)
         return False
 
     async def refresh_source_health_probe(self) -> None:
@@ -64,13 +67,14 @@ class BaseDataService:
             except Exception as exc:
                 self._mark_failure(source, exc)
 
-        await asyncio.gather(
+        probes = [
             _probe("tradier", self.tradier_client.health),
             _probe("finnhub", self.finnhub_client.health),
-            _probe("yahoo", self.yahoo_client.health),
             _probe("fred", self.fred_client.health),
-            return_exceptions=True,
-        )
+        ]
+        if self.polygon_client is not None:
+            probes.append(_probe("polygon", self.polygon_client.health))
+        await asyncio.gather(*probes, return_exceptions=True)
 
     @staticmethod
     def _new_source_state() -> dict[str, Any]:
@@ -177,7 +181,7 @@ class BaseDataService:
 
             if not self._source_configured(source):
                 status = "red"
-                message = "not configured"
+                message = "misconfigured" if source == "polygon" else "not configured"
                 out[source] = {
                     "status": status,
                     "last_http": last_http,
@@ -447,6 +451,10 @@ class BaseDataService:
 
         closes = [float(x) for x in (candles or []) if x is not None]
 
+        if not closes:
+            warnings.append("history_unavailable: no close prices returned")
+            logger.warning("event=snapshot_no_closes symbol=%s", normalized_symbol)
+
         return {
             "symbol": normalized_symbol,
             "underlying_price": underlying_price,
@@ -458,25 +466,33 @@ class BaseDataService:
     async def get_prices_history(self, symbol: str, lookback_days: int = 365) -> list[float]:
         normalized_symbol = self._normalize_symbol(symbol)
         if not normalized_symbol:
-            self._mark_validation_warning("yahoo", "invalid symbol")
+            self._mark_validation_warning("polygon", "invalid symbol")
             self._mark_validation_warning("tradier", "invalid symbol")
             return []
 
-        try:
-            closes = await self.yahoo_client.get_daily_closes(normalized_symbol, period="1y")
-            if closes:
-                self._mark_success("yahoo", http_status=200, message="history ok")
-                return [float(x) for x in closes if x is not None]
-            self._mark_failure("yahoo", UpstreamError("Yahoo returned empty history", details={"status_code": 429}))
-            logger.warning("event=prices_history_empty symbol=%s source=yahoo", normalized_symbol)
-        except Exception as exc:
-            self._mark_failure("yahoo", exc)
-            logger.warning(
-                "event=prices_history_unavailable symbol=%s source=yahoo error=%s",
-                normalized_symbol,
-                str(exc),
-            )
+        # Primary: Polygon aggregates
+        if self.polygon_client is not None and self._source_configured("polygon"):
+            try:
+                closes = await self.polygon_client.get_daily_closes(
+                    normalized_symbol, lookback_days=lookback_days
+                )
+                if closes:
+                    self._mark_success("polygon", http_status=200, message="history ok")
+                    return [float(x) for x in closes if x is not None]
+                self._mark_failure(
+                    "polygon",
+                    UpstreamError("Polygon returned empty history", details={"status_code": 204}),
+                )
+                logger.warning("event=prices_history_empty symbol=%s source=polygon", normalized_symbol)
+            except Exception as exc:
+                self._mark_failure("polygon", exc)
+                logger.warning(
+                    "event=prices_history_unavailable symbol=%s source=polygon error=%s",
+                    normalized_symbol,
+                    str(exc),
+                )
 
+        # Fallback: Tradier daily history
         end_date = datetime.now(timezone.utc).date()
         start_date = end_date - timedelta(days=lookback_days)
         try:
@@ -571,6 +587,15 @@ class BaseDataService:
         closes = [float(x) for x in (candles_raw or []) if x is not None]
         contracts = self.normalize_chain(chain_raw)
 
+        notes: list[str] = []
+        if not closes:
+            notes.append("history_unavailable: no close prices returned")
+            logger.warning(
+                "event=analysis_no_closes symbol=%s expiration=%s",
+                normalized_symbol,
+                normalized_expiration,
+            )
+
         logger.info(
             "event=analysis_inputs_loaded symbol=%s expiration=%s contracts=%d closes=%d",
             normalized_symbol,
@@ -584,4 +609,5 @@ class BaseDataService:
             "contracts": contracts,
             "prices_history": closes,
             "vix": vix,
+            "notes": notes,
         }

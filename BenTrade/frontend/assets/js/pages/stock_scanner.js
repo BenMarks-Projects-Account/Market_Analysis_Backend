@@ -9,9 +9,19 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
   const errorEl = scope.querySelector('#stockScannerError');
   const metaEl = scope.querySelector('#stockScannerMeta');
   const listEl = scope.querySelector('#stockScannerList');
+  const symbolsEl = scope.querySelector('#stockScannerSymbols');
 
   if(!refreshBtn || !errorEl || !metaEl || !listEl){
     return;
+  }
+
+  /* Mount symbol universe selector (add/remove chips + filter) */
+  let _symbolSelector = null;
+  if(symbolsEl && window.BenTradeSymbolUniverseSelector){
+    _symbolSelector = window.BenTradeSymbolUniverseSelector.mount(symbolsEl, {
+      showFilter: true,
+      onChange: () => {},  // filter change is passive — applied on next scan
+    });
   }
 
   let latestPayload = null;
@@ -20,6 +30,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
   const collapsed = {};
   const modelResults = {};
   const REJECTED_KEY = 'bentrade_scanner_rejected_v1';
+  const SESSION_CACHE_KEY = 'bentrade_stock_scanner_cache_v1';
 
   function loadRejected(){
     try{
@@ -38,6 +49,29 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
       localStorage.setItem(REJECTED_KEY, JSON.stringify(Array.from(rejectedIdeas)));
     }catch(_err){
     }
+  }
+
+  /* ── Session cache helpers (persist scan results across navigation) ── */
+  function saveToSessionCache(payload){
+    try{
+      const sid = window.BenTradeSessionState?.currentSessionId?.() || '';
+      sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify({ sid, payload, ts: Date.now() }));
+    }catch(_err){}
+  }
+
+  function loadFromSessionCache(){
+    try{
+      const raw = sessionStorage.getItem(SESSION_CACHE_KEY);
+      if(!raw) return null;
+      const obj = JSON.parse(raw);
+      // Only reuse if same session
+      const sid = window.BenTradeSessionState?.currentSessionId?.() || '';
+      if(sid && obj.sid && obj.sid !== sid) return null;
+      // Expire after 30 min
+      if(obj.ts && (Date.now() - obj.ts) > 30 * 60 * 1000) return null;
+      return obj.payload || null;
+    }catch(_err){}
+    return null;
   }
 
   function setError(text){
@@ -134,10 +168,9 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
   }
 
   function pickStrategy(candidate){
+    if(candidate?.type) return String(candidate.type);
     if(candidate?.recommended_strategy) return String(candidate.recommended_strategy);
-    const signals = Array.isArray(candidate?.signals) ? candidate.signals : [];
-    if(signals.includes('trend_up')) return 'credit_put_spread';
-    return 'credit_call_spread';
+    return 'stock_buy';
   }
 
   function renderMeta(payload){
@@ -254,6 +287,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
                 <span class="underlying-price">(${fmtNum(row?.price, 2)})</span>
               </div>
               <div class="trade-rank-line">Rank Score: ${fmtNum(row?.composite_score, 1)} (${scoreToTone(row?.composite_score)})</div>
+              <span class="trade-key-wrap"><span class="trade-key-label" style="font-size:10px;color:rgba(230,251,255,0.5);font-family:monospace;word-break:break-all;">${esc(symbol)}|NA|${esc(strategy)}|NA|NA|NA</span>${card.copyTradeKeyButton(`${symbol}|NA|${strategy}|NA|NA|NA`)}</span>
             </div>
             <div class="trade-header-right">${sourceBadge(row)}</div>
           </div>
@@ -294,7 +328,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
               <button class="btn btn-exec" data-action="execute" data-idx="${idx}">Execute Trade</button>
               <button class="btn btn-reject" data-action="reject" data-idx="${idx}">Reject</button>
               <button class="btn" data-action="open-analysis" data-symbol="${esc(symbol)}">Open in Stock Analysis</button>
-              <button class="btn" data-action="send-workbench" data-idx="${idx}" data-symbol="${esc(symbol)}" data-strategy="${esc(strategy)}">Send to Workbench</button>
+              <button class="btn" data-action="send-workbench" data-idx="${idx}" data-symbol="${esc(symbol)}" data-strategy="${esc(strategy)}">Send to Testing Workbench</button>
             </div>
           </div>
         </div>
@@ -319,7 +353,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
     const normalized = String(symbol || '').trim().toUpperCase();
     if(!normalized) return;
 
-    const chosenStrategy = String(strategy || 'credit_put_spread').trim() || 'credit_put_spread';
+    const chosenStrategy = String(strategy || 'put_credit_spread').trim() || 'put_credit_spread';
     const payloadInput = {
       symbol: normalized,
       strategy: chosenStrategy,
@@ -435,12 +469,21 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
     const suggestion = ideas[ideaIdx];
     if(!suggestion || String(suggestion?.type || '').toLowerCase() !== 'options') return;
 
-    const strategy = String(suggestion?.strategy || row?.recommended_strategy || pickStrategy(row));
+    const strategy = String(suggestion?.strategy || row?.type || row?.recommended_strategy || pickStrategy(row));
     const params = (suggestion?.params && typeof suggestion.params === 'object') ? suggestion.params : {};
     sendToWorkbench(row?.symbol, strategy, Number(row?.composite_score), params);
   }
 
   listEl.addEventListener('click', (event) => {
+    /* Copy trade key button */
+    const copyBtn = event.target.closest('[data-copy-trade-key]');
+    if(copyBtn){
+      event.preventDefault();
+      event.stopPropagation();
+      card.copyTradeKey(copyBtn.dataset.copyTradeKey, copyBtn);
+      return;
+    }
+
     const button = event.target.closest('[data-action]');
     if(!button) return;
     const action = String(button.getAttribute('data-action') || '');
@@ -481,7 +524,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
     }
 
     if(action === 'send-workbench'){
-      const strategy = String(button.getAttribute('data-strategy') || 'credit_put_spread');
+      const strategy = String(button.getAttribute('data-strategy') || 'put_credit_spread');
       const card = button.closest('[data-score]');
       const score = card ? Number(card.getAttribute('data-score')) : NaN;
       sendToWorkbench(symbol, strategy, score);
@@ -496,6 +539,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
       refreshBtn.textContent = 'Scanning...';
       const payload = await fetchScannerPayload();
       latestPayload = payload;
+      saveToSessionCache(payload);
       renderMeta(payload);
       renderCandidates(payload);
       window.BenTradeSessionStatsStore?.recordRun?.('stock_scanner', payload);
@@ -516,7 +560,16 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
 
   refreshBtn.addEventListener('click', runScan);
 
+  /* ── Init: restore from session cache or run fresh scan ── */
   renderMeta({ as_of: null, candidates: [] });
   renderCandidates({ candidates: [] });
-  runScan();
+
+  const _cached = loadFromSessionCache();
+  if(_cached && Array.isArray(_cached.candidates) && _cached.candidates.length > 0){
+    latestPayload = _cached;
+    renderMeta(_cached);
+    renderCandidates(_cached);
+  }else{
+    runScan();
+  }
 };

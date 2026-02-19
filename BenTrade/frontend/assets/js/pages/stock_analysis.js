@@ -175,11 +175,11 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
     const ivrv = Number(result?.signals?.iv_rv_ratio);
     const isIvRich = Number.isFinite(ivrv) && ivrv > 1.2;
 
-    if(trend === 'up' && isIvRich) return 'credit_put_spread';
-    if(trend === 'down' && isIvRich) return 'credit_call_spread';
-    if(trend === 'up') return 'debit_call_spread';
-    if(trend === 'down') return 'debit_put_spread';
-    return isIvRich ? 'credit_put_spread' : 'debit_call_spread';
+    if(trend === 'up' && isIvRich) return 'put_credit_spread';
+    if(trend === 'down' && isIvRich) return 'call_credit_spread';
+    if(trend === 'up') return 'call_debit';
+    if(trend === 'down') return 'put_debit';
+    return isIvRich ? 'put_credit_spread' : 'call_debit';
   }
 
   function suggestionTradeKey(result){
@@ -270,7 +270,7 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
     const out = {
       symbol: String(payload.symbol || '').toUpperCase(),
       expiration,
-      strategy: 'credit_put_spread',
+      strategy: 'put_credit_spread',
       short_strike: shortStrike,
       long_strike: longStrike,
       contractsMultiplier: 100,
@@ -487,7 +487,7 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
         }
 
         if(action === 'send-workbench'){
-          const strategy = String(btn.getAttribute('data-strategy') || 'credit_put_spread');
+          const strategy = String(btn.getAttribute('data-strategy') || 'put_credit_spread');
           const key = String(btn.getAttribute('data-key') || `${symbol}|NA|${strategy}|NA|NA|NA`);
           const payloadHandoff = {
             from: 'stock_scanner',

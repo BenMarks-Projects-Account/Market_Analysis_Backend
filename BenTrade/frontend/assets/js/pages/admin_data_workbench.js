@@ -92,12 +92,12 @@ window.BenTradePages.initAdminDataWorkbench = function initAdminDataWorkbench(ro
       : '';
 
     const coreMetrics = card.metricGrid([
-      { label: 'Max Profit', value: fmt.dollars(metricNumber(trade, 'max_profit', 'max_profit_per_contract', 'max_profit_per_share', 'max_profit')), cssClass: 'positive', dataMetric: 'max_profit' },
-      { label: 'Max Loss', value: fmt.dollars(metricNumber(trade, 'max_loss', 'max_loss_per_contract', 'max_loss_per_share', 'max_loss')), cssClass: 'negative', dataMetric: 'max_loss' },
-      { label: 'Probability', value: fmt.pct(metricNumber(trade, 'pop', 'p_win_used', 'pop_delta_approx', 'pop'), 1), cssClass: 'neutral', dataMetric: 'pop' },
-      { label: 'Return on Risk', value: fmt.pct(metricNumber(trade, 'return_on_risk', 'return_on_risk'), 1), cssClass: 'neutral', dataMetric: 'return_on_risk' },
-      { label: 'Expected Value', value: fmt.dollars(metricNumber(trade, 'expected_value', 'ev_per_contract', 'ev_per_share', 'expected_value', 'ev')), cssClass: 'neutral', dataMetric: 'ev' },
-      { label: 'Composite', value: fmt.num(metricNumber(trade, 'trade_quality_score', 'composite_score', 'trade_quality_score')), cssClass: 'neutral' },
+      { label: 'Max Profit', value: fmt.dollars(metricNumber(trade, 'max_profit')), cssClass: 'positive', dataMetric: 'max_profit' },
+      { label: 'Max Loss', value: fmt.dollars(metricNumber(trade, 'max_loss')), cssClass: 'negative', dataMetric: 'max_loss' },
+      { label: 'Probability', value: fmt.pct(metricNumber(trade, 'pop'), 1), cssClass: 'neutral', dataMetric: 'pop' },
+      { label: 'Return on Risk', value: fmt.pct(metricNumber(trade, 'return_on_risk'), 1), cssClass: 'neutral', dataMetric: 'return_on_risk' },
+      { label: 'Expected Value', value: fmt.dollars(metricNumber(trade, 'expected_value', 'ev')), cssClass: 'neutral', dataMetric: 'ev' },
+      { label: 'Composite', value: fmt.num(metricNumber(trade, 'trade_quality_score', 'composite_score')), cssClass: 'neutral' },
     ]);
 
     const details = card.detailRows([
@@ -113,9 +113,9 @@ window.BenTradePages.initAdminDataWorkbench = function initAdminDataWorkbench(ro
       <div class="trade-card" data-idx="0">
         <div class="trade-header">
           <div class="trade-header-center">
-            <div class="trade-type">${escapeHtml(formatTradeType(trade.spread_type || trade.strategy || trade.strategy_id))}</div>
+            <div class="trade-type">${escapeHtml(formatTradeType(trade.strategy_id || trade.spread_type || trade.strategy))}</div>
             <div class="trade-subtitle">
-              <span class="underlying-symbol">${escapeHtml(trade.underlying || trade.underlying_symbol || trade.symbol || '')}</span>
+              <span class="underlying-symbol">${escapeHtml(trade.symbol || trade.underlying || trade.underlying_symbol || '')}</span>
               <span class="trade-strikes-inline">${escapeHtml(String(trade.short_strike ?? 'NA'))}/${escapeHtml(String(trade.long_strike ?? 'NA'))}</span>
               <span class="underlying-price">(${fmt.dollars(metricNumber(trade, 'underlying_price', 'underlying_price'))})</span>
             </div>

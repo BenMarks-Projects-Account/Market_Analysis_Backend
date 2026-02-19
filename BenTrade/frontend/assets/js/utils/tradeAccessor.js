@@ -24,25 +24,25 @@ window.BenTradeUtils.tradeAccessor = (function(){
    */
   var FIELD_MAP = {
     /* identity / structure */
-    symbol:           { computed: null,                    fallbacks: ['underlying', 'underlying_symbol', 'symbol'] },
-    strategy:         { computed: null,                    fallbacks: ['spread_type', 'strategy', 'recommended_strategy'] },
-    expiration:       { computed: null,                    fallbacks: ['expiration', 'expiration_date'] },
+    symbol:           { computed: null,                    fallbacks: ['symbol'] },
+    strategy:         { computed: null,                    fallbacks: ['strategy_id'] },
+    expiration:       { computed: null,                    fallbacks: ['expiration'] },
     short_strike:     { computed: null,                    fallbacks: ['short_strike', 'put_short_strike', 'call_short_strike'] },
     long_strike:      { computed: null,                    fallbacks: ['long_strike', 'put_long_strike', 'call_long_strike'] },
 
     /* core metrics */
-    ev:               { computed: 'expected_value',        fallbacks: ['ev_per_contract', 'expected_value', 'ev_per_share', 'ev', 'edge'] },
-    pop:              { computed: 'pop',                   fallbacks: ['p_win_used', 'pop_delta_approx', 'probability_of_profit', 'pop'] },
+    ev:               { computed: 'expected_value',        fallbacks: ['ev', 'edge'] },
+    pop:              { computed: 'pop',                   fallbacks: ['pop'] },
     ror:              { computed: 'return_on_risk',        fallbacks: ['return_on_risk', 'ror'] },
-    max_loss:         { computed: 'max_loss',              fallbacks: ['max_loss_per_contract', 'max_loss_per_share', 'max_loss', 'estimated_risk', 'risk_amount'] },
-    max_profit:       { computed: 'max_profit',            fallbacks: ['max_profit_per_contract', 'max_profit_per_share', 'max_profit', 'estimated_max_profit'] },
-    net_credit:       { computed: 'net_credit',            fallbacks: ['net_credit', 'credit', 'premium_received'] },
-    net_debit:        { computed: 'net_debit',             fallbacks: ['net_debit', 'debit', 'premium_paid'] },
-    composite:        { computed: 'trade_quality_score',   fallbacks: ['composite_score', 'trade_quality_score', 'scanner_score', 'score'] },
+    max_loss:         { computed: 'max_loss',              fallbacks: ['max_loss'] },
+    max_profit:       { computed: 'max_profit',            fallbacks: ['max_profit'] },
+    net_credit:       { computed: 'net_credit',            fallbacks: ['net_credit', 'credit'] },
+    net_debit:        { computed: 'net_debit',             fallbacks: ['net_debit', 'debit'] },
+    composite:        { computed: 'trade_quality_score',   fallbacks: ['composite_score', 'trade_quality_score', 'score'] },
     rank:             { computed: 'rank_score',            fallbacks: ['rank', 'rank_score', 'score', 'composite_score', 'trade_quality_score'] },
     break_even:       { computed: 'break_even',            fallbacks: ['break_even'] },
     iv_rv_ratio:      { computed: 'iv_rv_ratio',           fallbacks: ['iv_rv_ratio'] },
-    bid_ask_pct:      { computed: 'bid_ask_pct',           fallbacks: ['bid_ask_spread_pct'] },
+    bid_ask_pct:      { computed: 'bid_ask_pct',           fallbacks: ['bid_ask_pct'] },
     underlying_price: { computed: 'underlying_price',      fallbacks: ['underlying_price', 'price'] },
   };
 

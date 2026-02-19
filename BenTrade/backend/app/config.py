@@ -38,6 +38,9 @@ class Settings(BaseModel):
     FRED_KEY: str = _cfg("FRED_KEY", "FRED_API_KEY", default="")
     FRED_BASE_URL: str = _cfg("FRED_BASE_URL", default="https://api.stlouisfed.org/fred")
 
+    POLYGON_API_KEY: str = _cfg("POLYGON_API_KEY", default="")
+    POLYGON_BASE_URL: str = _cfg("POLYGON_BASE_URL", default="https://api.polygon.io")
+
     FRED_VIX_SERIES_ID: str = "VIXCLS"
 
     QUOTE_CACHE_TTL_SECONDS: int = 10

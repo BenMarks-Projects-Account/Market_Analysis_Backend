@@ -56,3 +56,7 @@ BenTrade/backend/build/
 # Generated report files
 BenTrade/backend/results/*.json
 BenTrade/backend/results/*.jsonl
+
+#docs
+/docs/*.md
+/docs/scanners/*.md

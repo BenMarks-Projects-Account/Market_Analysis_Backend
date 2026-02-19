@@ -61,6 +61,17 @@ window.BenTradeApi = (function(){
     });
   }
 
+  function modelAnalyzeRegime(regime, playbook){
+    return jsonFetch('/api/model/analyze_regime', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        regime: (regime && typeof regime === 'object') ? regime : {},
+        playbook: (playbook && typeof playbook === 'object') ? playbook : null,
+      }),
+    });
+  }
+
   function persistRejectDecision(payload){
     return jsonFetch('/api/decisions/reject', {
       method: 'POST',
@@ -244,6 +255,7 @@ window.BenTradeApi = (function(){
     getReport,
     modelAnalyze,
     modelAnalyzeStock,
+    modelAnalyzeRegime,
     persistRejectDecision,
     getRejectDecisions,
     getActiveTrades,

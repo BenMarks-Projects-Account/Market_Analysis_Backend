@@ -11,13 +11,13 @@ router = APIRouter(prefix="/api/health", tags=["health"])
 async def health(request: Request) -> HealthResponse:
     tradier_ok = await request.app.state.tradier_client.health()
     finnhub_ok = await request.app.state.finnhub_client.health()
-    yahoo_ok = await request.app.state.yahoo_client.health()
+    polygon_ok = await request.app.state.polygon_client.health()
     fred_ok = await request.app.state.fred_client.health()
 
     upstream = {
         "tradier": "ok" if tradier_ok else "down",
         "finnhub": "ok" if finnhub_ok else "down",
-        "yahoo": "ok" if yahoo_ok else "down",
+        "polygon": "ok" if polygon_ok else "down",
         "fred": "ok" if fred_ok else "down",
     }
     return HealthResponse(ok=all(x == "ok" for x in upstream.values()), upstream=upstream)
@@ -35,7 +35,7 @@ async def sources_health(request: Request) -> dict:
 
     source_name_map = {
         "finnhub": "Finnhub",
-        "yahoo": "Yahoo",
+        "polygon": "Polygon",
         "tradier": "Tradier",
         "fred": "FRED",
     }
@@ -49,7 +49,7 @@ async def sources_health(request: Request) -> dict:
         return "degraded"
 
     sources: list[dict] = []
-    for key in ("finnhub", "yahoo", "tradier", "fred"):
+    for key in ("finnhub", "polygon", "tradier", "fred"):
         item = snapshot.get(key) or {}
         notes: list[str] = []
         message = str(item.get("message") or "").strip()

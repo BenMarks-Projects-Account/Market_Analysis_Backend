@@ -14,6 +14,11 @@ window.BenTradeSessionStatsStore = (function(){
   let state = null;
   const listeners = new Set();
 
+  /** Get the current sessionId from the boot-choice module (set on boot). */
+  function currentSessionId(){
+    return window.BenTradeBootChoiceModal?.getSessionId?.() || null;
+  }
+
   function nowIso(){
     return new Date().toISOString();
   }
@@ -63,8 +68,11 @@ window.BenTradeSessionStatsStore = (function(){
   function createInitialState(){
     const ts = nowIso();
     return {
+      sessionId: currentSessionId(),
       session_started_at: ts,
       last_updated_at: ts,
+      last_home_refresh_at: null,
+      home_refresh_count: 0,
       ...zeroCounters(),
       by_module: buildModuleMap(),
     };
@@ -88,8 +96,18 @@ window.BenTradeSessionStatsStore = (function(){
     const base = createInitialState();
     const incoming = (raw && typeof raw === 'object') ? raw : {};
 
+    /* ── Session boundary guard: reject data from a different session ── */
+    const activeId = currentSessionId();
+    if(activeId && incoming.sessionId && incoming.sessionId !== activeId){
+      /* Stale data from a prior session — start fresh */
+      return base;
+    }
+
+    base.sessionId = activeId || incoming.sessionId || base.sessionId;
     base.session_started_at = String(incoming.session_started_at || base.session_started_at);
     base.last_updated_at = String(incoming.last_updated_at || base.last_updated_at);
+    base.last_home_refresh_at = incoming.last_home_refresh_at || null;
+    base.home_refresh_count = clampNonNegative(incoming.home_refresh_count);
 
     const mergeCounters = (target, source) => {
       target.runs = clampNonNegative(source?.runs);
@@ -139,8 +157,11 @@ window.BenTradeSessionStatsStore = (function(){
     });
 
     return {
+      sessionId: root.sessionId || null,
       session_started_at: root.session_started_at,
       last_updated_at: root.last_updated_at,
+      last_home_refresh_at: root.last_home_refresh_at || null,
+      home_refresh_count: clampNonNegative(root.home_refresh_count),
       ...computeDerived(root),
       by_module: byModule,
     };
@@ -180,7 +201,8 @@ window.BenTradeSessionStatsStore = (function(){
     if(meta){
       const startedText = snapshot.session_started_at ? new Date(snapshot.session_started_at).toLocaleString() : 'N/A';
       const updatedText = snapshot.last_updated_at ? new Date(snapshot.last_updated_at).toLocaleString() : 'N/A';
-      meta.textContent = `Runs: ${snapshot.runs} • Started: ${startedText} • Updated: ${updatedText}`;
+      const homeRefreshText = snapshot.last_home_refresh_at ? new Date(snapshot.last_home_refresh_at).toLocaleTimeString() : '--';
+      meta.textContent = `Runs: ${snapshot.runs} • Home refreshes: ${snapshot.home_refresh_count} (${homeRefreshText}) • Started: ${startedText} • Updated: ${updatedText}`;
     }
 
     const stats = [
@@ -188,8 +210,8 @@ window.BenTradeSessionStatsStore = (function(){
       ['Accepted trades/ideas', String(snapshot.accepted_trades)],
       ['Rejected', String(snapshot.rejected_trades)],
       ['Acceptance rate', fmtPercent(snapshot.acceptance_rate, 1)],
-      ['Best score', snapshot.best_score === null ? 'N/A' : fmtPercent(snapshot.best_score, 1)],
-      ['Avg quality score', snapshot.avg_quality_score === null ? 'N/A' : fmtPercent(snapshot.avg_quality_score, 1)],
+      ['Best score', snapshot.best_score === null ? 'N/A' : `${snapshot.best_score.toFixed(1)}%`],
+      ['Avg quality score', snapshot.avg_quality_score === null ? 'N/A' : `${snapshot.avg_quality_score.toFixed(1)}%`],
       ['Avg return on risk', snapshot.avg_return_on_risk === null ? 'N/A' : fmtPercent(snapshot.avg_return_on_risk, 1)],
       ['Session runs', String(snapshot.runs)],
     ];
@@ -374,6 +396,16 @@ window.BenTradeSessionStatsStore = (function(){
     notify();
   }
 
+  function recordHomeRefresh(){
+    if(!state) init();
+    state.home_refresh_count = (state.home_refresh_count || 0) + 1;
+    state.last_home_refresh_at = nowIso();
+    state.last_updated_at = nowIso();
+    persist();
+    notify();
+    return computeViewState();
+  }
+
   function reset(){
     state = createInitialState();
     persist();
@@ -428,6 +460,7 @@ window.BenTradeSessionStatsStore = (function(){
     normalizeStats,
     recordRun,
     recordReject,
+    recordHomeRefresh,
     renderPanel,
   };
 })();

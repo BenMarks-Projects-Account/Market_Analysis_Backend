@@ -48,6 +48,7 @@ class RecommendationService:
         return str(
             row.get("spread_type")
             or row.get("strategy")
+            or row.get("type")
             or row.get("recommended_strategy")
             or row.get("strategyId")
             or "stock"

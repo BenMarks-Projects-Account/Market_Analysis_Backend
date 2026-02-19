@@ -7,8 +7,10 @@ lookup, admin data workbench) calls ``normalize_trade()`` to guarantee:
 - per-contract monetary values as primary (per-share × multiplier)
 - ``computed``, ``details``, ``pills`` sub-dicts for UI consumption
 - ``computed_metrics`` + ``metrics_status`` via shared contract
-- legacy root-level field back-fills as compatibility aliases
 - validation warnings for missing key metrics
+
+Use ``strip_legacy_fields()`` at the API boundary to remove legacy flat
+fields from trade dicts before returning to the frontend.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.utils.computed_metrics import apply_metrics_contract
+from app.utils.strategy_id_resolver import resolve_strategy_id_or_none
 from app.utils.trade_key import canonicalize_strategy_id, canonicalize_trade_key, trade_key
 
 
@@ -47,6 +50,52 @@ def _upsert_warning(row: dict[str, Any], code: str) -> None:
     if code not in warnings:
         warnings.append(code)
     row["validation_warnings"] = warnings
+
+
+# ── legacy-field stripping (API boundary) ─────────────────────────────
+
+_LEGACY_FLAT_FIELDS: frozenset[str] = frozenset({
+    # Per-share / per-contract duplicates (now in computed.*)
+    "ev_per_share",
+    "ev_per_contract",
+    "max_profit_per_share",
+    "max_loss_per_share",
+    "max_profit_per_contract",
+    "max_loss_per_contract",
+    # Legacy metric names (now in computed / details)
+    "p_win_used",
+    "pop_delta_approx",
+    "pop_approx",
+    "probability_of_profit",
+    "implied_prob_profit",
+    "ev_to_risk",
+    "bid_ask_spread_pct",
+    "strike_distance_pct",
+    "realized_vol_20d",
+    "estimated_risk",
+    "risk_amount",
+    "estimated_max_profit",
+    "premium_received",
+    "premium_paid",
+    "scanner_score",
+    "expiration_date",
+    # Duplicate identity fields (use strategy_id / symbol instead)
+    "spread_type",
+    "strategy",
+    "underlying",
+    "underlying_symbol",
+})
+
+
+def strip_legacy_fields(trade: dict[str, Any]) -> dict[str, Any]:
+    """Remove legacy flat fields from a trade dict for API responses.
+
+    Call this at every outbound API boundary so the frontend never
+    receives deprecated / ambiguous root-level fields.  The canonical
+    data lives in ``computed``, ``details``, ``pills``, and the root
+    identity keys (``symbol``, ``strategy_id``, ``trade_key``, etc.).
+    """
+    return {k: v for k, v in trade.items() if k not in _LEGACY_FLAT_FIELDS}
 
 
 # ── strategy display labels ──────────────────────────────────────────
@@ -147,6 +196,17 @@ def normalize_trade(
     """
     normalized = dict(trade or {})
 
+    # ── 0. Seed root from existing sub-dicts (safe re-normalization) ──
+    # When a trade was previously normalized and saved with values
+    # only in computed/details/computed_metrics sub-dicts (not at root),
+    # re-normalization must be able to find them.
+    for _subkey in ("computed", "computed_metrics", "details"):
+        _sub = normalized.get(_subkey)
+        if isinstance(_sub, dict):
+            for _k, _v in _sub.items():
+                if normalized.get(_k) is None and _v is not None:
+                    normalized[_k] = _v
+
     # ── 1. Symbol triple-write ────────────────────────────────────────
     symbol = str(
         normalized.get("underlying")
@@ -166,7 +226,10 @@ def normalize_trade(
         or normalized.get("strategy_id")
         or strategy_id
     )
-    spread_type, alias_mapped, provided_strategy = canonicalize_strategy_id(raw_spread_type)
+    # Use the single resolver (emits STRATEGY_ALIAS_USED for aliases).
+    spread_type = resolve_strategy_id_or_none(raw_spread_type)
+    # Keep old canonicalize call for alias_mapped metadata (cheap, no side-effects).
+    _, alias_mapped, provided_strategy = canonicalize_strategy_id(raw_spread_type)
     spread_type = spread_type or str(strategy_id or raw_spread_type or "NA").strip().lower() or "NA"
     normalized["spread_type"] = spread_type
     normalized["strategy"] = spread_type
@@ -269,6 +332,15 @@ def normalize_trade(
         "rv_20d": _first_number(normalized, "realized_vol_20d", "rv_20d"),
         "open_interest": _first_number(normalized, "open_interest"),
         "volume": _first_number(normalized, "volume"),
+        "ev_to_risk": (
+            _first_number(normalized, "ev_to_risk")
+            if _first_number(normalized, "ev_to_risk") is not None
+            else (
+                round(expected_value_contract / abs(max_loss_contract), 4)
+                if expected_value_contract is not None and max_loss_contract and abs(max_loss_contract) > 0
+                else None
+            )
+        ),
     }
 
     details: dict[str, Any] = {
@@ -305,29 +377,12 @@ def normalize_trade(
     # ── 9. apply_metrics_contract (computed_metrics + metrics_status) ─
     normalized = apply_metrics_contract(normalized)
 
-    # ── 10. Back-fill legacy root-level aliases ──────────────────────
-    if normalized.get("p_win_used") is None and computed["pop"] is not None:
-        normalized["p_win_used"] = computed["pop"]
-    if normalized.get("return_on_risk") is None and computed["return_on_risk"] is not None:
-        normalized["return_on_risk"] = computed["return_on_risk"]
-    if normalized.get("expected_value") is None and computed["expected_value"] is not None:
-        normalized["expected_value"] = computed["expected_value"]
-    if normalized.get("ev_per_contract") is None and computed["expected_value"] is not None:
-        normalized["ev_per_contract"] = computed["expected_value"]
-    if normalized.get("bid_ask_spread_pct") is None and computed["bid_ask_pct"] is not None:
-        normalized["bid_ask_spread_pct"] = computed["bid_ask_pct"]
-    if normalized.get("strike_distance_pct") is None and computed["strike_dist_pct"] is not None:
-        normalized["strike_distance_pct"] = computed["strike_dist_pct"]
-    if normalized.get("rsi14") is None and computed["rsi14"] is not None:
-        normalized["rsi14"] = computed["rsi14"]
-    if normalized.get("realized_vol_20d") is None and computed["rv_20d"] is not None:
-        normalized["realized_vol_20d"] = computed["rv_20d"]
-    if normalized.get("iv_rv_ratio") is None and details["iv_rv_ratio"] is not None:
-        normalized["iv_rv_ratio"] = details["iv_rv_ratio"]
-    if normalized.get("trade_quality_score") is None and details["trade_quality_score"] is not None:
-        normalized["trade_quality_score"] = details["trade_quality_score"]
-    if not str(normalized.get("market_regime") or "").strip() and details["market_regime"] is not None:
-        normalized["market_regime"] = details["market_regime"]
+    # ── 10. (removed) Legacy root-level back-fill aliases ────────────
+    # Formerly wrote p_win_used, ev_per_contract, bid_ask_spread_pct,
+    # etc. back to root from computed/details.  Consumers should now
+    # read from computed.* / details.* instead.  Use
+    # strip_legacy_fields() at the API boundary to ensure these fields
+    # never reach the frontend.
 
     # ── 11. Validation warnings ──────────────────────────────────────
     if computed["pop"] is None:

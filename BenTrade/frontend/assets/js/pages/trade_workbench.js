@@ -50,10 +50,10 @@ window.BenTradePages.initTradeWorkbench = function initTradeWorkbench(rootEl){
   window.BenTradeNotes?.attachNotes?.(pageNotesMountEl, 'notes:page:trade-testing');
 
   const ANALYZABLE_STRATEGIES = new Set([
-    'credit_put_spread',
-    'credit_call_spread',
-    'debit_put_spread',
-    'debit_call_spread',
+    'put_credit_spread',
+    'call_credit_spread',
+    'put_debit',
+    'call_debit',
   ]);
 
   let selectedTrade = null;
@@ -155,13 +155,13 @@ window.BenTradePages.initTradeWorkbench = function initTradeWorkbench(rootEl){
   }
 
   function currentStrategy(){
-    return String(strategyEl.value || 'credit_put_spread').trim();
+    return String(strategyEl.value || 'put_credit_spread').trim();
   }
 
   function updateStrategyFields(){
     const strategy = currentStrategy();
     const isSpread = strategy.includes('_put_spread') || strategy.includes('_call_spread');
-    const isSingle = strategy === 'long_call' || strategy === 'long_put' || strategy === 'covered_call' || strategy === 'cash_secured_put';
+    const isSingle = strategy === 'long_call' || strategy === 'long_put' || strategy === 'covered_call' || strategy === 'csp';
     const isCondor = strategy === 'iron_condor' || strategy === 'iron_butterfly';
     const isFly = strategy === 'iron_butterfly';
 
@@ -223,7 +223,7 @@ window.BenTradePages.initTradeWorkbench = function initTradeWorkbench(rootEl){
       };
     }
 
-    if(strategy === 'cash_secured_put'){
+    if(strategy === 'csp'){
       return {
         short_strike: payload.strike,
         long_strike: 'CASH',
@@ -287,25 +287,25 @@ window.BenTradePages.initTradeWorkbench = function initTradeWorkbench(rootEl){
     const s = p.strategy;
     const qty = p.contractsMultiplier || 100;
 
-    if(s === 'credit_put_spread'){
+    if(s === 'put_credit_spread'){
       return [
         { side: 'SELL', type: 'PUT', strike: p.short_strike, qty },
         { side: 'BUY', type: 'PUT', strike: p.long_strike, qty },
       ];
     }
-    if(s === 'credit_call_spread'){
+    if(s === 'call_credit_spread'){
       return [
         { side: 'SELL', type: 'CALL', strike: p.short_strike, qty },
         { side: 'BUY', type: 'CALL', strike: p.long_strike, qty },
       ];
     }
-    if(s === 'debit_put_spread'){
+    if(s === 'put_debit'){
       return [
         { side: 'BUY', type: 'PUT', strike: p.long_strike, qty },
         { side: 'SELL', type: 'PUT', strike: p.short_strike, qty },
       ];
     }
-    if(s === 'debit_call_spread'){
+    if(s === 'call_debit'){
       return [
         { side: 'BUY', type: 'CALL', strike: p.long_strike, qty },
         { side: 'SELL', type: 'CALL', strike: p.short_strike, qty },
@@ -340,7 +340,7 @@ window.BenTradePages.initTradeWorkbench = function initTradeWorkbench(rootEl){
         { side: 'SELL', type: 'CALL', strike: p.strike, qty },
       ];
     }
-    if(s === 'cash_secured_put'){
+    if(s === 'csp'){
       return [
         { side: 'SELL', type: 'PUT', strike: p.strike, qty },
         { side: 'RESERVE', type: 'CASH', strike: p.strike, qty },
@@ -379,13 +379,13 @@ window.BenTradePages.initTradeWorkbench = function initTradeWorkbench(rootEl){
     }
 
     const key = String(trade.trade_key || computeTradeKey(asPayload()));
-    const strategy = String(trade.strategy || trade.spread_type || currentStrategy());
+    const strategy = String(trade.strategy_id || trade.strategy || trade.spread_type || currentStrategy());
 
     if(trade.analysis_state === 'under_construction'){
       resultEl.innerHTML = `
         <div class="trade-card" data-trade-key="${key}">
           <div class="trade-header">
-            <div class="trade-type">${trade.underlying || trade.underlying_symbol || 'N/A'} • ${strategy}</div>
+            <div class="trade-type">${trade.symbol || trade.underlying || trade.underlying_symbol || 'N/A'} • ${strategy}</div>
             <div class="trade-strikes">Analysis: under construction</div>
             <div class="trade-strikes">${key}</div>
           </div>
@@ -394,13 +394,14 @@ window.BenTradePages.initTradeWorkbench = function initTradeWorkbench(rootEl){
       return;
     }
 
-    const rorClass = Number(trade.return_on_risk || 0) >= 0.2 ? 'positive' : 'neutral';
-    const evClass = Number(trade.ev_per_share || trade.expected_value || 0) >= 0 ? 'positive' : 'negative';
+    const rorClass = Number((trade.computed || {}).return_on_risk || trade.return_on_risk || 0) >= 0.2 ? 'positive' : 'neutral';
+    const evRaw = (trade.computed || {}).expected_value ?? trade.expected_value;
+    const evClass = Number(evRaw || 0) >= 0 ? 'positive' : 'negative';
 
     resultEl.innerHTML = `
       <div class="trade-card" data-trade-key="${key}">
         <div class="trade-header">
-          <div class="trade-type">${trade.underlying || trade.underlying_symbol || 'N/A'} • ${strategy}</div>
+          <div class="trade-type">${trade.symbol || trade.underlying || trade.underlying_symbol || 'N/A'} • ${strategy}</div>
           <div class="trade-strikes">${normalizeStrike(trade.short_strike)} / ${normalizeStrike(trade.long_strike)} • DTE ${trade.dte ?? 'N/A'}</div>
           <div class="trade-strikes">${key}</div>
         </div>
@@ -408,8 +409,8 @@ window.BenTradePages.initTradeWorkbench = function initTradeWorkbench(rootEl){
           <div class="metric-grid">
             <div class="metric"><div class="metric-label">Net Credit</div><div class="metric-value">$${fmt(trade.net_credit)}</div></div>
             <div class="metric"><div class="metric-label" data-metric="return_on_risk">Return on Risk</div><div class="metric-value ${rorClass}">${fmtPct(trade.return_on_risk)}</div></div>
-            <div class="metric"><div class="metric-label" data-metric="pop">POP</div><div class="metric-value">${fmtPct(trade.p_win_used || trade.pop_delta_approx)}</div></div>
-            <div class="metric"><div class="metric-label" data-metric="ev">Expected Value</div><div class="metric-value ${evClass}">$${fmt(trade.ev_per_share || trade.expected_value)}</div></div>
+            <div class="metric"><div class="metric-label" data-metric="pop">POP</div><div class="metric-value">${fmtPct((trade.computed || {}).pop)}</div></div>
+            <div class="metric"><div class="metric-label" data-metric="ev">Expected Value</div><div class="metric-value ${evClass}">$${fmt((trade.computed || {}).expected_value || trade.expected_value)}</div></div>
           </div>
           <div class="trade-actions-row" style="margin-top:12px; gap:8px; display:flex; flex-wrap:wrap;">
             <button class="btn" data-lifecycle="WATCHLIST">Add to Watchlist</button>
@@ -563,7 +564,7 @@ window.BenTradePages.initTradeWorkbench = function initTradeWorkbench(rootEl){
       return '';
     }
 
-    if(p.strategy === 'long_call' || p.strategy === 'long_put' || p.strategy === 'covered_call' || p.strategy === 'cash_secured_put'){
+    if(p.strategy === 'long_call' || p.strategy === 'long_put' || p.strategy === 'covered_call' || p.strategy === 'csp'){
       if(!Number.isFinite(Number(p.strike))) return 'strike must be numeric';
       return '';
     }
@@ -725,7 +726,7 @@ window.BenTradePages.initTradeWorkbench = function initTradeWorkbench(rootEl){
     symbolEl.value = String(payload.symbol || symbolEl.value || '').toUpperCase();
     const expirationRaw = String(payload.expiration || '').trim();
     expirationEl.value = expirationRaw && expirationRaw !== 'NA' ? expirationRaw : (expirationEl.value || '');
-    strategyEl.value = String(payload.strategy || strategyEl.value || 'credit_put_spread');
+    strategyEl.value = String(payload.strategy || strategyEl.value || 'put_credit_spread');
 
     if(shortStrikeEl) shortStrikeEl.value = payload.short_strike ?? '';
     if(longStrikeEl) longStrikeEl.value = payload.long_strike ?? '';

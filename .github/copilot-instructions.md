@@ -62,3 +62,4 @@ At the end of each task:
 - Output a summary of changes.
 - List any risks or assumptions.
 - Confirm tests pass.
+- Update Readme.md and Architecture.md if necessary.

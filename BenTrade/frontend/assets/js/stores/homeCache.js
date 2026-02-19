@@ -6,12 +6,6 @@ window.BenTradeHomeCacheStore = (function(){
 
   const INDEX_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA'];
   const SECTOR_SYMBOLS = ['XLF', 'XLK', 'XLE', 'XLY', 'XLP', 'XLV', 'XLI', 'XLB', 'XLRE', 'XLU', 'XLC'];
-  const STRATEGY_SOURCES = [
-    { id: 'credit_spread', label: 'Credit Spread', route: '#/credit-spread' },
-    { id: 'debit_spreads', label: 'Debit Spreads', route: '#/debit-spreads' },
-    { id: 'iron_condor', label: 'Iron Condor', route: '#/iron-condor' },
-    { id: 'butterflies', label: 'Butterflies', route: '#/butterflies' },
-  ];
 
   let renderer = null;
   let inMemory = null;
@@ -42,94 +36,6 @@ window.BenTradeHomeCacheStore = (function(){
     }
   }
 
-  function toNumber(value){
-    if(value === null || value === undefined || value === '') return null;
-    const n = Number(value);
-    return Number.isFinite(n) ? n : null;
-  }
-
-  function deriveRor(raw){
-    const direct = toNumber(raw?.return_on_risk ?? raw?.ror);
-    if(direct !== null) return direct;
-
-    const maxProfit = toNumber(raw?.max_profit_per_share ?? raw?.max_profit ?? raw?.max_profit_per_contract);
-    const maxLoss = toNumber(raw?.max_loss_per_share ?? raw?.max_loss ?? raw?.max_loss_per_contract);
-    if(maxProfit !== null && maxLoss !== null && maxLoss > 0){
-      return maxProfit / maxLoss;
-    }
-    return null;
-  }
-
-  function normalizeTradeIdea(row, source){
-    const raw = (row && typeof row === 'object') ? row : {};
-    const symbol = String(row?.underlying || row?.underlying_symbol || row?.symbol || '').trim().toUpperCase();
-    const score = toNumber(row?.composite_score ?? row?.trade_quality_score ?? row?.scanner_score ?? row?.score) ?? 0;
-    const ev = toNumber(raw?.ev_per_share ?? raw?.expected_value ?? raw?.ev ?? raw?.edge ?? raw?.ev_to_risk);
-    const pop = toNumber(raw?.p_win_used ?? raw?.pop_delta_approx ?? raw?.probability_of_profit ?? raw?.pop);
-    const ror = deriveRor(raw);
-    const sourceType = String(source?.type || '').toLowerCase() === 'stock' ? 'stock' : 'options';
-    const modelEvaluation = raw?.model_evaluation && typeof raw.model_evaluation === 'object' ? raw.model_evaluation : null;
-    const strategy = String(row?.spread_type || row?.strategy || row?.recommended_strategy || source?.label || 'idea');
-    const recommendation = modelEvaluation ? String(modelEvaluation?.recommendation || 'Not run') : 'Not run';
-
-    return {
-      symbol: symbol || 'N/A',
-      strategy,
-      score,
-      ev,
-      pop,
-      ror,
-      recommendation,
-      route: source?.route || '#/credit-spread',
-      source: source?.label || 'Unknown',
-      strategy_id: source?.id || null,
-      report_file: source?.report_file || null,
-      source_feed: source?.source_feed || 'latest analysis_*.json trades',
-      sourceType,
-      model: modelEvaluation,
-      key_metrics: {
-        price: toNumber(raw?.price),
-        rsi14: toNumber(raw?.metrics?.rsi14 ?? raw?.signals?.rsi_14 ?? raw?.rsi14),
-        ema20: toNumber(raw?.metrics?.ema20 ?? raw?.ema20),
-        iv_rv_ratio: toNumber(raw?.metrics?.iv_rv_ratio ?? raw?.signals?.iv_rv_ratio ?? raw?.iv_rv_ratio),
-        trend: String(raw?.trend || '').trim().toLowerCase() || null,
-      },
-      trade: row,
-    };
-  }
-
-  async function fetchLatestStrategyIdeas(api){
-    const allIdeas = [];
-
-    await Promise.all(STRATEGY_SOURCES.map(async (source) => {
-      try{
-        const files = await api.listStrategyReports(source.id);
-        const report = Array.isArray(files) && files.length ? String(files[0]) : null;
-        if(!report) return;
-        const payload = await api.getStrategyReport(source.id, report);
-        const trades = Array.isArray(payload?.trades) ? payload.trades : [];
-        trades.slice(0, 8).forEach((trade) => allIdeas.push(normalizeTradeIdea(trade, {
-          ...source,
-          report_file: report,
-          source_feed: 'latest analysis_*.json trades',
-        })));
-      }catch(_err){
-      }
-    }));
-
-    try{
-      const scannerPayload = await api.getStockScanner();
-      const candidates = Array.isArray(scannerPayload?.candidates) ? scannerPayload.candidates : [];
-      candidates.slice(0, 8).forEach((idea) => {
-        allIdeas.push(normalizeTradeIdea(idea, { label: 'Stock Scanner', route: '#/stock-scanner', type: 'stock', source_feed: 'stock scanner' }));
-      });
-    }catch(_err){
-    }
-
-    allIdeas.sort((a, b) => (b.score || 0) - (a.score || 0));
-    return allIdeas;
-  }
-
   function mergeData(previousData, nextData){
     return {
       ...(previousData || {}),
@@ -152,33 +58,69 @@ window.BenTradeHomeCacheStore = (function(){
     }
   }
 
-  async function refreshCore({ force, logFn } = {}){
+  async function refreshCore({ force, logFn, homeOnly } = {}){
     if(inFlight && !force) return inFlight;
 
     const api = window.BenTradeApi;
     const previous = getSnapshot();
     const previousData = (previous && typeof previous.data === 'object') ? previous.data : {};
+    const skipScanners = !!homeOnly;
 
     const doRefresh = (async () => {
       const errors = [];
       const updates = {};
       let successfulStages = 0;
 
+      /* ── Rate-limit aware stage runner ── */
+      const STAGE_MIN_DELAY_MS = 350;
+      const STAGE_MAX_RETRIES = 2;
+      const STAGE_BACKOFF_BASE_MS = 2000;
+      const STAGE_BACKOFF_CAP_MS = 15000;
+      let lastStageFinishedAt = 0;
+
+      function isRetryableError(err){
+        const status = Number(err?.status || err?.statusCode || err?.response?.status);
+        if(status === 429) return true;
+        if(status >= 500 && status < 600) return true;
+        const text = String(err?.message || err?.detail || '').toLowerCase();
+        return text.includes('rate limit') || text.includes('too many requests');
+      }
+
+      function sleep(ms){ return new Promise(function(r){ window.setTimeout(r, Math.max(0,ms)); }); }
+
       async function runStage(displayName, key, fn){
+        /* Enforce minimum gap between stage starts */
+        const elapsed = Date.now() - lastStageFinishedAt;
+        if(lastStageFinishedAt > 0 && elapsed < STAGE_MIN_DELAY_MS){
+          await sleep(STAGE_MIN_DELAY_MS - elapsed);
+        }
+
         logLine(logFn, `Fetching ${displayName}...`);
-        try{
-          const value = await fn();
-          if(key){
-            updates[key] = value;
+        let attempt = 0;
+        while(true){
+          try{
+            const value = await fn();
+            if(key){
+              updates[key] = value;
+            }
+            successfulStages += 1;
+            logLine(logFn, `Loaded: ${displayName}`);
+            lastStageFinishedAt = Date.now();
+            return value;
+          }catch(err){
+            if(isRetryableError(err) && attempt < STAGE_MAX_RETRIES){
+              const backoff = Math.min(STAGE_BACKOFF_CAP_MS, STAGE_BACKOFF_BASE_MS * Math.pow(2, attempt));
+              logLine(logFn, `Rate-limited on ${displayName}, retrying in ${(backoff/1000).toFixed(1)}s (attempt ${attempt + 1}/${STAGE_MAX_RETRIES})...`);
+              await sleep(backoff);
+              attempt += 1;
+              continue;
+            }
+            const info = errorParts(err);
+            errors.push(`${String(key || displayName)}: ${info.message}`);
+            logLine(logFn, `Error: ${displayName} ${info.status} ${info.message}`);
+            lastStageFinishedAt = Date.now();
+            return null;
           }
-          successfulStages += 1;
-          logLine(logFn, `Loaded: ${displayName}`);
-          return value;
-        }catch(err){
-          const info = errorParts(err);
-          errors.push(`${String(key || displayName)}: ${info.message}`);
-          logLine(logFn, `Error: ${displayName} ${info.status} ${info.message}`);
-          return null;
         }
       }
 
@@ -215,7 +157,6 @@ window.BenTradeHomeCacheStore = (function(){
         ]));
       });
 
-      await runStage('top picks', 'topPicks', () => api.getTopRecommendations());
       await runStage('portfolio risk', 'portfolioRisk', () => api.getPortfolioRiskMatrix());
 
       await runStage('source health', 'sourceHealth', async () => {
@@ -250,10 +191,21 @@ window.BenTradeHomeCacheStore = (function(){
           }
         })(),
         (async () => {
-          try{
-            updates.opportunities = await fetchLatestStrategyIdeas(api);
-          }catch(_err){
+          if(skipScanners){
+            // Home-only mode: preserve existing scanner opportunities, don't fetch stale reports
+            updates.opportunities = previousData?.opportunities || [];
+            return;
           }
+          // Full mode: read from Scanner Orchestrator (populated by Run Scan / Full App Refresh)
+          const orchestrator = window.BenTradeScannerOrchestrator;
+          const orchestratorResults = orchestrator?.getLatestResults?.();
+          if(orchestratorResults && Array.isArray(orchestratorResults.opportunities) && orchestratorResults.opportunities.length){
+            updates.opportunities = orchestratorResults.opportunities;
+            logLine(logFn, `Loaded ${orchestratorResults.opportunities.length} opportunities from scanner orchestrator`);
+            return;
+          }
+          // No orchestrator results yet — keep empty until scanners run this session
+          updates.opportunities = [];
         })(),
       ]);
 
@@ -357,12 +309,12 @@ window.BenTradeHomeCacheStore = (function(){
     if(!force && snap && !isStale(snap, FRESH_TTL_MS)){
       return snap;
     }
-    return refreshCore({ force });
+    return refreshCore({ force, homeOnly: true });
   }
 
   async function refreshNow(options = {}){
     const opts = options && typeof options === 'object' ? options : {};
-    return refreshCore({ force: true, logFn: opts.logFn });
+    return refreshCore({ force: true, logFn: opts.logFn, homeOnly: !!opts.homeOnly });
   }
 
   async function refreshSilentWithLog(options = {}){
@@ -371,7 +323,7 @@ window.BenTradeHomeCacheStore = (function(){
     if(!opts.force && snap && !isStale(snap, FRESH_TTL_MS)){
       return snap;
     }
-    return refreshCore({ force: !!opts.force, logFn: opts.logFn });
+    return refreshCore({ force: !!opts.force, logFn: opts.logFn, homeOnly: !!opts.homeOnly });
   }
 
   return {

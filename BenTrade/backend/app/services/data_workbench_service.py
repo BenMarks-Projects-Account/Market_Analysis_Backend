@@ -8,6 +8,8 @@ from typing import Any
 from app.services.validation_events import ValidationEventsService
 from app.utils.computed_metrics import apply_metrics_contract
 from app.utils.normalize import normalize_trade
+from app.utils.report_conformance import validate_report_file
+from app.utils.strategy_id_resolver import resolve_strategy_id_or_none
 from app.utils.trade_key import canonicalize_strategy_id, canonicalize_trade_key, normalize_strike, trade_key
 
 
@@ -60,8 +62,9 @@ class DataWorkbenchService:
         raw = str(value or "").strip().lower()
         if not raw:
             return "NA"
+        # Check workbench-specific aliases first, then delegate to single resolver.
         mapped = _WORKBENCH_TYPE_ALIASES.get(raw, raw)
-        canonical, _alias_mapped, _provided = canonicalize_strategy_id(mapped)
+        canonical = resolve_strategy_id_or_none(mapped)
         return canonical or mapped
 
     @classmethod
@@ -297,7 +300,11 @@ class DataWorkbenchService:
 
     def _find_in_latest_reports(self, attempted_keys: list[str]) -> dict[str, Any] | None:
         for report_path in self._iter_scan_report_files():
-            payload = self._read_json(report_path)
+            payload = validate_report_file(
+                report_path,
+                validation_events=self.validation_events,
+                auto_delete=True,
+            )
             if payload is None:
                 continue
 
@@ -310,8 +317,6 @@ class DataWorkbenchService:
                 rows = payload.get("trades")
                 if isinstance(rows, list):
                     trades = [row for row in rows if isinstance(row, dict)]
-            elif isinstance(payload, list):
-                trades = [row for row in payload if isinstance(row, dict)]
 
             if not trades:
                 continue
@@ -604,7 +609,11 @@ class DataWorkbenchService:
         entries: dict[str, dict[str, Any]] = {}
 
         for report_path in self._iter_scan_report_files():
-            payload = self._read_json(report_path)
+            payload = validate_report_file(
+                report_path,
+                validation_events=self.validation_events,
+                auto_delete=True,
+            )
             if not isinstance(payload, dict):
                 continue
             generated_at = self._to_iso_timestamp(payload.get("generated_at"))

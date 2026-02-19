@@ -331,7 +331,7 @@ class RegimeService:
         if regime_score >= 65:
             label = "RISK_ON"
             playbook = {
-                "primary": ["credit_put_spread", "covered_call", "debit_call_spread"],
+                "primary": ["put_credit_spread", "covered_call", "call_debit"],
                 "avoid": ["short_gamma", "debit_butterfly"],
                 "notes": [
                     "Favor bullish premium-selling structures with defined risk",
@@ -351,7 +351,7 @@ class RegimeService:
         else:
             label = "RISK_OFF"
             playbook = {
-                "primary": ["debit_put_spread", "cash", "hedges"],
+                "primary": ["put_debit", "cash", "hedges"],
                 "avoid": ["short_puts_near_spot", "short_gamma"],
                 "notes": [
                     "Reduce net short downside exposure",

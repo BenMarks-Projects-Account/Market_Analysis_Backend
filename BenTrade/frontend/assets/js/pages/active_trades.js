@@ -34,7 +34,7 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl){
       return tradeKeyUtil.tradeKey({
         underlying: trade?.symbol,
         expiration: trade?.expiration,
-        spread_type: trade?.spread_type || trade?.strategy,
+        spread_type: trade?.strategy_id || trade?.spread_type || trade?.strategy,
         short_strike: trade?.short_strike,
         long_strike: trade?.long_strike,
         dte: trade?.dte,

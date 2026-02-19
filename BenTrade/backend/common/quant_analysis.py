@@ -164,7 +164,7 @@ class CreditSpread:
             raise ValueError("spread_type must be 'put_credit' or 'call_credit'")
 
         width = abs(self.long_strike - self.short_strike)
-        if self.net_credit >= width:
+        if self.net_credit > width - 0.01:
             raise ValueError("net_credit must be < spread width (else invalid quotes/arbitrage)")
 
         if self.short_delta_abs is not None and not (0.0 < self.short_delta_abs < 1.0):

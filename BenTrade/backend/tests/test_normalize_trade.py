@@ -49,9 +49,6 @@ def test_per_share_to_per_contract_scaling():
     assert result["computed"]["expected_value"] == 25.0
     assert result["computed"]["max_profit"] == pytest.approx(110.0)
     assert result["computed"]["max_loss"] == pytest.approx(390.0)
-    # Legacy backfill aliases
-    assert result["ev_per_contract"] == 25.0
-    assert result["expected_value"] == 25.0
 
 
 def test_per_contract_fields_preferred_over_per_share():
@@ -332,9 +329,7 @@ def test_homepage_scanner_parity():
     assert cm["max_loss"] == 375.0
     assert cm["pop"] == 0.72
 
-    # Legacy backfill: root-level fields also have per-contract values
-    assert result["ev_per_contract"] == 35.0
-    assert result["expected_value"] == 35.0
+    # Legacy backfill removed — values only live in computed/computed_metrics
 
 
 # ── strategy_label helper ────────────────────────────────────────────

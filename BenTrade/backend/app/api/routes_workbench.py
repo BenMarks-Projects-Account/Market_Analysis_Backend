@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.models.schemas import SpreadAnalyzeRequest, SpreadCandidate
+from app.utils.normalize import normalize_trade, strip_legacy_fields
 from app.utils.trade_key import canonicalize_strategy_id, canonicalize_trade_key, trade_key
 
 router = APIRouter(prefix="/api/workbench", tags=["workbench"])
@@ -213,6 +214,10 @@ async def analyze_workbench_trade(payload: WorkbenchAnalyzeRequest, request: Req
         "long_strike": long_key_part,
     }
     trade["trade_id"] = trade["trade_key"]
+
+    # Normalize through the canonical pipeline and strip legacy fields.
+    trade = normalize_trade(trade)
+    trade = strip_legacy_fields(trade)
 
     return {
         "trade": trade,

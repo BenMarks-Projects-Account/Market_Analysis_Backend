@@ -24,6 +24,7 @@ CORE_COMPUTED_METRIC_FIELDS: tuple[str, ...] = (
     "volume",
     "rank_score",
     "composite_score",
+    "ev_to_risk",
 )
 
 
@@ -115,6 +116,7 @@ def build_computed_metrics(trade: dict[str, Any]) -> dict[str, float | None]:
         "volume": _first_number(containers, "volume"),
         "rank_score": _first_number(containers, "rank_score"),
         "composite_score": _first_number(containers, "composite_score"),
+        "ev_to_risk": _first_number(containers, "ev_to_risk"),
     }
 
 

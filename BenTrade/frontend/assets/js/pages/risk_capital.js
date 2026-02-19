@@ -160,7 +160,7 @@ window.BenTradePages.initRiskCapital = function initRiskCapital(rootEl){
   function openModal(trade){
     const width = trade?.width;
     const credit = trade?.credit;
-    const maxLoss = trade?.max_loss ?? trade?.estimated_risk;
+    const maxLoss = trade?.max_loss ?? (trade?.computed || {})?.max_loss ?? trade?.estimated_risk;
     const kelly = trade?.kelly_fraction;
     const note = trade?.notes || 'under construction';
 
@@ -224,7 +224,7 @@ window.BenTradePages.initRiskCapital = function initRiskCapital(rootEl){
         <tr class="risk-row" data-trade-key="${key}">
           <td>${trade.symbol || 'N/A'}</td>
           <td class="risk-key-cell">${key}</td>
-          <td data-metric="estimated_risk">${fmtMoney(trade.estimated_risk)}</td>
+          <td data-metric="max_loss">${fmtMoney(trade.max_loss ?? (trade.computed || {}).max_loss ?? trade.estimated_risk)}</td>
           <td data-metric="dte">${trade.dte ?? 'N/A'}</td>
           <td>${trade.notes || ''}</td>
         </tr>

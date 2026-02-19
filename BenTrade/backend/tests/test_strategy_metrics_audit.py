@@ -247,7 +247,7 @@ class TestIncomeMetrics:
     def _csp_candidate(self, *, spot: float = 100.0, strike: float = 90.0) -> dict[str, Any]:
         return {
             "strategy": "income",
-            "spread_type": "cash_secured_put",
+            "spread_type": "csp",
             "symbol": "TEST",
             "expiration": "2026-06-01",
             "dte": 30,
@@ -378,8 +378,8 @@ class TestDebitSpreadMetrics:
 
     def _call_debit_candidate(self) -> dict[str, Any]:
         return {
-            "strategy": "debit_call_spread",
-            "spread_type": "debit_call_spread",
+            "strategy": "call_debit",
+            "spread_type": "call_debit",
             "symbol": "TEST",
             "expiration": "2026-06-01",
             "dte": 30,

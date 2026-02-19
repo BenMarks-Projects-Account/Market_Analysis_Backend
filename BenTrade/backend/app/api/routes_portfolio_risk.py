@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 
 from app.api.routes_active_trades import _build_active_payload
+from app.utils.report_conformance import validate_report_file
 from app.utils.trade_key import trade_key
 
 router = APIRouter(prefix="/api/portfolio/risk", tags=["portfolio-risk"])
@@ -60,9 +61,8 @@ def _latest_report_trades(results_dir: Path) -> list[dict[str, Any]]:
 
     candidates = sorted(set(candidates), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
     for path in candidates:
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+        payload = validate_report_file(path, auto_delete=True)
+        if payload is None:
             continue
 
         trades = payload.get("trades") if isinstance(payload, dict) else payload

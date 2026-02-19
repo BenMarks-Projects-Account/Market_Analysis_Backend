@@ -37,8 +37,10 @@ def test_data_workbench_trade_found_in_latest_report(tmp_path: Path) -> None:
         "expiration": "2026-03-20",
         "trades": [
             {
+                "trade_key": "QQQ|2026-03-20|put_credit_spread|510|500|31",
+                "strategy_id": "put_credit_spread",
                 "underlying": "QQQ",
-                "spread_type": "credit_put_spread",
+                "spread_type": "put_credit_spread",
                 "short_strike": 510,
                 "long_strike": 500,
                 "dte": 31,
@@ -51,6 +53,15 @@ def test_data_workbench_trade_found_in_latest_report(tmp_path: Path) -> None:
                 "break_even": 508.55,
                 "return_on_risk": 0.17,
                 "validation_warnings": ["SAMPLE_WARNING"],
+                "computed": {
+                    "max_profit": 145.0,
+                    "max_loss": 855.0,
+                    "pop": 0.68,
+                    "expected_value": 122.0,
+                    "return_on_risk": 0.17,
+                },
+                "details": {"dte": 31, "break_even": 508.55},
+                "pills": {"strategy_label": "Put Credit Spread", "dte": 31, "pop": 0.68},
                 "input_snapshot": {
                     "underlying_snapshot": {"price": 520.1},
                     "chain_metadata": {"contracts": 100},
@@ -160,11 +171,16 @@ def test_data_workbench_trade_alias_key_resolves_and_emits_noncanonical_warning(
         "expiration": "2026-03-20",
         "trades": [
             {
+                "trade_key": "QQQ|2026-03-20|put_credit_spread|510|500|31",
+                "strategy_id": "put_credit_spread",
                 "underlying": "QQQ",
                 "spread_type": "put_credit_spread",
                 "short_strike": 510,
                 "long_strike": 500,
                 "dte": 31,
+                "computed": {"max_profit": 100.0, "max_loss": 500.0, "pop": 0.70},
+                "details": {"dte": 31},
+                "pills": {"strategy_label": "Put Credit Spread", "dte": 31},
                 "input_snapshot": {
                     "underlying_snapshot": {"price": 520.1},
                     "chain_metadata": {"contracts": 100},
@@ -206,6 +222,8 @@ def test_data_workbench_reconstructs_input_snapshot_without_missing_warning(tmp_
         "expiration": "2026-03-20",
         "trades": [
             {
+                "trade_key": "QQQ|2026-03-20|put_credit_spread|510|500|31",
+                "strategy_id": "put_credit_spread",
                 "underlying": "QQQ",
                 "spread_type": "put_credit_spread",
                 "short_strike": 510,
@@ -213,6 +231,9 @@ def test_data_workbench_reconstructs_input_snapshot_without_missing_warning(tmp_
                 "dte": 31,
                 "net_credit": 1.45,
                 "contractsMultiplier": 100,
+                "computed": {"max_profit": 145.0, "max_loss": 855.0, "pop": 0.70},
+                "details": {"dte": 31},
+                "pills": {"strategy_label": "Put Credit Spread"},
             }
         ],
     }

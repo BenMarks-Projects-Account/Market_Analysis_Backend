@@ -1,6 +1,6 @@
 # BenTrade Frontend
 
-> Last updated: 2026-02-17
+> Last updated: 2026-02-18
 
 Vanilla JS single-page application — no framework, no build step.
 
@@ -38,13 +38,41 @@ assets/js/
 ├── app.js              # Shared dashboard logic
 ├── router.js           # SPA route → view loader
 ├── api/                # Backend API client wrappers
-├── pages/              # Per-dashboard JS modules (home.js, etc.)
-├── ui/                 # Reusable UI components (trade_card.js, etc.)
+│   └── client.js           # Fetch wrapper for all API calls
+├── pages/              # Per-dashboard JS modules
+│   ├── home.js             # Homepage Opportunity Engine
+│   ├── strategy_dashboard_shell.js  # Generic strategy dashboard
+│   ├── active_trades.js
+│   ├── admin_data_workbench.js
+│   ├── data_health.js
+│   ├── portfolio_risk.js
+│   ├── risk_capital.js
+│   ├── stock_analysis.js
+│   ├── stock_scanner.js
+│   ├── strategy_analytics.js
+│   ├── trade_lifecycle.js
+│   └── trade_workbench.js
+├── ui/                 # Reusable UI components
+│   ├── trade_card.js       # Trade card builder
+│   ├── home_loading_overlay.js  # Homepage loading overlay
+│   ├── notes.js            # Trade notes (localStorage-backed)
+│   ├── source_health.js    # Source health display
+│   └── tooltip.js          # Tooltip component
 ├── stores/             # Client-side data stores
+│   ├── homeCache.js        # Homepage data cache
+│   └── sessionStats.js     # Session statistics
 ├── state/              # Reactive state management
+│   └── session_state.js    # Session state
 ├── strategies/         # Strategy-specific rendering
+│   └── defaults.js         # Strategy default configurations
 ├── metrics/            # Metric display helpers
+│   └── glossary.js         # Metrics glossary definitions
 └── utils/              # Shared utilities
+    ├── format.js           # Formatting helpers
+    ├── tradeAccessor.js    # Trade data accessor
+    ├── tradeKey.js         # Client-side trade key utilities
+    ├── rateLimiter.js      # Rate limiting
+    └── debug.js            # Debug utilities
 ```
 
 ## Trade Cards

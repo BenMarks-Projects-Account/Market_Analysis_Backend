@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.services.ranking import compute_rank_score, safe_float
 from app.utils.dates import dte_ceil
 from common.quant_analysis import enrich_trades_batch
+
+logger = logging.getLogger("bentrade.credit_spread")
+
+# Tolerance: reject candidates whose net_credit is within this many dollars
+# of the spread width.  Prevents near-zero-profit or floating-point-edge trades.
+_EPSILON = 0.01
 
 
 class CreditSpreadStrategyPlugin:
@@ -22,76 +29,86 @@ class CreditSpreadStrategyPlugin:
 
     def build_candidates(self, inputs: dict[str, Any]) -> list[dict[str, Any]]:
         snapshots = inputs.get("snapshots") or []
-        snapshot = snapshots[0] if snapshots else inputs
+        if not snapshots:
+            snapshots = [inputs]
         payload = inputs.get("request") or {}
-        contracts = snapshot.get("contracts") or []
-        underlying_price = self._to_float(snapshot.get("underlying_price"))
-        if underlying_price is None:
-            return []
 
-        puts = [
-            c for c in contracts
-            if str(getattr(c, "option_type", "")).lower() == "put"
-            and self._to_float(getattr(c, "strike", None)) is not None
-        ]
-        if not puts:
-            return []
-
-        puts.sort(key=lambda c: float(c.strike), reverse=True)
+        # Read distance / width params once (same for all snapshots)
+        distance_min = self._to_float(payload.get("distance_min")) or 0.01
+        distance_max = self._to_float(payload.get("distance_max")) or 0.12
+        width_min = self._to_float(payload.get("width_min"))
+        width_max = self._to_float(payload.get("width_max"))
+        if width_min is None:
+            width_min = 1.0
+        if width_max is None:
+            width_max = 5.0
+        if width_max < width_min:
+            width_min, width_max = width_max, width_min
+        base_widths = [1.0, 2.0, 3.0, 5.0, 10.0]
+        target_widths = tuple(w for w in base_widths if width_min <= w <= width_max) or (2.0, 3.0, 5.0)
 
         candidates: list[dict[str, Any]] = []
-        for short_leg in puts:
-            short_strike = float(short_leg.strike)
-            if short_strike >= underlying_price:
+
+        for snapshot in snapshots:
+            contracts = snapshot.get("contracts") or []
+            underlying_price = self._to_float(snapshot.get("underlying_price"))
+            if underlying_price is None:
                 continue
 
-            distance_pct = (underlying_price - short_strike) / underlying_price
-            if distance_pct < 0.01 or distance_pct > 0.12:
-                continue
-
-            long_candidates = [
-                leg for leg in puts
-                if float(leg.strike) < short_strike
+            puts = [
+                c for c in contracts
+                if str(getattr(c, "option_type", "")).lower() == "put"
+                and self._to_float(getattr(c, "strike", None)) is not None
             ]
-            if not long_candidates:
+            if not puts:
                 continue
 
-            width_min = self._to_float(payload.get("width_min"))
-            width_max = self._to_float(payload.get("width_max"))
-            if width_min is None:
-                width_min = 1.0
-            if width_max is None:
-                width_max = 5.0
-            if width_max < width_min:
-                width_min, width_max = width_max, width_min
+            puts.sort(key=lambda c: float(c.strike), reverse=True)
 
-            base_widths = [1.0, 2.0, 3.0, 5.0, 10.0]
-            target_widths = tuple(width for width in base_widths if width_min <= width <= width_max) or (2.0, 3.0, 5.0)
-            chosen_long = None
-            for width in target_widths:
-                chosen_long = min(
-                    long_candidates,
-                    key=lambda leg: abs((short_strike - float(leg.strike)) - width),
-                    default=None,
+            for short_leg in puts:
+                short_strike = float(short_leg.strike)
+                if short_strike >= underlying_price:
+                    continue
+
+                distance_pct = (underlying_price - short_strike) / underlying_price
+                if distance_pct < distance_min or distance_pct > distance_max:
+                    continue
+
+                long_candidates = [
+                    leg for leg in puts
+                    if float(leg.strike) < short_strike
+                ]
+                if not long_candidates:
+                    continue
+
+                chosen_long = None
+                for width in target_widths:
+                    chosen_long = min(
+                        long_candidates,
+                        key=lambda leg: abs((short_strike - float(leg.strike)) - width),
+                        default=None,
+                    )
+                    if chosen_long is not None:
+                        break
+                if chosen_long is None:
+                    continue
+
+                width = abs(short_strike - float(chosen_long.strike))
+                if width <= 0:
+                    continue
+
+                candidates.append(
+                    {
+                        "short_leg": short_leg,
+                        "long_leg": chosen_long,
+                        "strategy": "put_credit_spread",
+                        "width": width,
+                        "snapshot": snapshot,
+                    }
                 )
-                if chosen_long is not None:
+
+                if len(candidates) >= 80:
                     break
-            if chosen_long is None:
-                continue
-
-            width = abs(short_strike - float(chosen_long.strike))
-            if width <= 0:
-                continue
-
-            candidates.append(
-                {
-                    "short_leg": short_leg,
-                    "long_leg": chosen_long,
-                    "strategy": "put_credit_spread",
-                    "width": width,
-                    "snapshot": snapshot,
-                }
-            )
 
             if len(candidates) >= 80:
                 break
@@ -121,11 +138,42 @@ class CreditSpreadStrategyPlugin:
             underlying_price = self._to_float(snapshot.get("underlying_price") if isinstance(snapshot, dict) else inputs.get("underlying_price"))
             vix = self._to_float(snapshot.get("vix") if isinstance(snapshot, dict) else inputs.get("vix"))
 
+            short_strike = self._to_float(getattr(short_leg, "strike", None))
+            long_strike = self._to_float(getattr(long_leg, "strike", None))
+
             short_bid = self._to_float(getattr(short_leg, "bid", None))
+            short_ask = self._to_float(getattr(short_leg, "ask", None))
+            long_bid = self._to_float(getattr(long_leg, "bid", None))
             long_ask = self._to_float(getattr(long_leg, "ask", None))
-            net_credit = None
-            if short_bid is not None and long_ask is not None:
+
+            # -- Defensive quote checks before computing net_credit -----------
+            rejection: str | None = None
+
+            if short_bid is None or short_bid <= 0:
+                rejection = "MISSING_QUOTES:short_bid"
+            elif long_ask is None or long_ask <= 0:
+                rejection = "MISSING_QUOTES:long_ask"
+            elif short_ask is not None and short_ask < short_bid:
+                rejection = "ASK_LT_BID:short_leg"
+            elif long_bid is not None and long_ask < long_bid:
+                rejection = "ASK_LT_BID:long_leg"
+
+            if rejection:
+                net_credit = None
+            else:
                 net_credit = short_bid - long_ask
+
+            # Pre-validate net_credit versus width before sending to enrich_trade
+            width = abs((short_strike or 0.0) - (long_strike or 0.0))
+            if rejection is None and net_credit is not None:
+                if net_credit <= 0:
+                    rejection = "NON_POSITIVE_CREDIT"
+                elif net_credit > width - _EPSILON:
+                    rejection = "NET_CREDIT_GE_WIDTH"
+
+            # Resolve delta safely: pass None (not 0.0) when missing
+            raw_delta = self._to_float(getattr(short_leg, "delta", None))
+            short_delta_abs = abs(raw_delta) if raw_delta is not None else None
 
             base_trades.append(
                 {
@@ -135,21 +183,27 @@ class CreditSpreadStrategyPlugin:
                     "underlying_symbol": symbol,
                     "expiration": expiration,
                     "dte": dte_ceil(expiration),
-                    "short_strike": self._to_float(getattr(short_leg, "strike", None)),
-                    "long_strike": self._to_float(getattr(long_leg, "strike", None)),
+                    "short_strike": short_strike,
+                    "long_strike": long_strike,
                     "underlying_price": underlying_price,
                     "price": underlying_price,
                     "vix": vix,
                     "bid": short_bid,
-                    "ask": self._to_float(getattr(short_leg, "ask", None)),
+                    "ask": short_ask,
                     "open_interest": getattr(short_leg, "open_interest", None),
                     "volume": getattr(short_leg, "volume", None),
-                    "short_delta_abs": abs(self._to_float(getattr(short_leg, "delta", None)) or 0.0),
+                    "short_delta_abs": short_delta_abs,
                     "iv": self._to_float(getattr(short_leg, "iv", None)),
                     "implied_vol": self._to_float(getattr(short_leg, "iv", None)),
-                    "width": abs((self._to_float(getattr(short_leg, "strike", None)) or 0.0) - (self._to_float(getattr(long_leg, "strike", None)) or 0.0)),
+                    "width": width,
                     "net_credit": net_credit,
                     "contractsMultiplier": 100,
+                    # -- enrichment debug fields (consumed by evaluate, not persisted) --
+                    "_quote_rejection": rejection,
+                    "_short_bid": short_bid,
+                    "_short_ask": short_ask,
+                    "_long_bid": long_bid,
+                    "_long_ask": long_ask,
                 }
             )
 
@@ -167,6 +221,17 @@ class CreditSpreadStrategyPlugin:
 
     def evaluate(self, trade: dict[str, Any]) -> tuple[bool, list[str]]:
         reasons: list[str] = []
+
+        # -- Pre-enrichment quote rejection (set during enrich()) --
+        quote_rej = trade.get("_quote_rejection")
+        if quote_rej:
+            return False, [quote_rej]
+
+        # -- CreditSpread metric failure (set during enrich_trade()) --
+        data_warn = trade.get("data_warning") or ""
+        if "CreditSpread metrics unavailable" in data_warn:
+            reasons.append("CREDIT_SPREAD_METRICS_FAILED")
+
         policy = trade.get("_policy") if isinstance(trade.get("_policy"), dict) else {}
         payload = trade.get("_request") if isinstance(trade.get("_request"), dict) else {}
 

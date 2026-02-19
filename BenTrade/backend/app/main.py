@@ -29,8 +29,8 @@ from app.api.routes_underlying import router as underlying_router
 from app.api.routes_workbench import router as workbench_router
 from app.clients.finnhub_client import FinnhubClient
 from app.clients.fred_client import FredClient
+from app.clients.polygon_client import PolygonClient
 from app.clients.tradier_client import TradierClient
-from app.clients.yahoo_client import YahooClient
 from app.config import get_settings
 from app.services.base_data_service import BaseDataService
 from app.services.decision_service import DecisionService
@@ -75,14 +75,14 @@ def create_app() -> FastAPI:
 
     tradier_client = TradierClient(settings=settings, http_client=http_client, cache=cache)
     finnhub_client = FinnhubClient(settings=settings, http_client=http_client, cache=cache)
-    yahoo_client = YahooClient(settings=settings, cache=cache)
+    polygon_client = PolygonClient(settings=settings, http_client=http_client, cache=cache)
     fred_client = FredClient(settings=settings, http_client=http_client, cache=cache)
 
     base_data_service = BaseDataService(
         tradier_client=tradier_client,
         finnhub_client=finnhub_client,
-        yahoo_client=yahoo_client,
         fred_client=fred_client,
+        polygon_client=polygon_client,
     )
     signal_service = SignalService(base_data_service=base_data_service, cache=cache, ttl_seconds=45)
     spread_service = SpreadService(base_data_service=base_data_service)
@@ -124,7 +124,7 @@ def create_app() -> FastAPI:
     app.state.http_client = http_client
     app.state.tradier_client = tradier_client
     app.state.finnhub_client = finnhub_client
-    app.state.yahoo_client = yahoo_client
+    app.state.polygon_client = polygon_client
     app.state.fred_client = fred_client
     app.state.base_data_service = base_data_service
     app.state.signal_service = signal_service

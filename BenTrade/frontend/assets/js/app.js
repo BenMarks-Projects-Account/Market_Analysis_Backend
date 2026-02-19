@@ -1,18 +1,18 @@
 ﻿// BenTrade — Shared execution modal (used by strategy dashboards)
 window.BenTradeExecutionModal = window.BenTradeExecutionModal || (function(){
-    const toNumber = window.BenTradeUtils.format.toNumber;
+    const _accessor = window.BenTradeUtils.tradeAccessor;
     const fmtMoney  = window.BenTradeUtils.format.money;
 
     function tradeDetailsHtml(trade){
         const row = (trade && typeof trade === 'object') ? trade : {};
-        const symbol = String(row.underlying || row.underlying_symbol || row.symbol || 'N/A').toUpperCase();
-        const strategy = String(row.spread_type || row.strategy || 'N/A');
-        const expiration = String(row.expiration || row.expiration_date || 'N/A');
-        const shortStrike = row.short_strike ?? row.put_short_strike ?? row.call_short_strike;
-        const longStrike = row.long_strike ?? row.put_long_strike ?? row.call_long_strike;
-        const maxLoss = fmtMoney(row.max_loss_per_share ?? row.max_loss ?? row.estimated_risk ?? row.risk_amount);
-        const maxProfit = fmtMoney(row.max_profit_per_share ?? row.max_profit ?? row.estimated_max_profit);
-        const creditDebitRaw = toNumber(row.net_credit ?? row.net_debit ?? row.credit ?? row.debit ?? row.premium_received ?? row.premium_paid);
+        const symbol = _accessor.resolveString(row, 'symbol') || 'N/A';
+        const strategy = _accessor.resolveString(row, 'strategy') || 'N/A';
+        const expiration = _accessor.resolveString(row, 'expiration') || 'N/A';
+        const shortStrike = _accessor.resolveString(row, 'short_strike') || 'N/A';
+        const longStrike = _accessor.resolveString(row, 'long_strike') || 'N/A';
+        const maxLoss = fmtMoney(_accessor.resolve(row, 'max_loss'));
+        const maxProfit = fmtMoney(_accessor.resolve(row, 'max_profit'));
+        const creditDebitRaw = _accessor.resolve(row, 'net_credit') ?? _accessor.resolve(row, 'net_debit');
         const creditDebitLabel = creditDebitRaw === null ? 'Credit/Debit' : (creditDebitRaw >= 0 ? 'Credit' : 'Debit');
         const creditDebitValue = creditDebitRaw === null ? 'N/A' : `$${Math.abs(creditDebitRaw).toFixed(2)}`;
 
@@ -21,7 +21,7 @@ window.BenTradeExecutionModal = window.BenTradeExecutionModal || (function(){
                 <div><strong>Symbol:</strong> ${symbol}</div>
                 <div><strong>Strategy:</strong> ${strategy}</div>
                 <div><strong>Expiry:</strong> ${expiration}</div>
-                <div><strong>Strikes:</strong> ${shortStrike ?? 'N/A'} / ${longStrike ?? 'N/A'}</div>
+                <div><strong>Strikes:</strong> ${shortStrike} / ${longStrike}</div>
                 <div><strong>Max Loss:</strong> ${maxLoss}</div>
                 <div><strong>Max Profit:</strong> ${maxProfit}</div>
                 <div><strong>${creditDebitLabel}:</strong> ${creditDebitValue}</div>
