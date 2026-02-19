@@ -19,6 +19,7 @@ from app.services.evaluation.types import EvaluationContext
 from app.services.ranking import safe_float as rank_safe_float
 from app.services.validation_events import emit_validation_event
 from app.utils.dates import dte_ceil
+from app.utils.strategy_id_resolver import resolve_strategy_id_or_none
 from app.utils.trade_key import canonicalize_strategy_id, canonicalize_trade_key, trade_key
 
 try:
@@ -667,7 +668,7 @@ class ReportService:
                 expiration_dtes.append({"expiration": str(exp), "dte": exp_dte})
 
             selected_expirations = select_expirations_in_window(available_expirations, now, dte_min, dte_max)[:max_expirations]
-            self.logger.info(
+            self.logger.debug(
                 "event=underlying_expirations_selected symbol=%s dte_min=%d dte_max=%d max_expirations=%d available=%s selected=%s",
                 current_symbol,
                 dte_min,
@@ -701,7 +702,7 @@ class ReportService:
                         "message": f"{current_symbol} {expiration}: calling Tradier quote/options chain + FRED VIX.",
                     },
                 )
-                self.logger.info(
+                self.logger.debug(
                     "event=underlying_expiration_start symbol=%s expiration=%s dte=%d",
                     current_symbol,
                     expiration,
@@ -749,7 +750,7 @@ class ReportService:
                             "message": f"{current_symbol} {expiration}: no usable chain/price data.",
                         },
                     )
-                    self.logger.info(
+                    self.logger.debug(
                         "event=underlying_analysis_no_data symbol=%s expiration=%s contracts=%d underlying_price=%s",
                         current_symbol,
                         expiration,
@@ -758,7 +759,7 @@ class ReportService:
                     )
                     continue
 
-                self.logger.info(
+                self.logger.debug(
                     "event=underlying_chain_loaded symbol=%s expiration=%s contracts=%d",
                     current_symbol,
                     expiration,
@@ -779,7 +780,7 @@ class ReportService:
                             "message": f"{current_symbol} {expiration}: skipped by underlying tradeability checks ({', '.join(underlying_reasons)}).",
                         },
                     )
-                    self.logger.info(
+                    self.logger.debug(
                         "event=underlying_tradeability_rejected symbol=%s expiration=%s metrics=%s",
                         current_symbol,
                         expiration,
@@ -805,14 +806,14 @@ class ReportService:
                             "message": f"{current_symbol} {expiration}: no base spread candidates generated.",
                         },
                     )
-                    self.logger.info(
+                    self.logger.debug(
                         "event=symbol_candidates_generated symbol=%s expiration=%s count=0",
                         current_symbol,
                         expiration,
                     )
                     continue
 
-                self.logger.info(
+                self.logger.debug(
                     "event=symbol_candidates_generated symbol=%s expiration=%s count=%d",
                     current_symbol,
                     expiration,
@@ -927,7 +928,7 @@ class ReportService:
 
                 accepted_symbol_all.extend(accepted_symbol_exp)
                 merged_symbol.extend(merged)
-                self.logger.info(
+                self.logger.debug(
                     "event=expiration_filter_result symbol=%s expiration=%s generated=%d first_gate_kept=%d accepted=%d rejected=%d",
                     current_symbol,
                     expiration,
@@ -1001,7 +1002,9 @@ class ReportService:
             tr["dte"] = dte
 
             strategy = tr.get("strategy_id") or tr.get("spread_type") or tr.get("strategy")
-            canonical_strategy, alias_mapped, provided_strategy = canonicalize_strategy_id(strategy)
+            # Single resolver: emits STRATEGY_ALIAS_USED for aliases.
+            canonical_strategy = resolve_strategy_id_or_none(strategy)
+            _, alias_mapped, provided_strategy = canonicalize_strategy_id(strategy)
             canonical_strategy = canonical_strategy or str(strategy or "").strip().lower() or "NA"
             if alias_mapped:
                 emit_validation_event(

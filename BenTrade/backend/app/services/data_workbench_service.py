@@ -7,6 +7,9 @@ from typing import Any
 
 from app.services.validation_events import ValidationEventsService
 from app.utils.computed_metrics import apply_metrics_contract
+from app.utils.normalize import normalize_trade
+from app.utils.report_conformance import validate_report_file
+from app.utils.strategy_id_resolver import resolve_strategy_id_or_none
 from app.utils.trade_key import canonicalize_strategy_id, canonicalize_trade_key, normalize_strike, trade_key
 
 
@@ -59,8 +62,9 @@ class DataWorkbenchService:
         raw = str(value or "").strip().lower()
         if not raw:
             return "NA"
+        # Check workbench-specific aliases first, then delegate to single resolver.
         mapped = _WORKBENCH_TYPE_ALIASES.get(raw, raw)
-        canonical, _alias_mapped, _provided = canonicalize_strategy_id(mapped)
+        canonical = resolve_strategy_id_or_none(mapped)
         return canonical or mapped
 
     @classmethod
@@ -122,50 +126,8 @@ class DataWorkbenchService:
 
     @staticmethod
     def _normalize_trade_payload(trade_payload: dict[str, Any], *, expiration_hint: str | None = None) -> dict[str, Any]:
-        trade = dict(trade_payload or {})
-
-        underlying = str(
-            trade.get("underlying")
-            or trade.get("underlying_symbol")
-            or trade.get("symbol")
-            or ""
-        ).upper()
-        if underlying:
-            trade["underlying"] = underlying
-            trade["underlying_symbol"] = underlying
-            trade["symbol"] = underlying
-
-        expiration = str(trade.get("expiration") or expiration_hint or "NA").strip() or "NA"
-        trade["expiration"] = expiration
-
-        strategy_raw = trade.get("strategy_id") or trade.get("spread_type") or trade.get("strategy")
-        canonical_strategy, _alias_mapped, _provided = canonicalize_strategy_id(strategy_raw)
-        strategy_id = canonical_strategy or str(strategy_raw or "NA").strip().lower() or "NA"
-        trade["strategy_id"] = strategy_id
-        trade["spread_type"] = strategy_id
-        trade["strategy"] = strategy_id
-
-        dte = trade.get("dte")
-        short = trade.get("short_strike") if trade.get("short_strike") not in (None, "") else trade.get("strike")
-        long = trade.get("long_strike") if trade.get("long_strike") not in (None, "") else "NA"
-
-        key = str(trade.get("trade_key") or "").strip()
-        if key:
-            key = canonicalize_trade_key(key)
-        else:
-            key = trade_key(
-                underlying=underlying,
-                expiration=expiration,
-                spread_type=strategy_id,
-                short_strike=short,
-                long_strike=long,
-                dte=dte,
-            )
-        trade["trade_key"] = key
-        trade["trade_id"] = key
-        trade.pop("_trade_key", None)
-
-        return apply_metrics_contract(trade)
+        """Normalize via the shared builder.  Produces the full canonical shape."""
+        return normalize_trade(trade_payload, expiration=expiration_hint)
 
     @staticmethod
     def _to_float(value: Any) -> float | None:
@@ -338,7 +300,11 @@ class DataWorkbenchService:
 
     def _find_in_latest_reports(self, attempted_keys: list[str]) -> dict[str, Any] | None:
         for report_path in self._iter_scan_report_files():
-            payload = self._read_json(report_path)
+            payload = validate_report_file(
+                report_path,
+                validation_events=self.validation_events,
+                auto_delete=True,
+            )
             if payload is None:
                 continue
 
@@ -351,8 +317,6 @@ class DataWorkbenchService:
                 rows = payload.get("trades")
                 if isinstance(rows, list):
                     trades = [row for row in rows if isinstance(row, dict)]
-            elif isinstance(payload, list):
-                trades = [row for row in payload if isinstance(row, dict)]
 
             if not trades:
                 continue
@@ -645,7 +609,11 @@ class DataWorkbenchService:
         entries: dict[str, dict[str, Any]] = {}
 
         for report_path in self._iter_scan_report_files():
-            payload = self._read_json(report_path)
+            payload = validate_report_file(
+                report_path,
+                validation_events=self.validation_events,
+                auto_delete=True,
+            )
             if not isinstance(payload, dict):
                 continue
             generated_at = self._to_iso_timestamp(payload.get("generated_at"))

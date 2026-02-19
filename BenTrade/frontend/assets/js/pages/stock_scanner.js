@@ -9,9 +9,19 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
   const errorEl = scope.querySelector('#stockScannerError');
   const metaEl = scope.querySelector('#stockScannerMeta');
   const listEl = scope.querySelector('#stockScannerList');
+  const symbolsEl = scope.querySelector('#stockScannerSymbols');
 
   if(!refreshBtn || !errorEl || !metaEl || !listEl){
     return;
+  }
+
+  /* Mount symbol universe selector (add/remove chips + filter) */
+  let _symbolSelector = null;
+  if(symbolsEl && window.BenTradeSymbolUniverseSelector){
+    _symbolSelector = window.BenTradeSymbolUniverseSelector.mount(symbolsEl, {
+      showFilter: true,
+      onChange: () => {},  // filter change is passive — applied on next scan
+    });
   }
 
   let latestPayload = null;
@@ -20,6 +30,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
   const collapsed = {};
   const modelResults = {};
   const REJECTED_KEY = 'bentrade_scanner_rejected_v1';
+  const SESSION_CACHE_KEY = 'bentrade_stock_scanner_cache_v1';
 
   function loadRejected(){
     try{
@@ -38,6 +49,29 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
       localStorage.setItem(REJECTED_KEY, JSON.stringify(Array.from(rejectedIdeas)));
     }catch(_err){
     }
+  }
+
+  /* ── Session cache helpers (persist scan results across navigation) ── */
+  function saveToSessionCache(payload){
+    try{
+      const sid = window.BenTradeSessionState?.currentSessionId?.() || '';
+      sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify({ sid, payload, ts: Date.now() }));
+    }catch(_err){}
+  }
+
+  function loadFromSessionCache(){
+    try{
+      const raw = sessionStorage.getItem(SESSION_CACHE_KEY);
+      if(!raw) return null;
+      const obj = JSON.parse(raw);
+      // Only reuse if same session
+      const sid = window.BenTradeSessionState?.currentSessionId?.() || '';
+      if(sid && obj.sid && obj.sid !== sid) return null;
+      // Expire after 30 min
+      if(obj.ts && (Date.now() - obj.ts) > 30 * 60 * 1000) return null;
+      return obj.payload || null;
+    }catch(_err){}
+    return null;
   }
 
   function setError(text){
@@ -112,26 +146,12 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
     throw (lastError || new Error('Scanner endpoint unavailable'));
   }
 
-  function fmtNum(value, digits){
-    const n = Number(value);
-    if(!Number.isFinite(n)) return 'N/A';
-    return n.toFixed(digits);
-  }
-
-  function fmtPct(value, digits){
-    const n = Number(value);
-    if(!Number.isFinite(n)) return 'N/A';
-    return `${(n * 100).toFixed(digits)}%`;
-  }
-
-  function esc(value){
-    return String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
+  // Shared utilities
+  const fmt = window.BenTradeUtils.format;
+  const card = window.BenTradeTradeCard;
+  const fmtNum = fmt.num;
+  const fmtPct = fmt.pct;
+  const esc = fmt.escapeHtml;
 
   function ideaKey(row){
     const symbol = String(row?.symbol || '').toUpperCase();
@@ -148,10 +168,9 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
   }
 
   function pickStrategy(candidate){
+    if(candidate?.type) return String(candidate.type);
     if(candidate?.recommended_strategy) return String(candidate.recommended_strategy);
-    const signals = Array.isArray(candidate?.signals) ? candidate.signals : [];
-    if(signals.includes('trend_up')) return 'credit_put_spread';
-    return 'credit_call_spread';
+    return 'stock_buy';
   }
 
   function renderMeta(payload){
@@ -268,38 +287,31 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
                 <span class="underlying-price">(${fmtNum(row?.price, 2)})</span>
               </div>
               <div class="trade-rank-line">Rank Score: ${fmtNum(row?.composite_score, 1)} (${scoreToTone(row?.composite_score)})</div>
+              <span class="trade-key-wrap"><span class="trade-key-label" style="font-size:10px;color:rgba(230,251,255,0.5);font-family:monospace;word-break:break-all;">${esc(symbol)}|NA|${esc(strategy)}|NA|NA|NA</span>${card.copyTradeKeyButton(`${symbol}|NA|${strategy}|NA|NA|NA`)}</span>
             </div>
             <div class="trade-header-right">${sourceBadge(row)}</div>
           </div>
 
           <div id="tradeBody-${idx}" class="trade-collapsible ${collapsedNow ? 'is-collapsed' : ''}">
             <div class="trade-body">
-              <div class="section section-core">
-                <div class="section-title">CORE METRICS</div>
-                <div class="metric-grid">
-                  <div class="metric"><div class="metric-label">Price</div><div class="metric-value neutral">${fmtNum(row?.price, 2)}</div></div>
-                  <div class="metric"><div class="metric-label">Composite</div><div class="metric-value positive">${fmtNum(row?.composite_score, 1)}</div></div>
-                  <div class="metric"><div class="metric-label">Trend Score</div><div class="metric-value neutral">${fmtNum(row?.trend_score, 1)}</div></div>
-                  <div class="metric"><div class="metric-label">Momentum</div><div class="metric-value neutral">${fmtNum(row?.momentum_score, 1)}</div></div>
-                  <div class="metric"><div class="metric-label">Volatility</div><div class="metric-value neutral">${fmtNum(row?.volatility_score, 1)}</div></div>
-                  <div class="metric"><div class="metric-label">RSI14</div><div class="metric-value neutral">${fmtNum(metrics?.rsi14, 1)}</div></div>
-                  <div class="metric"><div class="metric-label">RV20</div><div class="metric-value neutral">${fmtPct(metrics?.rv20, 1)}</div></div>
-                  <div class="metric"><div class="metric-label">IV/RV</div><div class="metric-value neutral">${fmtNum(metrics?.iv_rv_ratio, 2)}</div></div>
-                </div>
-              </div>
+              ${card.section('CORE METRICS', card.metricGrid([
+                { label: 'Price', value: fmtNum(row?.price, 2), cssClass: 'neutral' },
+                { label: 'Composite', value: fmtNum(row?.composite_score, 1), cssClass: 'positive' },
+                { label: 'Trend Score', value: fmtNum(row?.trend_score, 1), cssClass: 'neutral' },
+                { label: 'Momentum', value: fmtNum(row?.momentum_score, 1), cssClass: 'neutral' },
+                { label: 'Volatility', value: fmtNum(row?.volatility_score, 1), cssClass: 'neutral' },
+                { label: 'RSI14', value: fmtNum(metrics?.rsi14, 1), cssClass: 'neutral', dataMetric: 'rsi_14' },
+                { label: 'RV20', value: fmtPct(metrics?.rv20, 1), cssClass: 'neutral', dataMetric: 'realized_vol_20d' },
+                { label: 'IV/RV', value: fmtNum(metrics?.iv_rv_ratio, 2), cssClass: 'neutral', dataMetric: 'iv_rv_ratio' },
+              ]), 'section-core')}
 
-              <div class="section section-details">
-                <div class="section-title">IDEA DETAILS</div>
-                <div class="trade-details">
-                  <div class="detail-row"><span class="detail-label">Signals</span><span class="detail-value">${esc(signalsText)}</span></div>
-                  <div class="detail-row"><span class="detail-label">Trend</span><span class="detail-value">${esc(row?.trend || 'range')}</span></div>
-                  <div class="detail-row"><span class="detail-label">1D Change</span><span class="detail-value">${fmtPct(metrics?.price_change_1d, 2)}</span></div>
-                  <div class="detail-row"><span class="detail-label">20D Change</span><span class="detail-value">${fmtPct(metrics?.price_change_20d, 2)}</span></div>
-                  <div class="detail-row"><span class="detail-label">52W Range</span><span class="detail-value">${fmtNum(metrics?.low_52w, 2)} — ${fmtNum(metrics?.high_52w, 2)}</span></div>
-                  <div class="detail-row" style="display:block;"><span class="detail-label">Thesis</span><ul class="key-factors">${thesis.map(v => `<li>${esc(v)}</li>`).join('') || '<li>No thesis notes</li>'}</ul></div>
-                  <div class="detail-row" style="display:block;"><span class="detail-label">Sparkline (24 bars, % from start)</span><div class="stock-note" style="margin-top:4px;">${esc(sparklineText)}</div></div>
-                </div>
-              </div>
+              ${card.section('IDEA DETAILS', card.detailRows([
+                { label: 'Signals', value: esc(signalsText) },
+                { label: 'Trend', value: esc(row?.trend || 'range') },
+                { label: '1D Change', value: fmtPct(metrics?.price_change_1d, 2) },
+                { label: '20D Change', value: fmtPct(metrics?.price_change_20d, 2) },
+                { label: '52W Range', value: fmtNum(metrics?.low_52w, 2) + ' — ' + fmtNum(metrics?.high_52w, 2) },
+              ]) + '<div class="detail-row" style="display:block;"><span class="detail-label">Thesis</span><ul class="key-factors">' + (thesis.map(v => `<li>${esc(v)}</li>`).join('') || '<li>No thesis notes</li>') + '</ul></div><div class="detail-row" style="display:block;"><span class="detail-label">Sparkline (24 bars, % from start)</span><div class="stock-note" style="margin-top:4px;">' + esc(sparklineText) + '</div></div>', 'section-details')}
 
               <div class="section section-details">
                 <div class="section-title">NOTES</div>
@@ -316,7 +328,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
               <button class="btn btn-exec" data-action="execute" data-idx="${idx}">Execute Trade</button>
               <button class="btn btn-reject" data-action="reject" data-idx="${idx}">Reject</button>
               <button class="btn" data-action="open-analysis" data-symbol="${esc(symbol)}">Open in Stock Analysis</button>
-              <button class="btn" data-action="send-workbench" data-idx="${idx}" data-symbol="${esc(symbol)}" data-strategy="${esc(strategy)}">Send to Workbench</button>
+              <button class="btn" data-action="send-workbench" data-idx="${idx}" data-symbol="${esc(symbol)}" data-strategy="${esc(strategy)}">Send to Testing Workbench</button>
             </div>
           </div>
         </div>
@@ -341,7 +353,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
     const normalized = String(symbol || '').trim().toUpperCase();
     if(!normalized) return;
 
-    const chosenStrategy = String(strategy || 'credit_put_spread').trim() || 'credit_put_spread';
+    const chosenStrategy = String(strategy || 'put_credit_spread').trim() || 'put_credit_spread';
     const payloadInput = {
       symbol: normalized,
       strategy: chosenStrategy,
@@ -457,12 +469,21 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
     const suggestion = ideas[ideaIdx];
     if(!suggestion || String(suggestion?.type || '').toLowerCase() !== 'options') return;
 
-    const strategy = String(suggestion?.strategy || row?.recommended_strategy || pickStrategy(row));
+    const strategy = String(suggestion?.strategy || row?.type || row?.recommended_strategy || pickStrategy(row));
     const params = (suggestion?.params && typeof suggestion.params === 'object') ? suggestion.params : {};
     sendToWorkbench(row?.symbol, strategy, Number(row?.composite_score), params);
   }
 
   listEl.addEventListener('click', (event) => {
+    /* Copy trade key button */
+    const copyBtn = event.target.closest('[data-copy-trade-key]');
+    if(copyBtn){
+      event.preventDefault();
+      event.stopPropagation();
+      card.copyTradeKey(copyBtn.dataset.copyTradeKey, copyBtn);
+      return;
+    }
+
     const button = event.target.closest('[data-action]');
     if(!button) return;
     const action = String(button.getAttribute('data-action') || '');
@@ -503,7 +524,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
     }
 
     if(action === 'send-workbench'){
-      const strategy = String(button.getAttribute('data-strategy') || 'credit_put_spread');
+      const strategy = String(button.getAttribute('data-strategy') || 'put_credit_spread');
       const card = button.closest('[data-score]');
       const score = card ? Number(card.getAttribute('data-score')) : NaN;
       sendToWorkbench(symbol, strategy, score);
@@ -518,6 +539,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
       refreshBtn.textContent = 'Scanning...';
       const payload = await fetchScannerPayload();
       latestPayload = payload;
+      saveToSessionCache(payload);
       renderMeta(payload);
       renderCandidates(payload);
       window.BenTradeSessionStatsStore?.recordRun?.('stock_scanner', payload);
@@ -538,7 +560,16 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
 
   refreshBtn.addEventListener('click', runScan);
 
+  /* ── Init: restore from session cache or run fresh scan ── */
   renderMeta({ as_of: null, candidates: [] });
   renderCandidates({ candidates: [] });
-  runScan();
+
+  const _cached = loadFromSessionCache();
+  if(_cached && Array.isArray(_cached.candidates) && _cached.candidates.length > 0){
+    latestPayload = _cached;
+    renderMeta(_cached);
+    renderCandidates(_cached);
+  }else{
+    runScan();
+  }
 };

@@ -1,17 +1,45 @@
 window.BenTradeStrategyDefaults = (function(){
-  const defaultsByStrategy = {
+  // Canonical scanner symbol universe — must match backend DEFAULT_SCANNER_SYMBOLS
+  const SCANNER_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA', 'XSP', 'RUT', 'NDX'];
+
+  const presetsByStrategy = {
     credit_spread: {
-      dte_min: 7,
-      dte_max: 21,
-      expected_move_multiple: 1.0,
-      width_min: 1,
-      width_max: 5,
-      min_pop: 0.65,
-      min_ev_to_risk: 0.02,
-      max_bid_ask_spread_pct: 1.5,
-      min_open_interest: 200,
-      min_volume: 10,
+      conservative: {
+        dte_min: 14,
+        dte_max: 30,
+        expected_move_multiple: 1.0,
+        width_min: 3,
+        width_max: 5,
+        distance_min: 0.03,
+        distance_max: 0.08,
+        symbols: SCANNER_SYMBOLS,
+        min_pop: 0.65,
+        min_ev_to_risk: 0.02,
+        max_bid_ask_spread_pct: 1.5,
+        min_open_interest: 500,
+        min_volume: 50,
+      },
+      strict: {
+        dte_min: 7,
+        dte_max: 21,
+        expected_move_multiple: 1.0,
+        width_min: 1,
+        width_max: 5,
+        distance_min: 0.01,
+        distance_max: 0.12,
+        symbols: SCANNER_SYMBOLS,
+        min_pop: 0.65,
+        min_ev_to_risk: 0.02,
+        max_bid_ask_spread_pct: 1.5,
+        min_open_interest: 200,
+        min_volume: 10,
+      },
     },
+  };
+
+  // Flat defaults map (backward-compatible: returns the conservative preset for credit_spread)
+  const defaultsByStrategy = {
+    credit_spread: presetsByStrategy.credit_spread.conservative,
     debit_spreads: {
       dte_min: 14,
       dte_max: 45,
@@ -23,6 +51,7 @@ window.BenTradeStrategyDefaults = (function(){
       min_open_interest: 200,
       min_volume: 10,
       direction: 'both',
+      symbols: SCANNER_SYMBOLS,
     },
     iron_condor: {
       dte_min: 21,
@@ -37,6 +66,7 @@ window.BenTradeStrategyDefaults = (function(){
       symmetry_target: 0.5,
       min_open_interest: 200,
       min_volume: 10,
+      symbols: SCANNER_SYMBOLS,
     },
     butterflies: {
       dte_min: 7,
@@ -49,6 +79,7 @@ window.BenTradeStrategyDefaults = (function(){
       min_volume: 10,
       butterfly_type: 'debit',
       option_side: 'call',
+      symbols: SCANNER_SYMBOLS,
     },
     calendars: {
       near_dte_min: 7,
@@ -62,6 +93,7 @@ window.BenTradeStrategyDefaults = (function(){
       max_bid_ask_spread_pct: 1.5,
       min_open_interest: 500,
       min_volume: 50,
+      symbols: SCANNER_SYMBOLS,
     },
     income: {
       dte_min: 14,
@@ -72,14 +104,15 @@ window.BenTradeStrategyDefaults = (function(){
       min_buffer: '',
       min_open_interest: 200,
       min_volume: 10,
+      symbols: SCANNER_SYMBOLS,
     },
   };
 
   const whyByStrategy = {
     credit_spread: [
-      '7-21 DTE and 1-5 wide spreads balance premium capture and assignment risk.',
-      'POP ≥ 0.65 and EV/risk ≥ 0.02 keep edge-focused setups.',
-      'Liquidity floors (OI 200, vol 10) keep fills realistic without over-restricting results.',
+      '14-30 DTE and $3-$5 spreads gather enough premium for positive EV on index ETFs.',
+      '3%-8% OTM distance avoids near-the-money gamma and illiquid far-OTM strikes.',
+      'SPY/QQQ/IWM multi-symbol scan maximizes the candidate pool while keeping to liquid ETFs.',
     ],
     debit_spreads: [
       '14-45 DTE with 2-10 point widths keeps directional risk defined.',
@@ -113,10 +146,25 @@ window.BenTradeStrategyDefaults = (function(){
     return key;
   }
 
-  function getStrategyDefaults(strategyId){
+  function getStrategyDefaults(strategyId, presetName){
     const key = normalizeStrategyId(strategyId);
-    const obj = defaultsByStrategy[key] || {};
-    return { ...obj };
+    // If a preset is requested and we have presets for this strategy, use it
+    const stratPresets = presetsByStrategy[key];
+    let result;
+    if(stratPresets && presetName){
+      const preset = stratPresets[String(presetName).toLowerCase()];
+      if(preset) result = { ...preset };
+    }
+    if(!result){
+      const obj = defaultsByStrategy[key] || {};
+      result = { ...obj };
+    }
+    // Override symbols with the global symbol universe store if available
+    const storeSymbols = window.BenTradeSymbolUniverseStore?.getSymbols?.();
+    if(Array.isArray(storeSymbols) && storeSymbols.length){
+      result.symbols = storeSymbols;
+    }
+    return result;
   }
 
   function getStrategyWhy(strategyId){
@@ -125,8 +173,15 @@ window.BenTradeStrategyDefaults = (function(){
     return [...reasons];
   }
 
+  function getPresetNames(strategyId){
+    const key = normalizeStrategyId(strategyId);
+    const stratPresets = presetsByStrategy[key];
+    return stratPresets ? Object.keys(stratPresets) : [];
+  }
+
   return {
     getStrategyDefaults,
     getStrategyWhy,
+    getPresetNames,
   };
 })();

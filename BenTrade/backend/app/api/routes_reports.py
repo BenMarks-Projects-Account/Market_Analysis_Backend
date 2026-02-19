@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,8 +15,46 @@ from pydantic import BaseModel
 
 from app.models.trade_contract import TradeContract
 from app.services.validation_events import emit_validation_event
+from app.utils.report_conformance import validate_report_file
 from app.utils.computed_metrics import apply_metrics_contract
+from app.utils.normalize import normalize_trade, strategy_label as _strategy_label, strip_legacy_fields
 from app.utils.trade_key import canonicalize_trade_key, canonicalize_strategy_id, trade_key
+
+logger = logging.getLogger(__name__)
+
+# ── Debug trade logging (set BENTRADE_DEBUG_TRADES=1 to enable) ──────
+_DEBUG_TRADES = os.environ.get("BENTRADE_DEBUG_TRADES", "").strip().lower() in ("1", "true", "yes", "on")
+
+# Must-have metric keys to audit at each pipeline stage
+_AUDIT_KEYS = (
+    "max_profit", "max_loss", "pop", "expected_value", "ev", "return_on_risk",
+    "kelly_fraction", "iv_rank", "iv_rv_ratio", "rank_score", "break_even",
+    "ev_per_contract", "ev_per_share", "p_win_used",
+)
+
+
+def _audit_trade(trade: dict, label: str, idx: int = 0) -> None:
+    """Log the presence and value of must-have fields across all sub-dicts."""
+    if not _DEBUG_TRADES:
+        return
+    symbol = trade.get("symbol") or trade.get("underlying") or "?"
+    strategy = trade.get("strategy_id") or trade.get("spread_type") or "?"
+    exp = trade.get("expiration") or "?"
+    root_vals = {k: trade.get(k) for k in _AUDIT_KEYS if trade.get(k) is not None}
+    computed = {k: v for k, v in (trade.get("computed") or {}).items() if v is not None}
+    computed_metrics = {k: v for k, v in (trade.get("computed_metrics") or {}).items() if v is not None}
+    details = {k: v for k, v in (trade.get("details") or {}).items() if v is not None}
+    missing_root = [k for k in _AUDIT_KEYS if trade.get(k) is None]
+    logger.info(
+        "[DEBUG_TRADES:%s] trade[%d] %s %s exp=%s\n"
+        "  root:            %s\n"
+        "  computed:        %s\n"
+        "  computed_metrics:%s\n"
+        "  details:         %s\n"
+        "  missing@root:    %s",
+        label, idx, symbol, strategy, exp,
+        root_vals, computed, computed_metrics, details, missing_root,
+    )
 
 router = APIRouter(tags=["reports"])
 
@@ -70,15 +110,15 @@ def _build_report_stats_from_trades(trades: list[dict]) -> dict:
 
     scores = [_to_float(t.get("composite_score")) for t in trades]
     scores = [s for s in scores if s is not None]
-    probabilities = [_to_float(t.get("p_win_used", t.get("pop_delta_approx"))) for t in trades]
+    probabilities = [_to_float((t.get("computed") or {}).get("pop") or t.get("p_win_used") or t.get("pop_delta_approx")) for t in trades]
     probabilities = [p for p in probabilities if p is not None]
-    ror_values = [_to_float(t.get("return_on_risk")) for t in trades]
+    ror_values = [_to_float((t.get("computed") or {}).get("return_on_risk") or t.get("return_on_risk")) for t in trades]
     ror_values = [r for r in ror_values if r is not None]
 
     best_underlying = None
     if trades:
         best_trade = max(trades, key=lambda t: _to_float(t.get("composite_score")) or -1.0)
-        best_underlying = str(best_trade.get("underlying") or best_trade.get("underlying_symbol") or "").upper() or None
+        best_underlying = str(best_trade.get("symbol") or best_trade.get("underlying") or best_trade.get("underlying_symbol") or "").upper() or None
 
     def _avg(values: list[float]):
         return (sum(values) / len(values)) if values else None
@@ -97,172 +137,20 @@ def _build_report_stats_from_trades(trades: list[dict]) -> dict:
     }
 
 
-def _strategy_label(strategy_id: str) -> str:
-    key = str(strategy_id or "").strip().lower()
-    labels = {
-        "put_credit_spread": "Put Credit Spread",
-        "call_credit_spread": "Call Credit Spread",
-        "put_debit": "Put Debit Spread",
-        "call_debit": "Call Debit Spread",
-        "iron_condor": "Iron Condor",
-        "butterfly_debit": "Debit Butterfly",
-        "calendar_spread": "Calendar Spread",
-        "calendar_call_spread": "Call Calendar Spread",
-        "calendar_put_spread": "Put Calendar Spread",
-        "csp": "Cash Secured Put",
-        "covered_call": "Covered Call",
-        "income": "Income Strategy",
-        "single": "Single Option",
-        "long_call": "Long Call",
-        "long_put": "Long Put",
-    }
-    return labels.get(key, key.replace("_", " ").title() or "Trade")
-
-
 def _normalize_report_trade(row: dict, expiration_hint: str | None = None) -> dict:
-    trade = dict(row or {})
-
-    symbol = str(
-        trade.get("underlying")
-        or trade.get("underlying_symbol")
-        or trade.get("symbol")
-        or ""
-    ).upper()
-    if symbol:
-        trade["underlying"] = symbol
-        trade["underlying_symbol"] = symbol
-        trade["symbol"] = symbol
-
-    expiration = str(trade.get("expiration") or expiration_hint or "NA").strip() or "NA"
-    trade["expiration"] = expiration
-
-    strategy_raw = trade.get("spread_type") or trade.get("strategy") or trade.get("strategy_id")
-    strategy_id, _alias_mapped, _provided = canonicalize_strategy_id(strategy_raw)
-    strategy_id = strategy_id or str(strategy_raw or "NA").strip().lower() or "NA"
-    trade["spread_type"] = strategy_id
-    trade["strategy"] = strategy_id
-    trade["strategy_id"] = strategy_id
-
-    incoming_key = str(trade.get("trade_key") or trade.get("_trade_key") or "").strip()
-    if incoming_key:
-        normalized_key = canonicalize_trade_key(incoming_key)
-    else:
-        normalized_key = trade_key(
-            underlying=symbol,
-            expiration=expiration,
-            spread_type=strategy_id,
-            short_strike=trade.get("short_strike") if trade.get("short_strike") not in (None, "") else trade.get("strike"),
-            long_strike=trade.get("long_strike") if trade.get("long_strike") not in (None, "") else "NA",
-            dte=trade.get("dte"),
-        )
-    trade["trade_key"] = normalized_key
-
-    def _first_number(*keys: str) -> float | None:
-        for key in keys:
-            value = _to_float(trade.get(key))
-            if value is not None:
-                return value
-        return None
-
-    expected_value_contract = _first_number("ev_per_contract", "expected_value", "ev")
-    if expected_value_contract is None:
-        ev_share = _first_number("ev_per_share")
-        if ev_share is not None:
-            expected_value_contract = ev_share * 100.0
-
-    computed = {
-        "max_profit": _first_number("max_profit_per_contract", "max_profit_per_share", "max_profit"),
-        "max_loss": _first_number("max_loss_per_contract", "max_loss_per_share", "max_loss"),
-        "pop": _first_number("p_win_used", "pop_delta_approx", "pop_approx", "probability_of_touch_center", "implied_prob_profit", "pop"),
-        "return_on_risk": _first_number("return_on_risk", "ror"),
-        "expected_value": expected_value_contract,
-        "kelly_fraction": _first_number("kelly_fraction"),
-        "iv_rank": _first_number("iv_rank"),
-        "short_strike_z": _first_number("short_strike_z"),
-        "bid_ask_pct": _first_number("bid_ask_spread_pct"),
-        "strike_dist_pct": _first_number("strike_distance_pct", "strike_distance_vs_expected_move", "expected_move_ratio"),
-        "rsi14": _first_number("rsi14", "rsi_14"),
-        "rv_20d": _first_number("realized_vol_20d", "rv_20d"),
-        "open_interest": _first_number("open_interest"),
-        "volume": _first_number("volume"),
-    }
-    details = {
-        "break_even": _first_number("break_even", "break_even_low"),
-        "dte": _first_number("dte"),
-        "expected_move": _first_number("expected_move", "expected_move_near"),
-        "iv_rv_ratio": _first_number("iv_rv_ratio"),
-        "trade_quality_score": _first_number("trade_quality_score"),
-        "market_regime": str(trade.get("market_regime") or trade.get("regime") or "").strip() or None,
-    }
-    dte_front = _first_number("dte_near")
-    dte_back = _first_number("dte_far")
-    pills = {
-        "strategy_label": _strategy_label(strategy_id),
-        "dte": details["dte"],
-        "pop": computed["pop"],
-        "oi": computed["open_interest"],
-        "vol": computed["volume"],
-        "regime_label": details["market_regime"],
-    }
-    if dte_front is not None and dte_back is not None:
-        pills["dte_front"] = dte_front
-        pills["dte_back"] = dte_back
-        front_value = int(dte_front) if float(dte_front).is_integer() else dte_front
-        back_value = int(dte_back) if float(dte_back).is_integer() else dte_back
-        pills["dte_label"] = f"DTE {front_value}/{back_value}"
-    trade["computed"] = computed
-    trade["details"] = details
-    trade["pills"] = pills
-    trade = apply_metrics_contract(trade)
-
-    if trade.get("p_win_used") is None and computed["pop"] is not None:
-        trade["p_win_used"] = computed["pop"]
-    if trade.get("return_on_risk") is None and computed["return_on_risk"] is not None:
-        trade["return_on_risk"] = computed["return_on_risk"]
-    if trade.get("expected_value") is None and computed["expected_value"] is not None:
-        trade["expected_value"] = computed["expected_value"]
-    if trade.get("ev_per_contract") is None and computed["expected_value"] is not None:
-        trade["ev_per_contract"] = computed["expected_value"]
-    if trade.get("bid_ask_spread_pct") is None and computed["bid_ask_pct"] is not None:
-        trade["bid_ask_spread_pct"] = computed["bid_ask_pct"]
-    if trade.get("strike_distance_pct") is None and computed["strike_dist_pct"] is not None:
-        trade["strike_distance_pct"] = computed["strike_dist_pct"]
-    if trade.get("rsi14") is None and computed["rsi14"] is not None:
-        trade["rsi14"] = computed["rsi14"]
-    if trade.get("realized_vol_20d") is None and computed["rv_20d"] is not None:
-        trade["realized_vol_20d"] = computed["rv_20d"]
-    if trade.get("iv_rv_ratio") is None and details["iv_rv_ratio"] is not None:
-        trade["iv_rv_ratio"] = details["iv_rv_ratio"]
-    if trade.get("trade_quality_score") is None and details["trade_quality_score"] is not None:
-        trade["trade_quality_score"] = details["trade_quality_score"]
-    if not str(trade.get("market_regime") or "").strip() and details["market_regime"] is not None:
-        trade["market_regime"] = details["market_regime"]
-
-    warnings = trade.get("validation_warnings") if isinstance(trade.get("validation_warnings"), list) else []
-    if computed["pop"] is None and "POP_NOT_IMPLEMENTED_FOR_STRATEGY" not in warnings:
-        warnings.append("POP_NOT_IMPLEMENTED_FOR_STRATEGY")
-    if pills["regime_label"] is None and "REGIME_UNAVAILABLE" not in warnings:
-        warnings.append("REGIME_UNAVAILABLE")
-    if computed["max_profit"] is None and "MAX_PROFIT_UNAVAILABLE" not in warnings:
-        warnings.append("MAX_PROFIT_UNAVAILABLE")
-    if computed["max_loss"] is None and "MAX_LOSS_UNAVAILABLE" not in warnings:
-        warnings.append("MAX_LOSS_UNAVAILABLE")
-    if computed["expected_value"] is None and "EXPECTED_VALUE_UNAVAILABLE" not in warnings:
-        warnings.append("EXPECTED_VALUE_UNAVAILABLE")
-    if computed["return_on_risk"] is None and "RETURN_ON_RISK_UNAVAILABLE" not in warnings:
-        warnings.append("RETURN_ON_RISK_UNAVAILABLE")
-    if warnings:
-        trade["validation_warnings"] = warnings
-
-    return trade
+    """Normalize a single trade from a persisted report via the shared builder."""
+    return normalize_trade(row, expiration=expiration_hint)
 
 
 def _normalize_report_trades(rows: list[dict], expiration_hint: str | None = None) -> list[dict]:
     out: list[dict] = []
-    for row in rows:
+    for i, row in enumerate(rows):
         if not isinstance(row, dict):
             continue
-        out.append(_normalize_report_trade(row, expiration_hint=expiration_hint))
+        _audit_trade(row, "RAW_JSON", i)
+        normalized = _normalize_report_trade(row, expiration_hint=expiration_hint)
+        _audit_trade(normalized, "POST_NORMALIZE", i)
+        out.append(normalized)
     return out
 
 
@@ -276,6 +164,16 @@ async def list_reports(request: Request) -> list[str]:
     return files
 
 
+def _strip_and_audit(trades: list[dict]) -> list[dict]:
+    """Strip legacy fields and audit the result when debug is enabled."""
+    out = []
+    for i, t in enumerate(trades):
+        stripped = strip_legacy_fields(t)
+        _audit_trade(stripped, "POST_STRIP", i)
+        out.append(stripped)
+    return out
+
+
 @router.get("/api/reports/{filename}")
 async def get_report(filename: str, request: Request):
     if not filename.startswith("analysis_") or not filename.endswith(".json"):
@@ -285,15 +183,14 @@ async def get_report(filename: str, request: Request):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Report not found")
 
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=500, detail="Invalid JSON report") from exc
+    ve = getattr(request.app.state, "validation_events", None)
+    data = validate_report_file(file_path, validation_events=ve, auto_delete=True)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Report removed: non-conforming")
 
     if isinstance(data, list):
         trades = _normalize_report_trades([row for row in data if isinstance(row, dict)])
-        return JSONResponse(content={"report_stats": _build_report_stats_from_trades(trades), "trades": trades})
+        return JSONResponse(content={"report_stats": _build_report_stats_from_trades(trades), "trades": _strip_and_audit(trades)})
 
     if isinstance(data, dict):
         trades = data.get("trades")
@@ -309,7 +206,7 @@ async def get_report(filename: str, request: Request):
             return JSONResponse(
                 content={
                     "report_stats": stats,
-                    "trades": trades,
+                    "trades": _strip_and_audit(trades),
                     "source_health": source_health,
                     "diagnostics": diagnostics,
                     "validation_mode": validation_mode,
@@ -375,6 +272,30 @@ async def model_analyze(payload: dict):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/api/model/analyze_regime")
+async def model_analyze_regime(payload: dict, request: Request):
+    """On-demand LLM analysis of the current Market Regime + Suggested Playbook."""
+    regime_data = payload.get("regime")
+    if not regime_data or not isinstance(regime_data, dict):
+        raise HTTPException(status_code=400, detail='Missing or invalid "regime" in request body')
+
+    playbook_data = payload.get("playbook")  # optional enriched playbook
+
+    try:
+        from common.model_analysis import LocalModelUnavailableError, analyze_regime
+
+        model_output = analyze_regime(
+            regime_data=regime_data,
+            playbook_data=playbook_data if isinstance(playbook_data, dict) else None,
+        )
+    except LocalModelUnavailableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Regime model analysis failed: {exc}") from exc
+
+    return {"ok": True, "analysis": model_output}
 
 
 @router.post("/api/model/analyze_stock")

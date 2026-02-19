@@ -6,6 +6,7 @@
         <div class="home-cache-controls">
           <button id="homeFullRefreshBtn" class="btn qtButton home-full-refresh-btn" type="button">Full App Refresh</button>
           <button id="homeRefreshBtn" class="btn qtButton" type="button">Refresh</button>
+          <button id="homePauseRefreshBtn" class="btn qtButton" type="button">Pause</button>
           <span id="homeRefreshingBadge" class="home-refreshing-badge" style="display:none;">Refreshing...</span>
           <span id="homeLastUpdated" class="stock-note">Last updated: --</span>
         </div>
@@ -22,6 +23,8 @@
         <div>
           <div class="stock-card-title" style="margin:0 0 8px 0;">Suggested Playbook</div>
           <div id="homePlaybookChips" class="home-playbook-chips"></div>
+          <button id="homeRegimeModelBtn" class="btn qtButton home-regime-model-btn" type="button">Model Analysis</button>
+          <div id="homeRegimeModelOutput" class="home-regime-model-output" style="display:none;"></div>
         </div>
       </div>
     </section>
@@ -55,9 +58,9 @@
       </section>
 
       <section class="home-col">
-        <div class="stock-card home-top-pick-card">
+        <div class="stock-card home-opportunity-engine-card">
           <div class="home-opportunity-head">
-            <div class="stock-card-title">Opportunity Engine • Top Pick</div>
+            <div class="stock-card-title">Opportunity Engine</div>
             <div class="home-opportunity-actions">
               <label for="homeScanPreset" class="stock-note home-queue-label">Scan Queue</label>
               <select id="homeScanPreset" class="home-queue-select" aria-label="Scan Queue preset">
@@ -77,12 +80,8 @@
           <div id="homeQueueLog" class="home-queue-log" style="display:none;"></div>
           <div id="homeScanStatus" class="stock-note" style="margin-bottom:6px;display:none;"></div>
           <div id="homeScanError" class="active-error" style="display:none;margin-bottom:6px;"></div>
-          <div id="homeTopPick"></div>
-        </div>
-
-        <div class="stock-card">
-          <div class="stock-card-title">Top Trade Opportunities</div>
-          <div id="homeOpportunities" class="home-opportunities"></div>
+          <div id="homeSymbolUniverse" style="margin-bottom:6px;"></div>
+          <div id="homeScannerOpportunities" class="home-scanner-opportunities"></div>
         </div>
 
         <div class="stock-card">

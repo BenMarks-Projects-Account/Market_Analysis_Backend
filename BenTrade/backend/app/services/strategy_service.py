@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from app.services.strategies.base import StrategyPlugin
 from app.services.strategies.butterflies import ButterfliesStrategyPlugin
@@ -17,7 +20,14 @@ from app.services.strategies.iron_condor import IronCondorStrategyPlugin
 from app.services.validation_events import ValidationEventsService
 from app.utils.computed_metrics import apply_metrics_contract
 from app.utils.dates import dte_ceil
+from app.utils.normalize import normalize_trade
+from app.utils.report_conformance import validate_report_file
+from app.utils.strategy_id_resolver import resolve_strategy_id_or_none
 from app.utils.trade_key import canonicalize_strategy_id, canonicalize_trade_key, trade_key
+
+# Central symbol universe for all strategy scanners.
+# Every generate() call that does not specify explicit symbols falls back here.
+DEFAULT_SCANNER_SYMBOLS: list[str] = ["SPY", "QQQ", "IWM", "DIA", "XSP", "RUT", "NDX"]
 
 
 class StrategyService:
@@ -73,41 +83,11 @@ class StrategyService:
             return None
 
     @staticmethod
-    def _first_number(row: dict[str, Any], *keys: str) -> float | None:
-        for key in keys:
-            value = StrategyService._to_float(row.get(key))
-            if value is not None:
-                return value
-        return None
-
-    @staticmethod
     def _upsert_warning(row: dict[str, Any], code: str) -> None:
         warnings = row.get("validation_warnings") if isinstance(row.get("validation_warnings"), list) else []
         if code not in warnings:
             warnings.append(code)
         row["validation_warnings"] = warnings
-
-    @staticmethod
-    def _strategy_label(strategy_id: str) -> str:
-        key = str(strategy_id or "").strip().lower()
-        labels = {
-            "put_credit_spread": "Put Credit Spread",
-            "call_credit_spread": "Call Credit Spread",
-            "put_debit": "Put Debit Spread",
-            "call_debit": "Call Debit Spread",
-            "iron_condor": "Iron Condor",
-            "butterfly_debit": "Debit Butterfly",
-            "calendar_spread": "Calendar Spread",
-            "calendar_call_spread": "Call Calendar Spread",
-            "calendar_put_spread": "Put Calendar Spread",
-            "csp": "Cash Secured Put",
-            "covered_call": "Covered Call",
-            "income": "Income Strategy",
-            "single": "Single Option",
-            "long_call": "Long Call",
-            "long_put": "Long Put",
-        }
-        return labels.get(key, key.replace("_", " ").title() or "Trade")
 
     @staticmethod
     def _utc_now_iso() -> str:
@@ -138,7 +118,7 @@ class StrategyService:
                 "prices_history_points": len(closes),
                 "has_prices_history": bool(closes),
             },
-            "pricing_source": "tradier+fred+yahoo",
+            "pricing_source": "tradier+fred+polygon",
             "timestamp": StrategyService._utc_now_iso(),
         }
 
@@ -306,7 +286,9 @@ class StrategyService:
                 "record_type": "data_workbench_trade_record_v1",
                 "report_id": report_id,
                 "trade_key": key,
-                "strategy_id": str(trade.get("strategy_id") or trade.get("spread_type") or strategy_id or "").strip().lower(),
+                "strategy_id": resolve_strategy_id_or_none(
+                    trade.get("strategy_id") or trade.get("spread_type") or strategy_id
+                ) or str(strategy_id or "").strip().lower(),
                 "input_snapshot": snapshot,
                 "input_snapshot_source": snapshot_source,
                 "trade_output": trade,
@@ -323,20 +305,60 @@ class StrategyService:
                 for line in lines:
                     handle.write(line + "\n")
 
+    # -- Scan-parameter presets (Conservative vs Strict) -------
+    # "conservative" widens the scan window to surface more viable candidates.
+    # "strict" is the legacy behaviour (narrow DTE / $1 widths / SPY-only).
+    # Evaluate thresholds are UNCHANGED by preset.
+    _PRESETS: dict[str, dict[str, dict[str, Any]]] = {
+        "credit_spread": {
+            "conservative": {
+                "dte_min": 14,
+                "dte_max": 30,
+                "expected_move_multiple": 1.0,
+                "width_min": 3.0,
+                "width_max": 5.0,
+                "distance_min": 0.03,
+                "distance_max": 0.08,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                # evaluate gates (unchanged)
+                "min_pop": 0.65,
+                "min_ev_to_risk": 0.02,
+                "max_bid_ask_spread_pct": 1.5,
+                "min_open_interest": 500,
+                "min_volume": 50,
+            },
+            "strict": {
+                "dte_min": 7,
+                "dte_max": 21,
+                "expected_move_multiple": 1.0,
+                "width_min": 1.0,
+                "width_max": 5.0,
+                "distance_min": 0.01,
+                "distance_max": 0.12,
+                # evaluate gates (unchanged)
+                "min_pop": 0.65,
+                "min_ev_to_risk": 0.02,
+                "max_bid_ask_spread_pct": 1.5,
+                "min_open_interest": 500,
+                "min_volume": 50,
+            },
+        },
+    }
+    _DEFAULT_PRESET = "conservative"
+
     def _apply_request_defaults(self, strategy_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         req = dict(payload or {})
 
         if strategy_id == "credit_spread":
-            req.setdefault("dte_min", 7)
-            req.setdefault("dte_max", 21)
-            req.setdefault("expected_move_multiple", 1.0)
-            req.setdefault("width_min", 1.0)
-            req.setdefault("width_max", 5.0)
-            req.setdefault("min_pop", 0.65)
-            req.setdefault("min_ev_to_risk", 0.02)
-            req.setdefault("max_bid_ask_spread_pct", 1.5)
-            req.setdefault("min_open_interest", 500)
-            req.setdefault("min_volume", 50)
+            preset_name = str(req.pop("preset", None) or self._DEFAULT_PRESET).lower()
+            presets = self._PRESETS.get(strategy_id, {})
+            preset_values = presets.get(preset_name, presets.get(self._DEFAULT_PRESET, {}))
+            # If user passed singular "symbol", don't apply preset "symbols"
+            user_specified_symbol = "symbol" in (payload or {}) or "symbols" in (payload or {})
+            for k, v in preset_values.items():
+                if k == "symbols" and user_specified_symbol:
+                    continue
+                req.setdefault(k, v)
 
         elif strategy_id == "debit_spreads":
             req.setdefault("dte_min", 14)
@@ -403,7 +425,7 @@ class StrategyService:
             return [requested_expiration]
 
         if strategy_id == "credit_spread":
-            default_min, default_max = 7, 21
+            default_min, default_max = 14, 30
         elif strategy_id == "debit_spreads":
             default_min, default_max = 14, 45
         elif strategy_id == "iron_condor":
@@ -447,27 +469,30 @@ class StrategyService:
         return [clean[0]]
 
     def _normalize_trade(self, strategy_id: str, expiration: str, trade: dict[str, Any]) -> dict[str, Any]:
-        normalized = dict(trade or {})
-        normalized["strategyId"] = strategy_id
+        """Thin wrapper around the shared ``normalize_trade`` builder.
 
-        symbol = str(
-            normalized.get("underlying")
-            or normalized.get("underlying_symbol")
-            or normalized.get("symbol")
-            or ""
-        ).upper()
-        if symbol:
-            normalized["underlying"] = symbol
-            normalized["underlying_symbol"] = symbol
-            normalized["symbol"] = symbol
-
+        Adds validation-event logging for alias mapping and non-canonical
+        trade keys — side-effects that belong to the scanner service, not
+        the shared normalizer.
+        """
+        # Capture pre-normalization state for validation-event logging.
         raw_spread_type = (
-            normalized.get("spread_type")
-            or normalized.get("strategy")
-            or strategy_id
+            trade.get("spread_type") or trade.get("strategy") or strategy_id
         )
-        spread_type, alias_mapped, provided_strategy = canonicalize_strategy_id(raw_spread_type)
-        spread_type = spread_type or str(strategy_id)
+        _, alias_mapped, provided_strategy = canonicalize_strategy_id(raw_spread_type)
+        provided_key = str(trade.get("trade_key") or "").strip()
+
+        # normalize_trade() now delegates to resolve_strategy_id_or_none
+        # which emits STRATEGY_ALIAS_USED for aliases.
+        normalized = normalize_trade(
+            trade,
+            strategy_id=strategy_id,
+            expiration=expiration,
+            derive_dte=True,
+        )
+
+        # Log legacy validation event for backward compat.
+        spread_type = normalized.get("strategy_id") or strategy_id
         if alias_mapped:
             try:
                 self.validation_events.append_event(
@@ -481,61 +506,8 @@ class StrategyService:
                 )
             except Exception:
                 pass
-        normalized["spread_type"] = spread_type
-        normalized["strategy"] = spread_type
-        normalized["strategy_id"] = spread_type
 
-        exp = str(normalized.get("expiration") or expiration or "").strip() or "NA"
-        normalized["expiration"] = exp
-
-        dte_value = normalized.get("dte")
-        if dte_value in (None, "") and exp not in ("", "NA"):
-            try:
-                dte_value = dte_ceil(exp)
-            except Exception:
-                dte_value = None
-        normalized["dte"] = dte_value
-
-        def _derive_key_strikes(row: dict[str, Any]) -> tuple[Any, Any]:
-            short = row.get("short_strike")
-            long = row.get("long_strike")
-            if short not in (None, "") or long not in (None, ""):
-                return short, long
-
-            if spread_type == "iron_condor":
-                return (
-                    f"P{row.get('put_short_strike') or 'NA'}|C{row.get('call_short_strike') or 'NA'}",
-                    f"P{row.get('put_long_strike') or 'NA'}|C{row.get('call_long_strike') or 'NA'}",
-                )
-
-            if spread_type == "butterfly_debit":
-                center = row.get("center_strike") or row.get("short_strike") or "NA"
-                lower = row.get("lower_strike") or "NA"
-                upper = row.get("upper_strike") or "NA"
-                return center, f"L{lower}|U{upper}"
-
-            if spread_type in {"csp", "covered_call", "single", "long_call", "long_put"}:
-                strike = row.get("strike") or row.get("short_strike") or "NA"
-                return strike, "NA"
-
-            return short, long
-
-        key_short_strike, key_long_strike = _derive_key_strikes(normalized)
-        if normalized.get("short_strike") in (None, ""):
-            normalized["short_strike"] = key_short_strike
-        if normalized.get("long_strike") in (None, ""):
-            normalized["long_strike"] = key_long_strike
-
-        provided_key = str(normalized.get("trade_key") or "").strip()
-        generated_key = trade_key(
-            underlying=symbol,
-            expiration=exp,
-            spread_type=spread_type,
-            short_strike=key_short_strike,
-            long_strike=key_long_strike,
-            dte=dte_value,
-        )
-        tkey = canonicalize_trade_key(provided_key) if provided_key else generated_key
+        tkey = normalized.get("trade_key") or ""
         if provided_key and tkey != provided_key:
             try:
                 self.validation_events.append_event(
@@ -550,104 +522,6 @@ class StrategyService:
                 )
             except Exception:
                 pass
-        normalized["trade_key"] = tkey
-        if "_trade_key" in normalized:
-            normalized.pop("_trade_key", None)
-
-        if normalized.get("composite_score") is None and normalized.get("rank_score") is not None:
-            normalized["composite_score"] = normalized.get("rank_score")
-
-        expected_value_contract = self._first_number(
-            normalized,
-            "ev_per_contract",
-            "expected_value",
-            "ev",
-        )
-        if expected_value_contract is None:
-            ev_share = self._first_number(normalized, "ev_per_share")
-            if ev_share is not None:
-                expected_value_contract = ev_share * 100.0
-
-        computed = {
-            "max_profit": self._first_number(normalized, "max_profit_per_contract", "max_profit_per_share", "max_profit"),
-            "max_loss": self._first_number(normalized, "max_loss_per_contract", "max_loss_per_share", "max_loss"),
-            "pop": self._first_number(normalized, "p_win_used", "pop_delta_approx", "pop_approx", "probability_of_touch_center", "implied_prob_profit", "pop"),
-            "return_on_risk": self._first_number(normalized, "return_on_risk", "ror"),
-            "expected_value": expected_value_contract,
-            "kelly_fraction": self._first_number(normalized, "kelly_fraction"),
-            "iv_rank": self._first_number(normalized, "iv_rank"),
-            "short_strike_z": self._first_number(normalized, "short_strike_z"),
-            "bid_ask_pct": self._first_number(normalized, "bid_ask_spread_pct"),
-            "strike_dist_pct": self._first_number(normalized, "strike_distance_pct", "strike_distance_vs_expected_move", "expected_move_ratio"),
-            "rsi14": self._first_number(normalized, "rsi14", "rsi_14"),
-            "rv_20d": self._first_number(normalized, "realized_vol_20d", "rv_20d"),
-            "open_interest": self._first_number(normalized, "open_interest"),
-            "volume": self._first_number(normalized, "volume"),
-        }
-        details = {
-            "break_even": self._first_number(normalized, "break_even", "break_even_low"),
-            "dte": self._first_number(normalized, "dte"),
-            "expected_move": self._first_number(normalized, "expected_move", "expected_move_near"),
-            "iv_rv_ratio": self._first_number(normalized, "iv_rv_ratio"),
-            "trade_quality_score": self._first_number(normalized, "trade_quality_score"),
-            "market_regime": str(normalized.get("market_regime") or normalized.get("regime") or "").strip() or None,
-        }
-
-        dte_front = self._first_number(normalized, "dte_near")
-        dte_back = self._first_number(normalized, "dte_far")
-        pills = {
-            "strategy_label": self._strategy_label(str(normalized.get("strategy_id") or normalized.get("spread_type") or "")),
-            "dte": details["dte"],
-            "pop": computed["pop"],
-            "oi": computed["open_interest"],
-            "vol": computed["volume"],
-            "regime_label": details["market_regime"],
-        }
-        if dte_front is not None and dte_back is not None:
-            pills["dte_front"] = dte_front
-            pills["dte_back"] = dte_back
-            pills["dte_label"] = f"DTE {int(dte_front) if float(dte_front).is_integer() else dte_front}/{int(dte_back) if float(dte_back).is_integer() else dte_back}"
-
-        normalized["computed"] = computed
-        normalized["details"] = details
-        normalized["pills"] = pills
-        normalized = apply_metrics_contract(normalized)
-
-        if normalized.get("p_win_used") is None and computed["pop"] is not None:
-            normalized["p_win_used"] = computed["pop"]
-        if normalized.get("return_on_risk") is None and computed["return_on_risk"] is not None:
-            normalized["return_on_risk"] = computed["return_on_risk"]
-        if normalized.get("expected_value") is None and computed["expected_value"] is not None:
-            normalized["expected_value"] = computed["expected_value"]
-        if normalized.get("ev_per_contract") is None and computed["expected_value"] is not None:
-            normalized["ev_per_contract"] = computed["expected_value"]
-        if normalized.get("bid_ask_spread_pct") is None and computed["bid_ask_pct"] is not None:
-            normalized["bid_ask_spread_pct"] = computed["bid_ask_pct"]
-        if normalized.get("strike_distance_pct") is None and computed["strike_dist_pct"] is not None:
-            normalized["strike_distance_pct"] = computed["strike_dist_pct"]
-        if normalized.get("rsi14") is None and computed["rsi14"] is not None:
-            normalized["rsi14"] = computed["rsi14"]
-        if normalized.get("realized_vol_20d") is None and computed["rv_20d"] is not None:
-            normalized["realized_vol_20d"] = computed["rv_20d"]
-        if normalized.get("iv_rv_ratio") is None and details["iv_rv_ratio"] is not None:
-            normalized["iv_rv_ratio"] = details["iv_rv_ratio"]
-        if normalized.get("trade_quality_score") is None and details["trade_quality_score"] is not None:
-            normalized["trade_quality_score"] = details["trade_quality_score"]
-        if not str(normalized.get("market_regime") or "").strip() and details["market_regime"] is not None:
-            normalized["market_regime"] = details["market_regime"]
-
-        if computed["pop"] is None:
-            self._upsert_warning(normalized, "POP_NOT_IMPLEMENTED_FOR_STRATEGY")
-        if pills["regime_label"] is None:
-            self._upsert_warning(normalized, "REGIME_UNAVAILABLE")
-        if computed["max_profit"] is None:
-            self._upsert_warning(normalized, "MAX_PROFIT_UNAVAILABLE")
-        if computed["max_loss"] is None:
-            self._upsert_warning(normalized, "MAX_LOSS_UNAVAILABLE")
-        if computed["expected_value"] is None:
-            self._upsert_warning(normalized, "EXPECTED_VALUE_UNAVAILABLE")
-        if computed["return_on_risk"] is None:
-            self._upsert_warning(normalized, "RETURN_ON_RISK_UNAVAILABLE")
 
         return normalized
 
@@ -769,12 +643,38 @@ class StrategyService:
         enriched: list[dict[str, Any]],
         accepted: list[dict[str, Any]],
         notes: list[str],
+        *,
+        generation_diagnostics: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         source_health = self.base_data_service.get_source_health_snapshot()
         report_stats = self._build_report_stats(accepted)
+
+        # -- report_status / report_warnings --
+        report_warnings: list[str] = []
+        if not accepted:
+            report_warnings.append("No trades generated (all candidates filtered out or invalid quotes).")
+        diag = generation_diagnostics if isinstance(generation_diagnostics, dict) else {}
+        rej_bk = diag.get("rejection_breakdown") if isinstance(diag.get("rejection_breakdown"), dict) else {}
+        if diag.get("closes_count", -1) == 0:
+            report_warnings.append("Price history unavailable (closes=0). SMA/RSI/RV computations may be missing.")
+        if diag.get("invalid_quote_count", 0) > 0:
+            report_warnings.append(f"{diag['invalid_quote_count']} chain row(s) had ask < bid (invalid quotes).")
+        if diag.get("invalid_spread_count", 0) > 0:
+            report_warnings.append(f"{diag['invalid_spread_count']} candidate(s) failed net_credit vs width validation.")
+
+        report_status = "ok" if accepted else "empty"
+
+        # Augment report_stats with candidate-level totals
+        report_stats["total_candidates"] = len(candidates)
+        report_stats["rejected_trades"] = len(enriched) - len(accepted)
+        report_stats["acceptance_rate"] = (len(accepted) / len(enriched)) if enriched else 0.0
+        report_stats["rejection_breakdown"] = rej_bk
+
         return {
             "strategyId": strategy_id,
             "generated_at": self._utc_now_iso(),
+            "report_status": report_status,
+            "report_warnings": report_warnings,
             "symbol": (primary or {}).get("symbol") if isinstance(primary, dict) else (symbol_list[0] if symbol_list else None),
             "expiration": (primary or {}).get("expiration") if isinstance(primary, dict) else None,
             "symbols": symbol_list,
@@ -785,6 +685,10 @@ class StrategyService:
                 "candidate_count": len(candidates),
                 "enriched_count": len(enriched),
                 "accepted_count": len(accepted),
+                "closes_count": diag.get("closes_count"),
+                "invalid_quote_count": diag.get("invalid_quote_count", 0),
+                "invalid_spread_count": diag.get("invalid_spread_count", 0),
+                "rejection_breakdown": rej_bk,
                 "notes": list(dict.fromkeys([str(n) for n in notes if str(n).strip()])),
             },
         }
@@ -797,7 +701,11 @@ class StrategyService:
         await self._emit_progress(progress_callback, "prepare", f"Preparing {strategy_id} inputs")
 
         symbols = payload.get("symbols") if isinstance(payload.get("symbols"), list) else None
-        symbol_list = [str(x).upper() for x in (symbols or []) if str(x).strip()] or [str(payload.get("symbol") or "SPY").upper()]
+        symbol_list = [str(x).upper() for x in (symbols or []) if str(x).strip()] or [str(payload.get("symbol") or "").upper().strip()]
+        # If no symbols resolved from payload at all, use the full scanner universe
+        if not symbol_list or symbol_list == [""]:
+            symbol_list = list(DEFAULT_SCANNER_SYMBOLS)
+        logger.info("[SCANNER] %s generate — symbols=%s", strategy_id, symbol_list)
 
         snapshots: list[dict[str, Any]] = []
         for symbol in symbol_list:
@@ -831,6 +739,7 @@ class StrategyService:
         candidates: list[dict[str, Any]] = []
         enriched: list[dict[str, Any]] = []
         accepted: list[dict[str, Any]] = []
+        rejection_breakdown: dict[str, int] = {}
 
         if snapshots:
             primary = snapshots[0]
@@ -868,6 +777,8 @@ class StrategyService:
                 raise
 
             await self._emit_progress(progress_callback, "evaluate", "Evaluating and scoring candidates", {"count": len(enriched)})
+            _MAX_REJECTION_LOGS = 20
+            _rejection_log_count = 0
             for row in enriched:
                 try:
                     row = dict(row)
@@ -875,10 +786,38 @@ class StrategyService:
                     row["_request"] = payload
                     ok, reasons = plugin.evaluate(row)
                     if not ok:
+                        # -- Aggregate rejection reason counters --
+                        for r in reasons:
+                            rejection_breakdown[r] = rejection_breakdown.get(r, 0) + 1
+                        # -- Structured debug log (first N only) --
+                        if _rejection_log_count < _MAX_REJECTION_LOGS:
+                            _rejection_log_count += 1
+                            logger.info(
+                                "event=candidate_rejected strategy=%s symbol=%s expiration=%s "
+                                "short_strike=%s long_strike=%s width=%s net_credit=%s "
+                                "short_bid=%s short_ask=%s long_bid=%s long_ask=%s "
+                                "delta=%s reasons=%s",
+                                strategy_id,
+                                row.get("underlying") or row.get("symbol"),
+                                row.get("expiration"),
+                                row.get("short_strike"),
+                                row.get("long_strike"),
+                                row.get("width"),
+                                row.get("net_credit"),
+                                row.get("_short_bid") or row.get("bid"),
+                                row.get("_short_ask") or row.get("ask"),
+                                row.get("_long_bid"),
+                                row.get("_long_ask"),
+                                row.get("short_delta_abs"),
+                                reasons,
+                            )
                         continue
                     rank_score, tie_breaks = plugin.score(row)
                     row.pop("_policy", None)
                     row.pop("_request", None)
+                    # Remove transient debug fields before persisting
+                    for _k in ("_quote_rejection", "_short_bid", "_short_ask", "_long_bid", "_long_ask"):
+                        row.pop(_k, None)
                     row["rank_score"] = rank_score
                     row["tie_breaks"] = tie_breaks
                     row["strategyId"] = strategy_id
@@ -887,6 +826,31 @@ class StrategyService:
                 except Exception as exc:
                     notes.append(f"candidate skipped: {exc}")
                     continue
+
+            # ── Per-symbol candidate / accepted summary ──────────────
+            _sym_candidates: dict[str, int] = {}
+            _sym_accepted: dict[str, int] = {}
+            for c in candidates:
+                sym = str(c.get("underlying") or c.get("symbol") or "?").upper()
+                _sym_candidates[sym] = _sym_candidates.get(sym, 0) + 1
+            for a in accepted:
+                sym = str(a.get("symbol") or a.get("underlying") or a.get("underlying_symbol") or "?").upper()
+                _sym_accepted[sym] = _sym_accepted.get(sym, 0) + 1
+            for sym in sorted(set(list(_sym_candidates.keys()) + list(_sym_accepted.keys()))):
+                logger.info(
+                    "[SCANNER] %s: %d candidates, %d accepted",
+                    sym,
+                    _sym_candidates.get(sym, 0),
+                    _sym_accepted.get(sym, 0),
+                )
+
+            if rejection_breakdown:
+                logger.info(
+                    "event=rejection_summary strategy=%s total_rejected=%d breakdown=%s",
+                    strategy_id,
+                    sum(rejection_breakdown.values()),
+                    rejection_breakdown,
+                )
 
         await self._apply_context_scores(accepted)
 
@@ -914,6 +878,20 @@ class StrategyService:
 
         await self._emit_progress(progress_callback, "write_report", "Writing report", {"accepted_count": len(accepted)})
 
+        # -- collect lightweight generation diagnostics --
+        total_closes = sum(len(s.get("prices_history") or []) for s in snapshots)
+        invalid_spread_notes = [n for n in notes if "net_credit" in n.lower() or "width" in n.lower()]
+        generation_diagnostics: dict[str, Any] = {
+            "closes_count": total_closes,
+            "invalid_quote_count": sum(
+                1 for s in snapshots
+                for w in (s.get("warnings") or [])
+                if "ask" in str(w).lower() and "bid" in str(w).lower()
+            ),
+            "invalid_spread_count": len(invalid_spread_notes),
+            "rejection_breakdown": rejection_breakdown,
+        }
+
         ts_name = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         filename = f"{strategy_id}_analysis_{ts_name}.json"
         path = self.results_dir / filename
@@ -927,6 +905,7 @@ class StrategyService:
             enriched=enriched,
             accepted=accepted,
             notes=notes,
+            generation_diagnostics=generation_diagnostics,
         )
 
         path.write_text(json.dumps(blob, indent=2), encoding="utf-8")
@@ -956,7 +935,10 @@ class StrategyService:
         if not path.exists():
             raise FileNotFoundError(filename)
 
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = validate_report_file(path, validation_events=self.validation_events, auto_delete=True)
+        if payload is None:
+            raise FileNotFoundError(filename)
+
         trades = payload.get("trades") if isinstance(payload, dict) else []
         if not isinstance(trades, list):
             trades = []
@@ -965,4 +947,7 @@ class StrategyService:
         payload["trades"] = normalized_trades
         payload["report_stats"] = payload.get("report_stats") if isinstance(payload.get("report_stats"), dict) else self._build_report_stats(normalized_trades)
         payload["strategyId"] = strategy_id
+        # Ensure report_status is always present
+        if not payload.get("report_status"):
+            payload["report_status"] = "ok" if normalized_trades else "empty"
         return payload

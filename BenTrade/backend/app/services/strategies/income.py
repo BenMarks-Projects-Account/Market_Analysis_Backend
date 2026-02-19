@@ -103,7 +103,7 @@ class IncomeStrategyPlugin:
                 candidates.append(
                     {
                         "strategy": "income",
-                        "spread_type": "cash_secured_put",
+                        "spread_type": "csp",
                         "symbol": symbol,
                         "expiration": expiration,
                         "dte": dte,
@@ -133,7 +133,7 @@ class IncomeStrategyPlugin:
                     candidates.append(
                         {
                             "strategy": "income",
-                            "spread_type": "cash_secured_put",
+                            "spread_type": "csp",
                             "symbol": symbol,
                             "expiration": expiration,
                             "dte": dte,
@@ -210,6 +210,9 @@ class IncomeStrategyPlugin:
         payload = inputs.get("request") or {}
         policy = inputs.get("policy") or {}
 
+        # Pre-compute realized vol once per unique snapshot to avoid redundant math
+        _rv_cache: dict[int, float | None] = {}
+
         min_annualized_yield = self._to_float(payload.get("min_annualized_yield"))
         if min_annualized_yield is None:
             min_annualized_yield = 0.10
@@ -264,8 +267,12 @@ class IncomeStrategyPlugin:
 
             delta_abs = abs(safe_float(getattr(leg, "delta", None)) or 0.0)
             iv = safe_float(getattr(leg, "iv", None))
-            prices = [float(x) for x in (row.get("snapshot") or {}).get("prices_history", []) if self._to_float(x) is not None]
-            rv = self._realized_vol(prices)
+            snapshot = row.get("snapshot") or {}
+            snap_id = id(snapshot)
+            if snap_id not in _rv_cache:
+                prices = [float(x) for x in snapshot.get("prices_history", []) if self._to_float(x) is not None]
+                _rv_cache[snap_id] = self._realized_vol(prices)
+            rv = _rv_cache[snap_id]
             iv_rv_ratio = (iv / rv) if iv not in (None, 0) and rv not in (None, 0) else None
             vol_for_em = iv if iv not in (None, 0) else rv
             expected_move = (spot * float(vol_for_em) * math.sqrt(dte / 365.0)) if vol_for_em not in (None, 0) and dte > 0 else None
@@ -277,7 +284,7 @@ class IncomeStrategyPlugin:
             annualized_yield = (premium / max(strike, 0.01)) * (365.0 / max(dte, 1))
             premium_per_day = (premium * 100.0) / max(dte, 1)
 
-            if spread_type == "cash_secured_put":
+            if spread_type == "csp":
                 downside_buffer = self._clamp((spot - strike) / max(spot, 0.01), 0.0, 0.99)
                 break_even = strike - premium
                 max_profit = premium * 100.0
@@ -293,6 +300,10 @@ class IncomeStrategyPlugin:
                 pop_est = self._clamp(1.0 - delta_abs)
 
             assignment_risk_score = self._clamp(assignment_raw)
+
+            # Proper EV from POP-based formula
+            ev_per_contract = pop_est * max_profit - (1.0 - pop_est) * max_loss
+            ev_per_share = ev_per_contract / 100.0
 
             oi = int(safe_float(getattr(leg, "open_interest", None)) or 0)
             volume = int(safe_float(getattr(leg, "volume", None)) or 0)
@@ -367,9 +378,9 @@ class IncomeStrategyPlugin:
                     "volume": volume,
                     "bid_ask_spread_pct": self._clamp(spread / max(premium, 0.05), 0.0, 9.99),
                     "event_risk_flag": event_risk_flag,
-                    "ev_per_contract": (rank_score - 0.5) * 100.0,
-                    "ev_per_share": rank_score - 0.5,
-                    "expected_value": (rank_score - 0.5) * 100.0,
+                    "ev_per_contract": ev_per_contract,
+                    "ev_per_share": ev_per_share,
+                    "expected_value": ev_per_contract,
                     "p_win_used": pop_est,
                     "rank_score": rank_score,
                     "collateral_per_contract": collateral_per_contract,

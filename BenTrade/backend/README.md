@@ -1,6 +1,6 @@
 # BenTrade Backend
 
-> Last updated: 2026-02-17
+> Last updated: 2026-02-18
 
 FastAPI backend for multi-strategy options analysis, report generation, trade lifecycle management, and trading execution.
 
@@ -33,13 +33,29 @@ Or on Windows PowerShell:
 
 Visit `http://127.0.0.1:5000/` in your browser.
 
-### 2. Run Tests
+### 2. Data Source Keys
+
+Set the following in `BenTrade/backend/.env`:
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `TRADIER_API_KEY` | **Yes** | Option chains, quotes, order execution |
+| `TRADIER_ACCOUNT_ID` | **Yes** | Tradier account for trading |
+| `POLYGON_API_KEY` | **Yes** | Daily OHLC price history (replaces Yahoo Finance) |
+| `FINNHUB_API_KEY` | Optional | Underlying quote fallback |
+| `FRED_API_KEY` | Optional | VIX / macro data |
+
+> **Polygon.io**: Used for all SMA / RSI / realized-vol / regime computations.
+> Free tier provides 5 API calls/min with end-of-day data. Set
+> `POLYGON_API_KEY=your_key` in `.env` to enable.
+
+### 3. Run Tests
 
 ```bash
 python -m pytest tests/ -q
 ```
 
-85 tests covering trade key canonicalization, metric computation, API routes, ingress validation, and more.
+238 tests (31 test files) covering trade key canonicalization, metric computation, strategy metrics audit, API routes, ingress validation, report conformance, trading workflows, E2E metric trace, and more.
 
 ### 3. API Usage
 
@@ -99,6 +115,17 @@ Each enriched trade includes:
 - Market regime classification
 - RSI-14, SMA-20/50, realized vol 20d
 
+### Metric Correctness by Strategy
+
+| Strategy | max_profit | max_loss | POP | EV | RoR | kelly | break_even |
+|---|---|---|---|---|---|---|---|
+| credit_spread | ✅ CreditSpread model | ✅ Real | ✅ Delta-derived | ✅ Real | ✅ Real | ✅ Real | ✅ Real |
+| debit_spreads | ✅ Per-contract | ✅ Per-contract | ⚠️ implied_prob (debit/width) | ⚠️ Heuristic | ✅ Real | — N/A | ✅ Real |
+| butterflies | ✅ Per-contract | ✅ Per-contract | ✅ Normal CDF (break-evens) | ✅ Numerical integration | ✅ Real | — N/A | ✅ Real (lower+debit / upper−debit) |
+| iron_condor | ✅ Per-contract | ✅ Per-contract | ✅ Normal CDF (break-evens) | ✅ POP-derived | ✅ Real | — N/A | ✅ Real |
+| income | ✅ Per-contract | ✅ Per-contract | ⚠️ 1−delta approx | ✅ POP-derived | ✅ Real | — N/A | ✅ Real |
+| calendars | — None (unknowable) | ✅ Net debit | — None | — None | — None | — N/A | ⚠️ Rough est. |
+
 ### Computed Metrics Contract
 All trades include:
 ```json
@@ -138,17 +165,9 @@ All strategy trade payloads include a `pills` object for UI trade cards:
 
 Calendar trades add `dte_front`, `dte_back`, `dte_label` (e.g. `"DTE 31/59"`).
 
-### Cleanup legacy scan reports
+### Report Conformance
 
-To archive or delete older report files that still contain legacy strategy strings (e.g. `put_credit`) and optionally regenerate:
-
-```bash
-python -m app.tools.legacy_strategy_report_cleanup --results-dir backend/results --mode archive
-```
-
-- Use `--mode delete` to remove files instead of archiving.
-- Use `--no-regenerate` to skip regeneration.
-- Use `--dry-run` to preview matching files without modifying anything.
+`app/utils/report_conformance.py` validates report files and can identify / remove corrupt entries. Report integrity is checked automatically during report loading.
 
 ## File Structure
 
@@ -164,42 +183,62 @@ backend/
 │   │   └── ...
 │   ├── clients/                # External data source clients
 │   │   ├── tradier_client.py       # Option chains, quotes, orders
-│   │   ├── yahoo_client.py         # Price history
+│   │   ├── polygon_client.py       # Price history (OHLC via Polygon.io)
+│   │   ├── yahoo_client.py         # (vestigial — replaced by Polygon)
 │   │   ├── fred_client.py          # VIX, rates
-│   │   └── finnhub_client.py       # Company data
+│   │   └── finnhub_client.py       # Company data (fallback quotes)
 │   ├── models/                 # Pydantic schemas + trade contract
 │   │   ├── schemas.py
 │   │   └── trade_contract.py
 │   ├── services/
 │   │   ├── strategy_service.py     # Orchestrator: generate → normalize → persist
+│   │   ├── base_data_service.py    # Upstream data aggregation
+│   │   ├── report_service.py       # Report listing, normalization, serving
 │   │   ├── data_workbench_service.py
+│   │   ├── recommendation_service.py  # Homepage opportunity engine
+│   │   ├── signal_service.py       # Signal scores
+│   │   ├── regime_service.py       # Market regime classification
+│   │   ├── spread_service.py       # Spread analysis
+│   │   ├── stock_analysis_service.py  # Stock analysis
+│   │   ├── trade_lifecycle_service.py # Trade lifecycle management
+│   │   ├── playbook_service.py     # Playbook / trade ideas
+│   │   ├── decision_service.py     # Reject decisions
+│   │   ├── risk_policy_service.py  # Risk policy
+│   │   ├── validation_events.py    # Validation event logging
+│   │   ├── ranking.py              # Ranking utilities
 │   │   ├── strategies/             # Plugin implementations
+│   │   │   ├── base.py
 │   │   │   ├── credit_spread.py
 │   │   │   ├── debit_spreads.py
 │   │   │   ├── iron_condor.py
 │   │   │   ├── butterflies.py
 │   │   │   ├── calendars.py
 │   │   │   └── income.py
-│   │   ├── strategy_scanner/       # Scanner defaults + aliases
-│   │   ├── evaluation/             # Gates, scoring, ranking
-│   │   └── ...
+│   │   └── evaluation/             # Gates, scoring, ranking, types
 │   ├── trading/                # Order execution layer
 │   │   ├── service.py              # Trading service
+│   │   ├── broker_base.py          # BrokerBase ABC
+│   │   ├── models.py               # OrderLeg, OrderTicket, BrokerResult
 │   │   ├── risk.py                 # Pre-trade risk checks
 │   │   ├── paper_broker.py         # Paper trading
 │   │   └── tradier_broker.py       # Live trading via Tradier
-│   ├── tools/                  # CLI utilities
-│   │   └── legacy_strategy_report_cleanup.py
+│   ├── storage/                # Persistence layer
+│   │   └── repository.py          # InMemoryTradingRepository (tickets, orders, idempotency)
 │   └── utils/
+│       ├── normalize.py            # Unified trade normalizer (single source of truth)
 │       ├── trade_key.py            # Canonical strategy IDs + trade key builder
+│       ├── strategy_id_resolver.py # Single-entry strategy string validator
 │       ├── computed_metrics.py     # Metrics contract (computed_metrics + metrics_status)
+│       ├── report_conformance.py   # Report file validation
+│       ├── validation.py           # Input validation helpers
+│       ├── http.py                 # UpstreamError + request_json
 │       ├── dates.py
 │       └── cache.py
 ├── common/                     # Shared quant/model modules
 │   ├── quant_analysis.py           # CreditSpread model + enrich_trade()
 │   ├── model_analysis.py
 │   └── utils.py
-├── tests/                      # ~85 unit tests
+├── tests/                      # 238 tests (31 test files)
 ├── results/                    # Generated reports + workbench records
 ├── start_backend.ps1
 ├── start_backend.sh

@@ -21,56 +21,17 @@ window.BenTradePages.initAdminDataWorkbench = function initAdminDataWorkbench(ro
     return;
   }
 
+  const fmt = window.BenTradeUtils.format;
+  const accessor = window.BenTradeUtils.tradeAccessor;
+  const card = window.BenTradeTradeCard;
+
   let latestPayload = null;
 
-  function escapeHtml(value){
-    return String(value || '')
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;');
-  }
-
-  function fmtNum(value, digits = 2, prefix = '', suffix = ''){
-    const n = toFiniteNumber(value);
-    if(!Number.isFinite(n)) return 'N/A';
-    return `${prefix}${n.toFixed(digits)}${suffix}`;
-  }
-
-  function fmtPct(value, digits = 1){
-    const n = toFiniteNumber(value);
-    if(!Number.isFinite(n)) return 'N/A';
-    return `${(n * 100).toFixed(digits)}%`;
-  }
-
-  function toFiniteNumber(value){
-    if(value === null || value === undefined || typeof value === 'boolean') return null;
-    if(typeof value === 'string' && value.trim() === '') return null;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  function metricNumber(trade, computedKey, ...legacyKeys){
-    const computed = (trade && typeof trade.computed === 'object') ? trade.computed : {};
-    const fromComputed = toFiniteNumber(computed?.[computedKey]);
-    if(fromComputed !== null) return fromComputed;
-    for(const key of legacyKeys){
-      const value = toFiniteNumber(trade?.[key]);
-      if(value !== null) return value;
-    }
-    return null;
-  }
-
-  function metricDollars(trade, computedKey, ...legacyKeys){
-    const value = metricNumber(trade, computedKey, ...legacyKeys);
-    return value;
-  }
-
-  function formatTradeType(value){
-    const text = String(value || 'trade').replaceAll('_', ' ').trim();
-    return text.replace(/\b\w/g, (ch) => ch.toUpperCase());
-  }
+  // Delegate to shared utilities
+  const escapeHtml = fmt.escapeHtml;
+  const toFiniteNumber = fmt.toNumber;
+  const metricNumber = accessor.metricNumber;
+  const formatTradeType = card.formatTradeType;
 
   function parseHashRouteAndQuery(){
     const hash = String(window.location.hash || '#/home');
@@ -123,20 +84,42 @@ window.BenTradePages.initAdminDataWorkbench = function initAdminDataWorkbench(ro
       return;
     }
 
+    window.BenTradeDebug?.validateTradeOnce?.(trade, 'admin_data_workbench');
+
     const warnings = Array.isArray(payload?.trade_json?.validation_warnings) ? payload.trade_json.validation_warnings : [];
-    const warningPill = warnings.length ? `<span class="data-warning-pill">${escapeHtml(`${warnings.length} warning${warnings.length === 1 ? '' : 's'}`)}</span>` : '';
+    const warningPill = warnings.length
+      ? card.pill(warnings.length + ' warning' + (warnings.length === 1 ? '' : 's'), 'warn')
+      : '';
+
+    const coreMetrics = card.metricGrid([
+      { label: 'Max Profit', value: fmt.dollars(metricNumber(trade, 'max_profit')), cssClass: 'positive', dataMetric: 'max_profit' },
+      { label: 'Max Loss', value: fmt.dollars(metricNumber(trade, 'max_loss')), cssClass: 'negative', dataMetric: 'max_loss' },
+      { label: 'Probability', value: fmt.pct(metricNumber(trade, 'pop'), 1), cssClass: 'neutral', dataMetric: 'pop' },
+      { label: 'Return on Risk', value: fmt.pct(metricNumber(trade, 'return_on_risk'), 1), cssClass: 'neutral', dataMetric: 'return_on_risk' },
+      { label: 'Expected Value', value: fmt.dollars(metricNumber(trade, 'expected_value', 'ev')), cssClass: 'neutral', dataMetric: 'ev' },
+      { label: 'Composite', value: fmt.num(metricNumber(trade, 'trade_quality_score', 'composite_score')), cssClass: 'neutral' },
+    ]);
+
+    const details = card.detailRows([
+      { label: 'Expiration', value: escapeHtml(String(trade.expiration || 'N/A')) },
+      { label: 'DTE', value: escapeHtml(String(trade.dte ?? 'N/A')) },
+      { label: 'Break Even', value: fmt.dollars(metricNumber(trade, 'break_even', 'break_even')), dataMetric: 'break_even' },
+      { label: 'Net Credit / Debit', value: fmt.dollars(metricNumber(trade, 'net_credit', 'net_credit')) + ' / ' + fmt.dollars(metricNumber(trade, 'net_debit', 'net_debit')), dataMetric: 'net_credit' },
+      { label: 'IV/RV Ratio', value: fmt.num(metricNumber(trade, 'iv_rv_ratio', 'iv_rv_ratio')), dataMetric: 'iv_rv_ratio' },
+      { label: 'Bid/Ask Spread %', value: fmt.pct(metricNumber(trade, 'bid_ask_pct', 'bid_ask_spread_pct'), 2), dataMetric: 'bid_ask_pct' },
+    ]);
 
     tradeCardHost.innerHTML = `
       <div class="trade-card" data-idx="0">
         <div class="trade-header">
           <div class="trade-header-center">
-            <div class="trade-type">${escapeHtml(formatTradeType(trade.spread_type || trade.strategy || trade.strategy_id))}</div>
+            <div class="trade-type">${escapeHtml(formatTradeType(trade.strategy_id || trade.spread_type || trade.strategy))}</div>
             <div class="trade-subtitle">
-              <span class="underlying-symbol">${escapeHtml(trade.underlying || trade.underlying_symbol || trade.symbol || '')}</span>
+              <span class="underlying-symbol">${escapeHtml(trade.symbol || trade.underlying || trade.underlying_symbol || '')}</span>
               <span class="trade-strikes-inline">${escapeHtml(String(trade.short_strike ?? 'NA'))}/${escapeHtml(String(trade.long_strike ?? 'NA'))}</span>
-              <span class="underlying-price">(${fmtNum(metricNumber(trade, 'underlying_price', 'underlying_price'), 2)})</span>
+              <span class="underlying-price">(${fmt.dollars(metricNumber(trade, 'underlying_price', 'underlying_price'))})</span>
             </div>
-            <div class="trade-rank-line">Rank Score: ${fmtPct(metricNumber(trade, 'rank_score', 'rank_score', 'composite_score'), 1)}</div>
+            <div class="trade-rank-line">Rank Score: ${fmt.pct(metricNumber(trade, 'rank_score', 'rank_score', 'composite_score'), 1)}</div>
             <div style="margin-top:4px;display:flex;align-items:center;gap:6px;opacity:0.86;font-size:11px;">
               <span>ID: ${escapeHtml(String(trade.trade_key || 'N/A'))}</span>
             </div>
@@ -146,53 +129,27 @@ window.BenTradePages.initAdminDataWorkbench = function initAdminDataWorkbench(ro
 
         <div class="trade-collapsible">
           <div class="trade-body">
-            <div class="section section-core">
-              <div class="section-title">CORE METRICS</div>
-              <div class="metric-grid">
-                <div class="metric"><div class="metric-label">Max Profit</div><div class="metric-value positive">${fmtNum(metricDollars(trade, 'max_profit', 'max_profit_per_contract', 'max_profit_per_share', 'max_profit'), 2, '$')}</div></div>
-                <div class="metric"><div class="metric-label">Max Loss</div><div class="metric-value negative">${fmtNum(metricDollars(trade, 'max_loss', 'max_loss_per_contract', 'max_loss_per_share', 'max_loss'), 2, '$')}</div></div>
-                <div class="metric"><div class="metric-label">Probability</div><div class="metric-value neutral">${fmtPct(metricNumber(trade, 'pop', 'p_win_used', 'pop_delta_approx', 'pop'), 1)}</div></div>
-                <div class="metric"><div class="metric-label">Return on Risk</div><div class="metric-value neutral">${fmtPct(metricNumber(trade, 'return_on_risk', 'return_on_risk'), 1)}</div></div>
-                <div class="metric"><div class="metric-label">Expected Value</div><div class="metric-value neutral">${fmtNum(metricDollars(trade, 'expected_value', 'ev_per_contract', 'ev_per_share', 'expected_value', 'ev'), 2, '$')}</div></div>
-                <div class="metric"><div class="metric-label">Composite</div><div class="metric-value neutral">${fmtNum(metricNumber(trade, 'trade_quality_score', 'composite_score', 'trade_quality_score'), 2)}</div></div>
-              </div>
-            </div>
-
-            <div class="section section-details">
-              <div class="section-title">TRADE DETAILS</div>
-              <div class="trade-details">
-                <div class="detail-row"><span class="detail-label">Expiration</span><span class="detail-value">${escapeHtml(String(trade.expiration || 'N/A'))}</span></div>
-                <div class="detail-row"><span class="detail-label">DTE</span><span class="detail-value">${escapeHtml(String(trade.dte ?? 'N/A'))}</span></div>
-                <div class="detail-row"><span class="detail-label">Break Even</span><span class="detail-value">${fmtNum(metricNumber(trade, 'break_even', 'break_even'), 2, '$')}</span></div>
-                <div class="detail-row"><span class="detail-label">Net Credit / Debit</span><span class="detail-value">${fmtNum(metricNumber(trade, 'net_credit', 'net_credit'), 2, '$')} / ${fmtNum(metricNumber(trade, 'net_debit', 'net_debit'), 2, '$')}</span></div>
-                <div class="detail-row"><span class="detail-label">IV/RV Ratio</span><span class="detail-value">${fmtNum(metricNumber(trade, 'iv_rv_ratio', 'iv_rv_ratio'), 2)}</span></div>
-                <div class="detail-row"><span class="detail-label">Bid/Ask Spread %</span><span class="detail-value">${fmtPct(metricNumber(trade, 'bid_ask_pct', 'bid_ask_spread_pct'), 2)}</span></div>
-              </div>
-            </div>
+            ${card.section('CORE METRICS', coreMetrics, 'section-core')}
+            ${card.section('TRADE DETAILS', details, 'section-details')}
           </div>
         </div>
       </div>
     `;
   }
 
-  function runMetricFormattingSanityCheck(){
-    if(window.__benTradeAdminMetricNullSanityChecked) return;
-    window.__benTradeAdminMetricNullSanityChecked = true;
-
+  // Sanity check: shared format module guarantees null → 'N/A'.
+  // Assertion via debug module replaces the old manual check.
+  if(window.BenTradeDebug?.enabled){
     const emptyTrade = { computed: {}, details: {} };
-    const checks = [
-      fmtNum(metricDollars(emptyTrade, 'max_profit', 'max_profit_per_contract', 'max_profit_per_share', 'max_profit'), 2, '$') === 'N/A',
-      fmtNum(metricDollars(emptyTrade, 'max_loss', 'max_loss_per_contract', 'max_loss_per_share', 'max_loss'), 2, '$') === 'N/A',
-      fmtPct(metricNumber(emptyTrade, 'pop', 'p_win_used', 'pop_delta_approx', 'pop'), 1) === 'N/A',
-      fmtPct(metricNumber(emptyTrade, 'return_on_risk', 'return_on_risk'), 1) === 'N/A',
-      fmtNum(metricDollars(emptyTrade, 'expected_value', 'ev_per_contract', 'ev_per_share', 'expected_value', 'ev'), 2, '$') === 'N/A',
-    ];
-
-    if(!checks.every(Boolean)){
-      console.warn('[dev-sanity] Admin Data Workbench metrics should render N/A for missing values, not 0.');
-    }
+    window.BenTradeDebug.assert(
+      fmt.dollars(metricNumber(emptyTrade, 'max_profit', 'max_profit_per_contract')) === 'N/A',
+      'Shared format.dollars should return N/A for missing values'
+    );
+    window.BenTradeDebug.assert(
+      fmt.pct(metricNumber(emptyTrade, 'pop', 'p_win_used'), 1) === 'N/A',
+      'Shared format.pct should return N/A for missing values'
+    );
   }
-  runMetricFormattingSanityCheck();
 
   function getJsonText(){
     if(!latestPayload) return '{}';

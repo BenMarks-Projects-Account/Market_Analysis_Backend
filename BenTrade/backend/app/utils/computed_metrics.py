@@ -24,6 +24,7 @@ CORE_COMPUTED_METRIC_FIELDS: tuple[str, ...] = (
     "volume",
     "rank_score",
     "composite_score",
+    "ev_to_risk",
 )
 
 
@@ -59,15 +60,29 @@ def build_computed_metrics(trade: dict[str, Any]) -> dict[str, float | None]:
     payload = trade if isinstance(trade, dict) else {}
     containers = _collect_containers(payload)
 
+    multiplier = _to_float(payload.get("contractsMultiplier") or payload.get("contracts_multiplier")) or 100.0
+
     expected_value = _first_number(containers, "expected_value", "ev_per_contract", "ev")
     if expected_value is None:
         ev_per_share = _first_number(containers, "ev_per_share")
         if ev_per_share is not None:
-            expected_value = ev_per_share * 100.0
+            expected_value = ev_per_share * multiplier
+
+    max_profit = _first_number(containers, "max_profit", "max_profit_per_contract")
+    if max_profit is None:
+        mp_share = _first_number(containers, "max_profit_per_share")
+        if mp_share is not None:
+            max_profit = mp_share * multiplier
+
+    max_loss = _first_number(containers, "max_loss", "max_loss_per_contract")
+    if max_loss is None:
+        ml_share = _first_number(containers, "max_loss_per_share")
+        if ml_share is not None:
+            max_loss = ml_share * multiplier
 
     return {
-        "max_profit": _first_number(containers, "max_profit", "max_profit_per_contract", "max_profit_per_share"),
-        "max_loss": _first_number(containers, "max_loss", "max_loss_per_contract", "max_loss_per_share"),
+        "max_profit": max_profit,
+        "max_loss": max_loss,
         "pop": _first_number(
             containers,
             "pop",
@@ -101,6 +116,7 @@ def build_computed_metrics(trade: dict[str, Any]) -> dict[str, float | None]:
         "volume": _first_number(containers, "volume"),
         "rank_score": _first_number(containers, "rank_score"),
         "composite_score": _first_number(containers, "composite_score"),
+        "ev_to_risk": _first_number(containers, "ev_to_risk"),
     }
 
 

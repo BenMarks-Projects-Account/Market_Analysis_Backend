@@ -49,9 +49,9 @@ window.BenTradeUtils.tradeKey = (function buildTradeKeyUtils(){
 
   function tradeKey(input){
     const source = input || {};
-    const underlying = String(source.underlying ?? source.symbol ?? 'NA').trim().toUpperCase() || 'NA';
+    const underlying = String(source.symbol ?? source.underlying ?? 'NA').trim().toUpperCase() || 'NA';
     const expiration = String(source.expiration ?? source.exp ?? 'NA').trim() || 'NA';
-    const spreadType = canonicalStrategy(source.spread_type ?? source.strategy ?? 'NA');
+    const spreadType = canonicalStrategy(source.strategy_id ?? source.spread_type ?? source.strategy ?? 'NA');
     const shortStrike = normalizeStrike(source.short_strike ?? source.shortStrike ?? source.short);
     const longStrike = normalizeStrike(source.long_strike ?? source.longStrike ?? source.long);
     const dte = source.dte === null || source.dte === undefined || source.dte === ''

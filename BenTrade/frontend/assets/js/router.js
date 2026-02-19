@@ -201,7 +201,7 @@
     },
     "credit-spread": {
       view: "dashboards/credit-spread.view.html",
-      init: () => (window.BenTradePages?.initCreditSpreads || window.BenTradePages?.initCreditSpread || window.BenTrade?.initCreditSpread)?.(document.getElementById('view')),
+      init: () => window.BenTradePages?.initCreditSpreads?.(document.getElementById('view')),
       title: routeMeta["credit-spread"].title
     },
     "strategy-iron-condor": {

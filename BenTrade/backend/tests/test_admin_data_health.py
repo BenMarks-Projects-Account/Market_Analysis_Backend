@@ -17,7 +17,7 @@ class _DummyBaseDataService:
     def get_source_health_snapshot(self) -> dict:
         return {
             "tradier": {"status": "green", "message": "ok"},
-            "yahoo": {"status": "yellow", "message": "intermittent"},
+            "polygon": {"status": "green", "message": "healthy"},
             "finnhub": {"status": "red", "message": "down"},
         }
 

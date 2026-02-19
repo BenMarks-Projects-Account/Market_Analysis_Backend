@@ -48,6 +48,7 @@ class RecommendationService:
         return str(
             row.get("spread_type")
             or row.get("strategy")
+            or row.get("type")
             or row.get("recommended_strategy")
             or row.get("strategyId")
             or "stock"
@@ -207,12 +208,13 @@ class RecommendationService:
         return out, notes
 
     def _derive_ror(self, raw: dict[str, Any]) -> float | None:
-        direct = self._safe_float(raw.get("return_on_risk") or raw.get("ror"))
+        computed = raw.get("computed") if isinstance(raw.get("computed"), dict) else {}
+        direct = self._safe_float(computed.get("return_on_risk") or raw.get("return_on_risk") or raw.get("ror"))
         if direct is not None:
             return direct
 
-        max_profit = self._safe_float(raw.get("max_profit_per_share") or raw.get("max_profit") or raw.get("max_profit_per_contract"))
-        max_loss = self._safe_float(raw.get("max_loss_per_share") or raw.get("max_loss") or raw.get("max_loss_per_contract"))
+        max_profit = self._safe_float(computed.get("max_profit") or raw.get("max_profit_per_contract") or raw.get("max_profit_per_share") or raw.get("max_profit"))
+        max_loss = self._safe_float(computed.get("max_loss") or raw.get("max_loss_per_contract") or raw.get("max_loss_per_share") or raw.get("max_loss"))
         if max_profit is not None and max_loss not in (None, 0):
             return max_profit / max_loss
         return None
@@ -236,6 +238,7 @@ class RecommendationService:
 
     def _build_pick(self, candidate: dict[str, Any], regime: dict[str, Any]) -> dict[str, Any]:
         raw = candidate.get("raw") if isinstance(candidate.get("raw"), dict) else {}
+        computed = raw.get("computed") if isinstance(raw.get("computed"), dict) else {}
         metrics = raw.get("metrics") if isinstance(raw.get("metrics"), dict) else {}
         signals = raw.get("signals") if isinstance(raw.get("signals"), dict) else {}
         strategy = str(candidate.get("strategy") or "stock")
@@ -247,12 +250,13 @@ class RecommendationService:
         rank_score = self._normalize_score(candidate.get("rank_score"))
         final_score = (0.6 * rank_score) + (0.2 * regime_fit) + (0.2 * liquidity_score)
 
-        ev = self._safe_float(raw.get("ev_per_share") or raw.get("expected_value") or raw.get("ev") or raw.get("edge"))
+        # Prefer per-contract EV from computed (set by _normalize_trade), then fall back
+        ev = self._safe_float(computed.get("expected_value") or raw.get("ev_per_contract") or raw.get("expected_value") or raw.get("ev") or raw.get("edge"))
         ev_to_risk = self._safe_float(raw.get("ev_to_risk"))
         if ev is None:
             ev = ev_to_risk
 
-        pop = self._safe_float(raw.get("p_win_used"))
+        pop = self._safe_float(computed.get("pop") or raw.get("p_win_used"))
         if pop is None:
             pop = self._safe_float(raw.get("pop_delta_approx") or raw.get("probability_of_profit") or raw.get("pop"))
 
@@ -314,12 +318,17 @@ class RecommendationService:
                 "pop": pop,
                 "ev_to_risk": ev_to_risk,
                 "ror": ror,
+                "max_profit": self._safe_float(computed.get("max_profit") or raw.get("max_profit_per_contract") or raw.get("max_profit")),
+                "max_loss": self._safe_float(computed.get("max_loss") or raw.get("max_loss_per_contract") or raw.get("max_loss")),
                 "iv_rv_ratio": iv_rv_ratio,
                 "price": self._safe_float(raw.get("price") or metrics.get("price")),
                 "rsi14": self._safe_float(raw.get("rsi14") or signals.get("rsi_14") or metrics.get("rsi14")),
                 "ema20": self._safe_float(raw.get("ema20") or metrics.get("ema20")),
                 "trend": str(raw.get("trend") or "").lower() or None,
             },
+            "computed": computed,
+            "computed_metrics": raw.get("computed_metrics") if isinstance(raw.get("computed_metrics"), dict) else {},
+            "metrics_status": raw.get("metrics_status") if isinstance(raw.get("metrics_status"), dict) else {},
             "model": model_payload,
             "notes": pick_notes,
             "actions": {

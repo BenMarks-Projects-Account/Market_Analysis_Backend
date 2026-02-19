@@ -105,34 +105,39 @@ class TradierClient:
             logger.warning("event=tradier_expirations_validation reason=invalid_symbol symbol=%s", symbol)
             return []
 
+        key = f"tradier:expirations:{normalized_symbol}"
         url = f"{self.settings.TRADIER_BASE_URL}/markets/options/expirations"
-        payload = await request_json(
-            self.http_client,
-            "GET",
-            url,
-            params={"symbol": normalized_symbol, "includeAllRoots": "true"},
-            headers=self._headers,
-        )
-        dates = ((payload.get("expirations") or {}).get("date")) or []
-        if isinstance(dates, str):
-            dates = [dates]
 
-        valid: list[str] = []
-        for item in dates:
-            value = str(item or "").strip()
-            if not value:
-                continue
-            try:
-                exp_date = datetime.strptime(value, "%Y-%m-%d").date()
-            except ValueError:
-                logger.warning("event=tradier_expirations_validation symbol=%s reason=invalid_date value=%s", normalized_symbol, value)
-                continue
-            dte = (exp_date - datetime.now(timezone.utc).date()).days
-            if dte < 0:
-                logger.warning("event=tradier_expirations_validation symbol=%s reason=past_expiration value=%s", normalized_symbol, value)
-                continue
-            valid.append(value)
-        return valid
+        async def _load() -> list[str]:
+            payload = await request_json(
+                self.http_client,
+                "GET",
+                url,
+                params={"symbol": normalized_symbol, "includeAllRoots": "true"},
+                headers=self._headers,
+            )
+            dates = ((payload.get("expirations") or {}).get("date")) or []
+            if isinstance(dates, str):
+                dates = [dates]
+
+            valid: list[str] = []
+            for item in dates:
+                value = str(item or "").strip()
+                if not value:
+                    continue
+                try:
+                    exp_date = datetime.strptime(value, "%Y-%m-%d").date()
+                except ValueError:
+                    logger.warning("event=tradier_expirations_validation symbol=%s reason=invalid_date value=%s", normalized_symbol, value)
+                    continue
+                dte = (exp_date - datetime.now(timezone.utc).date()).days
+                if dte < 0:
+                    logger.warning("event=tradier_expirations_validation symbol=%s reason=past_expiration value=%s", normalized_symbol, value)
+                    continue
+                valid.append(value)
+            return valid
+
+        return await self.cache.get_or_set(key, self.settings.EXPIRATIONS_CACHE_TTL_SECONDS, _load)
 
     async def get_chain(self, symbol: str, expiration: str, greeks: bool = True) -> list[dict[str, Any]]:
         normalized_symbol = self._normalize_symbol(symbol)

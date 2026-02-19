@@ -7,6 +7,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from app.utils.strategy_id_resolver import resolve_strategy_id_or_none
 from app.utils.trade_key import canonicalize_spread_type, canonicalize_strategy_id, canonicalize_trade_key, trade_key
 from app.services.validation_events import ValidationEventsService
 
@@ -123,7 +124,9 @@ class TradeLifecycleService:
         out = dict(payload)
 
         raw_spread = out.get("spread_type") or out.get("strategy")
-        canonical_spread, alias_mapped, _ = canonicalize_strategy_id(raw_spread)
+        # Single resolver: emits STRATEGY_ALIAS_USED for aliases.
+        canonical_spread = resolve_strategy_id_or_none(raw_spread)
+        _, alias_mapped, _ = canonicalize_strategy_id(raw_spread)
         if canonical_spread:
             if str(out.get("spread_type") or "").strip().lower() != canonical_spread:
                 warnings.append("SPREAD_TYPE_CANONICALIZED")
@@ -131,6 +134,7 @@ class TradeLifecycleService:
                 warnings.append("TRADE_STRATEGY_ALIAS_MAPPED")
             out["spread_type"] = canonical_spread
             out["strategy"] = canonical_spread
+            out["strategy_id"] = canonical_spread
 
         if out.get("model_evaluation") is None:
             out["model_status"] = "unavailable"

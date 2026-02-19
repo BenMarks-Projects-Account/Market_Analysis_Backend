@@ -3,14 +3,38 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse
 
+from app.utils.normalize import strip_legacy_fields
+
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
 logger = logging.getLogger(__name__)
+
+# ── Debug trade logging (set BENTRADE_DEBUG_TRADES=1 to enable) ──────
+_DEBUG_TRADES = os.environ.get("BENTRADE_DEBUG_TRADES", "").strip().lower() in ("1", "true", "yes", "on")
+
+_AUDIT_KEYS = (
+    "max_profit", "max_loss", "pop", "expected_value", "ev", "return_on_risk",
+    "kelly_fraction", "iv_rank", "iv_rv_ratio", "rank_score", "break_even",
+)
+
+
+def _audit_trade(trade: dict, label: str, idx: int = 0) -> None:
+    if not _DEBUG_TRADES:
+        return
+    symbol = trade.get("symbol") or trade.get("underlying") or "?"
+    strategy = trade.get("strategy_id") or trade.get("spread_type") or "?"
+    computed = {k: v for k, v in (trade.get("computed") or {}).items() if v is not None}
+    cm = {k: v for k, v in (trade.get("computed_metrics") or {}).items() if v is not None}
+    logger.info(
+        "[DEBUG_TRADES:%s] trade[%d] %s %s  computed=%s  computed_metrics=%s",
+        label, idx, symbol, strategy, computed, cm,
+    )
 
 
 @router.post("/{strategy_id}/generate")
@@ -26,13 +50,23 @@ async def generate_strategy_report(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to generate strategy report: {exc}") from exc
 
+    raw_trades = generated.get("trades") or []
+    stripped = []
+    for i, t in enumerate(raw_trades):
+        _audit_trade(t, "GENERATE_PRE_STRIP", i)
+        s = strip_legacy_fields(t)
+        _audit_trade(s, "GENERATE_POST_STRIP", i)
+        stripped.append(s)
     return {
         "ok": True,
         "strategyId": strategy_id,
         "filename": generated.get("filename"),
+        "report_status": generated.get("report_status") or ("ok" if raw_trades else "empty"),
+        "report_warnings": generated.get("report_warnings") or [],
+        "symbols": generated.get("symbols") or [],
         "report_stats": generated.get("report_stats") or {},
         "source_health": generated.get("source_health") or {},
-        "trades": generated.get("trades") or [],
+        "trades": stripped,
         "diagnostics": generated.get("diagnostics") or {},
     }
 
@@ -41,10 +75,14 @@ async def generate_strategy_report(
 async def generate_strategy_report_stream(strategy_id: str, request: Request):
     query = request.query_params
     request_payload: dict[str, Any] = {}
-    for key in ("symbol", "direction", "width", "distance_mode", "butterfly_type", "option_side", "center_mode", "moneyness"):
+    for key in ("symbol", "direction", "width", "distance_mode", "butterfly_type", "option_side", "center_mode", "moneyness", "preset"):
         value = query.get(key)
         if value not in (None, ""):
             request_payload[key] = value
+    # Comma-separated symbols list (e.g. symbols=SPY,QQQ,IWM)
+    symbols_raw = query.get("symbols")
+    if symbols_raw not in (None, ""):
+        request_payload["symbols"] = [s.strip().upper() for s in symbols_raw.split(",") if s.strip()]
     for key in ("dte_min", "dte_max", "max_candidates", "near_dte_min", "near_dte_max", "far_dte_min", "far_dte_max", "min_open_interest", "min_volume", "prefer_term_structure"):
         value = query.get(key)
         if value not in (None, ""):
@@ -78,6 +116,8 @@ async def generate_strategy_report_stream(strategy_id: str, request: Request):
         "min_cost_efficiency",
         "min_ror",
         "symmetry_target",
+        "distance_min",
+        "distance_max",
     ):
         value = query.get(key)
         if value not in (None, ""):
@@ -236,6 +276,15 @@ async def get_strategy_report(strategy_id: str, filename: str, request: Request)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to read strategy report: {exc}") from exc
 
+    # Strip legacy flat fields from trades before returning.
+    if isinstance(payload, dict) and isinstance(payload.get("trades"), list):
+        stripped = []
+        for i, t in enumerate(payload["trades"]):
+            _audit_trade(t, "REPORT_PRE_STRIP", i)
+            s = strip_legacy_fields(t)
+            _audit_trade(s, "REPORT_POST_STRIP", i)
+            stripped.append(s)
+        payload["trades"] = stripped
     return payload
 
 

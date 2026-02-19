@@ -48,15 +48,15 @@ class PlaybookService:
         if label == "RISK_ON":
             return {
                 "primary": [
-                    ("credit_put_spread", "Credit Put Spreads", "Bullish premium capture in constructive tape"),
+                    ("put_credit_spread", "Put Credit Spreads", "Bullish premium capture in constructive tape"),
                     ("covered_call", "Covered Calls", "Income overlay with risk-on drift"),
                 ],
                 "secondary": [
-                    ("debit_call_spread", "Debit Call Spreads", "Selective directional upside expression"),
+                    ("call_debit", "Call Debit Spreads", "Selective directional upside expression"),
                     ("iron_condor", "Iron Condor (Wide)", "Range premium harvesting with wider risk bands"),
                 ],
                 "avoid": [
-                    ("debit_put_spread", "Debit Put Spreads", "Bearish structures de-emphasized in risk-on"),
+                    ("put_debit", "Put Debit Spreads", "Bearish structures de-emphasized in risk-on"),
                     ("aggressive_short_calls", "Aggressive Short Calls", "Uncapped upside risk in trending tape"),
                 ],
                 "notes": ["Market in risk-on regime; favor premium selling strategies."],
@@ -64,7 +64,7 @@ class PlaybookService:
         if label == "RISK_OFF":
             return {
                 "primary": [
-                    ("debit_put_spread", "Debit Put Spreads", "Defined-risk bearish protection preferred"),
+                    ("put_debit", "Put Debit Spreads", "Defined-risk bearish protection preferred"),
                     ("cash_secured_put_far_otm", "Cash-Secured Puts (Far OTM)", "Only deep cushion entries with strict sizing"),
                 ],
                 "secondary": [
