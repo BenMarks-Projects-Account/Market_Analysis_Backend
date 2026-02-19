@@ -75,6 +75,52 @@ window.BenTradeUtils.format = (function(){
       .replaceAll("'", '&#39;');
   }
 
+  /**
+   * Canonical score normalizer.
+   * Converts any raw score to the 0–100 scale.
+   *   - null / non-finite → null
+   *   - negative          → 0  (clamped, with warning)
+   *   - 0                 → 0
+   *   - (0, 1.0]          → raw * 100  (0-1 fractional scale, with debug log)
+   *   - (1, 100]          → raw  (already 0-100)
+   *   - > 100             → 100 (clamped, with warning)
+   *
+   * @param {*} raw  — any value
+   * @returns {number|null}
+   */
+  function normalizeScore(raw){
+    var n = toNumber(raw);
+    if(n === null) return null;
+    if(n < 0){
+      if(typeof console !== 'undefined' && console.warn)
+        console.warn('[SCORE_NORMALIZE] Clamped negative value ' + n + ' → 0');
+      return 0;
+    }
+    if(n === 0) return 0;
+    if(n <= 1.0){
+      if(typeof console !== 'undefined' && console.debug)
+        console.debug('[SCORE_NORMALIZE] Converted 0–1 value ' + n + ' → ' + (n * 100));
+      return n * 100;
+    }
+    if(n <= 100) return n;
+    if(typeof console !== 'undefined' && console.warn)
+      console.warn('[SCORE_NORMALIZE] Clamped value ' + n + ' → 100');
+    return 100;
+  }
+
+  /**
+   * Format a score for display.
+   * Normalizes to 0–100, then renders as "82.4%" or "N/A".
+   * @param {*} raw    — any raw score value
+   * @param {number} [digits=1] — decimal places
+   * @returns {string}
+   */
+  function formatScore(raw, digits){
+    var s = normalizeScore(raw);
+    if(s === null) return 'N/A';
+    return s.toFixed(digits != null ? digits : 1) + '%';
+  }
+
   return {
     toNumber: toNumber,
     num: num,
@@ -84,5 +130,7 @@ window.BenTradeUtils.format = (function(){
     signedPct: signedPct,
     signed: signed,
     escapeHtml: escapeHtml,
+    normalizeScore: normalizeScore,
+    formatScore: formatScore,
   };
 })();

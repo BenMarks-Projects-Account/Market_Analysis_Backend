@@ -97,7 +97,7 @@ window.BenTradePages.initAdminDataWorkbench = function initAdminDataWorkbench(ro
       { label: 'Probability', value: fmt.pct(metricNumber(trade, 'pop'), 1), cssClass: 'neutral', dataMetric: 'pop' },
       { label: 'Return on Risk', value: fmt.pct(metricNumber(trade, 'return_on_risk'), 1), cssClass: 'neutral', dataMetric: 'return_on_risk' },
       { label: 'Expected Value', value: fmt.dollars(metricNumber(trade, 'expected_value', 'ev')), cssClass: 'neutral', dataMetric: 'ev' },
-      { label: 'Composite', value: fmt.num(metricNumber(trade, 'trade_quality_score', 'composite_score')), cssClass: 'neutral' },
+      { label: 'Composite', value: fmt.formatScore(metricNumber(trade, 'trade_quality_score', 'composite_score'), 1), cssClass: 'neutral' },
     ]);
 
     const details = card.detailRows([
@@ -119,7 +119,7 @@ window.BenTradePages.initAdminDataWorkbench = function initAdminDataWorkbench(ro
               <span class="trade-strikes-inline">${escapeHtml(String(trade.short_strike ?? 'NA'))}/${escapeHtml(String(trade.long_strike ?? 'NA'))}</span>
               <span class="underlying-price">(${fmt.dollars(metricNumber(trade, 'underlying_price', 'underlying_price'))})</span>
             </div>
-            <div class="trade-rank-line">Rank Score: ${fmt.pct(metricNumber(trade, 'rank_score', 'rank_score', 'composite_score'), 1)}</div>
+            <div class="trade-rank-line">Rank Score: ${fmt.formatScore(metricNumber(trade, 'rank_score', 'rank_score', 'composite_score'), 1)}</div>
             <div style="margin-top:4px;display:flex;align-items:center;gap:6px;opacity:0.86;font-size:11px;">
               <span>ID: ${escapeHtml(String(trade.trade_key || 'N/A'))}</span>
             </div>

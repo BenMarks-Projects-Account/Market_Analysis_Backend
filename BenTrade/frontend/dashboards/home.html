@@ -1,6 +1,7 @@
 <div class="view-wrap">
   <div class="home-page">
-    <section class="stock-card">
+    <!-- ═══ Top Bar (sticky) ═══ -->
+    <section class="stock-card home-topbar-card">
       <div class="home-topbar">
         <div class="home-page-title">Home Dashboard</div>
         <div class="home-cache-controls">
@@ -13,8 +14,14 @@
       </div>
     </section>
 
+    <!--
+      Do NOT add Source Health / Session Stats / Strategy Leaderboard here.
+      Those are GLOBAL-ONLY panels rendered in the global right info bar (index.html).
+    -->
+
+    <!-- ═══ Market Regime + Playbook ═══ -->
     <section class="stock-card home-regime-panel">
-      <div class="stock-card-title">Market Regime</div>
+      <div class="stock-card-title bt-panel-title">Market Regime</div>
       <div class="home-regime-panel-grid">
         <div>
           <div id="homeRegimeStrip" class="home-regime-strip"></div>
@@ -29,98 +36,100 @@
       </div>
     </section>
 
+    <!-- ═══ Strategy Playbook ═══ -->
     <section class="stock-card home-playbook-panel">
-      <div class="stock-card-title">Strategy Playbook</div>
+      <div class="stock-card-title bt-panel-title">Strategy Playbook</div>
       <div id="homeStrategyPlaybook" class="home-strategy-playbook"></div>
     </section>
 
-    <div class="home-grid">
-      <section class="home-col">
-        <div class="stock-card">
-          <div class="stock-card-title">Major Index Panel</div>
-          <div id="homeIndexTiles" class="home-index-tiles"></div>
-        </div>
-
-        <div class="stock-card">
-          <div class="stock-card-title">SPY Price Chart (6M)</div>
-          <svg id="homeSpyChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
-        </div>
-
-        <div class="stock-card">
-          <div class="stock-card-title">Sector Performance</div>
-          <div id="homeSectorBars" class="home-sector-bars"></div>
-        </div>
-
-        <div class="stock-card">
-          <div class="stock-card-title">Signal Hub</div>
-          <div id="homeSignalHub" class="home-signal-hub"></div>
-        </div>
-      </section>
-
-      <section class="home-col">
-        <div class="stock-card home-opportunity-engine-card">
-          <div class="home-opportunity-head">
-            <div class="stock-card-title">Opportunity Engine</div>
-            <div class="home-opportunity-actions">
-              <label for="homeScanPreset" class="stock-note home-queue-label">Scan Queue</label>
-              <select id="homeScanPreset" class="home-queue-select" aria-label="Scan Queue preset">
-                <option value="quick">Quick</option>
-                <option value="balanced" selected>Balanced</option>
-                <option value="full_sweep">Full Sweep</option>
-              </select>
-              <button id="homeRunQueueBtn" class="btn qtButton" type="button">Run Queue</button>
-              <button id="homeStopQueueBtn" class="btn qtButton" type="button" disabled>Stop</button>
-            </div>
+    <!-- ═══ Market Snapshot ═══ -->
+    <section class="stock-card home-market-snapshot-panel">
+      <div class="stock-card-title bt-panel-title">Market Snapshot</div>
+      <div class="home-market-snapshot-body">
+        <div class="home-data-row">
+          <div class="stock-card home-nested-card">
+            <div class="stock-card-title">Major Index Panel</div>
+            <div id="homeIndexTiles" class="home-index-tiles"></div>
           </div>
-          <div id="homeQueueProgress" class="home-queue-progress" style="display:none;">
-            <span id="homeQueueSpinner" class="home-scan-spinner" style="display:none;" aria-hidden="true"></span>
-            <span id="homeQueueCurrent" class="stock-note">Idle</span>
-            <span id="homeQueueCount" class="stock-note">0/0</span>
+          <div class="stock-card home-nested-card">
+            <div class="stock-card-title">Macro Indicators</div>
+            <div id="homeMacroTiles" class="home-macro-tiles"></div>
           </div>
-          <div id="homeQueueLog" class="home-queue-log" style="display:none;"></div>
-          <div id="homeScanStatus" class="stock-note" style="margin-bottom:6px;display:none;"></div>
-          <div id="homeScanError" class="active-error" style="display:none;margin-bottom:6px;"></div>
-          <div id="homeSymbolUniverse" style="margin-bottom:6px;"></div>
-          <div id="homeScannerOpportunities" class="home-scanner-opportunities"></div>
+        </div>
+        <div class="home-data-row">
+          <div class="stock-card home-nested-card">
+            <div class="stock-card-title">SPY Price Chart (6M)</div>
+            <svg id="homeSpyChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
+          </div>
+          <div class="stock-card home-nested-card">
+            <div class="stock-card-title">VIX Chart (3M)</div>
+            <svg id="homeVixChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
+          </div>
         </div>
 
-        <div class="stock-card">
-          <div class="stock-card-title">Strategy Leaderboard</div>
-          <div class="risk-table-wrap">
-            <table class="risk-table">
-              <thead>
-                <tr>
-                  <th>Strategy</th>
-                  <th>Avg Quality</th>
-                  <th>Avg RoR</th>
-                  <th>Trades</th>
-                </tr>
-              </thead>
-              <tbody id="homeStrategyRows"></tbody>
-            </table>
+        <div class="home-data-row">
+          <div class="stock-card home-nested-card">
+            <div class="stock-card-title">Sector Performance</div>
+            <div id="homeSectorBars" class="home-sector-bars"></div>
           </div>
-          <div id="homeStrategyMini" class="home-strategy-mini"></div>
+          <div class="stock-card home-nested-card">
+            <div class="stock-card-title">Signal Hub</div>
+            <div id="homeSignalHub" class="home-signal-hub"></div>
+          </div>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <section class="home-col">
-        <div class="stock-card">
-          <div class="stock-card-title">Risk & Macro • Portfolio Risk Snapshot</div>
+    <!-- ═══ Portfolio Snapshot ═══ -->
+    <section class="stock-card home-portfolio-snapshot-panel">
+      <div class="stock-card-title bt-panel-title">Portfolio Snapshot</div>
+      <div class="home-portfolio-snapshot-body">
+        <div class="stock-card home-nested-card">
+          <div class="stock-card-title">Active Trades</div>
+          <div id="homeActiveTradesCount" class="home-active-trades-bubbles"></div>
+        </div>
+        <div class="stock-card home-nested-card">
+          <div class="stock-card-title">Risk &amp; Macro</div>
           <div id="homeRiskTiles" class="home-risk-tiles"></div>
         </div>
+      </div>
+      <!-- Equity Curve — full width beneath Active Trades + Risk row -->
+      <div class="stock-card home-nested-card home-equity-curve-card">
+        <div class="stock-card-title">Equity Curve</div>
+        <div id="homeEquityCurveEmpty" class="home-equity-curve-empty">No equity curve data yet — run scans / connect brokerage</div>
+        <svg id="homeEquityCurve" class="home-chart home-equity-chart" viewBox="0 0 800 260" preserveAspectRatio="none"></svg>
+      </div>
+    </section>
 
-        <div class="stock-card">
-          <div class="stock-card-title">Macro Indicators</div>
-          <div id="homeMacroTiles" class="home-macro-tiles"></div>
+    <!-- ═══ Opportunity Engine ═══ -->
+    <section class="stock-card home-opportunity-engine-card">
+      <div class="stock-card-title bt-panel-title">Opportunity Engine</div>
+
+      <!-- Controls subpanel -->
+      <div class="home-opp-controls">
+        <div class="home-opp-controls-row">
+          <label for="homeScanPreset" class="stock-note home-queue-label">Filter Level</label>
+          <select id="homeScanPreset" class="home-queue-select" aria-label="Scan Queue filter level">
+            <option value="strict">Strict</option>
+            <option value="conservative">Conservative</option>
+            <option value="balanced" selected>Balanced</option>
+            <option value="wide">Wide</option>
+          </select>
+          <button id="homeRunQueueBtn" class="btn qtButton" type="button">Run Scan</button>
         </div>
+        <div id="homeSymbolUniverse" style="margin-top:8px;"></div>
+      </div>
 
-        <div class="stock-card">
-          <div class="stock-card-title">VIX Chart (3M)</div>
-          <svg id="homeVixChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
-        </div>
-
-      </section>
-    </div>
+      <div id="homeQueueProgress" class="home-queue-progress" style="display:none;">
+        <span id="homeQueueSpinner" class="home-scan-spinner" style="display:none;" aria-hidden="true"></span>
+        <span id="homeQueueCurrent" class="stock-note">Idle</span>
+        <span id="homeQueueCount" class="stock-note">0/0</span>
+      </div>
+      <div id="homeQueueLog" class="home-queue-log" style="display:none;"></div>
+      <div id="homeScanStatus" class="stock-note" style="margin-bottom:6px;display:none;"></div>
+      <div id="homeScanError" class="active-error" style="display:none;margin-bottom:6px;"></div>
+      <div id="homeScannerOpportunities" class="home-scanner-opportunities"></div>
+    </section>
 
     <div id="homeError" class="active-error" style="display:none;"></div>
   </div>

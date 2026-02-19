@@ -20,10 +20,18 @@ window.BenTradeScannerOrchestrator = (function(){
   /* ──────────────────── Scanner definitions ──────────────────── */
 
   /* Default per-scanner timeout (ms).  Override at runtime via
-     BenTradeScannerOrchestrator.setTimeoutOverrides({ stock_scanner: 90000 }) */
+     BenTradeScannerOrchestrator.setTimeoutOverrides({ stock_scanner: 120000 }) */
   const DEFAULT_OPTION_TIMEOUT = 90000;   // was 45 000
-  const DEFAULT_STOCK_TIMEOUT  = 60000;   // was 25 000
+  const DEFAULT_STOCK_TIMEOUT  = 180000;  // bumped from 60 000 — stock scanner is slow
   let _timeoutOverrides = {};             // id → ms
+
+  /* ── Per-level timeout multipliers (wider levels analyse more data) ── */
+  const LEVEL_TIMEOUT_MULT = { strict: 0.8, conservative: 1.0, balanced: 1.0, wide: 1.4 };
+
+  /* ── Retry / back-off constants ── */
+  const MAX_RETRIES       = 3;
+  const RETRY_BASE_MS     = 2000;   // 2 s → 4 s → 8 s  (exponential)
+  const RETRYABLE_STATUS  = new Set([429, 502, 503, 504]);
 
   const OPTION_SCANNER_DEFS = [
     { id: 'credit_put',    strategyId: 'credit_spread', moduleId: 'credit_put',    label: 'Credit Put Spread',  payload: { spread_type: 'put_credit_spread' }, route: '#/credit-spread', timeoutMs: DEFAULT_OPTION_TIMEOUT, optional: false },
@@ -39,12 +47,14 @@ window.BenTradeScannerOrchestrator = (function(){
     id: 'stock_scanner', moduleId: 'stock_scanner', label: 'Stock Scanner', route: '#/stock-scanner', timeoutMs: DEFAULT_STOCK_TIMEOUT, optional: false,
   };
 
-  const TOP_N = 5;
+  const TOP_N = 9;
 
   /** Latest scan results (persisted in memory). */
   let _latestResults = null;
 
   /* ──────────────────── Helpers ──────────────────── */
+
+  const fmt = window.BenTradeUtils && window.BenTradeUtils.format ? window.BenTradeUtils.format : {};
 
   function toNumber(value){
     if(value === null || value === undefined || value === '') return null;
@@ -82,11 +92,12 @@ window.BenTradeScannerOrchestrator = (function(){
     if(typeof logFn === 'function') logFn(String(text || ''));
   }
 
-  /** Resolve effective timeout for a scanner id. */
-  function getTimeoutMs(def){
+  /** Resolve effective timeout for a scanner id, factoring in level multiplier. */
+  function getTimeoutMs(def, level){
     const override = _timeoutOverrides[def.id];
-    if(typeof override === 'number' && override > 0) return override;
-    return def.timeoutMs;
+    const base = (typeof override === 'number' && override > 0) ? override : def.timeoutMs;
+    const mult = LEVEL_TIMEOUT_MULT[level] || 1.0;
+    return Math.round(base * mult);
   }
 
   /**
@@ -106,6 +117,47 @@ window.BenTradeScannerOrchestrator = (function(){
     });
   }
 
+  /**
+   * Determine whether an error is retryable (rate-limit or transient server error).
+   * Looks for a `status` prop (fetch failures), or a "429" / "rate" mention in the message.
+   */
+  function isRetryable(err){
+    if(err && typeof err.status === 'number' && RETRYABLE_STATUS.has(err.status)) return true;
+    const msg = String(err?.message || err || '').toLowerCase();
+    if(msg.includes('429') || msg.includes('rate limit') || msg.includes('too many requests')) return true;
+    if(msg.includes('502') || msg.includes('503') || msg.includes('504') || msg.includes('bad gateway') || msg.includes('service unavailable')) return true;
+    return false;
+  }
+
+  /**
+   * Retry a promise-returning function with exponential back-off.
+   * Only retries on retryable errors; other errors propagate immediately.
+   *
+   * @param {function} fn      — () => Promise<T>
+   * @param {number}   ms      — per-attempt timeout
+   * @param {string}   label   — human label for logging
+   * @param {function} logFn   — optional log callback
+   * @returns {Promise<T>}
+   */
+  async function withRetry(fn, ms, label, logFn){
+    let lastErr;
+    for(let attempt = 0; attempt <= MAX_RETRIES; attempt++){
+      try{
+        return await withTimeout(fn(), ms, label);
+      }catch(err){
+        lastErr = err;
+        if(attempt < MAX_RETRIES && isRetryable(err)){
+          const delay = RETRY_BASE_MS * Math.pow(2, attempt);
+          logLine(logFn, `⚠ ${label} failed (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying in ${delay}ms — ${err?.message || err}`);
+          await new Promise(r => setTimeout(r, delay));
+        }else{
+          throw err;
+        }
+      }
+    }
+    throw lastErr;
+  }
+
   /* ──────────────────── Normalize ──────────────────── */
 
   /**
@@ -121,7 +173,7 @@ window.BenTradeScannerOrchestrator = (function(){
     const raw = (row && typeof row === 'object') ? row : {};
     const comp = (raw?.computed && typeof raw.computed === 'object') ? raw.computed : {};
     const symbol = String(raw?.symbol || '').trim().toUpperCase() || 'N/A';
-    const score = toNumber(raw?.composite_score ?? raw?.trade_quality_score ?? raw?.score) ?? 0;
+    const score = fmt.normalizeScore(raw?.composite_score ?? raw?.trade_quality_score ?? raw?.score) ?? 0;
 
     const isStock = type === 'stock';
     const ev = isStock ? null : toNumber(comp?.expected_value ?? raw?.ev ?? raw?.edge);
@@ -194,17 +246,16 @@ window.BenTradeScannerOrchestrator = (function(){
 
   /**
    * Map preset name → array of scanner IDs.
+   * All filter levels run every scanner.  Legacy quick/full_sweep preserved.
    */
   function presetToScannerIds(preset){
     const mode = String(preset || 'balanced').toLowerCase();
     if(mode === 'quick'){
       return ['stock_scanner'];
     }
-    if(mode === 'full_sweep'){
-      return allScannerIds();
-    }
-    // balanced — stock + credit spreads only
-    return ['stock_scanner', 'credit_put', 'credit_call'];
+    // All filter levels (strict, conservative, balanced, wide) and full_sweep
+    // run every scanner.
+    return allScannerIds();
   }
 
   /**
@@ -219,7 +270,7 @@ window.BenTradeScannerOrchestrator = (function(){
    *        with { id, label, ok, error, tradeCount, moduleId }
    * @returns {Promise<{opportunities: object[], scanMeta: object, errors: string[]}>}
    */
-  async function runScannerSuite({ scannerIds, symbols, logFn, onStepComplete } = {}){
+  async function runScannerSuite({ scannerIds, symbols, filterLevel, logFn, onStepComplete } = {}){
     const api = window.BenTradeApi;
     if(!api){
       throw new Error('BenTradeApi not available');
@@ -228,6 +279,8 @@ window.BenTradeScannerOrchestrator = (function(){
     const idsToRun = Array.isArray(scannerIds) && scannerIds.length
       ? scannerIds
       : allScannerIds();
+
+    const effectiveLevel = String(filterLevel || 'balanced').toLowerCase();
 
     const startTime = Date.now();
     const allCandidates = [];
@@ -245,7 +298,12 @@ window.BenTradeScannerOrchestrator = (function(){
       const def = STOCK_SCANNER_DEF;
       logLine(logFn, `Running: ${def.label}`);
       try{
-        const response = await withTimeout(api.getStockScanner(), getTimeoutMs(def), def.label);
+        const response = await withRetry(
+          () => api.getStockScanner(),
+          getTimeoutMs(def, effectiveLevel),
+          def.label,
+          logFn,
+        );
         const candidates = Array.isArray(response?.candidates) ? response.candidates : [];
         candidates.forEach((row) => {
           allCandidates.push(normalizeResult(row, def, 'stock'));
@@ -278,12 +336,18 @@ window.BenTradeScannerOrchestrator = (function(){
 
       logLine(logFn, `Running: ${def.label}`);
       try{
-        const scanPayload = Object.assign({}, def.payload || {});
+        /* Merge profile params → scanner payload.  Profile values serve as
+           the baseline; def.payload overrides (e.g. spread_type for credit). */
+        const profileParams = (window.BenTradeScannerProfiles?.getProfile)
+          ? (window.BenTradeScannerProfiles.getProfile(def.strategyId, effectiveLevel) || {})
+          : {};
+        const scanPayload = Object.assign({}, profileParams, def.payload || {});
         if(resolvedSymbols) scanPayload.symbols = resolvedSymbols;
-        const response = await withTimeout(
-          api.generateStrategyReport(def.strategyId, scanPayload),
-          getTimeoutMs(def),
+        const response = await withRetry(
+          () => api.generateStrategyReport(def.strategyId, scanPayload),
+          getTimeoutMs(def, effectiveLevel),
           def.label,
+          logFn,
         );
 
         const trades = Array.isArray(response?.trades) ? response.trades : [];

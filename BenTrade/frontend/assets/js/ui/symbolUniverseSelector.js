@@ -33,6 +33,17 @@ window.BenTradeSymbolUniverseSelector = (function(){
     let _selected = new Set();       // empty = all
     let _unsub = null;
 
+    /* ── helpers ── */
+    function _doAdd(input){
+      const val = input.value.trim().toUpperCase();
+      if(val && store.addSymbol(val)){
+        input.value = '';
+      }else if(val){
+        input.classList.add('shake');
+        setTimeout(() => input.classList.remove('shake'), 400);
+      }
+    }
+
     /* ── Render ── */
     function render(){
       const symbols = store.getSymbols();
@@ -49,28 +60,33 @@ window.BenTradeSymbolUniverseSelector = (function(){
         ? `<span class="symbol-filter-label stock-note" style="font-size:10px;margin-right:4px;">${_selected.size === 0 ? 'All symbols' : _selected.size + ' selected'}:</span>`
         : '';
 
+      const emptyHint = symbols.length === 0
+        ? '<span class="symbol-empty-hint">No symbols — scanning all defaults</span>'
+        : '';
+
       container.innerHTML = `
-        <div class="symbol-universe-bar">
-          ${filterLabel}${chipsHtml}
-          <input type="text" class="symbol-add-input" maxlength="6" placeholder="+ Add" aria-label="Add symbol" />
+        <div class="symbol-add-row">
+          <input type="text" class="symbol-add-input" maxlength="6" placeholder="Ticker" aria-label="Add symbol" />
+          <button type="button" class="symbol-add-btn" title="Add symbol">Add</button>
+        </div>
+        <div class="symbol-chip-box">
+          ${filterLabel}${chipsHtml}${emptyHint}
         </div>
       `;
 
-      /* Wire events */
+      /* Wire add-row events */
       const input = container.querySelector('.symbol-add-input');
+      const addBtn = container.querySelector('.symbol-add-btn');
       if(input){
         input.addEventListener('keydown', (e) => {
           if(e.key === 'Enter'){
             e.preventDefault();
-            const val = input.value.trim().toUpperCase();
-            if(val && store.addSymbol(val)){
-              input.value = '';
-            }else if(val){
-              input.classList.add('shake');
-              setTimeout(() => input.classList.remove('shake'), 400);
-            }
+            _doAdd(input);
           }
         });
+      }
+      if(addBtn && input){
+        addBtn.addEventListener('click', () => _doAdd(input));
       }
 
       container.querySelectorAll('[data-remove-symbol]').forEach(el => {

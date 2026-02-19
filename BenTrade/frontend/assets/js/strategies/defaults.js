@@ -148,12 +148,25 @@ window.BenTradeStrategyDefaults = (function(){
 
   function getStrategyDefaults(strategyId, presetName){
     const key = normalizeStrategyId(strategyId);
-    // If a preset is requested and we have presets for this strategy, use it
-    const stratPresets = presetsByStrategy[key];
     let result;
-    if(stratPresets && presetName){
-      const preset = stratPresets[String(presetName).toLowerCase()];
-      if(preset) result = { ...preset };
+
+    // Prefer global scanner profiles when available (profiles.js loaded before defaults.js)
+    const profiles = window.BenTradeScannerProfiles;
+    if(profiles && profiles.getProfile){
+      const level = presetName ? String(presetName).toLowerCase() : profiles.DEFAULT_LEVEL;
+      const profileCfg = profiles.getProfile(key, level);
+      if(profileCfg){
+        result = { ...profileCfg };
+      }
+    }
+
+    // Fall back to legacy presets / flat defaults if profiles unavailable
+    if(!result){
+      const stratPresets = presetsByStrategy[key];
+      if(stratPresets && presetName){
+        const preset = stratPresets[String(presetName).toLowerCase()];
+        if(preset) result = { ...preset };
+      }
     }
     if(!result){
       const obj = defaultsByStrategy[key] || {};
@@ -174,6 +187,11 @@ window.BenTradeStrategyDefaults = (function(){
   }
 
   function getPresetNames(strategyId){
+    // Prefer profile levels if profiles.js is loaded
+    const profiles = window.BenTradeScannerProfiles;
+    if(profiles && Array.isArray(profiles.LEVELS)){
+      return [...profiles.LEVELS];
+    }
     const key = normalizeStrategyId(strategyId);
     const stratPresets = presetsByStrategy[key];
     return stratPresets ? Object.keys(stratPresets) : [];

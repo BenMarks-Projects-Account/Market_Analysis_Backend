@@ -512,6 +512,56 @@ class BaseDataService:
             )
             return []
 
+    async def get_prices_history_dated(self, symbol: str, lookback_days: int = 365) -> list[dict[str, Any]]:
+        """Return daily close prices with dates: ``[{"date": "YYYY-MM-DD", "close": float}, ...]``."""
+        normalized_symbol = self._normalize_symbol(symbol)
+        if not normalized_symbol:
+            self._mark_validation_warning("polygon", "invalid symbol")
+            self._mark_validation_warning("tradier", "invalid symbol")
+            return []
+
+        # Primary: Polygon aggregates
+        if self.polygon_client is not None and self._source_configured("polygon"):
+            try:
+                bars = await self.polygon_client.get_daily_closes_dated(
+                    normalized_symbol, lookback_days=lookback_days
+                )
+                if bars:
+                    self._mark_success("polygon", http_status=200, message="dated history ok")
+                    return bars
+                self._mark_failure(
+                    "polygon",
+                    UpstreamError("Polygon returned empty dated history", details={"status_code": 204}),
+                )
+                logger.warning("event=prices_history_dated_empty symbol=%s source=polygon", normalized_symbol)
+            except Exception as exc:
+                self._mark_failure("polygon", exc)
+                logger.warning(
+                    "event=prices_history_dated_unavailable symbol=%s source=polygon error=%s",
+                    normalized_symbol,
+                    str(exc),
+                )
+
+        # Fallback: Tradier daily history
+        end_date = datetime.now(timezone.utc).date()
+        start_date = end_date - timedelta(days=lookback_days)
+        try:
+            fallback = await self.tradier_client.get_daily_closes_dated(
+                normalized_symbol,
+                start_date=start_date.isoformat(),
+                end_date=end_date.isoformat(),
+            )
+            self._mark_success("tradier", http_status=200, message="dated history fallback ok")
+            return fallback
+        except Exception as exc:
+            self._mark_failure("tradier", exc)
+            logger.warning(
+                "event=prices_history_dated_unavailable symbol=%s source=tradier error=%s",
+                normalized_symbol,
+                str(exc),
+            )
+            return []
+
     async def _get_chain_with_health(self, symbol: str, expiration: str, greeks: bool = True) -> list[dict[str, Any]]:
         try:
             chain = await self.tradier_client.get_chain(symbol, expiration=expiration, greeks=greeks)

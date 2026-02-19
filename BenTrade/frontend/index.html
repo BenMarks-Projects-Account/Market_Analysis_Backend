@@ -381,6 +381,7 @@
         <div id="view"></div>
       </main>
 
+      <!-- GLOBAL RIGHT INFO BAR — DO NOT RENDER THESE PANELS IN PAGE COMPONENTS -->
       <aside class="diagnostic-sidebar">
         <div class="diagnosticPanel">
           <div class="diagnosticSection">
@@ -395,6 +396,24 @@
             </div>
             <div id="sessionStatsMeta" class="stock-note" style="margin-bottom:8px;"></div>
             <div id="reportStatsGrid" class="statGrid"></div>
+          </div>
+
+          <div class="diagnosticSection">
+            <div class="diagnosticTitle">STRATEGY LEADERBOARD</div>
+            <div class="risk-table-wrap" style="margin-bottom:8px;">
+              <table class="risk-table">
+                <thead>
+                  <tr>
+                    <th>Strategy</th>
+                    <th>Avg Quality</th>
+                    <th>Avg RoR</th>
+                    <th>Trades</th>
+                  </tr>
+                </thead>
+                <tbody id="globalStrategyRows"></tbody>
+              </table>
+            </div>
+            <div id="globalStrategyMini" class="home-strategy-mini"></div>
           </div>
         </div>
       </aside>
@@ -420,7 +439,9 @@
   <script src="assets/js/stores/sessionStats.js?v=20260216b"></script>
   <script src="assets/js/stores/homeCache.js?v=20260215a"></script>
   <script src="assets/js/stores/scannerOrchestrator.js?v=20260218a"></script>
-  <script src="assets/js/strategies/defaults.js?v=20260215a"></script>
+  <script src="assets/js/stores/playbookScoring.js?v=20260219a"></script>
+  <script src="assets/js/strategies/profiles.js?v=20260218a"></script>
+  <script src="assets/js/strategies/defaults.js?v=20260218a"></script>
   <script src="assets/js/stores/symbolUniverse.js?v=20260218a"></script>
   <script src="assets/js/ui/symbolUniverseSelector.js?v=20260218a"></script>
   <script src="assets/js/config/strategy_card_config.js?v=20260218a"></script>

@@ -870,11 +870,7 @@
             padding:12px 14px 14px;
             border-top:1px solid rgba(255,255,255,0.06);
             background:linear-gradient(180deg, rgba(8,10,26,0.55), rgba(6,6,18,0.30));
-            backdrop-filter: blur(10px);
             border-radius:0 0 16px 16px;
-            position: sticky;
-            bottom: 10px;
-            z-index: 30;
         }
         .btn-run{width:100%; margin-bottom:10px;}
         .trade-actions-row{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
@@ -1928,6 +1924,50 @@ main.main{
     margin-bottom:10px;
 }
 
+/* ─── Home Dashboard Panel Header (.bt-panel-title) ─── */
+@keyframes btFlicker {
+    0%   { opacity:1;    text-shadow: 0 0 6px rgba(0,234,255,0.35), 0 0 14px rgba(0,234,255,0.25), 0 0 22px rgba(255,255,255,0.10); }
+    /* stable for most of the 8s cycle */
+    83%  { opacity:1;    text-shadow: 0 0 6px rgba(0,234,255,0.35), 0 0 14px rgba(0,234,255,0.25), 0 0 22px rgba(255,255,255,0.10); }
+    /* burst start */
+    84%  { opacity:0.82; text-shadow: 0 0 2px var(--cyan-dim), 0 0 8px var(--glow); }
+    85%  { opacity:0.95; text-shadow: 0 0 10px var(--glow-strong), 0 0 28px rgba(0,234,255,0.30), 0 0 40px rgba(255,255,255,0.08); }
+    86%  { opacity:0.70; text-shadow: 0 0 3px var(--glow); }
+    87.5%{ opacity:0.92; text-shadow: 0 0 14px var(--glow-strong), 0 0 32px rgba(0,234,255,0.28), 0 0 48px rgba(255,255,255,0.06); }
+    89%  { opacity:1;    text-shadow: 0 0 6px rgba(0,234,255,0.35), 0 0 14px rgba(0,234,255,0.25), 0 0 22px rgba(255,255,255,0.10); }
+    100% { opacity:1;    text-shadow: 0 0 6px rgba(0,234,255,0.35), 0 0 14px rgba(0,234,255,0.25), 0 0 22px rgba(255,255,255,0.10); }
+}
+
+.bt-panel-title {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    color: var(--cyan);
+    text-shadow:
+        0 0 6px rgba(0,234,255,0.35),
+        0 0 14px rgba(0,234,255,0.25),
+        0 0 22px rgba(255,255,255,0.10);
+    padding: 10px 0 12px 0;
+    animation: btFlicker 8s ease-in-out infinite;
+    /* DEV VERIFY — remove after confirming class lands in DOM */
+    /* outline: 1px solid magenta; */
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .bt-panel-title {
+        animation: none;
+    }
+}
+
+/* ─── Home Dashboard panel spacing ─── */
+.home-page > .stock-card {
+    padding: 16px 18px;
+    margin-bottom: 18px;
+}
+.home-page .home-nested-card {
+    padding: 14px 16px;
+}
+
 #stockSparkline{
     width:100%;
     height:220px;
@@ -2057,6 +2097,16 @@ main.main{
 .home-page{
     min-height:0;
     padding-bottom:36px;
+}
+
+.home-topbar-card{
+    position:sticky;
+    top:0;
+    z-index:120;
+    /* Reinforce background so content doesn't bleed through */
+    background: linear-gradient(180deg, rgba(6,10,18,0.96), rgba(2,6,12,0.98));
+    backdrop-filter:blur(10px);
+    border-bottom:1px solid rgba(0,234,255,0.14);
 }
 
 .home-topbar{
@@ -2382,6 +2432,7 @@ main.main{
     display:grid;
     gap:8px;
     margin-top:2px;
+    justify-items:start;
 }
 
 .home-chip-group{
@@ -2389,6 +2440,7 @@ main.main{
     gap:6px;
     align-items:center;
     flex-wrap:wrap;
+    justify-content:flex-start;
 }
 
 .qtPill-warn{
@@ -2566,17 +2618,73 @@ main.main{
     gap:3px;
 }
 
-.home-grid{
+/* ── Market Snapshot wrapper ── */
+.home-market-snapshot-panel{ width:100%; }
+.home-market-snapshot-body{
     display:grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
     gap:14px;
-    align-items:start;
 }
 
-.home-col{
-    min-width:0;
-    min-height:0;
+/* ── Portfolio Snapshot wrapper (2-col: Active Trades + Risk) ── */
+.home-portfolio-snapshot-panel{ width:100%; }
+.home-portfolio-snapshot-body{
+    display:grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap:14px;
 }
+
+/* ── Equity Curve chart ── */
+.home-equity-curve-card{
+    margin-top:14px;
+}
+.home-equity-chart{
+    height:260px;
+}
+.home-equity-curve-empty{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    height:180px;
+    color:rgba(215,251,255,0.45);
+    font-size:13px;
+    font-family:'Orbitron',sans-serif;
+    letter-spacing:0.06em;
+    text-align:center;
+    border:1px dashed rgba(0,234,255,0.18);
+    border-radius:10px;
+    background:rgba(255,255,255,0.01);
+}
+
+/* ── Nested inner cards (subtler border) ── */
+.home-nested-card{
+    border-color: rgba(0,234,255,0.10);
+    box-shadow: inset 0 0 0 1px rgba(0,234,255,0.04);
+}
+
+/* ── Active Trades bubbles (per-strategy counts) ── */
+.home-active-trades-bubbles{
+    display:grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap:8px;
+}
+
+/* ── Session Stats panel in sidebar ── */
+.home-session-stats-panel{
+    display:grid;
+    gap:6px;
+}
+
+/* REMOVED: .home-main-layout, .home-data-panels, .home-sidebar (dead code — home.html is single-column, global right info bar is in index.html) */
+
+.home-data-row{
+    display:grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap:14px;
+}
+
+/* Legacy .home-grid / .home-col kept as dead-code aliases */
+.home-grid{ display:none; }
+.home-col{  display:none; }
 
 .home-chart{
     width:100%;
@@ -2634,7 +2742,7 @@ main.main{
 
 .home-sector-row{
     display:grid;
-    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr) 72px;
+    grid-template-columns: minmax(100px, 160px) minmax(0, 1fr) 56px;
     align-items:center;
     gap:10px;
 }
@@ -2675,7 +2783,13 @@ main.main{
 
 .home-scanner-opportunities{
     display:grid;
-    gap:12px;
+    grid-template-columns:repeat(3, minmax(340px, 1fr));
+    gap:18px;
+    align-items:start;
+}
+.home-scanner-opportunities > .home-opp-count,
+.home-scanner-opportunities > .home-opp-empty{
+    grid-column: 1 / -1;
 }
 
 .home-scanner-title{
@@ -2703,19 +2817,22 @@ main.main{
     margin-bottom:12px;
 }
 
-.home-opportunity-head{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:8px;
-    margin-bottom:6px;
+/* ─── Controls subpanel (glass inner panel) ─── */
+.home-opp-controls{
+    border:1px solid var(--panel-border);
+    border-radius:10px;
+    background: var(--glass);
+    padding:12px 14px;
+    margin-bottom:14px;
 }
-
-.home-opportunity-actions{
+.home-opp-controls-row{
     display:flex;
     align-items:center;
-    gap:8px;
+    gap:10px;
     flex-wrap:wrap;
+}
+@media (max-width:600px){
+    .home-opp-controls-row{ flex-direction:column; align-items:flex-start; }
 }
 
 /* ── Empty state ── */
@@ -2749,123 +2866,14 @@ main.main{
     font-size:0.92rem;
 }
 
-/* ── Pick card ── */
-
-.home-opp-card{
-    border:1px solid rgba(0,234,255,0.14);
-    border-radius:10px;
-    padding:12px 14px;
-    background:rgba(0,234,255,0.02);
-    transition: border-color 0.15s ease;
-}
-
-.home-opp-card:hover{
-    border-color:rgba(0,234,255,0.35);
-}
-
-.home-opp-card-head{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    gap:8px;
-    margin-bottom:8px;
-}
-
-.home-opp-card-title{
-    display:flex;
-    align-items:center;
-    gap:6px;
-    font-size:13px;
-    font-weight:700;
-    color:var(--text);
-}
-
-.home-opp-card-score{
-    font-size:14px;
-    font-weight:700;
-    color:var(--cyan);
-    white-space:nowrap;
-}
-
-/* ── Type badges ── */
-
-.home-opp-badge{
-    font-size:10px;
-    font-weight:600;
-    padding:2px 7px;
-    border-radius:999px;
-    letter-spacing:0.02em;
-    text-transform:uppercase;
-}
-
-.home-opp-badge-stock{
-    background:rgba(126,247,184,0.14);
-    color:rgba(126,247,184,0.92);
-    border:1px solid rgba(126,247,184,0.28);
-}
-
-.home-opp-badge-option{
-    background:rgba(0,234,255,0.10);
-    color:rgba(0,234,255,0.92);
-    border:1px solid rgba(0,234,255,0.24);
-}
-
-/* ── Thesis bullets ── */
-
-.home-opp-card-bullets{
-    list-style:none;
-    margin:0 0 8px;
-    padding:0;
-    display:grid;
-    gap:3px;
-    font-size:12px;
-    color:rgba(215,251,255,0.72);
-    line-height:1.4;
-}
-
-.home-opp-card-bullets li::before{
-    content:'•';
-    margin-right:6px;
-    color:rgba(0,234,255,0.5);
-}
-
-/* ── Key metrics row ── */
-
-.home-opp-card-metrics{
-    display:flex;
-    flex-wrap:wrap;
-    gap:10px;
-    margin-bottom:6px;
-    font-size:12px;
-    color:rgba(215,251,255,0.78);
-}
-
-.home-opp-card-metrics span{
-    white-space:nowrap;
-}
-
-/* ── Model summary ── */
-
-.home-opp-card-model{
-    margin-bottom:8px;
-}
-
-/* ── Action buttons ── */
-
-.home-opp-card-actions{
-    display:flex;
-    gap:8px;
-    flex-wrap:wrap;
-}
-
-.home-opp-card-actions .btn{
-    flex:1 1 120px;
-    font-size:11px;
-    padding:5px 10px;
-}
-
 .home-queue-label{
     margin-right:2px;
+}
+
+.home-source-health{
+    display:grid;
+    gap:6px;
+    font-size:12px;
 }
 
 .home-queue-select{
@@ -2977,8 +2985,11 @@ main.main{
 }
 
 @media (max-width: 1500px){
-    .home-grid{
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+    .home-scanner-opportunities{
+        grid-template-columns:repeat(2, minmax(340px, 1fr));
+    }
+    .home-portfolio-snapshot-body{
+        grid-template-columns: 1fr;
     }
 }
 
@@ -2989,8 +3000,17 @@ main.main{
     .home-playbook-grid{
         grid-template-columns: 1fr;
     }
-    .home-grid{
+    .home-data-row{
         grid-template-columns: 1fr;
+    }
+    .home-portfolio-snapshot-body{
+        grid-template-columns: 1fr;
+    }
+    .home-scanner-opportunities{
+        grid-template-columns: 1fr;
+    }
+    .home-scanner-opportunities > .trade-card{
+        max-width: 100%;
     }
     .home-regime-strip,
     .home-index-tiles,
@@ -3000,6 +3020,9 @@ main.main{
     }
     .home-session-strip{
         grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .home-active-trades-bubbles{
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
@@ -3149,15 +3172,28 @@ main.main{
 }
 
 /* ── Symbol Universe Chips ── */
-.symbol-universe-bar{
-    display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding:6px 0;
+.symbol-add-row{
+    display:flex; align-items:center; gap:6px; margin-bottom:8px;
+}
+.symbol-chip-box{
+    display:flex; flex-wrap:wrap; gap:6px; align-items:center;
+    padding:8px 10px; min-height:36px;
+    border:1px solid rgba(0,234,255,0.22);
+    border-radius:8px;
+    background:rgba(0,0,0,0.18);
 }
 .symbol-chip{
     display:inline-flex; align-items:center; gap:4px;
     padding:2px 10px; border-radius:999px;
     font-size:11px; font-family:'Orbitron',monospace;
     background:rgba(0,234,255,0.10); color:var(--text-primary, #e6fbff);
-    border:1px solid rgba(0,234,255,0.25);
+    border:1px solid rgba(0,234,255,0.30);
+    box-shadow:0 0 4px rgba(0,234,255,0.15);
+    transition:box-shadow 0.15s, border-color 0.15s;
+}
+.symbol-chip:hover{
+    border-color:rgba(0,234,255,0.55);
+    box-shadow:0 0 8px rgba(0,234,255,0.30);
 }
 .symbol-chip-remove{
     cursor:pointer; font-size:13px; line-height:1;
@@ -3165,20 +3201,44 @@ main.main{
 }
 .symbol-chip-remove:hover{ color:#ff4444; }
 .symbol-add-input{
-    width:64px; padding:2px 6px; border-radius:999px;
+    width:72px; padding:4px 8px; border-radius:6px;
     font-size:11px; font-family:'Orbitron',monospace;
-    background:rgba(0,0,0,0.2); color:var(--text-primary, #e6fbff);
-    border:1px solid rgba(0,234,255,0.18); text-transform:uppercase;
+    background:rgba(0,0,0,0.25); color:var(--text-primary, #e6fbff);
+    border:1px solid rgba(0,234,255,0.22); text-transform:uppercase;
+}
+.symbol-add-input:focus{
+    outline:none; border-color:rgba(0,234,255,0.55);
+    box-shadow:0 0 6px rgba(0,234,255,0.25);
 }
 .symbol-add-input::placeholder{ color:rgba(230,251,255,0.3); }
+.symbol-add-btn{
+    padding:4px 12px; border-radius:6px;
+    font-size:11px; font-family:'Orbitron',monospace; font-weight:600;
+    color:var(--cyan, #00eaff); background:rgba(0,234,255,0.08);
+    border:1px solid rgba(0,234,255,0.30);
+    cursor:pointer; transition:background 0.15s, box-shadow 0.15s;
+}
+.symbol-add-btn:hover{
+    background:rgba(0,234,255,0.18);
+    box-shadow:0 0 8px rgba(0,234,255,0.25);
+}
+.symbol-empty-hint{
+    font-size:10px; color:rgba(230,251,255,0.35);
+    font-style:italic; white-space:nowrap;
+}
 .symbol-chip-active{
-    background:rgba(0,234,255,0.18); border-color:rgba(0,234,255,0.45);
+    background:rgba(0,234,255,0.18); border-color:rgba(0,234,255,0.50);
+    box-shadow:0 0 6px rgba(0,234,255,0.22);
 }
 .symbol-chip-inactive{
     opacity:0.45; border-style:dashed;
 }
 .symbol-filter-label{
     white-space:nowrap;
+}
+/* Legacy class kept for compat — now unused in new layout */
+.symbol-universe-bar{
+    display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding:6px 0;
 }
 @keyframes chip-shake{
     0%,100%{ transform:translateX(0); }

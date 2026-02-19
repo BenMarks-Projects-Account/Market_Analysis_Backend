@@ -159,8 +159,8 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
   }
 
   function scoreToTone(score){
-    const n = Number(score);
-    if(!Number.isFinite(n)) return 'N/A';
+    const n = fmt.normalizeScore(score);
+    if(n === null) return 'N/A';
     if(n >= 85) return 'Strong';
     if(n >= 70) return 'Constructive';
     if(n >= 55) return 'Neutral+';
@@ -286,7 +286,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
                 <span class="trade-strikes-inline">${esc(strategy)}</span>
                 <span class="underlying-price">(${fmtNum(row?.price, 2)})</span>
               </div>
-              <div class="trade-rank-line">Rank Score: ${fmtNum(row?.composite_score, 1)} (${scoreToTone(row?.composite_score)})</div>
+              <div class="trade-rank-line">Rank Score: ${fmt.formatScore(row?.composite_score, 1)} (${scoreToTone(row?.composite_score)})</div>
               <span class="trade-key-wrap"><span class="trade-key-label" style="font-size:10px;color:rgba(230,251,255,0.5);font-family:monospace;word-break:break-all;">${esc(symbol)}|NA|${esc(strategy)}|NA|NA|NA</span>${card.copyTradeKeyButton(`${symbol}|NA|${strategy}|NA|NA|NA`)}</span>
             </div>
             <div class="trade-header-right">${sourceBadge(row)}</div>
@@ -296,10 +296,10 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
             <div class="trade-body">
               ${card.section('CORE METRICS', card.metricGrid([
                 { label: 'Price', value: fmtNum(row?.price, 2), cssClass: 'neutral' },
-                { label: 'Composite', value: fmtNum(row?.composite_score, 1), cssClass: 'positive' },
-                { label: 'Trend Score', value: fmtNum(row?.trend_score, 1), cssClass: 'neutral' },
-                { label: 'Momentum', value: fmtNum(row?.momentum_score, 1), cssClass: 'neutral' },
-                { label: 'Volatility', value: fmtNum(row?.volatility_score, 1), cssClass: 'neutral' },
+                { label: 'Composite', value: fmt.formatScore(row?.composite_score, 1), cssClass: 'positive' },
+                { label: 'Trend Score', value: fmt.formatScore(row?.trend_score, 1), cssClass: 'neutral' },
+                { label: 'Momentum', value: fmt.formatScore(row?.momentum_score, 1), cssClass: 'neutral' },
+                { label: 'Volatility', value: fmt.formatScore(row?.volatility_score, 1), cssClass: 'neutral' },
                 { label: 'RSI14', value: fmtNum(metrics?.rsi14, 1), cssClass: 'neutral', dataMetric: 'rsi_14' },
                 { label: 'RV20', value: fmtPct(metrics?.rv20, 1), cssClass: 'neutral', dataMetric: 'realized_vol_20d' },
                 { label: 'IV/RV', value: fmtNum(metrics?.iv_rv_ratio, 2), cssClass: 'neutral', dataMetric: 'iv_rv_ratio' },
@@ -320,15 +320,17 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
 
               ${modelSectionHtml(row, idx)}
             </div>
-          </div>
 
-          <div class="trade-actionbar">
-            <button class="btn btn-run" id="runBtn-${idx}" data-action="run-model" data-idx="${idx}" style="${collapsedNow ? 'display:none;' : ''}">Run Model Analysis</button>
-            <div class="trade-actions-row">
-              <button class="btn btn-exec" data-action="execute" data-idx="${idx}">Execute Trade</button>
-              <button class="btn btn-reject" data-action="reject" data-idx="${idx}">Reject</button>
-              <button class="btn" data-action="open-analysis" data-symbol="${esc(symbol)}">Open in Stock Analysis</button>
-              <button class="btn" data-action="send-workbench" data-idx="${idx}" data-symbol="${esc(symbol)}" data-strategy="${esc(strategy)}">Send to Testing Workbench</button>
+            <div class="trade-actions">
+              <div class="run-row"><button class="btn btn-run" id="runBtn-${idx}" data-action="run-model" data-idx="${idx}">Run Model Analysis</button></div>
+              <div class="actions-row">
+                <button class="btn btn-exec" data-action="execute" data-idx="${idx}">Execute Trade</button>
+                <button class="btn btn-reject" data-action="reject" data-idx="${idx}">Reject</button>
+              </div>
+              <div class="actions-row">
+                <button class="btn" data-action="open-analysis" data-symbol="${esc(symbol)}">Open in Stock Analysis</button>
+                <button class="btn" data-action="send-workbench" data-idx="${idx}" data-symbol="${esc(symbol)}" data-strategy="${esc(strategy)}">Send to Testing Workbench</button>
+              </div>
             </div>
           </div>
         </div>
@@ -368,7 +370,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
       ts: new Date().toISOString(),
       input: payloadInput,
       trade_key: `${normalized}|NA|${chosenStrategy}|NA|NA|NA`,
-      note: `Scanner composite score ${fmtNum(score, 1)}`,
+      note: `Scanner composite score ${fmt.formatScore(score, 1)}`,
     };
 
     localStorage.setItem('bentrade_workbench_handoff_v1', JSON.stringify(payload));
@@ -382,8 +384,6 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
     const isCollapsed = body.classList.toggle('is-collapsed');
     collapsed[idx] = isCollapsed;
     if(chev) chev.textContent = isCollapsed ? '▸' : '▾';
-    const runBtn = doc.getElementById(`runBtn-${idx}`);
-    if(runBtn) runBtn.style.display = isCollapsed ? 'none' : '';
   }
 
   function executeStub(){
@@ -561,15 +561,14 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
   refreshBtn.addEventListener('click', runScan);
 
   /* ── Init: restore from session cache or run fresh scan ── */
-  renderMeta({ as_of: null, candidates: [] });
-  renderCandidates({ candidates: [] });
-
   const _cached = loadFromSessionCache();
   if(_cached && Array.isArray(_cached.candidates) && _cached.candidates.length > 0){
     latestPayload = _cached;
     renderMeta(_cached);
     renderCandidates(_cached);
   }else{
+    renderMeta({ as_of: null, candidates: [] });
+    renderCandidates({ candidates: [] });
     runScan();
   }
 };

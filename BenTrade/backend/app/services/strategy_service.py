@@ -311,6 +311,21 @@ class StrategyService:
     # Evaluate thresholds are UNCHANGED by preset.
     _PRESETS: dict[str, dict[str, dict[str, Any]]] = {
         "credit_spread": {
+            "strict": {
+                "dte_min": 14,
+                "dte_max": 30,
+                "expected_move_multiple": 1.2,
+                "width_min": 3.0,
+                "width_max": 5.0,
+                "distance_min": 0.03,
+                "distance_max": 0.08,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                "min_pop": 0.70,
+                "min_ev_to_risk": 0.03,
+                "max_bid_ask_spread_pct": 1.0,
+                "min_open_interest": 1000,
+                "min_volume": 100,
+            },
             "conservative": {
                 "dte_min": 14,
                 "dte_max": 30,
@@ -320,31 +335,45 @@ class StrategyService:
                 "distance_min": 0.03,
                 "distance_max": 0.08,
                 "symbols": list(DEFAULT_SCANNER_SYMBOLS),
-                # evaluate gates (unchanged)
                 "min_pop": 0.65,
                 "min_ev_to_risk": 0.02,
                 "max_bid_ask_spread_pct": 1.5,
                 "min_open_interest": 500,
                 "min_volume": 50,
             },
-            "strict": {
+            "balanced": {
                 "dte_min": 7,
-                "dte_max": 21,
+                "dte_max": 45,
                 "expected_move_multiple": 1.0,
                 "width_min": 1.0,
                 "width_max": 5.0,
                 "distance_min": 0.01,
                 "distance_max": 0.12,
-                # evaluate gates (unchanged)
-                "min_pop": 0.65,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                "min_pop": 0.60,
                 "min_ev_to_risk": 0.02,
                 "max_bid_ask_spread_pct": 1.5,
-                "min_open_interest": 500,
-                "min_volume": 50,
+                "min_open_interest": 300,
+                "min_volume": 20,
+            },
+            "wide": {
+                "dte_min": 3,
+                "dte_max": 60,
+                "expected_move_multiple": 0.8,
+                "width_min": 1.0,
+                "width_max": 10.0,
+                "distance_min": 0.01,
+                "distance_max": 0.15,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                "min_pop": 0.50,
+                "min_ev_to_risk": 0.01,
+                "max_bid_ask_spread_pct": 2.5,
+                "min_open_interest": 100,
+                "min_volume": 10,
             },
         },
     }
-    _DEFAULT_PRESET = "conservative"
+    _DEFAULT_PRESET = "balanced"
 
     def _apply_request_defaults(self, strategy_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         req = dict(payload or {})

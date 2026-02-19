@@ -197,6 +197,27 @@ window.BenTradeStrategyCardConfig = (function () {
 
     csp:          { alias: 'income' },
     covered_call: { alias: 'income' },
+
+    /* ── Stock Buy (stock scanner candidates — no options legs) ── */
+    stock_buy: {
+      strategyLabel: 'Stock Buy',
+      headerFields: ['symbol', 'strategy_label'],
+      coreMetrics: [
+        SHARED.rank_score,
+        { key: 'trend_score',    computedKey: 'trend_score',    rootFallbacks: ['trend_score'],    label: 'Trend',       format: 'score' },
+        { key: 'momentum_score', computedKey: 'momentum_score', rootFallbacks: ['momentum_score'], label: 'Momentum',    format: 'score' },
+        { key: 'pullback_score', computedKey: 'pullback_score', rootFallbacks: ['pullback_score'], label: 'Pullback',    format: 'score' },
+        { key: 'catalyst_score', computedKey: 'catalyst_score', rootFallbacks: ['catalyst_score'], label: 'Catalyst',    format: 'score' },
+        SHARED.iv_rv_ratio,
+      ],
+      detailFields: [
+        { key: 'rsi14',            computedKey: 'rsi14',            rootFallbacks: ['rsi14'],           label: 'RSI 14',          format: 'num' },
+        { key: 'volatility_score', computedKey: 'volatility_score', rootFallbacks: ['volatility_score'], label: 'Volatility',      format: 'score' },
+        { key: 'ema20',            computedKey: 'ema20',            rootFallbacks: ['ema20'],           label: 'EMA-20',          format: 'dollars' },
+        { key: 'sma50',            computedKey: 'sma50',            rootFallbacks: ['sma50'],           label: 'SMA-50',          format: 'dollars' },
+      ],
+      requiredKeys: [],
+    },
   };
 
 
