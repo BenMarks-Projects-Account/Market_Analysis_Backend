@@ -395,7 +395,7 @@ _header_id = _glow_text(W // 2, 84, "BenTrade Intelligence is Running",
                         ("Segoe UI", 16, "bold"))
 
 # Subheader
-canvas.create_text(W // 2, 114, text="Your Desk. Your Rules. Wall Street In Your Pocket",
+canvas.create_text(W // 2, 114, text="Expected Value and Doctor Prescribed Positive Convexity",
                    font=("Segoe UI", 11), fill=TEXT_MUTED, anchor="center")
 
 # ── Separator ────────────────────────────────────────────────────────────────

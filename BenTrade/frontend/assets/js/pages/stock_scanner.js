@@ -1,5 +1,8 @@
 window.BenTradePages = window.BenTradePages || {};
 
+/* ── In-memory session store (survives SPA navigation, clears on F5/close) ── */
+window._BenTradeStockScannerStore = window._BenTradeStockScannerStore || { payload: null };
+
 window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
   const doc = (rootEl && rootEl.ownerDocument) ? rootEl.ownerDocument : document;
   const scope = rootEl || doc;
@@ -10,6 +13,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
   const metaEl = scope.querySelector('#stockScannerMeta');
   const listEl = scope.querySelector('#stockScannerList');
   const symbolsEl = scope.querySelector('#stockScannerSymbols');
+  const countsBar = scope.querySelector('#tradeCountsBar');
 
   if(!refreshBtn || !errorEl || !metaEl || !listEl){
     return;
@@ -30,7 +34,6 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
   const collapsed = {};
   const modelResults = {};
   const REJECTED_KEY = 'bentrade_scanner_rejected_v1';
-  const SESSION_CACHE_KEY = 'bentrade_stock_scanner_cache_v1';
 
   function loadRejected(){
     try{
@@ -51,26 +54,19 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
     }
   }
 
-  /* ── Session cache helpers (persist scan results across navigation) ── */
+  /* ── Session cache helpers (in-memory, no TTL, no auto-run) ── */
   function saveToSessionCache(payload){
-    try{
-      const sid = window.BenTradeSessionState?.currentSessionId?.() || '';
-      sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify({ sid, payload, ts: Date.now() }));
-    }catch(_err){}
+    window._BenTradeStockScannerStore.payload = payload;
+    console.debug('StockScanner: stored results in session cache (count=' + (Array.isArray(payload?.candidates) ? payload.candidates.length : 0) + ')');
   }
 
   function loadFromSessionCache(){
-    try{
-      const raw = sessionStorage.getItem(SESSION_CACHE_KEY);
-      if(!raw) return null;
-      const obj = JSON.parse(raw);
-      // Only reuse if same session
-      const sid = window.BenTradeSessionState?.currentSessionId?.() || '';
-      if(sid && obj.sid && obj.sid !== sid) return null;
-      // Expire after 30 min
-      if(obj.ts && (Date.now() - obj.ts) > 30 * 60 * 1000) return null;
-      return obj.payload || null;
-    }catch(_err){}
+    const cached = window._BenTradeStockScannerStore.payload;
+    if(cached && Array.isArray(cached.candidates) && cached.candidates.length > 0){
+      console.debug('StockScanner: session cache hit (rendering cached results)');
+      return cached;
+    }
+    console.debug('StockScanner: session cache miss (no scan yet; waiting for user)');
     return null;
   }
 
@@ -178,6 +174,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
     const count = Array.isArray(payload?.candidates) ? payload.candidates.length : 0;
     const srcStatus = payload?.source_status ? ` • Sources ${String(payload.source_status)}` : '';
     metaEl.textContent = `As of ${asOf} • ${count} candidates • Source ${lastEndpointUsed}${srcStatus}`;
+    if(countsBar) countsBar.textContent = count ? `${count} candidate${count !== 1 ? 's' : ''} ranked` : '';
   }
 
   function renderModelIdeaRows(model, idx){
@@ -266,7 +263,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
       return;
     }
 
-    listEl.innerHTML = `<div class="trades-grid">${activeRows.map((row, idx) => {
+    listEl.innerHTML = `<div class="trades-grid" style="width:100%">${activeRows.map((row, idx) => {
       const symbol = String(row?.symbol || '').toUpperCase();
       const signals = (Array.isArray(row?.signals) ? row.signals : []).map(s => String(s || '')).filter(Boolean);
       const signalsText = signals.length ? signals.join(', ') : 'none';
@@ -532,11 +529,12 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
   });
 
   async function runScan(){
+    console.debug('StockScanner: user triggered scan -> fetching');
     const previousLabel = refreshBtn.textContent;
     try{
       setError('');
       refreshBtn.disabled = true;
-      refreshBtn.textContent = 'Scanning...';
+      refreshBtn.textContent = 'Scanning…';
       const payload = await fetchScannerPayload();
       latestPayload = payload;
       saveToSessionCache(payload);
@@ -550,25 +548,24 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
       setError(`${prefix}${String(err?.message || err || 'Failed to run stock scan')}`);
       if(!latestPayload){
         metaEl.textContent = `As of N/A • 0 candidates • Source ${lastEndpointUsed}`;
-        listEl.innerHTML = '<div class="loading">No scanner candidates returned.</div>';
+        listEl.innerHTML = '<div class="loading">No scan yet. Click <b>Run Scan</b> to start.</div>';
       }
     }finally{
       refreshBtn.disabled = false;
-      refreshBtn.textContent = previousLabel || 'Refresh Scan';
+      refreshBtn.textContent = previousLabel || 'Run Scan';
     }
   }
 
   refreshBtn.addEventListener('click', runScan);
 
-  /* ── Init: restore from session cache or run fresh scan ── */
+  /* ── Init: restore from session cache — NEVER auto-run ── */
   const _cached = loadFromSessionCache();
-  if(_cached && Array.isArray(_cached.candidates) && _cached.candidates.length > 0){
+  if(_cached){
     latestPayload = _cached;
     renderMeta(_cached);
     renderCandidates(_cached);
   }else{
     renderMeta({ as_of: null, candidates: [] });
-    renderCandidates({ candidates: [] });
-    runScan();
+    listEl.innerHTML = '<div class="loading">No scan yet. Click <b>Run Scan</b> to start.</div>';
   }
 };
