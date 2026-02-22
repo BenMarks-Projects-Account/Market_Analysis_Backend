@@ -271,7 +271,7 @@ def analyze_trade(
     source: str,
     model_url: str = "http://localhost:1234/v1/chat/completions",
     retries: int = 2,
-    timeout: int = 30,
+    timeout: int = 120,
 ) -> dict[str, Any] | None:
     # Keep the legacy JSON contract exactly the same by delegating to the legacy implementation.
     # TODO(architecture): migrate implementation from common.utils into this module and delete legacy shim.

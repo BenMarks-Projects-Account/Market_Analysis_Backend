@@ -594,6 +594,9 @@ window.BenTradeStrategyShell = (function(){
     /* ---------- collapse state (persists across re-renders) ---------- */
     const _expandState = {};  // { [tradeKey]: true/false } — true = expanded
 
+    /* ---------- per-card model analysis state ---------- */
+    const _modelAnalysisState = {};  // { [tradeKey]: { status, result, error } }
+
     /* ---------- helpers ---------- */
 
     function setDropdownError(select, message){
@@ -616,6 +619,132 @@ window.BenTradeStrategyShell = (function(){
 
     /* ── Mapper + config references ───────────────────────────── */
     const _mapper = window.BenTradeOptionTradeCardModel;
+
+    /**
+     * Render model analysis result as inline HTML for a card.
+     * @param {object} result – { status, recommendation, confidence, summary, risk_level, key_factors }
+     * @returns {string} HTML
+     */
+    function _renderModelOutputHtml(result){
+      if(!result) return '';
+      const esc = escapeHtml;
+
+      if(result.status === 'running'){
+        return '<div style="font-size:12px;color:var(--muted);padding:6px 10px;"><span class="home-scan-spinner" aria-hidden="true"></span> Running model analysis\u2026</div>';
+      }
+
+      if(result.status === 'error'){
+        const msg = String(result.summary || 'Model analysis failed').trim();
+        return `<div style="font-size:12px;color:#ff6b6b;padding:6px 10px;border:1px solid rgba(255,107,107,0.25);border-radius:6px;margin:4px 0;">\u26A0 ${esc(msg)}</div>`;
+      }
+
+      const me = result.model_evaluation || result;
+      const rec = String(me.recommendation || 'UNKNOWN').toUpperCase();
+      const confRaw = toNumber(me.confidence);
+      const confPct = confRaw !== null ? ` (${(confRaw * 100).toFixed(0)}%)` : '';
+      const summary = String(me.summary || '').trim();
+      const riskLevel = String(me.risk_level || '').trim();
+      const keyFactors = Array.isArray(me.key_factors) ? me.key_factors : [];
+
+      const recColors = {
+        'ACCEPT': 'rgba(0,220,120,0.9)',
+        'REJECT': 'rgba(255,90,90,0.9)',
+        'NEUTRAL': 'rgba(180,180,200,0.85)',
+      };
+      const color = recColors[rec] || recColors['NEUTRAL'];
+
+      let html = `<div style="font-size:12px;padding:8px 10px;border:1px solid ${color.replace('0.9','0.3').replace('0.85','0.3')};border-radius:6px;margin:4px 0;">`;
+      html += `<div style="font-weight:700;color:${color};margin-bottom:4px;">${esc(rec)}${esc(confPct)}`;
+      if(riskLevel) html += ` <span style="font-weight:400;color:var(--muted);font-size:11px;">\u00B7 ${esc(riskLevel)} risk</span>`;
+      html += '</div>';
+      if(summary) html += `<div style="color:var(--text-secondary,#ccc);line-height:1.4;margin-bottom:4px;">${esc(summary)}</div>`;
+      if(keyFactors.length){
+        html += '<ul style="margin:4px 0 0;padding-left:16px;color:var(--text-secondary,#ccc);font-size:11px;">';
+        keyFactors.forEach(f => { html += `<li>${esc(String(f))}</li>`; });
+        html += '</ul>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+    /**
+     * Run model analysis inline on a specific card.
+     * @param {HTMLElement} btn        – the clicked button
+     * @param {HTMLElement} cardEl     – the .trade-card element
+     * @param {object}      trade      – raw trade object from currentTrades
+     * @param {object}      payload    – canonical action payload from mapper
+     */
+    async function _runModelAnalysisOnCard(btn, cardEl, trade, payload){
+      const tradeKey = payload.tradeKey || '';
+      const outputEl = cardEl?.querySelector('[data-model-output]');
+
+      /* Guard duplicate clicks — use tradeKey or fall back to a per-element flag */
+      const guardKey = tradeKey || ('_idx_' + (cardEl?.dataset?.idx ?? ''));
+      if(_modelAnalysisState[guardKey]?.status === 'running'){
+        INFO('[MODEL_TRACE] dedupe guard — already running for', guardKey);
+        return;
+      }
+      _modelAnalysisState[guardKey] = { status: 'running' };
+      INFO('[MODEL_TRACE] _runModelAnalysisOnCard start', { guardKey, symbol: trade?.symbol || trade?.underlying, strategy: state.activeConfig?.strategyId });
+
+      /* Show loading state */
+      btn.disabled = true;
+      btn.textContent = 'Running\u2026';
+      if(outputEl){
+        outputEl.style.display = 'block';
+        outputEl.innerHTML = _renderModelOutputHtml({ status: 'running' });
+      }
+
+      /* Resolve source file — use currently loaded report, try session state,
+         or fall back to the trade's own _source_report_file stamp. */
+      const sourceFile = currentFilename
+        || String(trade?._source_report_file || '').trim()
+        || window.BenTradeSessionState?.getCurrentReportFile?.()
+        || window.currentReportFile
+        || null;
+      INFO('[MODEL_TRACE] sourceFile resolved:', sourceFile || '(null)');
+
+      if(!sourceFile){
+        const errResult = { status: 'error', summary: 'No report source available. Load a report first.' };
+        _modelAnalysisState[guardKey] = errResult;
+        btn.disabled = false;
+        btn.textContent = 'Run Model Analysis';
+        if(outputEl){
+          outputEl.style.display = 'block';
+          outputEl.innerHTML = _renderModelOutputHtml(errResult);
+        }
+        INFO('[MODEL_TRACE] no sourceFile — aborting');
+        return;
+      }
+
+      try{
+        INFO('[MODEL_TRACE] calling api.modelAnalyze', { guardKey, sourceFile });
+        const result = await api.modelAnalyze(trade, sourceFile);
+        const me = result?.evaluated_trade?.model_evaluation || {};
+        const successResult = { status: 'success', model_evaluation: me };
+        _modelAnalysisState[guardKey] = successResult;
+
+        if(outputEl){
+          outputEl.style.display = 'block';
+          outputEl.innerHTML = _renderModelOutputHtml(successResult);
+        }
+        INFO(`[MODEL_TRACE] complete for ${guardKey}: ${me.recommendation}`);
+      }catch(err){
+        const errResult = {
+          status: 'error',
+          summary: String(err?.detail || err?.message || err || 'Model analysis failed'),
+        };
+        _modelAnalysisState[guardKey] = errResult;
+        if(outputEl){
+          outputEl.style.display = 'block';
+          outputEl.innerHTML = _renderModelOutputHtml(errResult);
+        }
+        INFO(`[MODEL_TRACE] failed for ${guardKey}: ${errResult.summary}`);
+      }finally{
+        btn.disabled = false;
+        btn.textContent = 'Run Model Analysis';
+      }
+    }
 
     function renderTradeCard(trade, idx){
       /* 1. Map raw API trade → clean view model via config + mapper */
@@ -679,15 +808,16 @@ window.BenTradeStrategyShell = (function(){
       const actionsHtml = `
         <div class="trade-actions">
           <div class="run-row">
-            <button class="btn btn-run btn-action" data-action="model-analysis"${tradeKeyAttr} title="Run model analysis on this trade">Run Model Analysis</button>
+            <button type="button" class="btn btn-run btn-action" data-action="model-analysis"${tradeKeyAttr} title="Run model analysis on this trade">Run Model Analysis</button>
+          </div>
+          <div class="trade-model-output" data-model-output${tradeKeyAttr} style="display:none;"></div>
+          <div class="actions-row">
+            <button type="button" class="btn btn-exec btn-action" data-action="execute"${tradeKeyAttr} title="Open execution modal">Execute Trade</button>
+            <button type="button" class="btn btn-reject btn-action" data-action="reject"${tradeKeyAttr} title="Reject this trade">Reject</button>
           </div>
           <div class="actions-row">
-            <button class="btn btn-exec btn-action" data-action="execute"${tradeKeyAttr} title="Open execution modal">Execute Trade</button>
-            <button class="btn btn-reject btn-action" data-action="reject"${tradeKeyAttr} title="Reject this trade">Reject</button>
-          </div>
-          <div class="actions-row">
-            <button class="btn btn-action" data-action="workbench"${tradeKeyAttr} title="Send to Testing Workbench">Send to Testing Workbench</button>
-            <button class="btn btn-action" data-action="data-workbench"${tradeKeyAttr} title="Send to Data Workbench">Send to Data Workbench</button>
+            <button type="button" class="btn btn-action" data-action="workbench"${tradeKeyAttr} title="Send to Testing Workbench">Send to Testing Workbench</button>
+            <button type="button" class="btn btn-action" data-action="data-workbench"${tradeKeyAttr} title="Send to Data Workbench">Send to Data Workbench</button>
           </div>
         </div>`;
 
@@ -1114,9 +1244,9 @@ window.BenTradeStrategyShell = (function(){
               })
               .catch(err => INFO('Reject error: ' + err.message));
           }else if(action === 'model-analysis'){
-            /* Run model analysis — navigate to model analysis page with trade context */
-            const qs = new URLSearchParams({ symbol: payload.symbol, strategy: payload.strategyId, trade_key: payload.tradeKey || '' });
-            window.location.hash = '#/admin/model-analysis?' + qs.toString();
+            /* Run model analysis inline on this card — no navigation */
+            INFO('[MODEL_TRACE] button clicked', { tradeKey: payload.tradeKey, tradeIdx, symbol: trade?.symbol || trade?.underlying });
+            _runModelAnalysisOnCard(btn, cardEl, trade, payload);
           }else if(action === 'workbench'){
             if(payload.tradeKey){
               window.location.hash = '#/admin/data-workbench?trade_key=' + encodeURIComponent(payload.tradeKey);

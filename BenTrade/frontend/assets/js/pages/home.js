@@ -554,6 +554,44 @@ window.BenTradePages.initHome = function initHome(rootEl){
     return `${rec}${confText}`;
   }
 
+  /**
+   * Render trade model analysis output as inline HTML for a card.
+   * @param {object} model – { status, recommendation, confidence, summary }
+   * @returns {string} HTML
+   */
+  function _renderTradeModelOutput(model){
+    if(!model) return '';
+    const esc = escapeHtml;
+
+    if(model.status === 'running'){
+      return '<div style="font-size:12px;color:var(--muted);padding:6px 10px;"><span class="home-scan-spinner" aria-hidden="true"></span> Running model analysis\u2026</div>';
+    }
+
+    if(model.status === 'error'){
+      const msg = String(model.summary || 'Model analysis failed').trim();
+      return `<div style="font-size:12px;color:#ff6b6b;padding:6px 10px;border:1px solid rgba(255,107,107,0.25);border-radius:6px;margin:4px 0;">\u26A0 ${esc(msg)}</div>`;
+    }
+
+    const rec = String(model.recommendation || 'UNKNOWN').toUpperCase();
+    const confPct = toNumber(model.confidence) !== null ? ` (${(toNumber(model.confidence) * 100).toFixed(0)}%)` : '';
+    const summary = String(model.summary || '').trim();
+
+    const recColors = {
+      'ACCEPT': 'rgba(0,220,120,0.9)',
+      'REJECT': 'rgba(255,90,90,0.9)',
+      'NEUTRAL': 'rgba(180,180,200,0.85)',
+    };
+    const color = recColors[rec] || recColors['NEUTRAL'];
+
+    let html = `<div style="font-size:12px;padding:8px 10px;border:1px solid ${color.replace('0.9','0.3').replace('0.85','0.3')};border-radius:6px;margin:4px 0;">`;
+    html += `<div style="font-weight:700;color:${color};margin-bottom:4px;">${esc(rec)}${esc(confPct)}</div>`;
+    if(summary){
+      html += `<div style="color:var(--text-secondary,#ccc);line-height:1.4;">${esc(summary)}</div>`;
+    }
+    html += '</div>';
+    return html;
+  }
+
   function routeForOpportunity(idea){
     if(!idea || idea.sourceType === 'stock') return '#/stock-analysis';
     const strategy = String(idea?.strategy || idea?.trade?.spread_type || idea?.trade?.strategy || '').toLowerCase();
@@ -660,23 +698,40 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   async function resolveModelSourceFile(idea){
-    const direct = String(idea?.report_file || idea?.trade?.report_file || '').trim();
-    if(direct) return direct;
+    const direct = String(idea?.report_file || idea?.trade?.report_file || idea?.trade?._source_report_file || '').trim();
+    if(direct){
+      console.info('[MODEL_TRACE] resolveModelSourceFile → direct:', direct);
+      return direct;
+    }
 
     const sessionSource = getModelSourceFromSession();
-    if(sessionSource) return sessionSource;
+    if(sessionSource){
+      console.info('[MODEL_TRACE] resolveModelSourceFile → session:', sessionSource);
+      return sessionSource;
+    }
 
     const strategyId = String(idea?.strategy_id || strategyIdFromValue(idea?.strategy || idea?.trade?.spread_type || idea?.trade?.strategy) || '').trim();
     if(strategyId && api?.listStrategyReports){
       try{
         const files = await api.listStrategyReports(strategyId);
         const candidate = Array.isArray(files) && files.length ? String(files[0] || '').trim() : '';
-        if(candidate) return candidate;
+        if(candidate){
+          console.info('[MODEL_TRACE] resolveModelSourceFile → listReports:', candidate);
+          return candidate;
+        }
       }catch(_err){
+        console.warn('[MODEL_TRACE] resolveModelSourceFile → listReports error:', _err);
       }
     }
 
-    return null;
+    /* Fallback: generate a synthetic source identifier so the backend can
+       tag its output file.  The "source" param is an output label, not an
+       input dependency — the model evaluates the trade payload directly. */
+    const sym = String(idea?.symbol || idea?.trade?.underlying || idea?.trade?.symbol || 'unknown').toUpperCase();
+    const strat = strategyId || 'unknown';
+    const synthetic = `home_${strat}_${sym}`.replace(/[^a-zA-Z0-9_]/g, '_');
+    console.info('[MODEL_TRACE] resolveModelSourceFile → synthetic fallback:', synthetic);
+    return synthetic;
   }
 
   function findMatchingOpportunityForModel(idea){
@@ -706,13 +761,41 @@ window.BenTradePages.initHome = function initHome(rootEl){
     return findMatchingOpportunityForModel(idea) || idea;
   }
 
+  /* ── Dedupe guard for Home model analysis (single-flight per opKey) ── */
+  const _homeModelInFlight = new Set();
+
   async function runModelForOpportunity(idea, onModel, originTag = 'home_opportunities'){
-    if(!idea || idea.sourceType === 'stock'){
+    const _tag = `[MODEL_TRACE:home] runModelForOpportunity`;
+
+    if(!idea){
+      console.warn(_tag, 'called with null idea');
+      if(typeof onModel === 'function') onModel({ status: 'error', recommendation: 'ERROR', confidence: null, summary: 'No trade selected.' });
       return false;
     }
 
+    if(idea.sourceType === 'stock'){
+      console.info(_tag, 'stock idea — skipping (not an options trade)');
+      if(typeof onModel === 'function') onModel({ status: 'error', recommendation: 'N/A', confidence: null, summary: 'Model analysis is not available for stock ideas.' });
+      return false;
+    }
+
+    /* Dedupe guard — only one request per opportunity at a time */
+    const opKey = idea._opKey || opportunityKey(idea, -1);
+    if(_homeModelInFlight.has(opKey)){
+      console.info(_tag, 'dedupe guard — already in-flight for', opKey);
+      return false;
+    }
+    _homeModelInFlight.add(opKey);
+    console.info(_tag, 'start', { opKey, originTag, symbol: idea?.symbol, strategy: idea?.strategy });
+
     const resolvedIdea = resolveIdeaForModel(idea);
-    const sourceFile = await resolveModelSourceFile(resolvedIdea);
+    let sourceFile;
+    try{
+      sourceFile = await resolveModelSourceFile(resolvedIdea);
+    }catch(sfErr){
+      console.warn(_tag, 'resolveModelSourceFile threw:', sfErr);
+      sourceFile = null;
+    }
     if(!sourceFile){
       const nextModel = {
         status: 'error',
@@ -721,6 +804,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
         summary: 'No report source available for model analysis.',
       };
       if(typeof onModel === 'function') onModel(nextModel);
+      _homeModelInFlight.delete(opKey);
       return false;
     }
 
@@ -735,8 +819,10 @@ window.BenTradePages.initHome = function initHome(rootEl){
       onModel({ status: 'running', recommendation: 'RUNNING', confidence: null, summary: 'Running...' });
     }
 
+    console.info(_tag, 'calling api.modelAnalyze', { source: sourceFile, symbol: tradePayload.symbol, strategy_id: tradePayload.strategy_id });
     try{
       const result = await api.modelAnalyze(tradePayload, sourceFile);
+      console.info(_tag, 'response OK', { recommendation: result?.evaluated_trade?.model_evaluation?.recommendation });
       const me = result?.evaluated_trade?.model_evaluation || {};
       const nextModel = {
         status: 'available',
@@ -747,6 +833,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
       if(typeof onModel === 'function') onModel(nextModel);
       return true;
     }catch(err){
+      console.warn(_tag, 'api.modelAnalyze error:', err?.detail || err?.message || err);
       const nextModel = {
         status: 'error',
         recommendation: 'ERROR',
@@ -755,6 +842,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
       };
       if(typeof onModel === 'function') onModel(nextModel);
       return false;
+    }finally{
+      _homeModelInFlight.delete(opKey);
     }
   }
 
@@ -1185,12 +1274,37 @@ window.BenTradePages.initHome = function initHome(rootEl){
         }
 
         if(action === 'model-analysis'){
-          const qs = new URLSearchParams({
-            symbol: payload.symbol || '',
-            strategy: payload.strategyId || '',
-            trade_key: payload.tradeKey || '',
-          });
-          window.location.hash = '#/admin/model-analysis?' + qs.toString();
+          /* Run model analysis inline on this card — no navigation */
+          console.info('[MODEL_TRACE:home] button clicked', { cardIdx, symbol: idea?.symbol, strategy: idea?.strategy });
+          const modelBtn = btn;
+          const modelOutputEl = cardEl?.querySelector('[data-model-output]');
+          modelBtn.disabled = true;
+          modelBtn.textContent = 'Running\u2026';
+          if(modelOutputEl){
+            modelOutputEl.style.display = 'block';
+            modelOutputEl.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:6px 10px;"><span class="home-scan-spinner" aria-hidden="true"></span> Running model analysis\u2026</div>';
+          }
+
+          runModelForOpportunity(idea, (modelResult) => {
+            console.info('[MODEL_TRACE:home] callback received', { status: modelResult?.status, recommendation: modelResult?.recommendation });
+            /* Update per-card state */
+            const opKey = idea._opKey || opportunityKey(idea, cardIdx);
+            opportunityModelState.set(opKey, modelResult);
+
+            /* Update button */
+            modelBtn.disabled = false;
+            modelBtn.textContent = 'Run Model Analysis';
+
+            /* Render result in card */
+            if(modelOutputEl){
+              if(!modelResult || modelResult.status === 'not_run'){
+                modelOutputEl.style.display = 'none';
+              } else {
+                modelOutputEl.style.display = 'block';
+                modelOutputEl.innerHTML = _renderTradeModelOutput(modelResult);
+              }
+            }
+          }, 'home_card_action');
           return;
         }
 
