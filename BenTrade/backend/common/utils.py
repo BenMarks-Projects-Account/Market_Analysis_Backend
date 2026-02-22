@@ -1,5 +1,7 @@
 import json
+import re
 import time
+import uuid
 from pathlib import Path
 from datetime import datetime
 import sys
@@ -24,6 +26,142 @@ finally:
         sys.path.insert(0, _repo_backend_dir)
 
 RESULTS_DIR = Path(__file__).parent.parent / 'results'
+
+# ---------------------------------------------------------------------------
+# Robust LLM JSON extraction
+# ---------------------------------------------------------------------------
+_CODE_FENCE_RE = re.compile(r'```(?:json)?\s*\n?(.*?)\n?\s*```', re.DOTALL)
+
+_MODEL_EVAL_KEYS = frozenset({'recommendation', 'confidence', 'risk_level', 'key_factors', 'summary'})
+
+
+def _strip_code_fences(text: str) -> str:
+    """Remove markdown code fences, returning the inner content."""
+    m = _CODE_FENCE_RE.search(text)
+    return m.group(1).strip() if m else text.strip()
+
+
+def _find_json_block(text: str):
+    """Attempt to parse the first balanced JSON object or array from *text*.
+
+    Returns the parsed Python object on success, ``None`` on failure.
+    Tries:
+      1) Full text as JSON
+      2) First ``{``…last ``}``  or first ``[``…last ``]`` substring
+    """
+    cleaned = _strip_code_fences(text)
+
+    # Attempt 1 — full cleaned text
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+
+    # Attempt 2 — locate outermost JSON block
+    for open_ch, close_ch in (('{', '}'), ('[', ']')):
+        start = cleaned.find(open_ch)
+        if start == -1:
+            continue
+        end = cleaned.rfind(close_ch)
+        if end == -1 or end <= start:
+            continue
+        try:
+            return json.loads(cleaned[start:end + 1])
+        except Exception:
+            continue
+
+    return None
+
+
+def _coerce_model_evaluation(parsed, original_trade: dict | None = None) -> dict | None:
+    """Extract a ``model_evaluation`` dict from the LLM's parsed JSON output.
+
+    Tolerates multiple common response shapes:
+      - List of 1 trade containing ``model_evaluation`` key
+      - Dict with ``trades`` list containing 1 trade
+      - Dict with ``model_evaluation`` key directly
+      - Bare ``model_evaluation`` object (has recommendation/confidence/…)
+      - Dict wrapping an inner-most ``model_evaluation`` at any nesting level
+
+    Returns ``None`` only if the parsed data truly contains nothing usable.
+    """
+    if parsed is None:
+        return None
+
+    # --- Shape: list of trades (expected by the prompt) ---
+    if isinstance(parsed, list):
+        if len(parsed) >= 1 and isinstance(parsed[0], dict):
+            first = parsed[0]
+            if 'model_evaluation' in first and isinstance(first['model_evaluation'], dict):
+                return _normalize_eval(first['model_evaluation'])
+            # Maybe the list item *is* the evaluation object
+            if _looks_like_eval(first):
+                return _normalize_eval(first)
+        return None
+
+    if not isinstance(parsed, dict):
+        return None
+
+    # --- Shape: dict with 'trades' key ---
+    trades_list = parsed.get('trades')
+    if isinstance(trades_list, list) and trades_list:
+        first = trades_list[0] if isinstance(trades_list[0], dict) else None
+        if first and 'model_evaluation' in first:
+            return _normalize_eval(first['model_evaluation'])
+
+    # --- Shape: dict with direct 'model_evaluation' ---
+    if 'model_evaluation' in parsed and isinstance(parsed['model_evaluation'], dict):
+        return _normalize_eval(parsed['model_evaluation'])
+
+    # --- Shape: bare evaluation object ---
+    if _looks_like_eval(parsed):
+        return _normalize_eval(parsed)
+
+    # --- Shape: single-trade dict containing the original trade keys + model_evaluation ---
+    # (model echoed the trade back as a dict instead of a single-element list)
+    for key in ('model_evaluation',):
+        for v in parsed.values():
+            if isinstance(v, dict) and _looks_like_eval(v):
+                return _normalize_eval(v)
+
+    return None
+
+
+def _looks_like_eval(d: dict) -> bool:
+    """Check whether *d* looks like a model_evaluation object."""
+    return bool(d and isinstance(d, dict) and d.keys() & _MODEL_EVAL_KEYS)
+
+
+def _normalize_eval(raw: dict) -> dict:
+    """Ensure the evaluation dict has the expected keys with safe types."""
+    rec = str(raw.get('recommendation') or 'NEUTRAL').strip().upper()
+    if rec not in ('ACCEPT', 'NEUTRAL', 'REJECT'):
+        rec = 'NEUTRAL'
+
+    conf = raw.get('confidence')
+    try:
+        conf = max(0.0, min(float(conf), 1.0))
+    except (TypeError, ValueError):
+        conf = 0.5
+
+    risk = str(raw.get('risk_level') or 'Moderate').strip()
+    if risk not in ('Low', 'Moderate', 'High'):
+        risk = 'Moderate'
+
+    kf = raw.get('key_factors')
+    if not isinstance(kf, list):
+        kf = [str(kf)] if kf else []
+    kf = [str(f) for f in kf if str(f or '').strip()][:6]
+
+    summary = str(raw.get('summary') or '').strip()
+
+    return {
+        'recommendation': rec,
+        'confidence': conf,
+        'risk_level': risk,
+        'key_factors': kf,
+        'summary': summary,
+    }
 
 
 def generate_mock_report() -> str:
@@ -381,34 +519,36 @@ def generate_mock_report() -> str:
     return filename
 
 
-def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http://localhost:1234/v1/chat/completions', retries=2, timeout=30):
+def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http://localhost:1234/v1/chat/completions', retries=2, timeout=120):
     """Send a single trade to the local model and append the evaluated trade
-    to `results/model_<source_filename>`. Returns the evaluated trade dict
-    (including `model_evaluation`) on success. On model-call failure a
+    to ``results/model_<source_filename>``.  Returns the evaluated trade dict
+    (including ``model_evaluation``) on success.  On model-call failure a
     provisional NEUTRAL evaluation is persisted and returned so the UI
     receives a deterministic response (no 500).
+
+    **Key changes from the previous version:**
+    - *timeout* raised from 30 → 120 s to accommodate slow local LLMs.
+    - Robust JSON extraction: strips code fences, tolerates multiple shapes.
+    - Detailed ``[MODEL_TRACE]`` logging with a per-call *requestId*.
     """
+    request_id = uuid.uuid4().hex[:10]
+    TAG = f'[MODEL_TRACE:{request_id}]'
+
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     model_out_path = RESULTS_DIR / ("model_" + Path(source_filename).name)
 
     PROMPT = (
         "You are an options trading risk advisor.\n\n"
-        "You will receive a JSON array of trades (this request contains up to 1 trade).\n"
-        "Return ONLY a JSON array of the SAME trades in the SAME order.\n"
-        "For each trade object, append EXACTLY one new key: \"model_evaluation\".\n"
-        "Do NOT add any filenames, metadata, or wrapper objects.\n"
-        "Do not modify, remove, rename, or reorder existing keys/values.\n\n"
-        "The \"model_evaluation\" object MUST contain EXACTLY these keys:\n"
+        "You will receive a JSON object representing a single options trade.\n"
+        "Return ONLY a JSON object with EXACTLY these keys:\n"
         "- recommendation: one of [\"ACCEPT\", \"NEUTRAL\", \"REJECT\"]\n"
         "- confidence: number between 0 and 1\n"
         "- risk_level: one of [\"Low\", \"Moderate\", \"High\"]\n"
         "- key_factors: array of 2 to 6 short strings\n"
         "- summary: one paragraph string\n\n"
         "OUTPUT RULES:\n"
-        "- Output must be valid JSON only (a single JSON array).\n"
-        "- Do not include any commentary or surrounding text.\n"
-        "- Preserve all numeric values exactly as received.\n"
-        "- If you cannot evaluate a trade, still return the trade but set \"model_evaluation\" with an appropriate recommendation and low confidence."
+        "- Output must be valid JSON only — NO code fences, no commentary, no surrounding text.\n"
+        "- Return ONE object (not an array), with only the five keys listed above.\n"
     )
 
     # Pre-call deterministic override
@@ -421,51 +561,50 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http:
         forced_eval.pop('_hard_gate_forced', None)
         new = dict(trade)
         new['model_evaluation'] = forced_eval
-        existing = []
-        try:
-            if model_out_path.exists():
-                with open(model_out_path, 'r', encoding='utf-8') as rf:
-                    existing = json.load(rf)
-        except Exception:
-            existing = []
-        existing.append(new)
-        try:
-            with open(model_out_path, 'w', encoding='utf-8') as wf:
-                json.dump(existing, wf, indent=2, default=str)
-            print(f"[utils] Hard-gate forced evaluation appended to {model_out_path} (total={len(existing)})")
-            return new
-        except Exception as e:
-            print('[utils] Failed to write forced model output file for single trade:', e)
+        _persist_model_result(new, model_out_path, TAG)
+        print(f"{TAG} Hard-gate forced evaluation: {forced_eval.get('recommendation')}")
+        return new
 
-    # Prepare payload (include provisional evaluation if present)
+    # Prepare a compact payload — send ONLY trade data, don't ask the model to echo it back.
     trade_for_payload = dict(trade)
+    # Remove any existing model_evaluation to avoid confusing the LLM
+    trade_for_payload.pop('model_evaluation', None)
     if me_override and me_override.get('recommendation') in ('REJECT', 'NEUTRAL', 'ACCEPT'):
         mcopy = dict(me_override)
         mcopy.pop('_hard_gate_forced', None)
-        trade_for_payload['model_evaluation'] = mcopy
+        trade_for_payload['_provisional_evaluation'] = mcopy
 
     payload = {
         'messages': [
             {'role': 'system', 'content': PROMPT},
-            {'role': 'user', 'content': json.dumps([trade_for_payload], ensure_ascii=False, indent=None)}
+            {'role': 'user', 'content': json.dumps(trade_for_payload, ensure_ascii=False, indent=None)}
         ],
-        'max_tokens': 2048,
+        'max_tokens': 1024,
         'temperature': 0.0,
+        'stream': False,
     }
+
+    symbol = trade.get('symbol') or trade.get('underlying') or '?'
+    strategy = trade.get('strategy_id') or trade.get('spread_type') or '?'
+    print(f"{TAG} start — symbol={symbol} strategy={strategy} source={source_filename} url={model_url} timeout={timeout}")
 
     attempt = 0
     last_err = None
+    raw_snippet = None
     while attempt <= retries:
         try:
             attempt += 1
-            print(f"[utils] Calling model at {model_url} (attempt {attempt}) for single trade")
+            print(f"{TAG} attempt {attempt}/{retries + 1}")
             resp = requests.post(model_url, json=payload, timeout=timeout)
+            print(f"{TAG} HTTP {resp.status_code} ({len(resp.content)} bytes, {resp.elapsed.total_seconds():.1f}s)")
             resp.raise_for_status()
 
+            # --- Extract assistant text from OpenAI-compatible response ---
+            resp_json = None
             try:
                 resp_json = resp.json()
             except Exception:
-                resp_json = None
+                pass
 
             assistant_text = None
             if isinstance(resp_json, dict):
@@ -481,82 +620,43 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http:
             if assistant_text is None:
                 assistant_text = getattr(resp, 'text', '') or ''
 
-            parsed = None
-            try:
-                parsed = json.loads(assistant_text)
-            except Exception:
-                txt = assistant_text
-                start_idx = None
-                for ch in ('[', '{'):
-                    i = txt.find(ch)
-                    if i != -1:
-                        start_idx = i
-                        break
-                if start_idx is not None:
-                    open_ch = txt[start_idx]
-                    close_ch = ']' if open_ch == '[' else '}'
-                    end_idx = txt.rfind(close_ch)
-                    if end_idx != -1:
-                        try:
-                            parsed = json.loads(txt[start_idx:end_idx + 1])
-                        except Exception:
-                            parsed = None
+            raw_snippet = (assistant_text[:500] + '…') if len(assistant_text) > 500 else assistant_text
+            print(f"{TAG} assistant_text length={len(assistant_text)} first500={raw_snippet!r}")
 
+            # --- Robust JSON extraction (code fences, bare objects, arrays) ---
+            parsed = _find_json_block(assistant_text)
             if parsed is None:
-                print('[utils] Could not parse model response for single trade; raw response:')
-                print(getattr(resp, 'text', ''))
-                last_err = 'unparsable_response'
-                break
+                print(f"{TAG} FAIL: could not extract any JSON from LLM output")
+                last_err = f'unparsable_response (requestId={request_id})'
+                break  # don't retry — the model answered, just not parseable
 
-            if isinstance(parsed, dict) and 'trades' in parsed:
-                model_trades = parsed['trades']
-            elif isinstance(parsed, list):
-                model_trades = parsed
-            else:
-                print('[utils] Unexpected parsed model shape for single trade; raw parsed:')
-                print(parsed)
-                last_err = 'unexpected_shape'
-                break
+            # --- Tolerant shape coercion ---
+            model_eval = _coerce_model_evaluation(parsed, original_trade=trade)
 
-            if len(model_trades) != 1:
-                print('[utils] Model returned unexpected number of trades for single-call')
-                last_err = 'unexpected_count'
-                break
+            if model_eval is None:
+                # Legacy fallback: try the old list-of-trades shape
+                model_eval = _try_legacy_list_shape(parsed, TAG)
 
-            m = model_trades[0]
+            if model_eval is None:
+                print(f"{TAG} FAIL: parsed JSON but could not extract model_evaluation; parsed type={type(parsed).__name__}")
+                print(f"{TAG} parsed keys={list(parsed.keys()) if isinstance(parsed, dict) else 'N/A'}")
+                last_err = f'unexpected_shape (requestId={request_id})'
+                break  # don't retry — shape issue won't change
+
+            # --- Success! ---
             new = dict(trade)
-            if isinstance(m, dict) and 'model_evaluation' in m:
-                new['model_evaluation'] = m['model_evaluation']
-            else:
-                if isinstance(m, dict) and any(k in m for k in ('recommendation','confidence','risk_level','key_factors','summary')):
-                    new['model_evaluation'] = {k: m.get(k) for k in ('recommendation','confidence','risk_level','key_factors','summary') if k in m}
-
-            # append to model_out_path
-            existing = []
-            try:
-                if model_out_path.exists():
-                    with open(model_out_path, 'r', encoding='utf-8') as rf:
-                        existing = json.load(rf)
-            except Exception:
-                existing = []
-
-            existing.append(new)
-            try:
-                with open(model_out_path, 'w', encoding='utf-8') as wf:
-                    json.dump(existing, wf, indent=2, default=str)
-                print(f"[utils] Appended evaluated trade to {model_out_path} (total={len(existing)})")
-                return new
-            except Exception as e:
-                print('[utils] Failed to write model output file for single trade:', e)
-                last_err = e
-                break
+            new['model_evaluation'] = model_eval
+            _persist_model_result(new, model_out_path, TAG)
+            print(f"{TAG} SUCCESS — recommendation={model_eval.get('recommendation')} confidence={model_eval.get('confidence')}")
+            return new
 
         except RequestException as e:
             last_err = e
-            print(f"[utils] Model call failed for single trade (attempt {attempt}): {e}")
-            time.sleep(1)
+            print(f"{TAG} RequestException on attempt {attempt}: {e}")
+            if attempt <= retries:
+                time.sleep(2)
 
-    print('[utils] Model attempts exhausted or errored; last error:', last_err)
+    print(f"{TAG} FALLBACK — all attempts failed; last_err={last_err}")
 
     # Fallback: persist a provisional NEUTRAL evaluation so caller receives a response
     fallback_eval = {
@@ -564,11 +664,14 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http:
         'confidence': 0.35,
         'risk_level': 'Moderate',
         'key_factors': [
-            'Model unreachable or returned invalid response',
-            'Persisted provisional NEUTRAL evaluation'
+            f'Model returned unparsable response (requestId={request_id})',
+            'Saved provisional NEUTRAL evaluation',
         ],
-        'summary': 'Model call failed; saved provisional NEUTRAL evaluation so UI reflects a decision.'
+        'summary': f'Model call failed (requestId={request_id}); saved provisional NEUTRAL evaluation so UI reflects a decision.',
     }
+    if raw_snippet:
+        fallback_eval['_raw_snippet'] = str(raw_snippet)[:300]
+
     try:
         if me_override and isinstance(me_override, dict) and not me_override.get('_hard_gate_forced'):
             if me_override.get('recommendation'):
@@ -578,12 +681,41 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http:
             if me_override.get('risk_level'):
                 fallback_eval['risk_level'] = me_override.get('risk_level')
             if me_override.get('key_factors'):
-                fallback_eval['key_factors'] = (['Model unreachable or returned invalid response'] + me_override.get('key_factors'))[:6]
+                fallback_eval['key_factors'] = ([f'Model response unparsable (requestId={request_id})'] + me_override.get('key_factors'))[:6]
     except Exception:
         pass
 
     new = dict(trade)
     new['model_evaluation'] = fallback_eval
+    _persist_model_result(new, model_out_path, TAG)
+    return new
+
+
+def _try_legacy_list_shape(parsed, tag: str) -> dict | None:
+    """Handle the old prompt's expected shape: a JSON array of 1 trade with model_evaluation."""
+    model_trades = None
+    if isinstance(parsed, dict) and 'trades' in parsed:
+        model_trades = parsed['trades']
+    elif isinstance(parsed, list):
+        model_trades = parsed
+    else:
+        return None
+
+    if not isinstance(model_trades, list) or not model_trades:
+        return None
+
+    m = model_trades[0]
+    if isinstance(m, dict) and 'model_evaluation' in m:
+        print(f"{tag} legacy list-of-trades shape detected — extracting model_evaluation")
+        return _normalize_eval(m['model_evaluation'])
+    if isinstance(m, dict) and _looks_like_eval(m):
+        print(f"{tag} legacy list shape — first element IS the evaluation")
+        return _normalize_eval(m)
+    return None
+
+
+def _persist_model_result(evaluated_trade: dict, model_out_path: Path, tag: str = '[utils]'):
+    """Append an evaluated trade to the model output file."""
     existing = []
     try:
         if model_out_path.exists():
@@ -591,15 +723,14 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http:
                 existing = json.load(rf)
     except Exception:
         existing = []
-    existing.append(new)
+
+    existing.append(evaluated_trade)
     try:
         with open(model_out_path, 'w', encoding='utf-8') as wf:
             json.dump(existing, wf, indent=2, default=str)
-        print(f"[utils] Wrote provisional model evaluation to {model_out_path} (total={len(existing)})")
-        return new
+        print(f"{tag} Persisted to {model_out_path} (total={len(existing)})")
     except Exception as e:
-        print('[utils] Failed to write provisional model output file for single trade:', e)
-        return None
+        print(f"{tag} Failed to write {model_out_path}: {e}")
 
 
 def hard_gate_override(trade: dict, me: dict) -> dict:

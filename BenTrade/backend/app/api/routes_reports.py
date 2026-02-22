@@ -252,11 +252,17 @@ async def generate_report_stream(request: Request):
 
 @router.post("/api/model/analyze")
 async def model_analyze(payload: dict):
+    import logging as _logging
+
+    _log = _logging.getLogger("bentrade.model_trace")
     if not payload or "trade" not in payload:
         raise HTTPException(status_code=400, detail='Missing "trade" in request body')
 
     trade = payload.get("trade")
     source = payload.get("source")
+    _log.info("[MODEL_TRACE] /api/model/analyze hit — source=%s symbol=%s strategy=%s",
+              source, trade.get("symbol") if isinstance(trade, dict) else None,
+              trade.get("strategy_id") if isinstance(trade, dict) else None)
     if not source:
         raise HTTPException(status_code=400, detail='Missing "source" filename in request body')
 
@@ -266,11 +272,15 @@ async def model_analyze(payload: dict):
         contract = TradeContract.from_dict(trade)
         evaluated = analyze_trade(contract, source)
         if evaluated is None:
+            _log.warning("[MODEL_TRACE] analyze_trade returned None for source=%s", source)
             raise HTTPException(status_code=500, detail="Model call failed or returned unparsable response")
+        rec = (evaluated.get("model_evaluation") or {}).get("recommendation") if isinstance(evaluated, dict) else None
+        _log.info("[MODEL_TRACE] /api/model/analyze OK — source=%s recommendation=%s", source, rec)
         return {"ok": True, "evaluated_trade": evaluated}
     except HTTPException:
         raise
     except Exception as exc:
+        _log.exception("[MODEL_TRACE] /api/model/analyze error — source=%s", source)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

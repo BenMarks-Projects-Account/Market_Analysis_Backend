@@ -347,11 +347,12 @@ window.BenTradeTradeCard = (function(){
     var tradeKeyAttr = model.tradeKey ? ' data-trade-key="' + esc(model.tradeKey) + '"' : '';
     var modelBtnLabel = (o.modelStatus === 'running') ? 'Running\u2026' : 'Run Model Analysis';
     var actionsHtml = '<div class="trade-actions">'
-      + '<div class="run-row"><button class="btn btn-run btn-action" data-action="model-analysis"' + tradeKeyAttr + ' title="Run model analysis on this trade">' + modelBtnLabel + '</button></div>'
-      + '<div class="actions-row"><button class="btn btn-exec btn-action" data-action="execute"' + tradeKeyAttr + ' title="Open execution modal">Execute Trade</button>'
-      + '<button class="btn btn-reject btn-action" data-action="reject"' + tradeKeyAttr + ' title="Reject this trade">Reject</button></div>'
-      + '<div class="actions-row"><button class="btn btn-action" data-action="workbench"' + tradeKeyAttr + ' title="Send to Testing Workbench">Send to Testing Workbench</button>'
-      + '<button class="btn btn-action" data-action="data-workbench"' + tradeKeyAttr + ' title="Send to Data Workbench">Send to Data Workbench</button></div>'
+      + '<div class="run-row"><button type="button" class="btn btn-run btn-action" data-action="model-analysis"' + tradeKeyAttr + ' title="Run model analysis on this trade">' + modelBtnLabel + '</button></div>'
+      + '<div class="trade-model-output" data-model-output' + tradeKeyAttr + ' style="display:none;"></div>'
+      + '<div class="actions-row"><button type="button" class="btn btn-exec btn-action" data-action="execute"' + tradeKeyAttr + ' title="Open execution modal">Execute Trade</button>'
+      + '<button type="button" class="btn btn-reject btn-action" data-action="reject"' + tradeKeyAttr + ' title="Reject this trade">Reject</button></div>'
+      + '<div class="actions-row"><button type="button" class="btn btn-action" data-action="workbench"' + tradeKeyAttr + ' title="Send to Testing Workbench">Send to Testing Workbench</button>'
+      + '<button type="button" class="btn btn-action" data-action="data-workbench"' + tradeKeyAttr + ' title="Send to Data Workbench">Send to Data Workbench</button></div>'
       + '</div>';
 
     /* 7. Debug warnings */

@@ -1,22 +1,23 @@
 <div class="view-wrap">
-  <div class="stock-layout">
-    <section class="stock-panel stock-main">
-      <div class="stock-toolbar">
-        <div class="stock-card-title" style="margin-bottom:0;">Stock Scanner</div>
-        <div class="workbench-actions" style="margin-top:0;">
-          <button id="stockScannerRefreshBtn" class="btn">Refresh Scan</button>
-        </div>
+<div class="dashboard-layout">
+  <main class="main">
+    <div class="file-selector">
+      <h2>Stock Scanner</h2>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button id="stockScannerRefreshBtn" class="btn" style="flex:0 0 auto;padding:10px 14px;">Run Scan</button>
       </div>
+    </div>
 
-      <div id="stockScannerError" class="active-error" style="display:none;"></div>
+    <div id="stockScannerSymbols" style="margin:6px 0;"></div>
 
-      <div id="stockScannerSymbols" class="stock-card" style="padding:6px 12px;"></div>
+    <div id="stockScannerError" class="active-error" style="display:none;"></div>
 
-      <div class="stock-card">
-        <div class="stock-card-title">Ranked Candidates</div>
-        <div id="stockScannerMeta" class="stock-note"></div>
-        <div id="stockScannerList" class="workbench-suggestions" style="margin-top:10px;"></div>
-      </div>
-    </section>
-  </div>
+    <div id="tradeCountsBar" style="margin-top:12px;color:rgba(190,236,244,0.94);font-size:12px;"></div>
+    <div id="stockScannerMeta" style="margin-top:6px;color:rgba(190,236,244,0.7);font-size:12px;"></div>
+
+    <div id="content" style="margin-top:18px">
+      <div id="stockScannerList"></div>
+    </div>
+  </main>
+</div>
 </div>
