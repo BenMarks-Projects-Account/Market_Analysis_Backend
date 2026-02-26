@@ -132,6 +132,10 @@ window.BenTradeStrategyShell = (function(){
             qp.set(String(key), String(value));
           });
         }
+        // Dev toggle: capture rejected examples for filter trace
+        if(localStorage.getItem('bentrade_filter_trace_examples') === 'true'){
+          qp.set('_capture_trace_examples', '1');
+        }
         const suffix = qp.toString();
         if(suffix){
           mapped = `${mapped}${mapped.includes('?') ? '&' : '?'}${suffix}`;
@@ -157,6 +161,7 @@ window.BenTradeStrategyShell = (function(){
         { key: 'distance_max', label: 'OTM max', type: 'float', min: 0.01, max: 0.30, step: 0.01, width: '95px' },
         { key: 'min_pop', label: 'Min POP', type: 'float', min: 0, max: 1, step: 0.01, width: '100px' },
         { key: 'min_ev_to_risk', label: 'Min EV/Risk', type: 'float', min: 0, step: 0.01, width: '115px' },
+        { key: 'min_ror', label: 'Min RoR', type: 'float', min: 0, step: 0.005, width: '100px' },
         { key: 'max_bid_ask_spread_pct', label: 'Max spread %', type: 'float', min: 0.1, step: 0.1, width: '115px' },
         { key: 'min_open_interest', label: 'Min OI', type: 'int', min: 1, width: '90px' },
         { key: 'min_volume', label: 'Min Vol', type: 'int', min: 1, width: '90px' },
@@ -964,12 +969,21 @@ window.BenTradeStrategyShell = (function(){
         }
 
         if(trades.length === 0){
-          // Empty report — styled explanation box with warnings, diagnostics, rejection breakdown
+          // Empty report — styled explanation box with warnings, diagnostics, filter trace
           const stats = data?.report_stats || {};
           const symbols = Array.isArray(data?.symbols) ? data.symbols : [];
+          const ft = data?.filter_trace || null;
 
           let html = '<div style="border:1px solid rgba(255,187,51,0.35);border-radius:10px;padding:16px 18px;margin-top:6px;background:rgba(255,187,51,0.06);">';
-          html += '<div style="font-size:14px;font-weight:700;color:#ffbb33;margin-bottom:8px;">No Trades Passed Filters</div>';
+
+          // ── Header with preset badge ──
+          html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">';
+          html += '<div style="font-size:14px;font-weight:700;color:#ffbb33;">No Trades Passed Filters</div>';
+          if(ft && ft.preset_name){
+            html += `<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;background:rgba(159,239,255,0.12);color:#9fefff;text-transform:uppercase;letter-spacing:0.5px;">${escapeHtml(ft.preset_name)}</span>`;
+          }
+          html += '</div>';
+
           html += '<div style="font-size:12px;color:rgba(230,251,255,0.85);line-height:1.55;">';
           html += 'All candidates were filtered out by the evaluate thresholds. ';
           html += 'This is normal when market conditions or scan parameters produce candidates ';
@@ -981,6 +995,229 @@ window.BenTradeStrategyShell = (function(){
             html += '<ul style="margin:4px 0 0 18px;padding:0;color:#9fefff;font-size:12px;line-height:1.5;">';
             reportWarnings.forEach(w => { html += `<li>${escapeHtml(w)}</li>`; });
             html += '</ul>';
+          }
+
+          // ── Top 3 Bottleneck Stages (largest dropoffs) ──
+          if(ft && Array.isArray(ft.stages) && ft.stages.length){
+            const _allStages = ft.stages.map(function(stage, i){
+              var inp = typeof stage.input_count === 'number' ? stage.input_count : 0;
+              var out = typeof stage.output_count === 'number' ? stage.output_count : 0;
+              return { idx: i, label: stage.label || stage.name, inp: inp, out: out, dropped: Math.max(0, inp - out) };
+            }).filter(function(s){ return s.dropped > 0; });
+            _allStages.sort(function(a,b){ return b.dropped - a.dropped; });
+            var _top3 = _allStages.slice(0, 3);
+            if(_top3.length){
+              html += '<div style="margin-top:14px;font-size:12px;font-weight:600;color:#9fefff;">Top Bottleneck Stages</div>';
+              html += '<div style="margin-top:6px;display:flex;flex-direction:column;gap:2px;">';
+              _top3.forEach(function(s){
+                var isKill = s.out === 0;
+                var barColor = isKill ? 'rgba(255,94,94,0.25)' : 'rgba(255,187,51,0.12)';
+                var borderColor = isKill ? 'rgba(255,94,94,0.5)' : 'rgba(255,187,51,0.3)';
+                var countColor = isKill ? '#ff5e5e' : '#ffbb33';
+                html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:6px;background:'+barColor+';border:1px solid '+borderColor+';">';
+                html += '<span style="font-size:10px;color:rgba(159,239,255,0.5);min-width:14px;text-align:center;">'+(s.idx+1)+'</span>';
+                html += '<span style="font-size:11px;color:#e6fbff;flex:1;">'+escapeHtml(s.label)+'</span>';
+                html += '<span style="font-size:11px;font-weight:600;color:'+countColor+';">'+s.inp+' \u2192 '+s.out+'</span>';
+                html += '<span style="font-size:10px;color:rgba(255,187,51,0.8);">(-'+s.dropped+')</span>';
+                html += '</div>';
+              });
+              html += '</div>';
+            }
+            // Full pipeline in collapsible details
+            html += '<details style="margin-top:6px;">';
+            html += '<summary style="font-size:11px;color:rgba(159,239,255,0.5);cursor:pointer;user-select:none;">All Pipeline Stages ('+ft.stages.length+')</summary>';
+            html += '<div style="margin-top:4px;display:flex;flex-direction:column;gap:2px;">';
+            ft.stages.forEach((stage, i) => {
+              const inp = stage.input_count != null ? stage.input_count : '?';
+              const out = stage.output_count != null ? stage.output_count : '?';
+              const dropped = (typeof inp === 'number' && typeof out === 'number') ? inp - out : null;
+              const isBottleneck = dropped !== null && dropped > 0 && out === 0;
+              const barColor = isBottleneck ? 'rgba(255,94,94,0.25)' : 'rgba(159,239,255,0.08)';
+              const borderColor = isBottleneck ? 'rgba(255,94,94,0.5)' : 'rgba(159,239,255,0.15)';
+              html += `<div style="display:flex;align-items:center;gap:8px;padding:4px 10px;border-radius:6px;background:${barColor};border:1px solid ${borderColor};">`;
+              html += `<span style="font-size:10px;color:rgba(159,239,255,0.5);min-width:14px;text-align:center;">${i + 1}</span>`;
+              html += `<span style="font-size:11px;color:#e6fbff;flex:1;">${escapeHtml(stage.label || stage.name)}</span>`;
+              html += `<span style="font-size:11px;font-weight:600;color:${isBottleneck ? '#ff5e5e' : '#9fefff'};">${inp} \u2192 ${out}</span>`;
+              if(dropped !== null && dropped > 0){
+                html += `<span style="font-size:10px;color:rgba(255,187,51,0.8);">(-${dropped})</span>`;
+              }
+              html += '</div>';
+            });
+            html += '</div>';
+            html += '</details>';
+          }
+
+          // ── Gate Breakdown ──
+          const gateBk = (ft && ft.gate_breakdown) ? ft.gate_breakdown : {};
+          const gateEntries = Object.entries(gateBk).filter(([,v]) => v > 0);
+          const rejBk = stats.rejection_breakdown || diagnostics.rejection_breakdown || {};
+          const rejEntries = Object.entries(rejBk).filter(([,v]) => v > 0);
+          if(gateEntries.length){
+            const gateLabels = {
+              quote_validation: 'Quote Validation',
+              metrics_computation: 'Metrics Computation',
+              probability: 'Probability (POP)',
+              expected_value: 'Expected Value (EV/Risk)',
+              return_on_risk: 'Return on Risk',
+              spread_structure: 'Spread Structure',
+              liquidity: 'Liquidity (OI/Volume)',
+              data_quality: 'Data Quality (Missing Fields)',
+              other: 'Other',
+            };
+            html += '<div style="margin-top:12px;font-size:12px;font-weight:600;color:#ffbb33;">Gate Breakdown</div>';
+            html += '<table style="margin-top:4px;font-size:11px;color:#ddd;border-collapse:collapse;width:100%;max-width:400px;">';
+            html += '<tr style="border-bottom:1px solid rgba(255,255,255,0.1);"><th style="text-align:left;padding:4px 10px 4px 0;font-weight:600;color:#9fefff;">Gate</th><th style="text-align:right;padding:4px 0;font-weight:600;color:#9fefff;">Rejected</th></tr>';
+            gateEntries.sort((a,b) => b[1] - a[1]);
+            gateEntries.forEach(([gate, count]) => {
+              const label = gateLabels[gate] || gate.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              html += `<tr><td style="padding:3px 10px 3px 0;">${escapeHtml(label)}</td><td style="text-align:right;padding:3px 0;">${count}</td></tr>`;
+            });
+            html += '</table>';
+          } else if(rejEntries.length){
+            // Fallback: plain rejection breakdown (no gate grouping)
+            html += '<div style="margin-top:12px;font-size:12px;font-weight:600;color:#ffbb33;">Rejection Breakdown</div>';
+            html += '<table style="margin-top:4px;font-size:11px;color:#ddd;border-collapse:collapse;width:100%;max-width:360px;">';
+            html += '<tr style="border-bottom:1px solid rgba(255,255,255,0.1);"><th style="text-align:left;padding:4px 10px 4px 0;font-weight:600;color:#9fefff;">Reason</th><th style="text-align:right;padding:4px 0;font-weight:600;color:#9fefff;">Count</th></tr>';
+            rejEntries.sort((a,b) => b[1] - a[1]);
+            rejEntries.forEach(([reason, count]) => {
+              const label = reason.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              html += `<tr><td style="padding:3px 10px 3px 0;">${escapeHtml(label)}</td><td style="text-align:right;padding:3px 0;">${count}</td></tr>`;
+            });
+            html += '</table>';
+          }
+
+          // ── Resolved Thresholds (collapsible) ──
+          if(ft && ft.resolved_thresholds && Object.keys(ft.resolved_thresholds).length){
+            html += '<details style="margin-top:12px;">';
+            html += '<summary style="font-size:12px;font-weight:600;color:#9fefff;cursor:pointer;user-select:none;">Resolved Thresholds</summary>';
+            html += '<table style="margin-top:4px;font-size:11px;color:#ddd;border-collapse:collapse;width:100%;max-width:400px;">';
+            const _thresholdLabels = {
+              dte_min:'DTE Min', dte_max:'DTE Max', distance_min:'OTM Distance Min', distance_max:'OTM Distance Max',
+              width_min:'Width Min', width_max:'Width Max', expected_move_multiple:'Exp Move Multiple',
+              min_pop:'Min POP', min_ev_to_risk:'Min EV/Risk', min_ror:'Min ROR', max_bid_ask_spread_pct:'Max Bid-Ask Spread %',
+              min_open_interest:'Min Open Interest', min_volume:'Min Volume',
+            };
+            Object.entries(ft.resolved_thresholds).forEach(([key, val]) => {
+              const label = _thresholdLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              html += `<tr><td style="padding:2px 10px 2px 0;color:rgba(230,251,255,0.7);">${escapeHtml(label)}</td><td style="text-align:right;padding:2px 0;">${val}</td></tr>`;
+            });
+            html += '</table>';
+            html += '</details>';
+          }
+
+          // ── Preset Comparison (diff vs Strict / Wide) ──
+          if(ft && ft.preset_name && ft.resolved_thresholds){
+            const _profiles = window.BenTradeScannerProfiles;
+            const _sId = state.activeConfig?.strategyId || 'credit_spread';
+            const _strictCfg = _profiles?.getProfile?.(_sId, 'strict');
+            const _wideCfg   = _profiles?.getProfile?.(_sId, 'wide');
+            if(_strictCfg && _wideCfg){
+              const _diffKeys = [
+                { key:'min_pop',               label:'Min POP',             fmt: v => v != null ? (v*100).toFixed(0)+'%' : '\u2014' },
+                { key:'min_ev_to_risk',        label:'Min EV / Risk',       fmt: v => v != null ? v.toFixed(3)          : '\u2014' },
+                { key:'min_ror',               label:'Min ROR',             fmt: v => v != null ? (v*100).toFixed(1)+'%' : '\u2014' },
+                { key:'max_bid_ask_spread_pct', label:'Max Bid-Ask %',      fmt: v => v != null ? v.toFixed(1)+'%'      : '\u2014' },
+                { key:'min_open_interest',     label:'Min Open Interest',    fmt: v => v != null ? String(v)            : '\u2014' },
+                { key:'min_volume',            label:'Min Volume',           fmt: v => v != null ? String(v)            : '\u2014' },
+              ];
+              const _curT = ft.resolved_thresholds;
+              html += '<details style="margin-top:12px;">';
+              html += '<summary style="font-size:12px;font-weight:600;color:#9fefff;cursor:pointer;user-select:none;">Preset Comparison</summary>';
+              html += '<table style="margin-top:4px;font-size:11px;color:#ddd;border-collapse:collapse;width:100%;max-width:480px;">';
+              html += '<tr style="border-bottom:1px solid rgba(255,255,255,0.1);">';
+              html += '<th style="text-align:left;padding:4px 8px 4px 0;font-weight:600;color:#9fefff;">Param</th>';
+              html += '<th style="text-align:right;padding:4px 6px;font-weight:600;color:rgba(255,94,94,0.9);">Strict</th>';
+              html += '<th style="text-align:right;padding:4px 6px;font-weight:600;color:#ffbb33;text-transform:capitalize;">'+escapeHtml(ft.preset_name)+'</th>';
+              html += '<th style="text-align:right;padding:4px 0 4px 6px;font-weight:600;color:#4ade80;">Wide</th>';
+              html += '</tr>';
+              _diffKeys.forEach(function(d){
+                var sV = _strictCfg[d.key], cV = _curT[d.key], wV = _wideCfg[d.key];
+                var differs = cV != null && sV != null && cV !== sV;
+                var cStyle = differs ? 'color:#ffbb33;font-weight:600;' : 'color:#ddd;';
+                html += '<tr>';
+                html += '<td style="padding:2px 8px 2px 0;color:rgba(230,251,255,0.7);">'+escapeHtml(d.label)+'</td>';
+                html += '<td style="text-align:right;padding:2px 6px;color:rgba(255,94,94,0.6);">'+d.fmt(sV)+'</td>';
+                html += '<td style="text-align:right;padding:2px 6px;'+cStyle+'">'+d.fmt(cV)+'</td>';
+                html += '<td style="text-align:right;padding:2px 0 2px 6px;color:rgba(74,222,128,0.7);">'+d.fmt(wV)+'</td>';
+                html += '</tr>';
+              });
+              html += '</table>';
+              html += '</details>';
+            }
+          }
+
+          // ── Data Quality Flags ──
+          if(ft && Array.isArray(ft.data_quality_flags) && ft.data_quality_flags.length){
+            html += '<div style="margin-top:10px;font-size:11px;color:rgba(255,187,51,0.8);">';
+            html += '<strong>Data Quality:</strong> ' + ft.data_quality_flags.map(f => escapeHtml(f)).join(', ');
+            html += '</div>';
+          }
+
+          // ── Data Quality Mode badge ──
+          if(ft && ft.data_quality_mode){
+            const dqModeColors = { strict: '#ff5e5e', balanced: '#ffbb33', lenient: '#4ade80' };
+            const dqColor = dqModeColors[ft.data_quality_mode] || '#9fefff';
+            html += `<div style="margin-top:6px;font-size:11px;color:rgba(230,251,255,0.7);">`;
+            html += `Data Quality Mode: <span style="font-weight:600;color:${dqColor};padding:1px 6px;border-radius:4px;background:rgba(255,255,255,0.06);border:1px solid ${dqColor}40;">${escapeHtml(ft.data_quality_mode)}</span>`;
+            html += `</div>`;
+          }
+
+          // ── Missing Field Counts ──
+          if(ft && ft.missing_field_counts && typeof ft.missing_field_counts === 'object'){
+            const mfc = ft.missing_field_counts;
+            const total = mfc.total_enriched || 0;
+            const hasMissing = (mfc.open_interest || 0) + (mfc.volume || 0) + (mfc.bid || 0) + (mfc.ask || 0) + (mfc.quote_rejected || 0) > 0;
+            if(hasMissing && total > 0){
+              html += '<details style="margin-top:8px;">';
+              html += '<summary style="font-size:12px;font-weight:600;color:rgba(255,187,51,0.9);cursor:pointer;user-select:none;">Missing Field Counts</summary>';
+              html += '<table style="margin-top:4px;font-size:11px;color:#ddd;border-collapse:collapse;width:100%;max-width:360px;">';
+              html += '<tr style="border-bottom:1px solid rgba(255,255,255,0.1);"><th style="text-align:left;padding:4px 10px 4px 0;font-weight:600;color:#9fefff;">Field</th><th style="text-align:right;padding:4px 0;font-weight:600;color:#9fefff;">Missing</th><th style="text-align:right;padding:4px 0 4px 8px;font-weight:600;color:#9fefff;">% of Total</th></tr>';
+              const mfcRows = [
+                ['Open Interest', mfc.open_interest],
+                ['Volume', mfc.volume],
+                ['Bid', mfc.bid],
+                ['Ask', mfc.ask],
+                ['Quote Rejected', mfc.quote_rejected],
+              ];
+              mfcRows.forEach(([label, count]) => {
+                if(count > 0){
+                  const pct = ((count / total) * 100).toFixed(1);
+                  html += `<tr><td style="padding:2px 10px 2px 0;">${label}</td><td style="text-align:right;padding:2px 0;">${count}</td><td style="text-align:right;padding:2px 0 2px 8px;color:rgba(255,187,51,0.8);">${pct}%</td></tr>`;
+                }
+              });
+              if(mfc.dq_waived > 0){
+                html += `<tr><td style="padding:2px 10px 2px 0;color:#4ade80;">DQ Waived (lenient)</td><td style="text-align:right;padding:2px 0;color:#4ade80;">${mfc.dq_waived}</td><td style="text-align:right;padding:2px 0 2px 8px;color:#4ade80;">\u2014</td></tr>`;
+              }
+              html += '</table>';
+              html += '</details>';
+            }
+          }
+
+          // ── Rejected Examples (dev toggle) ──
+          if(ft && Array.isArray(ft.rejected_examples) && ft.rejected_examples.length){
+            html += '<details style="margin-top:12px;">';
+            html += '<summary style="font-size:12px;font-weight:600;color:rgba(255,187,51,0.9);cursor:pointer;user-select:none;">Rejected Examples (' + ft.rejected_examples.length + ')</summary>';
+            html += '<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">';
+            ft.rejected_examples.forEach((ex, i) => {
+              html += '<div style="padding:6px 10px;border-radius:6px;background:rgba(255,94,94,0.06);border:1px solid rgba(255,94,94,0.2);font-size:11px;color:#ddd;">';
+              const sym = ex.symbol || '?';
+              const strikes = [ex.short_strike, ex.long_strike].filter(Boolean).join('/');
+              html += `<div style="font-weight:600;color:#e6fbff;">${escapeHtml(sym)} ${strikes} w=${ex.width || '?'}</div>`;
+              const fields = [];
+              if(ex.net_credit != null) fields.push(`credit=$${ex.net_credit}`);
+              if(ex.pop != null) fields.push(`POP=${(ex.pop * 100).toFixed(1)}%`);
+              if(ex.ev_to_risk != null) fields.push(`EV/Risk=${ex.ev_to_risk}`);
+              if(ex.ror != null) fields.push(`ROR=${(ex.ror * 100).toFixed(1)}%`);
+              if(ex.open_interest != null) fields.push(`OI=${ex.open_interest}`);
+              if(ex.volume != null) fields.push(`Vol=${ex.volume}`);
+              if(fields.length) html += `<div style="color:rgba(230,251,255,0.7);">${fields.join(' · ')}</div>`;
+              if(Array.isArray(ex.reasons) && ex.reasons.length){
+                html += `<div style="color:#ff5e5e;margin-top:2px;">Rejected: ${ex.reasons.map(r => escapeHtml(r)).join(', ')}</div>`;
+              }
+              html += '</div>';
+            });
+            html += '</div>';
+            html += '</details>';
           }
 
           // Diagnostics summary line
@@ -997,26 +1234,75 @@ window.BenTradeStrategyShell = (function(){
             html += `<div style="margin-top:10px;color:rgba(159,239,255,0.7);font-size:11px;">${escapeHtml(parts.join(' · '))}</div>`;
           }
 
-          // Rejection breakdown (from report_stats or diagnostics)
-          const rejBk = stats.rejection_breakdown || diagnostics.rejection_breakdown || {};
-          const rejEntries = Object.entries(rejBk).filter(([,v]) => v > 0);
-          if(rejEntries.length){
-            html += '<div style="margin-top:12px;font-size:12px;font-weight:600;color:#ffbb33;">Rejection Breakdown</div>';
-            html += '<table style="margin-top:4px;font-size:11px;color:#ddd;border-collapse:collapse;width:100%;max-width:360px;">';
-            html += '<tr style="border-bottom:1px solid rgba(255,255,255,0.1);"><th style="text-align:left;padding:4px 10px 4px 0;font-weight:600;color:#9fefff;">Reason</th><th style="text-align:right;padding:4px 0;font-weight:600;color:#9fefff;">Count</th></tr>';
-            rejEntries.sort((a,b) => b[1] - a[1]);
-            rejEntries.forEach(([reason, count]) => {
-              const label = reason.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-              html += `<tr><td style="padding:3px 10px 3px 0;">${escapeHtml(label)}</td><td style="text-align:right;padding:3px 0;">${count}</td></tr>`;
+          // ── Dynamic Suggestions based on gate breakdown ──
+          {
+            const _gb = (ft && ft.gate_breakdown) ? ft.gate_breakdown : {};
+            const _rej = stats.rejection_breakdown || diagnostics.rejection_breakdown || {};
+            // Determine dominant bottleneck category
+            const _gateScores = {
+              ev_to_risk:   (_gb.expected_value || 0) + (_rej.ev_to_risk_below_floor || 0) + (_rej.ror_below_floor || 0),
+              spread_width: (_gb.spread_structure || 0) + (_rej.spread_too_wide || 0),
+              liquidity:    (_gb.liquidity || 0) + (_rej.volume_below_min || 0) + (_rej.open_interest_below_min || 0),
+              pop:          (_gb.probability || 0) + (_rej.pop_below_floor || 0),
+              data_quality: (_gb.data_quality || 0) + (_gb.quote_validation || 0) + (_gb.metrics_computation || 0),
+            };
+            const _sortedGates = Object.entries(_gateScores).filter(function(e){ return e[1]>0; }).sort(function(a,b){ return b[1]-a[1]; });
+            const _tips = [];
+            const _dominant = _sortedGates.length ? _sortedGates[0][0] : null;
+
+            if(_dominant === 'ev_to_risk' || _gateScores.ev_to_risk > 0){
+              _tips.push('\u26a1 <strong>EV/Risk & ROR too low:</strong> Try widening spread width ($3\u2013$5), extending DTE to 30\u201345, or increasing OTM distance to capture more premium.');
+            }
+            if(_dominant === 'spread_width' || _gateScores.spread_width > 0){
+              _tips.push('\ud83d\udcc9 <strong>Bid-Ask spread too wide:</strong> Focus on the most liquid expirations (monthly opex), limit to SPY/QQQ, or raise minimum credit to filter illiquid strikes.');
+            }
+            if(_dominant === 'liquidity' || _gateScores.liquidity > 0){
+              _tips.push('\ud83d\udcca <strong>Low OI/Volume:</strong> Limit symbols to SPY/QQQ only, or switch to a looser preset that relaxes OI/volume floors.');
+            }
+            if(_gateScores.pop > 0){
+              _tips.push('\ud83c\udfaf <strong>POP too low:</strong> Move strikes further OTM (increase distance_min) or reduce width to narrow the breakeven range.');
+            }
+            if(_gateScores.data_quality > 0){
+              _tips.push('\u26a0\ufe0f <strong>Data quality issues:</strong> Missing bid/ask/OI data prevented evaluation. Try scanning during market hours for fresher quotes.');
+            }
+
+            if(_tips.length === 0){
+              _tips.push('Try the Conservative preset for wider scan parameters, scan multiple symbols (SPY + QQQ + IWM), or enable Advanced Filters to tune DTE / width / OTM distance.');
+            }
+
+            html += '<div style="margin-top:14px;font-size:11px;color:rgba(159,239,255,0.85);line-height:1.6;">';
+            html += '<div style="font-size:12px;font-weight:600;color:#9fefff;margin-bottom:4px;">Actionable Suggestions</div>';
+            _tips.forEach(function(tip){
+              html += '<div style="margin:3px 0;padding:4px 8px;border-radius:4px;background:rgba(159,239,255,0.04);border-left:2px solid rgba(159,239,255,0.3);">'+tip+'</div>';
             });
-            html += '</table>';
+            html += '</div>';
           }
 
-          // Suggestion
-          html += '<div style="margin-top:14px;font-size:11px;color:rgba(159,239,255,0.6);line-height:1.5;">';
-          html += '<strong>Suggestions:</strong> Try the Conservative preset for wider scan parameters, ';
-          html += 'scan multiple symbols (SPY + QQQ + IWM), or enable Advanced Filters to tune DTE / width / OTM distance.';
-          html += '</div>';
+          // ── Action buttons: Run Wide Preset + Open Data Workbench ──
+          {
+            const _presetName = (ft && ft.preset_name) ? String(ft.preset_name).toLowerCase() : '';
+            const _btns = [];
+
+            // Req 3: Run Wide Preset button (only if not already wide and 0 accepted)
+            if(_presetName && _presetName !== 'wide'){
+              _btns.push('<button data-action="run-wide-preset" style="padding:6px 14px;font-size:11px;font-weight:600;border:1px solid rgba(74,222,128,0.4);border-radius:6px;background:rgba(74,222,128,0.1);color:#4ade80;cursor:pointer;transition:background 0.15s;">\u26a1 Run Wide Preset</button>');
+            }
+
+            // Req 4: Open Data Workbench link for filter trace JSON
+            if(ft){
+              _btns.push('<button data-action="open-workbench-trace" style="padding:6px 14px;font-size:11px;font-weight:600;border:1px solid rgba(159,239,255,0.3);border-radius:6px;background:rgba(159,239,255,0.08);color:#9fefff;cursor:pointer;transition:background 0.15s;">\ud83d\udd0d Open Data Workbench</button>');
+            }
+
+            // Existing: Copy Trace JSON
+            if(ft){
+              const traceJson = JSON.stringify(ft, null, 2);
+              _btns.push('<button data-action="copy-trace" data-trace="'+escapeHtml(traceJson)+'" style="padding:6px 14px;font-size:11px;font-weight:600;border:1px solid rgba(159,239,255,0.3);border-radius:6px;background:rgba(159,239,255,0.08);color:#9fefff;cursor:pointer;transition:background 0.15s;">Copy Trace JSON</button>');
+            }
+
+            if(_btns.length){
+              html += '<div data-no-trades-actions data-filter-trace="'+escapeHtml(JSON.stringify(ft || null))+'" data-symbols="'+escapeHtml((Array.isArray(data?.symbols) ? data.symbols : []).join(','))+'" style="margin-top:14px;display:flex;flex-wrap:wrap;gap:8px;">'+_btns.join('')+'</div>';
+            }
+          }
 
           html += '</div>';  // close explanation box
           if(contentEl) contentEl.innerHTML = html;
@@ -1213,6 +1499,72 @@ window.BenTradeStrategyShell = (function(){
           e.preventDefault();
           e.stopPropagation();
           const action = btn.dataset.action;
+
+          // ── No-trades panel actions (no card context needed) ──
+          if(btn.closest('[data-no-trades-actions]')){
+            if(action === 'run-wide-preset'){
+              // Switch preset to wide and re-generate
+              const pSel = rootEl.querySelector('select');
+              if(pSel){
+                // Find the <select> that contains 'wide' option
+                const wideOpt = Array.from(pSel.options).find(o => o.value === 'wide');
+                if(wideOpt){
+                  pSel.value = 'wide';
+                  pSel.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+              }
+              // Also force the filters state
+              if(state.activeConfig){
+                state.activeConfig.currentFilters = state.activeConfig.currentFilters || {};
+                state.activeConfig.currentFilters.preset = 'wide';
+                // Merge wide profile defaults
+                var _wDefs = window.BenTradeStrategyDefaults?.getStrategyDefaults?.(
+                  state.activeConfig.strategyId || 'credit_spread', 'wide'
+                ) || {};
+                Object.keys(_wDefs).forEach(function(k){
+                  if(k !== 'symbols') state.activeConfig.currentFilters[k] = _wDefs[k];
+                });
+              }
+              // Click generate
+              if(genBtn && !genBtn.disabled){
+                genBtn.click();
+              }
+              return;
+            }
+
+            if(action === 'open-workbench-trace'){
+              // Open the Data Workbench modal with filter-trace JSON
+              var _actionsEl = btn.closest('[data-no-trades-actions]');
+              var _ftData = null;
+              try{ _ftData = JSON.parse(_actionsEl?.dataset?.filterTrace || 'null'); }catch(_){}
+              if(_ftData && window.BenTradeDataWorkbenchModal && window.BenTradeDataWorkbenchModal.open){
+                var _sym = (_actionsEl?.dataset?.symbols || '').split(',').filter(Boolean)[0] || 'Scanner';
+                window.BenTradeDataWorkbenchModal.open({
+                  symbol: _sym,
+                  normalized: _ftData,
+                  rawSource: _ftData,
+                  derived: { note: 'Filter trace from ' + (_ftData.preset_name || 'unknown') + ' preset scan' },
+                });
+              }else{
+                // Fallback: navigate to Data Workbench page
+                window.location.hash = '#/admin/data-workbench';
+              }
+              return;
+            }
+
+            if(action === 'copy-trace'){
+              var _traceText = btn.dataset.trace || '';
+              navigator.clipboard.writeText(_traceText).then(function(){
+                btn.textContent = 'Copied!';
+                setTimeout(function(){ btn.textContent = 'Copy Trace JSON'; }, 1500);
+              }).catch(function(){
+                prompt('Copy trace JSON:', _traceText);
+              });
+              return;
+            }
+            return;
+          }
+
           const cardEl = btn.closest('.trade-card');
           const tradeIdx = cardEl ? parseInt(cardEl.dataset.idx, 10) : -1;
           const trade = currentTrades[tradeIdx];

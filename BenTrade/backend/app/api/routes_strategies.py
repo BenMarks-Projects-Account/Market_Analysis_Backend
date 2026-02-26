@@ -129,6 +129,11 @@ async def generate_strategy_report_stream(strategy_id: str, request: Request):
     if allow_skewed not in (None, ""):
         request_payload["allow_skewed"] = str(allow_skewed)
 
+    # Dev toggle: capture rejected trade examples in filter trace
+    capture_examples = query.get("_capture_trace_examples")
+    if capture_examples not in (None, "", "0", "false"):
+        request_payload["_capture_trace_examples"] = True
+
     timeout_seconds = 180
     timeout_q = query.get("timeout_seconds")
     if timeout_q not in (None, ""):

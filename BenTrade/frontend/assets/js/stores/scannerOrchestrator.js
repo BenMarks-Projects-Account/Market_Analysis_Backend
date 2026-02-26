@@ -309,6 +309,17 @@ window.BenTradeScannerOrchestrator = (function(){
           allCandidates.push(normalizeResult(row, def, 'stock'));
         });
 
+        // Persist raw stock scanner response to shared sessionStorage cache
+        if(window.BenTradeScanResultsCache){
+          const normalized = {
+            as_of: response?.as_of || new Date().toISOString(),
+            candidates: candidates,
+            notes: Array.isArray(response?.notes) ? response.notes : [],
+            source_status: response?.source_status || null,
+          };
+          window.BenTradeScanResultsCache.save('stockScanner', normalized, { source: 'orchestrator', filterLevel: effectiveLevel });
+        }
+
         // Record session stats
         if(window.BenTradeSessionStatsStore?.recordRun && (Array.isArray(response?.candidates) || response?.report_stats)){
           window.BenTradeSessionStatsStore.recordRun(def.moduleId, response);
@@ -337,11 +348,13 @@ window.BenTradeScannerOrchestrator = (function(){
       logLine(logFn, `Running: ${def.label}`);
       try{
         /* Merge profile params → scanner payload.  Profile values serve as
-           the baseline; def.payload overrides (e.g. spread_type for credit). */
+           the baseline; def.payload overrides (e.g. spread_type for credit).
+           Always include preset so the backend stamps _preset_name correctly. */
         const profileParams = (window.BenTradeScannerProfiles?.getProfile)
           ? (window.BenTradeScannerProfiles.getProfile(def.strategyId, effectiveLevel) || {})
           : {};
         const scanPayload = Object.assign({}, profileParams, def.payload || {});
+        scanPayload.preset = effectiveLevel;
         if(resolvedSymbols) scanPayload.symbols = resolvedSymbols;
         const response = await withRetry(
           () => api.generateStrategyReport(def.strategyId, scanPayload),

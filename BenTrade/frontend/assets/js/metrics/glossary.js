@@ -190,6 +190,41 @@ window.BenTradeMetrics.glossary = {
     why: 'Provides fast shortlist ordering.',
     notes: 'Useful for scanner triage.'
   },
+  trend_score: {
+    label: 'Trend Score',
+    short: 'Composite trend-strength reading from price action and moving averages.',
+    formula: 'Weighted composite of EMA/SMA alignment, slope, and price position',
+    why: 'Quantifies directional conviction for entry timing.',
+    notes: 'Higher values indicate stronger, more aligned trend.'
+  },
+  momentum_score: {
+    label: 'Momentum Score',
+    short: 'Composite momentum reading from RSI, rate-of-change, and volume.',
+    formula: 'Weighted blend of RSI, ROC, and volume trend signals',
+    why: 'Captures whether price movement has follow-through.',
+    notes: 'Can diverge from trend during reversals.'
+  },
+  pullback_score: {
+    label: 'Pullback Score',
+    short: 'Measures depth and quality of a pullback within a prevailing trend.',
+    formula: 'Based on retracement depth, RSI dip, and support proximity',
+    why: 'Higher values suggest a better risk/reward entry on a dip.',
+    notes: 'Most useful when trend score is also strong.'
+  },
+  catalyst_score: {
+    label: 'Catalyst Score',
+    short: 'Proximity and strength of upcoming fundamental or technical catalysts.',
+    formula: 'Heuristic from earnings, events, volume spikes, and breakout setups',
+    why: 'Flags candidates with near-term price-moving events.',
+    notes: 'Interpret alongside volatility context.'
+  },
+  volatility_score: {
+    label: 'Volatility Score',
+    short: 'Composite volatility regime classification score.',
+    formula: 'Blended from realized vol, ATR, and range compression metrics',
+    why: 'Helps match strategy type to current vol environment.',
+    notes: 'Low score can indicate compression (potential breakout).'
+  },
   iv_rank: {
     label: 'IV Rank',
     short: 'Current IV percentile within its lookback high-low range.',

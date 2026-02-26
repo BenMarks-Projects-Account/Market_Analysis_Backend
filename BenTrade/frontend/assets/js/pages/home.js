@@ -43,6 +43,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
   const activeTradesCountEl = scope.querySelector('#homeActiveTradesCount');
   const equityCurveEl = scope.querySelector('#homeEquityCurve');
   const equityCurveEmptyEl = scope.querySelector('#homeEquityCurveEmpty');
+  const clearScanResultsBtnEl = scope.querySelector('#homeClearScanResultsBtn');
+  const scanLastRunEl = scope.querySelector('#homeScanLastRun');
 
   if(!regimeStripEl || !regimeComponentsEl || !playbookChipsEl || !scanPresetEl || !runQueueBtnEl || !queueProgressEl || !queueCurrentEl || !queueCountEl || !queueSpinnerEl || !queueLogEl || !scanStatusEl || !scanErrorEl || !signalHubEl || !indexTilesEl || !spyChartEl || !sectorBarsEl || !scannerOpportunitiesEl || !riskTilesEl || !macroTilesEl || !strategyPlaybookEl || !fullRefreshBtnEl || !refreshBtnEl || !refreshingBadgeEl || !lastUpdatedEl || !vixChartEl || !errorEl){
     return;
@@ -51,6 +53,47 @@ window.BenTradePages.initHome = function initHome(rootEl){
   let latestOpportunities = [];
   const opportunityModelState = new Map();
   const devLoggedCards = new Set();
+
+  /* ── Scan Results Cache helpers (shared sessionStorage) ── */
+  const _scanCache = window.BenTradeScanResultsCache;
+  const SCAN_CACHE_ID = 'stockScanner';
+
+  function updateHomeScanCacheUI(){
+    if(_scanCache){
+      const hasCached = _scanCache.load(SCAN_CACHE_ID) !== null;
+      if(clearScanResultsBtnEl){
+        clearScanResultsBtnEl.style.display = hasCached ? 'inline-block' : 'none';
+      }
+      if(scanLastRunEl){
+        const ts = _scanCache.formatTimestamp(SCAN_CACHE_ID);
+        scanLastRunEl.textContent = ts !== 'N/A' ? 'Last run: ' + ts : '';
+      }
+    } else {
+      if(clearScanResultsBtnEl) clearScanResultsBtnEl.style.display = 'none';
+      if(scanLastRunEl) scanLastRunEl.textContent = '';
+    }
+  }
+
+  function clearHomeScanResults(){
+    if(_scanCache) _scanCache.clear(SCAN_CACHE_ID);
+    // Also clear orchestrator in-memory results
+    const orchestrator = window.BenTradeScannerOrchestrator;
+    if(orchestrator?.clearResults) orchestrator.clearResults();
+    // Clear the home cache opportunities so next render shows empty
+    const snap = cacheStore?.getSnapshot?.();
+    if(snap && typeof snap === 'object'){
+      const data = (snap.data && typeof snap.data === 'object') ? { ...snap.data } : {};
+      data.opportunities = [];
+      cacheStore.setSnapshot({ ...snap, data });
+    }
+    latestOpportunities = [];
+    scannerOpportunitiesEl.innerHTML = '';
+    renderScannerOpportunities([]);
+    updateHomeScanCacheUI();
+    setScanStatus('');
+    setScanError('');
+    console.debug('Home: cleared scan results cache');
+  }
 
   /* ── OE card state (mirrors scanner shell's _expandState + currentTrades) ── */
   const _oeExpandState = {};
@@ -2007,6 +2050,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
         await runLoadSequence({ force: true, showOverlay: false, homeOnly: false }).catch(() => {});
         setScanStatus(`Full App Refresh complete${warnings ? ` (${warnings} warnings)` : ''} • ${new Date().toLocaleTimeString()}`);
         pushLog('Full App Refresh complete');
+        updateHomeScanCacheUI();
       }
     }finally{
       if(runId === fullAppRefreshState.runId){
@@ -2110,6 +2154,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
       }
 
       await runLoadSequence({ force: true, showOverlay: false, homeOnly: false }).catch(() => {});
+      updateHomeScanCacheUI();
     }finally{
       if(runId === queueState.runId){
         queueState.isRunning = false;
@@ -2348,7 +2393,14 @@ window.BenTradePages.initHome = function initHome(rootEl){
     });
   }
 
+  if(clearScanResultsBtnEl){
+    clearScanResultsBtnEl.addEventListener('click', () => {
+      clearHomeScanResults();
+    });
+  }
+
   resetQueueProgress();
+  updateHomeScanCacheUI();
 
   return function cleanupHome(){
     fullAppRefreshState.stopRequested = true;

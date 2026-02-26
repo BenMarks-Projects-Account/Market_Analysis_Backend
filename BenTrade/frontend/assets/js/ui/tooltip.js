@@ -62,7 +62,19 @@ window.BenTradeUI.Tooltip = (function(){
     'win rate': 'win_rate',
     'total p&l': 'total_pnl',
     'avg p&l': 'avg_pnl',
-    'max drawdown': 'max_drawdown'
+    'max drawdown': 'max_drawdown',
+    'trend': 'trend_score',
+    'trend score': 'trend_score',
+    'momentum': 'momentum_score',
+    'momentum score': 'momentum_score',
+    'pullback': 'pullback_score',
+    'pullback score': 'pullback_score',
+    'catalyst': 'catalyst_score',
+    'catalyst score': 'catalyst_score',
+    'volatility': 'volatility_score',
+    'volatility score': 'volatility_score',
+    'ema-20': 'ema_20',
+    'sma-50': 'sma_50'
   };
 
   function ensureTooltipEl(){

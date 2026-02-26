@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
@@ -305,10 +306,43 @@ class StrategyService:
                 for line in lines:
                     handle.write(line + "\n")
 
-    # -- Scan-parameter presets (Conservative vs Strict) -------
-    # "conservative" widens the scan window to surface more viable candidates.
-    # "strict" is the legacy behaviour (narrow DTE / $1 widths / SPY-only).
-    # Evaluate thresholds are UNCHANGED by preset.
+    # -- Scan-parameter presets (Strict / Conservative / Balanced / Wide) --
+    # Gate groups for filter-trace categorisation.
+    # Keys match rejection-reason strings emitted by strategy plugins.
+    _GATE_GROUPS: dict[str, list[str]] = {
+        "quote_validation": [
+            "MISSING_QUOTES:short_bid", "MISSING_QUOTES:long_ask",
+            "ASK_LT_BID:short_leg", "ASK_LT_BID:long_leg",
+            "NON_POSITIVE_CREDIT", "NET_CREDIT_GE_WIDTH",
+            # Centralised quote-validation codes (finer-grained)
+            "QUOTE_INVALID:short_leg:missing_bid", "QUOTE_INVALID:short_leg:missing_ask",
+            "QUOTE_INVALID:short_leg:negative_bid", "QUOTE_INVALID:short_leg:zero_or_negative_ask",
+            "QUOTE_INVALID:short_leg:inverted_market", "QUOTE_INVALID:short_leg:zero_mid",
+            "QUOTE_INVALID:long_leg:missing_bid", "QUOTE_INVALID:long_leg:missing_ask",
+            "QUOTE_INVALID:long_leg:negative_bid", "QUOTE_INVALID:long_leg:zero_or_negative_ask",
+            "QUOTE_INVALID:long_leg:inverted_market", "QUOTE_INVALID:long_leg:zero_mid",
+        ],
+        "metrics_computation": ["CREDIT_SPREAD_METRICS_FAILED"],
+        "probability": ["pop_below_floor"],
+        "expected_value": ["ev_to_risk_below_floor", "ev_negative"],
+        "return_on_risk": ["ror_below_floor"],
+        "spread_structure": ["invalid_width", "non_positive_credit", "spread_too_wide"],
+        "liquidity": ["open_interest_below_min", "volume_below_min"],
+        "data_quality": ["DQ_MISSING:open_interest", "DQ_MISSING:volume"],
+    }
+
+    # Payload keys that are NOT numeric filter thresholds.
+    _FILTER_TRACE_SKIP_KEYS: frozenset[str] = frozenset({
+        "symbols", "symbol", "expiration", "max_expirations_per_symbol",
+        "preset", "direction", "moneyness", "center_mode", "butterfly_type",
+        "option_side", "distance_mode", "allow_skewed",
+        "prefer_term_structure", "data_quality_mode",
+        "spread_type", "min_credit_for_dq_waiver",
+    })
+
+    # Per-level presets for each strategy.  All numeric evaluate thresholds
+    # (min_pop, min_ev_to_risk, min_ror, liquidity floors, etc.) are set per
+    # level so that strict is materially tighter than balanced in ≥3 dimensions.
     _PRESETS: dict[str, dict[str, dict[str, Any]]] = {
         "credit_spread": {
             "strict": {
@@ -322,9 +356,11 @@ class StrategyService:
                 "symbols": list(DEFAULT_SCANNER_SYMBOLS),
                 "min_pop": 0.70,
                 "min_ev_to_risk": 0.03,
+                "min_ror": 0.03,
                 "max_bid_ask_spread_pct": 1.0,
                 "min_open_interest": 1000,
                 "min_volume": 100,
+                "data_quality_mode": "strict",
             },
             "conservative": {
                 "dte_min": 14,
@@ -335,11 +371,13 @@ class StrategyService:
                 "distance_min": 0.03,
                 "distance_max": 0.08,
                 "symbols": list(DEFAULT_SCANNER_SYMBOLS),
-                "min_pop": 0.65,
-                "min_ev_to_risk": 0.02,
+                "min_pop": 0.60,
+                "min_ev_to_risk": 0.012,
+                "min_ror": 0.01,
                 "max_bid_ask_spread_pct": 1.5,
-                "min_open_interest": 500,
-                "min_volume": 50,
+                "min_open_interest": 200,
+                "min_volume": 10,
+                "data_quality_mode": "balanced",
             },
             "balanced": {
                 "dte_min": 7,
@@ -350,11 +388,13 @@ class StrategyService:
                 "distance_min": 0.01,
                 "distance_max": 0.12,
                 "symbols": list(DEFAULT_SCANNER_SYMBOLS),
-                "min_pop": 0.60,
-                "min_ev_to_risk": 0.02,
-                "max_bid_ask_spread_pct": 1.5,
-                "min_open_interest": 300,
-                "min_volume": 20,
+                "min_pop": 0.55,
+                "min_ev_to_risk": 0.008,
+                "min_ror": 0.005,
+                "max_bid_ask_spread_pct": 2.0,
+                "min_open_interest": 100,
+                "min_volume": 5,
+                "data_quality_mode": "balanced",
             },
             "wide": {
                 "dte_min": 3,
@@ -365,29 +405,76 @@ class StrategyService:
                 "distance_min": 0.01,
                 "distance_max": 0.15,
                 "symbols": list(DEFAULT_SCANNER_SYMBOLS),
-                "min_pop": 0.50,
-                "min_ev_to_risk": 0.01,
-                "max_bid_ask_spread_pct": 2.5,
-                "min_open_interest": 100,
-                "min_volume": 10,
+                "min_pop": 0.45,
+                "min_ev_to_risk": 0.005,
+                "min_ror": 0.002,
+                "max_bid_ask_spread_pct": 3.0,
+                "min_open_interest": 25,
+                "min_volume": 1,
+                "data_quality_mode": "lenient",
             },
         },
     }
     _DEFAULT_PRESET = "balanced"
 
+    @classmethod
+    def resolve_thresholds(cls, strategy_id: str, preset_name: str | None = None, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return the complete resolved threshold dict for a strategy + preset.
+
+        This is the **single source of truth** for filter thresholds.
+        ``_apply_request_defaults`` delegates here for credit_spread presets.
+
+        Parameters
+        ----------
+        strategy_id : str
+        preset_name : str | None
+            One of strict / conservative / balanced / wide.
+            Falls back to ``_DEFAULT_PRESET`` if ``None`` or unknown.
+        overrides : dict | None
+            Explicit overrides that win over preset values.
+
+        Returns
+        -------
+        dict[str, Any]
+            Flat dict of threshold keys → resolved values.
+        """
+        presets = cls._PRESETS.get(strategy_id, {})
+        name = str(preset_name or cls._DEFAULT_PRESET).lower()
+        if name not in presets:
+            logger.warning(
+                "Unknown preset '%s' for strategy '%s'; falling back to '%s'",
+                preset_name, strategy_id, cls._DEFAULT_PRESET,
+            )
+            name = cls._DEFAULT_PRESET
+        base = dict(presets.get(name, {}))
+        if overrides:
+            base.update({k: v for k, v in overrides.items() if v is not None})
+        return base
+
     def _apply_request_defaults(self, strategy_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         req = dict(payload or {})
 
         if strategy_id == "credit_spread":
-            preset_name = str(req.pop("preset", None) or self._DEFAULT_PRESET).lower()
+            raw_preset = req.pop("preset", None)
+            preset_name = str(raw_preset or self._DEFAULT_PRESET).lower()
+
+            # Validate preset name
             presets = self._PRESETS.get(strategy_id, {})
-            preset_values = presets.get(preset_name, presets.get(self._DEFAULT_PRESET, {}))
+            if preset_name not in presets:
+                logger.warning(
+                    "Unknown preset '%s' for strategy '%s'; falling back to '%s'",
+                    preset_name, strategy_id, self._DEFAULT_PRESET,
+                )
+                preset_name = self._DEFAULT_PRESET
+
+            preset_values = presets.get(preset_name, {})
             # If user passed singular "symbol", don't apply preset "symbols"
             user_specified_symbol = "symbol" in (payload or {}) or "symbols" in (payload or {})
             for k, v in preset_values.items():
                 if k == "symbols" and user_specified_symbol:
                     continue
                 req.setdefault(k, v)
+            req["_preset_name"] = preset_name  # stamp for filter trace
 
         elif strategy_id == "debit_spreads":
             req.setdefault("dte_min", 14)
@@ -674,6 +761,7 @@ class StrategyService:
         notes: list[str],
         *,
         generation_diagnostics: dict[str, Any] | None = None,
+        filter_trace: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         source_health = self.base_data_service.get_source_health_snapshot()
         report_stats = self._build_report_stats(accepted)
@@ -720,6 +808,7 @@ class StrategyService:
                 "rejection_breakdown": rej_bk,
                 "notes": list(dict.fromkeys([str(n) for n in notes if str(n).strip()])),
             },
+            "filter_trace": filter_trace,
         }
 
     async def generate(self, strategy_id: str, request_payload: dict[str, Any] | None = None, progress_callback: Any | None = None) -> dict[str, Any]:
@@ -769,6 +858,9 @@ class StrategyService:
         enriched: list[dict[str, Any]] = []
         accepted: list[dict[str, Any]] = []
         rejection_breakdown: dict[str, int] = {}
+        _capture_examples = bool(payload.get("_capture_trace_examples"))
+        _rejected_examples: list[dict[str, Any]] = []
+        _MAX_EXAMPLES = 3
 
         if snapshots:
             primary = snapshots[0]
@@ -818,6 +910,23 @@ class StrategyService:
                         # -- Aggregate rejection reason counters --
                         for r in reasons:
                             rejection_breakdown[r] = rejection_breakdown.get(r, 0) + 1
+                        # -- Capture rejected examples for filter trace --
+                        if _capture_examples and len(_rejected_examples) < _MAX_EXAMPLES:
+                            from app.services.ranking import safe_float as _sf
+                            _rejected_examples.append({
+                                "symbol": str(row.get("underlying") or row.get("symbol") or ""),
+                                "expiration": str(row.get("expiration") or ""),
+                                "short_strike": row.get("short_strike"),
+                                "long_strike": row.get("long_strike"),
+                                "width": row.get("width"),
+                                "net_credit": row.get("net_credit"),
+                                "pop": _sf(row.get("p_win_used") or row.get("pop_delta_approx")),
+                                "ev_to_risk": _sf(row.get("ev_to_risk")),
+                                "ror": _sf(row.get("return_on_risk")),
+                                "open_interest": row.get("open_interest"),
+                                "volume": row.get("volume"),
+                                "reasons": reasons,
+                            })
                         # -- Structured debug log (first N only) --
                         if _rejection_log_count < _MAX_REJECTION_LOGS:
                             _rejection_log_count += 1
@@ -883,6 +992,8 @@ class StrategyService:
 
         await self._apply_context_scores(accepted)
 
+        accepted_pre_dedup = len(accepted)
+
         deduped: dict[str, dict[str, Any]] = {}
         for trade in accepted:
             key = str(trade.get("trade_key") or "").strip()
@@ -925,6 +1036,139 @@ class StrategyService:
         filename = f"{strategy_id}_analysis_{ts_name}.json"
         path = self.results_dir / filename
 
+        # ── Build filter trace ───────────────────────────────────
+        total_contracts = sum(len(s.get("contracts") or []) for s in snapshots)
+
+        # Resolve thresholds: extract numeric filter params from payload
+        preset_name = str(payload.get("_preset_name") or self._DEFAULT_PRESET)
+        resolved_thresholds: dict[str, Any] = {}
+        for k, v in payload.items():
+            if k.startswith("_") or k in self._FILTER_TRACE_SKIP_KEYS:
+                continue
+            if isinstance(v, (int, float)):
+                resolved_thresholds[k] = v
+
+        # Gate breakdown: categorize rejection reasons
+        gate_breakdown: dict[str, int] = {}
+        all_categorized: set[str] = set()
+        for gate_name, reason_keys in self._GATE_GROUPS.items():
+            count = sum(rejection_breakdown.get(k, 0) for k in reason_keys)
+            if count > 0:
+                gate_breakdown[gate_name] = count
+            all_categorized.update(reason_keys)
+        uncategorized = sum(
+            cnt for reason, cnt in rejection_breakdown.items()
+            if reason not in all_categorized and cnt > 0
+        )
+        if uncategorized:
+            gate_breakdown["other"] = uncategorized
+
+        # Data quality flags
+        data_quality_flags: list[str] = []
+        if generation_diagnostics.get("closes_count", -1) == 0:
+            data_quality_flags.append("MISSING_PRICE_HISTORY")
+        iq = generation_diagnostics.get("invalid_quote_count", 0)
+        if iq > 0:
+            data_quality_flags.append(f"INVALID_QUOTES:{iq}")
+        no_chain_count = sum(1 for n in notes if "no_chain" in n)
+        if no_chain_count:
+            data_quality_flags.append(f"NO_CHAIN_SYMBOLS:{no_chain_count}")
+
+        # Missing-field counts — scan enriched rows for None bid/ask/OI/volume
+        _mfc_oi = 0
+        _mfc_vol = 0
+        _mfc_bid = 0
+        _mfc_ask = 0
+        _mfc_quote_rejected = 0
+        _mfc_dq_waived = 0
+        for _row in enriched:
+            if not isinstance(_row, dict):
+                continue
+            # OI / volume
+            if _row.get("open_interest") is None:
+                _mfc_oi += 1
+            if _row.get("volume") is None:
+                _mfc_vol += 1
+            # Bid / ask (short leg's bid & long leg's ask are credit-critical)
+            if _row.get("_short_bid") is None and _row.get("bid") is None:
+                _mfc_bid += 1
+            if _row.get("_long_ask") is None and _row.get("ask") is None:
+                _mfc_ask += 1
+            # Quote validation failure
+            if _row.get("_quote_rejection"):
+                _mfc_quote_rejected += 1
+
+        # Count DQ waived trades (in lenient mode, DQ_MISSING codes absent for
+        # trades that would have been flagged but were waived).
+        _dq_oi_rejected = rejection_breakdown.get("DQ_MISSING:open_interest", 0)
+        _dq_vol_rejected = rejection_breakdown.get("DQ_MISSING:volume", 0)
+        _dq_mode_used = str(payload.get("data_quality_mode") or "").lower()
+        if _dq_mode_used == "lenient":
+            # Waived = had missing fields but not rejected
+            _mfc_dq_waived = max(0, _mfc_oi - _dq_oi_rejected) + max(0, _mfc_vol - _dq_vol_rejected)
+
+        missing_field_counts: dict[str, int] = {
+            "open_interest": _mfc_oi,
+            "volume": _mfc_vol,
+            "bid": _mfc_bid,
+            "ask": _mfc_ask,
+            "quote_rejected": _mfc_quote_rejected,
+            "dq_waived": _mfc_dq_waived,
+            "total_enriched": len(enriched),
+        }
+
+        filter_trace: dict[str, Any] = {
+            "trace_id": f"{strategy_id}_{ts_name}_{uuid.uuid4().hex[:8]}",
+            "timestamp": self._utc_now_iso(),
+            "strategy_id": strategy_id,
+            "preset_name": preset_name,
+            "data_quality_mode": _dq_mode_used or "balanced",
+            "resolved_thresholds": resolved_thresholds,
+            "stages": [
+                {
+                    "name": "snapshot_collection",
+                    "label": "Snapshot Collection",
+                    "input_count": len(symbol_list),
+                    "output_count": len(snapshots),
+                    "detail": f"{len(symbol_list)} symbols \u2192 {len(snapshots)} valid snapshots",
+                },
+                {
+                    "name": "candidate_construction",
+                    "label": "Candidate Construction",
+                    "input_count": total_contracts,
+                    "output_count": len(candidates),
+                    "detail": f"{total_contracts} contracts \u2192 {len(candidates)} spread candidates",
+                },
+                {
+                    "name": "enrichment",
+                    "label": "Enrichment",
+                    "input_count": len(candidates),
+                    "output_count": len(enriched),
+                    "detail": f"{len(candidates)} candidates \u2192 {len(enriched)} enriched trades",
+                },
+                {
+                    "name": "evaluate_gates",
+                    "label": "Quality Gates",
+                    "input_count": len(enriched),
+                    "output_count": accepted_pre_dedup,
+                    "detail": f"{len(enriched)} enriched \u2192 {accepted_pre_dedup} passed all gates",
+                },
+                {
+                    "name": "dedup_ranking",
+                    "label": "Dedup & Ranking",
+                    "input_count": accepted_pre_dedup,
+                    "output_count": len(accepted),
+                    "detail": f"{accepted_pre_dedup} \u2192 {len(accepted)} unique trades",
+                },
+            ],
+            "gate_breakdown": gate_breakdown,
+            "rejection_reasons": dict(rejection_breakdown),
+            "data_quality_flags": data_quality_flags,
+            "missing_field_counts": missing_field_counts,
+        }
+        if _capture_examples and _rejected_examples:
+            filter_trace["rejected_examples"] = _rejected_examples
+
         blob = self._build_report_blob(
             strategy_id=strategy_id,
             payload=payload,
@@ -935,6 +1179,7 @@ class StrategyService:
             accepted=accepted,
             notes=notes,
             generation_diagnostics=generation_diagnostics,
+            filter_trace=filter_trace,
         )
 
         path.write_text(json.dumps(blob, indent=2), encoding="utf-8")

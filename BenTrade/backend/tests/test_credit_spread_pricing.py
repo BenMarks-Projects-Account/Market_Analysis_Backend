@@ -156,7 +156,7 @@ class TestPluginEnrich:
         candidates = [self._make_candidate(short, long)]
         enriched = self.plugin.enrich(candidates, self._make_inputs())
         assert len(enriched) == 1
-        assert enriched[0]["_quote_rejection"] == "ASK_LT_BID:short_leg"
+        assert enriched[0]["_quote_rejection"] == "QUOTE_INVALID:short_leg:inverted_market"
 
     def test_ask_lt_bid_on_long_leg_rejected(self) -> None:
         """Long leg with inverted quotes gets _quote_rejection."""
@@ -165,14 +165,14 @@ class TestPluginEnrich:
         candidates = [self._make_candidate(short, long)]
         enriched = self.plugin.enrich(candidates, self._make_inputs())
         assert len(enriched) == 1
-        assert enriched[0]["_quote_rejection"] == "ASK_LT_BID:long_leg"
+        assert enriched[0]["_quote_rejection"] == "QUOTE_INVALID:long_leg:inverted_market"
 
     def test_missing_short_bid_rejected(self) -> None:
         short = FakeContract(strike=595.0, bid=None, ask=1.80)
         long = FakeContract(strike=590.0, bid=0.40, ask=0.60)
         candidates = [self._make_candidate(short, long)]
         enriched = self.plugin.enrich(candidates, self._make_inputs())
-        assert enriched[0]["_quote_rejection"] == "MISSING_QUOTES:short_bid"
+        assert enriched[0]["_quote_rejection"] == "QUOTE_INVALID:short_leg:missing_bid"
 
     def test_zero_short_bid_rejected(self) -> None:
         short = FakeContract(strike=595.0, bid=0.0, ask=0.10)

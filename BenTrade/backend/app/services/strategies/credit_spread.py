@@ -13,6 +13,69 @@ logger = logging.getLogger("bentrade.credit_spread")
 # of the spread width.  Prevents near-zero-profit or floating-point-edge trades.
 _EPSILON = 0.01
 
+# Valid dataQualityMode values — controls how missing OI/volume is handled.
+#   "strict"   – missing OI/volume rejects  (distinct DQ code)
+#   "balanced" – missing OI/volume rejects  (distinct DQ code, same outcome as strict)
+#   "lenient"  – allow missing OI/volume when bid-ask is tight & credit >= min_credit
+_DATA_QUALITY_MODES = frozenset({"strict", "balanced", "lenient"})
+_DEFAULT_DATA_QUALITY_MODE = "balanced"
+
+# Default minimum credit ($) required to keep a trade alive under lenient DQ mode.
+_DEFAULT_MIN_CREDIT_FOR_DQ_WAIVER = 0.10
+
+
+# ---------------------------------------------------------------------------
+# Centralised quote validation
+# ---------------------------------------------------------------------------
+
+def validate_quote(bid: float | None, ask: float | None) -> tuple[bool, str | None]:
+    """Check a single leg's quote validity.
+
+    Rules:
+    - bid must be >= 0 (None → invalid)
+    - ask must be > 0    (None → invalid)
+    - ask must be >= bid (inverted market)
+    - mid = (bid + ask) / 2 must be > 0
+
+    Returns (is_valid, reason_or_none).
+    """
+    if bid is None:
+        return False, "missing_bid"
+    if ask is None:
+        return False, "missing_ask"
+    if bid < 0:
+        return False, "negative_bid"
+    if ask <= 0:
+        return False, "zero_or_negative_ask"
+    if ask < bid:
+        return False, "inverted_market"
+    mid = (bid + ask) / 2.0
+    if mid <= 0:
+        return False, "zero_mid"
+    return True, None
+
+
+def validate_spread_quotes(
+    short_bid: float | None,
+    short_ask: float | None,
+    long_bid: float | None,
+    long_ask: float | None,
+) -> tuple[bool, str | None]:
+    """Validate both legs of a credit spread.
+
+    Returns (is_valid, rejection_code_or_none).
+    Rejection codes use the ``QUOTE_INVALID:`` prefix for granular tracking.
+    """
+    ok_short, short_reason = validate_quote(short_bid, short_ask)
+    if not ok_short:
+        return False, f"QUOTE_INVALID:short_leg:{short_reason}"
+
+    ok_long, long_reason = validate_quote(long_bid, long_ask)
+    if not ok_long:
+        return False, f"QUOTE_INVALID:long_leg:{long_reason}"
+
+    return True, None
+
 
 class CreditSpreadStrategyPlugin:
     id = "credit_spread"
@@ -146,17 +209,23 @@ class CreditSpreadStrategyPlugin:
             long_bid = self._to_float(getattr(long_leg, "bid", None))
             long_ask = self._to_float(getattr(long_leg, "ask", None))
 
-            # -- Defensive quote checks before computing net_credit -----------
-            rejection: str | None = None
+            # -- Centralised quote validation ---------------------------------
+            quotes_ok, quote_rejection = validate_spread_quotes(
+                short_bid, short_ask, long_bid, long_ask,
+            )
 
-            if short_bid is None or short_bid <= 0:
+            # Legacy rejection codes kept for backward compatibility with
+            # existing filter-trace gate groups.  The new QUOTE_INVALID:*
+            # codes carry more detail; we map to legacy codes so both appear
+            # in the trace breakdown.
+            rejection: str | None = None
+            if not quotes_ok:
+                # Store the detailed code as primary rejection.
+                rejection = quote_rejection
+            elif short_bid is not None and short_bid <= 0:
                 rejection = "MISSING_QUOTES:short_bid"
-            elif long_ask is None or long_ask <= 0:
+            elif long_ask is not None and long_ask <= 0:
                 rejection = "MISSING_QUOTES:long_ask"
-            elif short_ask is not None and short_ask < short_bid:
-                rejection = "ASK_LT_BID:short_leg"
-            elif long_bid is not None and long_ask < long_bid:
-                rejection = "ASK_LT_BID:long_leg"
 
             if rejection:
                 net_credit = None
@@ -222,12 +291,12 @@ class CreditSpreadStrategyPlugin:
     def evaluate(self, trade: dict[str, Any]) -> tuple[bool, list[str]]:
         reasons: list[str] = []
 
-        # -- Pre-enrichment quote rejection (set during enrich()) --
+        # ── Gate 1: Pre-enrichment quote rejection (set during enrich()) ─────
         quote_rej = trade.get("_quote_rejection")
         if quote_rej:
             return False, [quote_rej]
 
-        # -- CreditSpread metric failure (set during enrich_trade()) --
+        # ── Gate 2: CreditSpread metric failure (set during enrich_trade()) ──
         data_warn = trade.get("data_warning") or ""
         if "CreditSpread metrics unavailable" in data_warn:
             reasons.append("CREDIT_SPREAD_METRICS_FAILED")
@@ -235,6 +304,12 @@ class CreditSpreadStrategyPlugin:
         policy = trade.get("_policy") if isinstance(trade.get("_policy"), dict) else {}
         payload = trade.get("_request") if isinstance(trade.get("_request"), dict) else {}
 
+        # ── Resolve dataQualityMode ──────────────────────────────────────────
+        dq_mode = str(payload.get("data_quality_mode") or _DEFAULT_DATA_QUALITY_MODE).lower()
+        if dq_mode not in _DATA_QUALITY_MODES:
+            dq_mode = _DEFAULT_DATA_QUALITY_MODE
+
+        # ── Read trade metrics ───────────────────────────────────────────────
         pop = safe_float(trade.get("p_win_used") or trade.get("pop_delta_approx"))
         ev = safe_float(trade.get("ev_per_share") or trade.get("expected_value"))
         ev_to_risk = safe_float(trade.get("ev_to_risk"))
@@ -242,49 +317,97 @@ class CreditSpreadStrategyPlugin:
         width = safe_float(trade.get("width"))
         net_credit = safe_float(trade.get("net_credit"))
         spread_pct = safe_float(trade.get("bid_ask_spread_pct"))
-        open_interest = int(safe_float(trade.get("open_interest")) or 0)
-        volume = int(safe_float(trade.get("volume")) or 0)
 
+        # ── Read OI / volume — preserve None for data-quality detection ──────
+        raw_oi = trade.get("open_interest")
+        raw_vol = trade.get("volume")
+        oi_value = safe_float(raw_oi)   # None if missing / unparseable
+        vol_value = safe_float(raw_vol)  # None if missing / unparseable
+
+        # ── Gate 3: Spread structure (requires valid net_credit & width) ─────
+        if width is None or width <= 0:
+            reasons.append("invalid_width")
+        if net_credit is None or net_credit <= 0:
+            reasons.append("non_positive_credit")
+
+        # ── Threshold resolution: prefer payload (preset-resolved), then policy, then safety fallback ──
         min_pop = safe_float(payload.get("min_pop"))
         if min_pop is None:
-            min_pop = 0.65
+            min_pop = safe_float(policy.get("min_pop"))
+        if min_pop is None:
+            min_pop = 0.60  # balanced-level safety fallback
 
         min_ev_to_risk = safe_float(payload.get("min_ev_to_risk"))
         if min_ev_to_risk is None:
-            min_ev_to_risk = 0.02
+            min_ev_to_risk = safe_float(policy.get("min_ev_to_risk"))
+        if min_ev_to_risk is None:
+            min_ev_to_risk = 0.02  # balanced-level safety fallback
+
+        min_ror = safe_float(payload.get("min_ror"))
+        if min_ror is None:
+            min_ror = safe_float(policy.get("min_ror"))
+        if min_ror is None:
+            min_ror = 0.01  # balanced-level safety fallback
 
         spread_pct_limit = safe_float(payload.get("max_bid_ask_spread_pct"))
         if spread_pct_limit is None:
             spread_pct_limit = safe_float(policy.get("max_bid_ask_spread_pct"))
         if spread_pct_limit is None:
-            spread_pct_limit = 1.5
+            spread_pct_limit = 1.5  # balanced-level safety fallback
 
         min_oi = int(safe_float(payload.get("min_open_interest")) or 0)
         if min_oi <= 0:
-            min_oi = max(int(safe_float(policy.get("min_open_interest")) or 0), 500)
+            min_oi = max(int(safe_float(policy.get("min_open_interest")) or 0), 300)
 
         min_vol = int(safe_float(payload.get("min_volume")) or 0)
         if min_vol <= 0:
-            min_vol = max(int(safe_float(policy.get("min_volume")) or 0), 50)
+            min_vol = max(int(safe_float(policy.get("min_volume")) or 0), 20)
 
+        # ── Gate 4: Probability & expected-value thresholds ──────────────────
         if pop is not None and pop < min_pop:
             reasons.append("pop_below_floor")
         if ev_to_risk is not None and ev_to_risk < min_ev_to_risk:
             reasons.append("ev_to_risk_below_floor")
         elif ev is not None and ev < -0.05:
             reasons.append("ev_negative")
-        if ror is not None and ror < 0.01:
+        if ror is not None and ror < min_ror:
             reasons.append("ror_below_floor")
-        if width is None or width <= 0:
-            reasons.append("invalid_width")
-        if net_credit is None or net_credit <= 0:
-            reasons.append("non_positive_credit")
+
+        # ── Gate 5: Bid-ask spread (only meaningful on validated quotes) ─────
         if spread_pct is not None and (spread_pct * 100.0) > spread_pct_limit:
             reasons.append("spread_too_wide")
-        if open_interest < min_oi:
-            reasons.append("open_interest_below_min")
-        if volume < min_vol:
-            reasons.append("volume_below_min")
+
+        # ── Gate 6: Liquidity / data-quality for OI & volume ────────────────
+        oi_missing = oi_value is None
+        vol_missing = vol_value is None
+
+        if oi_missing or vol_missing:
+            # In lenient mode: waive missing OI/vol if pricing looks healthy
+            if dq_mode == "lenient":
+                spread_ok = (spread_pct is None) or ((spread_pct * 100.0) <= spread_pct_limit)
+                min_credit = safe_float(payload.get("min_credit_for_dq_waiver"))
+                if min_credit is None:
+                    min_credit = _DEFAULT_MIN_CREDIT_FOR_DQ_WAIVER
+                credit_ok = (net_credit is not None) and (net_credit >= min_credit)
+                if not (spread_ok and credit_ok):
+                    # Cannot waive — add DQ rejection
+                    if oi_missing:
+                        reasons.append("DQ_MISSING:open_interest")
+                    if vol_missing:
+                        reasons.append("DQ_MISSING:volume")
+                # else: waived — trade keeps going
+            else:
+                # strict / balanced: missing data → distinct DQ rejection
+                if oi_missing:
+                    reasons.append("DQ_MISSING:open_interest")
+                if vol_missing:
+                    reasons.append("DQ_MISSING:volume")
+        else:
+            # Both OI and volume present — apply threshold checks
+            if int(oi_value) < min_oi:
+                reasons.append("open_interest_below_min")
+            if int(vol_value) < min_vol:
+                reasons.append("volume_below_min")
 
         return len(reasons) == 0, reasons
 
