@@ -80,7 +80,11 @@ window.BenTradeDataWorkbenchModal = (function () {
     _overlayEl.setAttribute('role', 'dialog');
     _overlayEl.setAttribute('aria-modal', 'true');
     _overlayEl.setAttribute('aria-label', 'Data Workbench');
-    document.body.appendChild(_overlayEl);
+    // Mount inside overlay-root so modal stays visible in fullscreen.
+    var overlayRoot = (window.BenTradeOverlayRoot && window.BenTradeOverlayRoot.get)
+      ? window.BenTradeOverlayRoot.get()
+      : document.body;
+    overlayRoot.appendChild(_overlayEl);
 
     /* Close on backdrop click */
     _overlayEl.addEventListener('click', function (e) {
@@ -193,6 +197,12 @@ window.BenTradeDataWorkbenchModal = (function () {
 
     overlay.innerHTML = _renderContent(o);
     overlay.classList.add('is-open');
+
+    if (window.__BEN_DEBUG_OVERLAYS) {
+      console.debug('[BenTrade:overlay] DWB modal opened',
+        'parent:', overlay.parentElement && (overlay.parentElement.id || overlay.parentElement.tagName),
+        'fullscreenElement:', document.fullscreenElement && document.fullscreenElement.className);
+    }
 
     /* Wire close button */
     var closeBtn = overlay.querySelector('.dwb-modal-close');

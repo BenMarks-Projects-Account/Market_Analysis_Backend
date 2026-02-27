@@ -84,7 +84,12 @@ window.BenTradeUI.Tooltip = (function(){
     el.id = 'btMetricTooltip';
     el.setAttribute('role', 'tooltip');
     el.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(el);
+    // Mount inside overlay-root (inside .shell) so tooltip remains
+    // visible when the app enters browser fullscreen.
+    var root = (window.BenTradeOverlayRoot && window.BenTradeOverlayRoot.get)
+      ? window.BenTradeOverlayRoot.get()
+      : document.body;
+    root.appendChild(el);
     state.el = el;
     return el;
   }
@@ -167,6 +172,12 @@ window.BenTradeUI.Tooltip = (function(){
     target.setAttribute('aria-describedby', 'btMetricTooltip');
     state.activeTarget = target;
     positionTooltip(target);
+
+    if(window.__BEN_DEBUG_OVERLAYS){
+      console.debug('[BenTrade:overlay] showTooltip', metricId,
+        'parent:', el.parentElement?.id || el.parentElement?.tagName,
+        'fullscreenElement:', document.fullscreenElement?.className || null);
+    }
   }
 
   function isBound(el){

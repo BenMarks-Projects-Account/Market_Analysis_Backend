@@ -13,6 +13,8 @@ from app.services.strategies.base import StrategyPlugin
 
 class _FakeBaseDataService:
     tradier_client = None
+    snapshot_recorder = None
+    chain_source = None
 
     @staticmethod
     def get_source_health_snapshot() -> dict:

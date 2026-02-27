@@ -89,6 +89,21 @@ def _compute_rank_components(trade: dict[str, Any]) -> dict[str, float | None]:
 
 
 def compute_rank_score(trade: dict[str, Any]) -> float:
+    """Compute a 0–100 rank score from weighted components.
+
+    Components and weights:
+      edge (EV/risk)    0.30
+      ror               0.22
+      pop               0.20
+      liquidity         0.18   (OI + volume + spread tightness)
+      tqs               0.10   (omitted & re-weighted when absent)
+
+    Liquidity impact comes ONLY from the weighted component.
+    No additional multiplicative penalty is applied — that was removed
+    to eliminate double-penalization (see scoring audit Finding #2).
+
+    Returns: float in [0, 100] (rounded to 3 decimal places).
+    """
     comps = _compute_rank_components(trade)
     weighted_terms: list[tuple[float, float]] = [
         (0.30, float(comps["edge"])),
@@ -105,11 +120,8 @@ def compute_rank_score(trade: dict[str, Any]) -> float:
 
     score = sum(weight * value for weight, value in weighted_terms) / total_weight
 
-    spread_pct = safe_float(trade.get("bid_ask_spread_pct"), 9.99)
-    liquidity_penalty = clamp(((spread_pct - 0.30) / 0.70), 0.0, 1.0)
-    score = score * (1.0 - 0.75 * liquidity_penalty)
-
-    return round(clamp(score), 6)
+    # Scale to 0–100 and clamp.
+    return round(clamp(score * 100.0, 0.0, 100.0), 3)
 
 
 def _trade_tie_break_tuple(trade: dict[str, Any]) -> tuple[float, float, float, float, str, float, float]:

@@ -7,6 +7,22 @@ from app.utils.http import UpstreamError
 router = APIRouter(prefix="/api/trading", tags=["trading"])
 
 
+@router.get("/status")
+async def trading_status(request: Request) -> dict:
+    """Return current trading capability flags for the frontend."""
+    settings = request.app.state.trading_service.settings
+    return {
+        "enable_live_trading": settings.ENABLE_LIVE_TRADING,
+        "live_runtime_enabled": settings.LIVE_TRADING_RUNTIME_ENABLED,
+        "trading_live_enabled": settings.TRADING_LIVE_ENABLED,
+        "dry_run": settings.TRADIER_DRY_RUN_LIVE,
+        "environment": settings.TRADIER_ENV,
+        "data_source": "LIVE",
+        "paper_configured": bool(settings.TRADIER_API_KEY_PAPER and settings.TRADIER_ACCOUNT_ID_PAPER),
+        "trade_capability_enabled": settings.ENABLE_LIVE_TRADING and settings.LIVE_TRADING_RUNTIME_ENABLED,
+    }
+
+
 @router.get("/test-connection")
 async def test_connection(request: Request) -> dict:
     settings = request.app.state.trading_service.settings

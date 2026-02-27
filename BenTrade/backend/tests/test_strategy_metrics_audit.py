@@ -168,6 +168,10 @@ class TestIronCondorMetrics:
     ) -> dict[str, Any]:
         put_credit = credit * 0.5
         call_credit = credit * 0.5
+        _put_short_leg = _make_leg(strike=put_short, option_type="put", bid=put_credit + 0.10, ask=put_credit + 0.20, delta=-0.15)
+        _put_long_leg = _make_leg(strike=put_long, option_type="put", bid=0.05, ask=0.10, delta=-0.08)
+        _call_short_leg = _make_leg(strike=call_short, option_type="call", bid=call_credit + 0.10, ask=call_credit + 0.20, delta=0.15)
+        _call_long_leg = _make_leg(strike=call_long, option_type="call", bid=0.05, ask=0.10, delta=0.08)
         return {
             "strategy": "iron_condor",
             "spread_type": "iron_condor",
@@ -179,10 +183,12 @@ class TestIronCondorMetrics:
             "put_long_strike": put_long,
             "call_short_strike": call_short,
             "call_long_strike": call_long,
-            "put_short_leg": _make_leg(strike=put_short, option_type="put", bid=put_credit + 0.10, ask=put_credit + 0.20, delta=-0.15),
-            "put_long_leg": _make_leg(strike=put_long, option_type="put", bid=0.05, ask=0.10, delta=-0.08),
-            "call_short_leg": _make_leg(strike=call_short, option_type="call", bid=call_credit + 0.10, ask=call_credit + 0.20, delta=0.15),
-            "call_long_leg": _make_leg(strike=call_long, option_type="call", bid=0.05, ask=0.10, delta=0.08),
+            "legs": [
+                {"name": "long_put",   "right": "put",  "side": "buy",  "strike": put_long,   "qty": 1, "_contract": _put_long_leg},
+                {"name": "short_put",  "right": "put",  "side": "sell", "strike": put_short,  "qty": 1, "_contract": _put_short_leg},
+                {"name": "short_call", "right": "call", "side": "sell", "strike": call_short, "qty": 1, "_contract": _call_short_leg},
+                {"name": "long_call",  "right": "call", "side": "buy",  "strike": call_long,  "qty": 1, "_contract": _call_long_leg},
+            ],
             "width_put": put_short - put_long,
             "width_call": call_long - call_short,
             "symmetry_score": 1.0,
@@ -404,11 +410,16 @@ class TestDebitSpreadMetrics:
         assert trade["max_profit_per_contract"] == trade["max_profit"]
 
     def test_pop_from_implied_prob(self, plugin):
-        """POP should come from implied_prob_profit (1 - debit/width)."""
+        """POP uses refined model; pop_delta_approx = |delta_long| as baseline."""
         candidate = self._call_debit_candidate()
         enriched = plugin.enrich([candidate], {"request": {}, "policy": {}})
         assert len(enriched) >= 1
         trade = enriched[0]
+        # implied_prob_profit = p_win_used = pop_refined (NOT raw delta)
+        assert trade["implied_prob_profit"] == trade["p_win_used"]
+        # pop_delta_approx baseline still = |delta_long|
+        assert abs(trade["pop_delta_approx"] - 0.50) < 0.01
+        # Diagnostic field: implied_max_profit_prob = debit/width
         debit_as_pct = trade.get("debit_as_pct_of_width")
-        expected_pop = max(0, min(1, 1.0 - debit_as_pct))
-        assert abs(trade["implied_prob_profit"] - expected_pop) < 0.01
+        expected_max_profit_prob = debit_as_pct  # debit/width
+        assert abs(trade["implied_max_profit_prob"] - expected_max_profit_prob) < 0.01

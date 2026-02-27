@@ -60,3 +60,5 @@ BenTrade/backend/results/*.jsonl
 #docs
 /docs/*.md
 /docs/scanners/*.md
+
+BenTrade/backend/tests/_test_results_smoke/*.json

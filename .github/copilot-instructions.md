@@ -54,6 +54,14 @@ Non-negotiables (must follow):
    - Preserve existing working features.
    - Prefer additive instrumentation before changing strategy logic/thresholds.
 
+Anchor docs (work must conform to these standards):
+- docs/standards/scanner-contract.md — required scanner output fields and filter trace schema.
+- docs/standards/rejection-taxonomy.md — stable rejection reason codes; never rename, only add.
+- docs/standards/presets.md — Strict / Balanced / Wide preset philosophy, required knobs, verification rule.
+- docs/standards/ui-tradecard-spec.md — TradeCard as single primitive, footer visibility, tooltip rules.
+- docs/standards/data-quality-rules.md — quote integrity, missing-field policy, source-of-truth summary.
+- docs/standards/canonical-contract.md — canonical trade structure and strategy IDs.
+
 When finishing a task:
 - Provide a concise summary of changes and where they live (files/modules).
 - List risks/assumptions explicitly.

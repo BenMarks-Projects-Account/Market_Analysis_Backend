@@ -435,10 +435,12 @@ class TestFilterTraceMissingFieldCounts:
         assert "missing_field_counts" in ft
         mfc = ft["missing_field_counts"]
         assert isinstance(mfc, dict)
-        assert "open_interest" in mfc
-        assert "volume" in mfc
-        assert "bid" in mfc
-        assert "ask" in mfc
+        assert "missing_open_interest" in mfc
+        assert "zero_open_interest" in mfc
+        assert "missing_volume" in mfc
+        assert "zero_volume" in mfc
+        assert "missing_bid" in mfc
+        assert "missing_ask" in mfc
         assert "quote_rejected" in mfc
         assert "dq_waived" in mfc
         assert "total_enriched" in mfc

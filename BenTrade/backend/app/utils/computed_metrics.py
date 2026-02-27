@@ -2,6 +2,28 @@ from __future__ import annotations
 
 from typing import Any
 
+# Fields required for metrics_status.ready = True.
+# Only core pricing/risk metrics — advanced analytics do NOT block readiness.
+# 12 fields: pricing (max_profit, max_loss, break_even, net_debit),
+#            risk (pop, expected_value, ev_to_risk, return_on_risk),
+#            liquidity (bid_ask_pct, open_interest, volume),
+#            structure (dte).
+READINESS_REQUIRED_FIELDS: tuple[str, ...] = (
+    "max_profit",
+    "max_loss",
+    "break_even",
+    "pop",
+    "expected_value",
+    "ev_to_risk",
+    "return_on_risk",
+    "bid_ask_pct",
+    "open_interest",
+    "volume",
+    "dte",
+    "net_debit",
+)
+
+# Full set of computed metrics tracked for completeness reporting.
 CORE_COMPUTED_METRIC_FIELDS: tuple[str, ...] = (
     "max_profit",
     "max_loss",
@@ -11,6 +33,7 @@ CORE_COMPUTED_METRIC_FIELDS: tuple[str, ...] = (
     "kelly_fraction",
     "break_even",
     "dte",
+    "net_debit",
     "expected_move",
     "iv_rank",
     "iv_rv_ratio",
@@ -117,15 +140,24 @@ def build_computed_metrics(trade: dict[str, Any]) -> dict[str, float | None]:
         "rank_score": _first_number(containers, "rank_score"),
         "composite_score": _first_number(containers, "composite_score"),
         "ev_to_risk": _first_number(containers, "ev_to_risk"),
+        "net_debit": _first_number(containers, "net_debit", "net_credit"),
     }
 
 
 def build_metrics_status(computed_metrics: dict[str, Any]) -> dict[str, Any]:
     metrics = computed_metrics if isinstance(computed_metrics, dict) else {}
-    missing_fields = [field for field in CORE_COMPUTED_METRIC_FIELDS if metrics.get(field) is None]
+    # Readiness gated only on core pricing/risk fields.
+    # Advanced metrics (iv_rank, rsi14, kelly_fraction, etc.) are tracked
+    # as missing but do NOT block ready = True.
+    missing_required = [f for f in READINESS_REQUIRED_FIELDS if metrics.get(f) is None]
+    _optional = set(CORE_COMPUTED_METRIC_FIELDS) - set(READINESS_REQUIRED_FIELDS)
+    missing_optional = sorted(f for f in _optional if metrics.get(f) is None)
     return {
-        "ready": len(missing_fields) == 0,
-        "missing_fields": missing_fields,
+        "ready": len(missing_required) == 0,
+        # missing_fields lists ONLY missing REQUIRED fields (gate-blocking).
+        "missing_fields": missing_required,
+        "missing_required": missing_required,
+        "missing_optional": missing_optional,
     }
 
 

@@ -139,15 +139,36 @@ class TestPluginEnrich:
             "prices_history": [598.0 + i * 0.1 for i in range(100)],
         }
 
-    def test_correct_net_credit_from_bid_ask(self) -> None:
-        """net_credit = short_bid - long_ask (conservative fill)."""
+    def test_correct_net_credit_from_mid(self) -> None:
+        """net_credit = short_mid - long_mid (default mid-based pricing).
+
+        short_mid = (1.50 + 1.80) / 2 = 1.65
+        long_mid  = (0.40 + 0.60) / 2 = 0.50
+        credit    = 1.65 - 0.50        = 1.15
+        """
         short = FakeContract(strike=595.0, bid=1.50, ask=1.80, delta=-0.25)
         long = FakeContract(strike=590.0, bid=0.40, ask=0.60, delta=-0.12)
         candidates = [self._make_candidate(short, long)]
         enriched = self.plugin.enrich(candidates, self._make_inputs())
         assert len(enriched) == 1
-        assert enriched[0]["net_credit"] == pytest.approx(0.90)
+        assert enriched[0]["net_credit"] == pytest.approx(1.15)
         assert enriched[0]["width"] == 5.0
+        assert enriched[0]["_credit_basis"] == "mid"
+
+    def test_net_credit_natural_fill(self) -> None:
+        """With credit_price_basis='natural', credit = short_bid - long_ask.
+
+        credit = 1.50 - 0.60 = 0.90
+        """
+        short = FakeContract(strike=595.0, bid=1.50, ask=1.80, delta=-0.25)
+        long = FakeContract(strike=590.0, bid=0.40, ask=0.60, delta=-0.12)
+        candidates = [self._make_candidate(short, long)]
+        inputs = self._make_inputs()
+        inputs["request"] = {"credit_price_basis": "natural"}
+        enriched = self.plugin.enrich(candidates, inputs)
+        assert len(enriched) == 1
+        assert enriched[0]["net_credit"] == pytest.approx(0.90)
+        assert enriched[0]["_credit_basis"] == "natural"
 
     def test_ask_lt_bid_on_short_leg_rejected(self) -> None:
         """Short leg with inverted quotes gets _quote_rejection."""
@@ -182,13 +203,18 @@ class TestPluginEnrich:
         assert enriched[0]["_quote_rejection"] == "MISSING_QUOTES:short_bid"
 
     def test_net_credit_ge_width_rejected(self) -> None:
-        """Credit exceeding width is rejected before CreditSpread model."""
+        """Credit exceeding width is rejected before CreditSpread model.
+
+        short_mid = (3.50 + 3.80) / 2 = 3.65
+        long_mid  = (0.30 + 0.50) / 2 = 0.40
+        credit    = 3.65 - 0.40        = 3.25  >  width(2.0) - 0.01
+        """
         short = FakeContract(strike=595.0, bid=3.50, ask=3.80, delta=-0.40)
         long = FakeContract(strike=593.0, bid=0.30, ask=0.50, delta=-0.15)
-        # width = 2.0, credit = 3.50 - 0.50 = 3.00 > 2.0 - 0.01
         candidates = [self._make_candidate(short, long)]
         enriched = self.plugin.enrich(candidates, self._make_inputs())
-        assert enriched[0]["_quote_rejection"] == "NET_CREDIT_GE_WIDTH"
+        assert enriched[0]["_quote_rejection"] == "credit_ge_width"
+        assert "credit_ge_width" in enriched[0].get("_rejection_codes", [])
 
     def test_missing_delta_does_not_default_to_zero(self) -> None:
         """When delta is None, short_delta_abs should be None (not 0.0)."""
@@ -208,10 +234,28 @@ class TestPluginEvaluate:
 
     def test_quote_rejected_candidate_fails_evaluate(self) -> None:
         """A candidate flagged during enrich gets fast-rejected in evaluate."""
-        trade = {"_quote_rejection": "ASK_LT_BID:short_leg", "net_credit": None}
+        trade = {
+            "_quote_rejection": "ASK_LT_BID:short_leg",
+            "_rejection_codes": ["ASK_LT_BID:short_leg"],
+            "net_credit": None,
+        }
         ok, reasons = self.plugin.evaluate(trade)
         assert not ok
         assert reasons == ["ASK_LT_BID:short_leg"]
+
+    def test_multi_reason_rejection(self) -> None:
+        """When bad quotes cause non-positive credit, both codes are returned."""
+        trade = {
+            "_rejection_codes": [
+                "QUOTE_INVALID:short_leg:zero_mid",
+                "non_positive_credit",
+            ],
+            "net_credit": None,
+        }
+        ok, reasons = self.plugin.evaluate(trade)
+        assert not ok
+        assert "QUOTE_INVALID:short_leg:zero_mid" in reasons
+        assert "non_positive_credit" in reasons
 
     def test_metrics_failed_candidate_includes_reason(self) -> None:
         trade = {
@@ -292,3 +336,89 @@ class TestBuildCandidates:
         short_strikes = {c.get("short_leg").strike for c in candidates}
         assert 582.0 not in short_strikes, "3% OTM should be excluded by distance_min=5%"
         assert 540.0 in short_strikes, "10% OTM should be included"
+
+    def test_width_order_is_center_first(self) -> None:
+        """target_widths should be ordered center-first, not ascending."""
+        snap = {
+            "symbol": "SPY",
+            "expiration": "2026-03-06",
+            "underlying_price": 600.0,
+            "contracts": self._make_chain(
+                600.0,
+                [598.0, 597.0, 596.0, 595.0, 594.0, 593.0, 592.0,
+                 591.0, 590.0, 589.0, 588.0, 587.0, 585.0, 580.0],
+            ),
+        }
+        inputs = {
+            "snapshots": [snap],
+            "request": {"width_min": 1.0, "width_max": 10.0,
+                        "distance_min": 0.001, "distance_max": 0.05},
+        }
+        self.plugin.build_candidates(inputs)
+        sub = inputs["_build_sub_stages"]
+        order = sub["width_order_used"]
+        # Center of sqrt(1*10) ≈ 3.16 → 3.0 should be first
+        assert order[0] == 3.0, f"Expected center ≈ 3, but first width is {order[0]}"
+        # 1.0 (min extreme) should NOT be first
+        assert order[0] != 1.0, "Width 1.0 should not be first"
+        # All base widths in range should be present
+        for w in [1.0, 2.0, 3.0, 5.0, 10.0]:
+            assert w in order, f"Width {w} should be in width_order_used"
+
+    def test_width_distribution_trace_present(self) -> None:
+        """sub_stages should include width_distribution and width_order_used."""
+        snap = {
+            "symbol": "SPY",
+            "expiration": "2026-03-06",
+            "underlying_price": 600.0,
+            "contracts": self._make_chain(
+                600.0,
+                [597.0, 595.0, 593.0, 590.0, 585.0, 580.0],
+            ),
+        }
+        inputs = {
+            "snapshots": [snap],
+            "request": {"width_min": 2.0, "width_max": 5.0,
+                        "distance_min": 0.001, "distance_max": 0.05},
+        }
+        self.plugin.build_candidates(inputs)
+        sub = inputs["_build_sub_stages"]
+        assert "width_distribution" in sub
+        assert "width_order_used" in sub
+        assert "width_center" in sub
+        assert "candidates_before_cap" in sub
+        assert "candidates_after_cap" in sub
+        assert isinstance(sub["width_distribution"], dict)
+        assert isinstance(sub["width_order_used"], list)
+
+    def test_bucket_cap_preserves_width_diversity(self) -> None:
+        """When cap is hit, each width bucket should get a fair share."""
+        # Create many strikes so we produce lots of candidates
+        strikes = [600.0 - i for i in range(1, 60)]  # 599 down to 541
+        snap = {
+            "symbol": "SPY",
+            "expiration": "2026-03-06",
+            "underlying_price": 600.0,
+            "contracts": self._make_chain(600.0, strikes),
+        }
+        inputs = {
+            "snapshots": [snap],
+            "request": {
+                "width_min": 1.0, "width_max": 5.0,
+                "distance_min": 0.001, "distance_max": 0.12,
+                "max_candidates": 20,
+            },
+        }
+        candidates = self.plugin.build_candidates(inputs)
+        sub = inputs["_build_sub_stages"]
+        wd = sub["width_distribution"]
+
+        # Multiple width values should be represented in the output
+        assert len(wd) >= 2, (
+            f"Expected diversity across widths, got only: {wd}"
+        )
+        # No single width should consume all 20 slots
+        for w_str, cnt in wd.items():
+            assert cnt < 20, (
+                f"Width {w_str} consumed all {cnt} slots — cap diversity failed"
+            )

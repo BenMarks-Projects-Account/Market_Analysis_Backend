@@ -75,6 +75,7 @@ class OrderSubmitResponse(BaseModel):
     broker_order_id: str
     message: str
     created_at: datetime
+    account_mode_used: Literal["paper", "live"] | None = None
 
 
 class BrokerResult(BaseModel):

@@ -418,11 +418,16 @@
         </div>
       </aside>
     </div>
+
+    <!-- Overlay root: tooltips, modals, toasts mount here so they
+         remain visible when .shell enters browser fullscreen. -->
+    <div id="overlay-root"></div>
   </div>
 
   <!-- Router is provided by assets/js/router.js -->
 
   <script src="assets/js/utils/debug.js?v=20260217a"></script>
+  <script src="assets/js/utils/overlayRoot.js?v=20260227a"></script>
   <script src="assets/js/state/session_state.js?v=20260215a"></script>
   <script src="assets/js/api/client.js?v=20260216e"></script>
   <script src="assets/js/utils/tradeKey.js?v=20260216a"></script>
@@ -430,6 +435,7 @@
   <script src="assets/js/utils/tradeAccessor.js?v=20260217a"></script>
   <script src="assets/js/metrics/glossary.js?v=20260215a"></script>
   <script src="assets/js/ui/tooltip.js?v=20260215a"></script>
+  <script src="assets/js/ui/ben_tooltip.js?v=20260227a"></script>
   <script src="assets/js/ui/trade_card.js?v=20260217a"></script>
   <script src="assets/js/ui/source_health.js?v=20260215a"></script>
   <script src="assets/js/ui/boot_choice_modal.js?v=20260218a"></script>
@@ -448,6 +454,8 @@
   <script src="assets/js/ui/symbolUniverseSelector.js?v=20260218a"></script>
   <script src="assets/js/config/strategy_card_config.js?v=20260218a"></script>
   <script src="assets/js/models/option_trade_card_model.js?v=20260218a"></script>
+  <script src="assets/js/models/trade_ticket_model.js?v=20260227a"></script>
+  <script src="assets/js/ui/trade_ticket.js?v=20260227a"></script>
   <script src="assets/js/pages/strategy_dashboard_shell.js?v=20260218a"></script>
   <script src="assets/js/pages/active_trades.js?v=20260217a"></script>
   <script src="assets/js/pages/trade_workbench.js?v=20260217a"></script>

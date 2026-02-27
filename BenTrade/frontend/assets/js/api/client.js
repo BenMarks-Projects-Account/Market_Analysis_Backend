@@ -250,6 +250,40 @@ window.BenTradeApi = (function(){
     return jsonFetch('/api/admin/data-health');
   }
 
+  /* ── Trading execution ───────────────────────────────────── */
+
+  function getTradingStatus(){
+    return jsonFetch('/api/trading/status');
+  }
+
+  function tradingTestConnection(){
+    return jsonFetch('/api/trading/test-connection');
+  }
+
+  function tradingPreview(payload){
+    return jsonFetch('/api/trading/preview', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  function tradingSubmit(payload){
+    return jsonFetch('/api/trading/submit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  function tradingKillSwitchOn(){
+    return jsonFetch('/api/trading/kill-switch/on', { method: 'POST' });
+  }
+
+  function tradingKillSwitchOff(){
+    return jsonFetch('/api/trading/kill-switch/off', { method: 'POST' });
+  }
+
   return {
     listReports,
     getReport,
@@ -289,5 +323,11 @@ window.BenTradeApi = (function(){
     getStrategyReport,
     generateStrategyReport,
     getAdminDataHealth,
+    getTradingStatus,
+    tradingTestConnection,
+    tradingPreview,
+    tradingSubmit,
+    tradingKillSwitchOn,
+    tradingKillSwitchOff,
   };
 })();

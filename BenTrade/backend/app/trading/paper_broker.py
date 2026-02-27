@@ -15,7 +15,7 @@ def _leg_mid(leg) -> float:
 
 
 class PaperBroker(BrokerBase):
-    async def place_order(self, ticket: OrderTicket) -> BrokerResult:
+    async def place_order(self, ticket: OrderTicket, **kwargs) -> BrokerResult:
         short_leg = next((l for l in ticket.legs if l.side == "SELL_TO_OPEN"), None)
         long_leg = next((l for l in ticket.legs if l.side == "BUY_TO_OPEN"), None)
 

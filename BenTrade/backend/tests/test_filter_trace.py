@@ -74,18 +74,19 @@ class TestGateGroups:
         evaluate_codes = {
             "pop_below_floor", "ev_to_risk_below_floor", "ev_negative",
             "ror_below_floor", "invalid_width", "non_positive_credit",
-            "spread_too_wide", "open_interest_below_min", "volume_below_min",
+            "credit_ge_width", "spread_too_wide",
+            "open_interest_below_min", "volume_below_min",
             "CREDIT_SPREAD_METRICS_FAILED",
         }
         # Known enrich() quote rejection codes
         quote_codes = {
             "MISSING_QUOTES:short_bid", "MISSING_QUOTES:long_ask",
             "ASK_LT_BID:short_leg", "ASK_LT_BID:long_leg",
-            "NON_POSITIVE_CREDIT", "NET_CREDIT_GE_WIDTH",
         }
         # Data-quality rejection codes (Gate 6)
         dq_codes = {
             "DQ_MISSING:open_interest", "DQ_MISSING:volume",
+            "DQ_ZERO:open_interest", "DQ_ZERO:volume",
         }
         # Centralised QUOTE_INVALID codes (Gate 1)
         quote_invalid_codes = {
@@ -476,3 +477,210 @@ class TestFilterTraceSkipKeys:
         skip = StrategyService._FILTER_TRACE_SKIP_KEYS
         for key in ("symbols", "symbol", "expiration", "direction", "moneyness"):
             assert key in skip, f"Expected '{key}' in _FILTER_TRACE_SKIP_KEYS"
+
+
+# ---------------------------------------------------------------------------
+# 9. Near-miss analysis
+# ---------------------------------------------------------------------------
+
+class TestNearMiss:
+    """Verify _build_near_miss produces the expected output shape and scoring."""
+
+    def test_basic_near_miss_shape(self):
+        """Near-miss entries have all required fields and gate_deltas."""
+        from app.services.strategy_service import StrategyService
+
+        # Build some fake rejected rows with varying metrics
+        rows = [
+            (
+                {
+                    "underlying": "SPY", "expiration": "2025-03-21",
+                    "dte": 25, "short_strike": 595.0, "long_strike": 590.0,
+                    "spread_type": "put_credit_spread",
+                    "width": 5.0, "net_credit": 1.20,
+                    "p_win_used": 0.58,  # below min_pop=0.60
+                    "ev_per_share": 0.05, "ev_to_risk": 0.03,
+                    "return_on_risk": 0.02, "bid_ask_spread_pct": 0.01,
+                    "open_interest": 1000, "volume": 50,
+                    "_short_bid": 2.50, "_short_ask": 2.70,
+                    "_long_bid": 1.30, "_long_ask": 1.50,
+                    "_credit_basis": "mid",
+                    "max_loss_per_share": 3.80,
+                },
+                ["pop_below_floor"],
+            ),
+            (
+                {
+                    "underlying": "SPY", "expiration": "2025-03-21",
+                    "dte": 25, "short_strike": 594.0, "long_strike": 589.0,
+                    "spread_type": "put_credit_spread",
+                    "width": 5.0, "net_credit": 0.80,
+                    "p_win_used": 0.65, "ev_per_share": 0.01,
+                    "ev_to_risk": 0.005,  # below min_ev_to_risk=0.02
+                    "return_on_risk": 0.005,  # below min_ror=0.01
+                    "bid_ask_spread_pct": 0.02,
+                    "open_interest": 200,  # below min_oi=300
+                    "volume": 10,  # below min_vol=20
+                    "_short_bid": 2.00, "_short_ask": 2.20,
+                    "_long_bid": 1.10, "_long_ask": 1.40,
+                    "_credit_basis": "mid",
+                },
+                ["ev_to_risk_below_floor", "ror_below_floor",
+                 "open_interest_below_min", "volume_below_min"],
+            ),
+        ]
+
+        result = StrategyService._build_near_miss(rows, {}, {}, limit=20)
+
+        assert len(result) == 2
+        # First entry should be the one closest to passing (only 1 reason)
+        best = result[0]
+        assert best["symbol"] == "SPY"
+        assert best["short_strike"] == 595.0
+        assert best["reason_count"] == 1
+        assert best["nearness_score"] > result[1]["nearness_score"]
+
+        # Check required fields
+        for entry in result:
+            assert "symbol" in entry
+            assert "expiration" in entry
+            assert "short_strike" in entry
+            assert "long_strike" in entry
+            assert "width" in entry
+            assert "net_credit" in entry
+            assert "gate_deltas" in entry
+            assert "reasons" in entry
+            assert "nearness_score" in entry
+            assert "short_bid" in entry
+            assert "short_ask" in entry
+            assert "long_bid" in entry
+            assert "long_ask" in entry
+            assert "short_mid" in entry
+            assert "long_mid" in entry
+            assert "pop" in entry
+            assert "ev_to_risk" in entry
+            assert "ror" in entry
+
+        # Check gate_deltas structure
+        gd = best["gate_deltas"]
+        assert "ev_to_risk" in gd
+        assert "ror" in gd
+        assert "pop" in gd
+        assert "spread_pct" in gd
+        assert "open_interest" in gd
+        assert "volume" in gd
+        for gate_name, gate_info in gd.items():
+            assert "actual" in gate_info
+            assert "threshold" in gate_info
+            assert "delta" in gate_info
+
+    def test_structural_rejections_score_poorly(self):
+        """Candidates with structural/quote rejections rank below threshold-only failures."""
+        from app.services.strategy_service import StrategyService
+
+        rows = [
+            # Threshold-only failure: almost passing
+            (
+                {
+                    "underlying": "SPY", "expiration": "2025-03-21",
+                    "width": 5.0, "net_credit": 1.20,
+                    "p_win_used": 0.59, "ev_to_risk": 0.019,
+                    "return_on_risk": 0.009, "bid_ask_spread_pct": 0.008,
+                    "open_interest": 500, "volume": 50,
+                },
+                ["pop_below_floor", "ev_to_risk_below_floor", "ror_below_floor"],
+            ),
+            # Structural rejection: non_positive_credit
+            (
+                {
+                    "underlying": "SPY", "expiration": "2025-03-21",
+                    "width": 5.0, "net_credit": -0.20,
+                    "p_win_used": None, "ev_to_risk": None,
+                    "return_on_risk": None, "bid_ask_spread_pct": None,
+                    "open_interest": 1000, "volume": 200,
+                },
+                ["non_positive_credit"],
+            ),
+        ]
+
+        result = StrategyService._build_near_miss(rows, {}, {}, limit=20)
+        assert len(result) == 2
+        # Threshold-only should rank higher than structural
+        assert result[0]["nearness_score"] > result[1]["nearness_score"]
+
+    def test_near_miss_respects_limit(self):
+        """Only top N candidates are returned."""
+        from app.services.strategy_service import StrategyService
+
+        rows = [
+            (
+                {"underlying": f"SYM{i}", "width": 5.0, "net_credit": 1.0 + i * 0.01,
+                 "p_win_used": 0.55 + i * 0.001, "ev_to_risk": 0.01,
+                 "return_on_risk": 0.005, "bid_ask_spread_pct": 0.01,
+                 "open_interest": 100, "volume": 10},
+                ["ev_to_risk_below_floor", "ror_below_floor"],
+            )
+            for i in range(30)
+        ]
+
+        result = StrategyService._build_near_miss(rows, {}, {}, limit=5)
+        assert len(result) == 5
+
+    @pytest.mark.anyio
+    async def test_near_miss_in_generate_when_zero_accepted(self, tmp_path):
+        """When generate() produces 0 accepted, near_miss appears in filter_trace."""
+        from app.services.strategy_service import StrategyService
+        from dataclasses import dataclass
+
+        @dataclass
+        class _FC:
+            strike: float
+            bid: float | None
+            ask: float | None
+            option_type: str = "put"
+            delta: float | None = None
+            iv: float | None = None
+            open_interest: int | None = 1000
+            volume: int | None = 100
+
+        mock_bds = MagicMock()
+        mock_bds.get_source_health_snapshot.return_value = {"sources": []}
+        svc = StrategyService(base_data_service=mock_bds, results_dir=tmp_path)
+
+        # Intentionally craft contracts that will produce candidates that
+        # fail threshold gates (very low credit / bad metrics).
+        mock_contracts = [
+            _FC(strike=595.0, bid=0.15, ask=0.25, delta=-0.05),
+            _FC(strike=590.0, bid=0.05, ask=0.10, delta=-0.02),
+        ]
+
+        async def mock_get_inputs(sym, exp):
+            return {
+                "symbol": sym, "expiration": exp,
+                "underlying_price": 600.0, "vix": 18.0,
+                "contracts": mock_contracts,
+                "prices_history": [595.0 + i * 0.1 for i in range(20)],
+            }
+
+        async def mock_get_expirations(sym):
+            return ["2025-03-21"]
+
+        svc.base_data_service.get_analysis_inputs = mock_get_inputs
+        svc.base_data_service.tradier_client = MagicMock()
+        svc.base_data_service.tradier_client.get_expirations = mock_get_expirations
+
+        result = await svc.generate("credit_spread", {
+            "preset": "strict", "symbols": ["SPY"],
+        })
+
+        assert len(result.get("trades", [])) == 0
+        ft = result.get("filter_trace", {})
+        nm = ft.get("near_miss")
+        # If candidates were generated and rejected, near_miss should be present
+        if ft.get("stages") and any(s.get("output_count", 0) > 0 for s in ft["stages"] if s.get("name") == "candidate_construction"):
+            assert nm is not None, "near_miss should be present when accepted==0 and candidates exist"
+            assert isinstance(nm, list)
+            if nm:
+                assert "gate_deltas" in nm[0]
+                assert "nearness_score" in nm[0]
+                assert "reasons" in nm[0]

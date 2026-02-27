@@ -61,7 +61,11 @@ window.BenTradeStrategyShell = (function(){
       el.style.boxShadow = '0 10px 24px rgba(0,0,0,0.45)';
       el.style.opacity = '0';
       el.style.transition = 'opacity 0.16s ease';
-      document.body.appendChild(el);
+      // Mount inside overlay-root so toast stays visible in fullscreen.
+      var overlayRoot = (window.BenTradeOverlayRoot && window.BenTradeOverlayRoot.get)
+        ? window.BenTradeOverlayRoot.get()
+        : document.body;
+      overlayRoot.appendChild(el);
     }
     el.textContent = String(message || 'Updated');
     el.style.opacity = '1';
@@ -379,10 +383,11 @@ window.BenTradeStrategyShell = (function(){
     btnDefaults.className = 'btn';
     btnDefaults.textContent = 'Use Defaults';
 
-    const btnGenerateDefaults = document.createElement('button');
-    btnGenerateDefaults.type = 'button';
-    btnGenerateDefaults.className = 'btn';
-    btnGenerateDefaults.textContent = 'Generate With Defaults';
+    const btnGenerateAdvanced = document.createElement('button');
+    btnGenerateAdvanced.type = 'button';
+    btnGenerateAdvanced.className = 'btn';
+    btnGenerateAdvanced.textContent = 'Generate With Advanced Filters';
+    btnGenerateAdvanced.style.display = 'none'; // hidden until advanced toggle is on
 
     const btnReset = document.createElement('button');
     btnReset.type = 'button';
@@ -408,12 +413,29 @@ window.BenTradeStrategyShell = (function(){
     why.appendChild(summary);
     why.appendChild(list);
 
-    controls.appendChild(advancedToggleWrap);
+    controls.appendChild(btnDefaults);
+    controls.appendChild(btnGenerateAdvanced);
+    controls.appendChild(btnReset);
+    controls.appendChild(why);
 
-    // -- Preset toggle (Conservative / Strict) --
+    // Insert advanced toggle checkbox into the top control row (not the filter form)
+    const topAdvancedSlot = host.querySelector('#topAdvancedToggle');
+    if(topAdvancedSlot){
+      topAdvancedSlot.appendChild(advancedToggleWrap);
+    }else{
+      // Fallback: prepend to controls row
+      controls.prepend(advancedToggleWrap);
+    }
+
+    row.appendChild(fieldWrap);
+    row.appendChild(controls);
+    host.appendChild(row);
+
+    // -- Preset dropdown: placed in the TOP control row next to genBtn --
     const sKey = strategyKey(config);
     const presetNames = window.BenTradeStrategyDefaults?.getPresetNames?.(sKey) || [];
     let presetSelect = null;
+    const topControlGroup = host.querySelector('#topControlGroup');
     if(presetNames.length > 1){
       const presetWrap = document.createElement('label');
       presetWrap.style.display = 'inline-flex';
@@ -421,7 +443,6 @@ window.BenTradeStrategyShell = (function(){
       presetWrap.style.gap = '6px';
       presetWrap.style.fontSize = '12px';
       presetWrap.style.color = 'rgba(215,251,255,0.96)';
-      presetWrap.style.marginRight = '4px';
       const presetLabel = document.createElement('span');
       presetLabel.textContent = 'Preset:';
       presetSelect = document.createElement('select');
@@ -436,17 +457,19 @@ window.BenTradeStrategyShell = (function(){
       presetSelect.value = presetNames[0]; // default to first (conservative)
       presetWrap.appendChild(presetLabel);
       presetWrap.appendChild(presetSelect);
-      controls.appendChild(presetWrap);
+      // Insert into the TOP bar (right-aligned group) instead of the advanced controls row
+      if(topControlGroup){
+        topControlGroup.appendChild(presetWrap);
+      }else{
+        // Fallback: place next to genBtn
+        const genBtn = host.querySelector('#genBtn');
+        if(genBtn && genBtn.parentNode){
+          genBtn.parentNode.insertBefore(presetWrap, genBtn);
+        }else{
+          controls.appendChild(presetWrap);
+        }
+      }
     }
-
-    controls.appendChild(btnDefaults);
-    controls.appendChild(btnGenerateDefaults);
-    controls.appendChild(btnReset);
-    controls.appendChild(why);
-
-    row.appendChild(fieldWrap);
-    row.appendChild(controls);
-    host.appendChild(row);
 
     const sticky = { ...(config.defaultFilters || {}) };
     let currentPreset = presetNames.length ? presetNames[0] : '';
@@ -456,6 +479,7 @@ window.BenTradeStrategyShell = (function(){
       state.activeConfig.advancedEnabled = on;
       fieldWrap.style.display = on ? 'flex' : 'none';
       btnDefaults.style.display = on ? '' : 'none';
+      btnGenerateAdvanced.style.display = on ? '' : 'none';
       btnReset.style.display = on ? '' : 'none';
       why.style.display = on ? '' : 'none';
       /* Template manual-filter controls removed — shell owns its own. */
@@ -470,6 +494,9 @@ window.BenTradeStrategyShell = (function(){
           next[field.key] = value;
         }
       });
+      // Preserve preset — form fields don't include it, so carry forward
+      // from the existing currentFilters or the dropdown's current value.
+      next.preset = state.activeConfig.currentFilters?.preset || currentPreset;
       state.activeConfig.currentFilters = next;
     };
 
@@ -490,7 +517,9 @@ window.BenTradeStrategyShell = (function(){
         const input = row.querySelector(`#${CSS.escape(inputId(mode, field.key))}`);
         writeFieldValue(field, input, '');
       });
+      const savedPreset = state.activeConfig.currentFilters?.preset || currentPreset;
       state.activeConfig.currentFilters = { ...sticky };
+      state.activeConfig.currentFilters.preset = savedPreset;
       showToast('Inputs reset');
     };
 
@@ -503,7 +532,9 @@ window.BenTradeStrategyShell = (function(){
     advancedToggle.addEventListener('change', () => {
       setAdvancedEnabled(advancedToggle.checked);
       if(!advancedToggle.checked){
+        const savedPreset = state.activeConfig.currentFilters?.preset || currentPreset;
         state.activeConfig.currentFilters = { ...(config.defaultFilters || {}) };
+        state.activeConfig.currentFilters.preset = savedPreset;
       }
     });
 
@@ -519,20 +550,25 @@ window.BenTradeStrategyShell = (function(){
 
     btnDefaults.addEventListener('click', applyDefaults);
     btnReset.addEventListener('click', clearInputs);
-    btnGenerateDefaults.addEventListener('click', () => {
-      applyDefaults();
-      advancedToggle.checked = false;
-      setAdvancedEnabled(false);
-      // Ensure preset + symbols travel through the generate call
-      const defaults = window.BenTradeStrategyDefaults?.getStrategyDefaults?.(strategyKey(config), currentPreset) || {};
-      if(defaults.symbols){
-        state.activeConfig.currentFilters.symbols = defaults.symbols;
+    btnGenerateAdvanced.addEventListener('click', () => {
+      // Run scanner using manually-entered advanced filter values.
+      // Temporarily force advanced mode on so PatchedEventSource sends filter params,
+      // then restore state after SSE is opened.
+      writeFiltersFromInputs();
+      const wasAdvanced = state.activeConfig.advancedEnabled;
+      state.activeConfig.advancedEnabled = true;
+      // Mark as 'manual' — user tweaked thresholds, trace should reflect that
+      state.activeConfig.currentFilters.preset = 'manual';
+      console.info('[StrategyShell] Generate advanced scan:', { preset: 'manual', filters: { ...state.activeConfig.currentFilters } });
+      // Use the exposed startGeneration from mount scope
+      if(typeof state.startGeneration === 'function'){
+        state.startGeneration();
+      }else{
+        // Fallback: open SSE directly won't work, so log a warning
+        console.warn('[StrategyShell] startGeneration not yet available');
       }
-      state.activeConfig.currentFilters.preset = currentPreset;
-      const genBtn = document.getElementById('genBtn');
-      if(genBtn){
-        genBtn.click();
-      }
+      // Restore after SSE is opened (EventSource constructor is synchronous)
+      state.activeConfig.advancedEnabled = wasAdvanced;
     });
 
     applyDefaults();
@@ -980,7 +1016,13 @@ window.BenTradeStrategyShell = (function(){
           html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">';
           html += '<div style="font-size:14px;font-weight:700;color:#ffbb33;">No Trades Passed Filters</div>';
           if(ft && ft.preset_name){
-            html += `<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;background:rgba(159,239,255,0.12);color:#9fefff;text-transform:uppercase;letter-spacing:0.5px;">${escapeHtml(ft.preset_name)}</span>`;
+            const presetMatch = ft.requested_preset_name === ft.preset_name || !ft.requested_preset_name;
+            const badgeColor = presetMatch ? 'rgba(159,239,255,0.12)' : 'rgba(255,94,94,0.15)';
+            const badgeText = presetMatch ? '#9fefff' : '#ff5e5e';
+            html += `<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;background:${badgeColor};color:${badgeText};text-transform:uppercase;letter-spacing:0.5px;">${escapeHtml(ft.preset_name)}</span>`;
+            if(!presetMatch && ft.requested_preset_name){
+              html += `<span style="font-size:10px;color:rgba(255,94,94,0.8);">(requested: ${escapeHtml(ft.requested_preset_name)})</span>`;
+            }
           }
           html += '</div>';
 
@@ -989,6 +1031,28 @@ window.BenTradeStrategyShell = (function(){
           html += 'This is normal when market conditions or scan parameters produce candidates ';
           html += 'that don\'t meet the quality gates (EV/risk, liquidity, spread width).';
           html += '</div>';
+
+          // ── Scan Parameters Confirmation ──
+          if(ft){
+            const rt = ft.resolved_thresholds || {};
+            const keyThresholds = [
+              { label: 'Min POP', value: rt.min_pop },
+              { label: 'Min EV/Risk', value: rt.min_ev_to_risk },
+              { label: 'Max Spread %', value: rt.max_bid_ask_spread_pct },
+              { label: 'Min OI', value: rt.min_open_interest },
+              { label: 'Min Volume', value: rt.min_volume },
+              { label: 'DQ Mode', value: ft.data_quality_mode },
+            ].filter(t => t.value != null && t.value !== '');
+            if(keyThresholds.length){
+              html += '<div style="margin-top:10px;padding:8px 10px;border-radius:6px;background:rgba(159,239,255,0.05);border:1px solid rgba(159,239,255,0.12);">';
+              html += '<div style="font-size:10px;font-weight:600;color:rgba(159,239,255,0.6);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Scan Parameters Used</div>';
+              html += '<div style="display:flex;flex-wrap:wrap;gap:6px 14px;">';
+              keyThresholds.forEach(t => {
+                html += `<span style="font-size:11px;color:#e6fbff;"><span style="color:rgba(159,239,255,0.5);">${escapeHtml(t.label)}:</span> ${escapeHtml(String(t.value))}</span>`;
+              });
+              html += '</div></div>';
+            }
+          }
 
           if(reportWarnings.length){
             html += '<div style="margin-top:10px;font-size:12px;font-weight:600;color:#9fefff;">Warnings</div>';
@@ -1220,6 +1284,107 @@ window.BenTradeStrategyShell = (function(){
             html += '</details>';
           }
 
+          // ── Near-Miss Candidates (auto when accepted==0) ──
+          if(ft && Array.isArray(ft.near_miss) && ft.near_miss.length){
+            const nm = ft.near_miss;
+            const nmJson = JSON.stringify(nm, null, 2);
+            html += '<details open style="margin-top:14px;">';
+            html += '<summary style="font-size:13px;font-weight:700;color:#f0c040;cursor:pointer;user-select:none;">';
+            html += '\uD83D\uDD0E Near-Miss Candidates (' + nm.length + ')';
+            html += ' <span style="font-weight:400;font-size:11px;color:rgba(240,192,64,0.6);">— closest to passing filters</span>';
+            html += '</summary>';
+            html += '<div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">';
+            nm.forEach(function(c, idx) {
+              // Card for each near-miss candidate
+              const score = c.nearness_score != null ? c.nearness_score.toFixed(2) : '?';
+              // Color: green-ish for high nearness, red-ish for low
+              const scoreColor = c.nearness_score > 0 ? '#4ade80' : c.nearness_score > -3 ? '#f0c040' : '#ff5e5e';
+              html += '<div style="padding:8px 12px;border-radius:8px;background:rgba(240,192,64,0.05);border:1px solid rgba(240,192,64,0.25);font-size:11px;color:#ddd;">';
+
+              // Header: rank, symbol, strikes, nearness badge
+              const sym = escapeHtml(c.symbol || '?');
+              const strikes = [c.short_strike, c.long_strike].filter(function(v){return v!=null;}).join('/');
+              const dte = c.dte != null ? c.dte + 'd' : '';
+              const exp = c.expiration ? escapeHtml(c.expiration) : '';
+              html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
+              html += '<span style="font-weight:700;color:#e6fbff;font-size:12px;">#' + (idx+1) + ' ' + sym + ' ' + strikes + '</span>';
+              if(dte) html += '<span style="color:rgba(230,251,255,0.6);">' + dte + '</span>';
+              if(exp) html += '<span style="color:rgba(230,251,255,0.5);font-size:10px;">' + exp + '</span>';
+              html += '<span style="margin-left:auto;padding:1px 6px;border-radius:4px;font-weight:600;font-size:10px;background:rgba(0,0,0,0.3);color:' + scoreColor + ';">score ' + score + '</span>';
+              html += '</div>';
+
+              // Row 2: per-leg quotes
+              const legs = [];
+              if(c.short_bid != null && c.short_ask != null){
+                const smid = c.short_mid != null ? c.short_mid.toFixed(2) : '?';
+                legs.push('Short: ' + c.short_bid.toFixed(2) + '/' + c.short_ask.toFixed(2) + ' (mid ' + smid + ')');
+              }
+              if(c.long_bid != null && c.long_ask != null){
+                const lmid = c.long_mid != null ? c.long_mid.toFixed(2) : '?';
+                legs.push('Long: ' + c.long_bid.toFixed(2) + '/' + c.long_ask.toFixed(2) + ' (mid ' + lmid + ')');
+              }
+              if(legs.length) html += '<div style="color:rgba(230,251,255,0.55);margin-top:3px;">' + legs.join(' &nbsp;\u2502&nbsp; ') + '</div>';
+
+              // Row 3: metrics chips
+              const chips = [];
+              if(c.net_credit != null) chips.push('Credit=$' + c.net_credit.toFixed(2));
+              if(c.max_loss != null) chips.push('MaxLoss=$' + Math.abs(c.max_loss).toFixed(2));
+              if(c.width != null) chips.push('W=' + c.width);
+              if(c.spread_pct != null) chips.push('Sprd=' + c.spread_pct.toFixed(1) + '%');
+              if(c.pop != null) chips.push('POP=' + (c.pop*100).toFixed(1) + '%');
+              if(c.ev != null) chips.push('EV=$' + c.ev.toFixed(3));
+              if(c.ev_to_risk != null) chips.push('EV/R=' + c.ev_to_risk.toFixed(4));
+              if(c.ror != null) chips.push('ROR=' + (c.ror*100).toFixed(1) + '%');
+              if(c.open_interest != null) chips.push('OI=' + c.open_interest);
+              if(c.volume != null) chips.push('Vol=' + c.volume);
+              if(chips.length){
+                html += '<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;">';
+                chips.forEach(function(ch){
+                  html += '<span style="padding:1px 5px;border-radius:3px;background:rgba(159,239,255,0.08);color:rgba(159,239,255,0.85);font-size:10px;">' + escapeHtml(ch) + '</span>';
+                });
+                html += '</div>';
+              }
+
+              // Row 4: gate deltas — show how far each metric was from threshold
+              if(c.gate_deltas && typeof c.gate_deltas === 'object'){
+                html += '<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px;">';
+                const deltaLabels = {ev_to_risk:'EV/Risk',ror:'ROR',pop:'POP',spread_pct:'Spread%',open_interest:'OI',volume:'Vol'};
+                Object.keys(c.gate_deltas).forEach(function(gk){
+                  const gd = c.gate_deltas[gk];
+                  if(!gd) return;
+                  const label = deltaLabels[gk] || gk;
+                  let txt = label + ': ';
+                  if(gd.actual == null){
+                    txt += 'MISSING';
+                  } else {
+                    const fmt = function(v){ return typeof v==='number' ? (Math.abs(v)<1 ? v.toFixed(4) : v.toFixed(2)) : String(v); };
+                    txt += fmt(gd.actual) + ' vs ' + fmt(gd.threshold);
+                    if(gd.delta != null){
+                      txt += ' (' + (gd.delta >= 0 ? '+' : '') + fmt(gd.delta) + ')';
+                    }
+                  }
+                  const passing = gd.delta != null && gd.delta >= 0;
+                  const dColor = gd.actual == null ? '#888' : passing ? '#4ade80' : '#ff5e5e';
+                  html += '<span style="padding:1px 5px;border-radius:3px;font-size:10px;border:1px solid ' + dColor + '40;color:' + dColor + ';">' + escapeHtml(txt) + '</span>';
+                });
+                html += '</div>';
+              }
+
+              // Row 5: rejection reasons
+              if(Array.isArray(c.reasons) && c.reasons.length){
+                html += '<div style="color:#ff5e5e;margin-top:3px;font-size:10px;">\u2716 ' + c.reasons.map(function(r){return escapeHtml(r);}).join(', ') + '</div>';
+              }
+
+              html += '</div>';
+            });
+            html += '</div>';
+            // Copy Near-Miss JSON button
+            html += '<div style="margin-top:6px;">';
+            html += '<button data-action="copy-near-miss" data-near-miss="' + escapeHtml(nmJson) + '" style="padding:4px 10px;font-size:10px;font-weight:600;border:1px solid rgba(240,192,64,0.3);border-radius:5px;background:rgba(240,192,64,0.08);color:#f0c040;cursor:pointer;">Copy Near-Miss JSON</button>';
+            html += '</div>';
+            html += '</details>';
+          }
+
           // Diagnostics summary line
           const parts = [];
           if(symbols.length) parts.push(`Symbols: ${symbols.join(', ')}`);
@@ -1438,6 +1603,9 @@ window.BenTradeStrategyShell = (function(){
       }, 180000);
     }
 
+    // Expose startGeneration for buildForm closures (e.g. btnGenerateAdvanced)
+    state.startGeneration = startGeneration;
+
     function finishGeneration(){
       if(genBtn){
         genBtn.disabled = false;
@@ -1468,7 +1636,17 @@ window.BenTradeStrategyShell = (function(){
       genBtn.addEventListener('click', (e) => {
         e.preventDefault();
         if(genBtn.disabled) return;
+        // "Generate New Report" ALWAYS runs preset scan (ignores advanced filters).
+        // Temporarily force advancedEnabled=false for the SSE URL builder,
+        // then restore it so the UI checkbox state is preserved.
+        const wasAdvanced = state.activeConfig.advancedEnabled;
+        state.activeConfig.advancedEnabled = false;
+        // Use the dropdown's current value as the authoritative preset source
+        state.activeConfig.currentFilters.preset = state.activeConfig.currentFilters.preset || currentPreset;
+        console.info('[StrategyShell] Generate preset scan:', { preset: state.activeConfig.currentFilters.preset });
         startGeneration();
+        // Restore after SSE is opened (EventSource constructor is synchronous)
+        state.activeConfig.advancedEnabled = wasAdvanced;
       });
     }
 
@@ -1559,6 +1737,17 @@ window.BenTradeStrategyShell = (function(){
                 setTimeout(function(){ btn.textContent = 'Copy Trace JSON'; }, 1500);
               }).catch(function(){
                 prompt('Copy trace JSON:', _traceText);
+              });
+              return;
+            }
+
+            if(action === 'copy-near-miss'){
+              var _nmText = btn.dataset.nearMiss || '';
+              navigator.clipboard.writeText(_nmText).then(function(){
+                btn.textContent = 'Copied!';
+                setTimeout(function(){ btn.textContent = 'Copy Near-Miss JSON'; }, 1500);
+              }).catch(function(){
+                prompt('Copy near-miss JSON:', _nmText);
               });
               return;
             }

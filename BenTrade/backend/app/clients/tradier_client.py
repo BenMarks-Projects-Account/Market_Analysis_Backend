@@ -12,6 +12,8 @@ from app.utils.http import request_json
 
 logger = logging.getLogger(__name__)
 _SYMBOL_PATTERN = re.compile(r"^[A-Z0-9.\-]{1,10}$")
+# OCC option symbol: root(1-6 upper) + date(6 digits) + P/C + strike(8 digits)
+_OCC_SYMBOL_PATTERN = re.compile(r"^[A-Z]{1,6}\d{6}[PC]\d{8}$")
 
 
 class TradierClient:
@@ -167,6 +169,30 @@ class TradierClient:
 
         return await self.cache.get_or_set(key, self.settings.CHAIN_CACHE_TTL_SECONDS, _load)
 
+    async def fetch_chain_raw_payload(
+        self, symbol: str, expiration: str, greeks: bool = True,
+    ) -> dict[str, Any]:
+        """Fetch the full raw JSON payload from ``/markets/options/chains``.
+
+        Bypasses cache.  Used by the snapshot-capture endpoint to save the
+        complete, unextracted response body for later replay.
+        """
+        normalized_symbol = self._normalize_symbol(symbol)
+        if not normalized_symbol:
+            return {}
+        url = f"{self.settings.TRADIER_BASE_URL}/markets/options/chains"
+        return await request_json(
+            self.http_client,
+            "GET",
+            url,
+            params={
+                "symbol": normalized_symbol,
+                "expiration": expiration,
+                "greeks": str(greeks).lower(),
+            },
+            headers=self._headers,
+        )
+
     async def get_daily_closes(self, symbol: str, start_date: str, end_date: str) -> list[float]:
         normalized_symbol = self._normalize_symbol(symbol)
         if not normalized_symbol:
@@ -303,6 +329,67 @@ class TradierClient:
                 symbol = self._normalize_symbol(item.get("symbol"))
                 if symbol:
                     out[symbol] = self._sanitize_quote(item, symbol=symbol)
+            return out
+
+        return await self.cache.get_or_set(key, self.settings.QUOTE_CACHE_TTL_SECONDS, _load)
+
+    # ------------------------------------------------------------------
+    # Option-symbol-aware quote lookup (accepts OCC symbols)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _normalize_option_symbol(symbol: Any) -> str | None:
+        """Validate an OCC option symbol (e.g. SPY260320P00500000)."""
+        value = str(symbol or "").strip().upper()
+        if not value:
+            return None
+        if _OCC_SYMBOL_PATTERN.fullmatch(value):
+            return value
+        return None
+
+    async def get_option_quotes(self, option_symbols: list[str]) -> dict[str, dict[str, Any]]:
+        """Fetch quotes for OCC option symbols via /markets/quotes.
+
+        Unlike get_quotes(), accepts long-form OCC symbols (e.g.
+        SPY260320P00500000).  Uses the same Tradier /markets/quotes
+        endpoint which supports both equity and option symbols.
+
+        Returns ``{occ_symbol: {bid, ask, last, ...}, ...}``.
+        """
+        validated: list[str] = []
+        for sym in option_symbols or []:
+            norm = self._normalize_option_symbol(sym)
+            if norm:
+                validated.append(norm)
+            else:
+                logger.warning(
+                    "event=tradier_option_quote_validation reason=invalid_occ_symbol symbol=%s",
+                    sym,
+                )
+        if not validated:
+            return {}
+
+        key = "tradier:option_quotes:" + ",".join(sorted(set(validated)))
+        url = f"{self.settings.TRADIER_BASE_URL}/markets/quotes"
+
+        async def _load() -> dict[str, dict[str, Any]]:
+            payload = await request_json(
+                self.http_client,
+                "GET",
+                url,
+                params={"symbols": ",".join(sorted(set(validated)))},
+                headers=self._headers,
+            )
+            quote_obj = (payload.get("quotes") or {}).get("quote")
+            if isinstance(quote_obj, dict):
+                quote_obj = [quote_obj]
+
+            out: dict[str, dict[str, Any]] = {}
+            for item in quote_obj or []:
+                if not isinstance(item, dict):
+                    continue
+                raw_sym = str(item.get("symbol") or "").strip().upper()
+                if raw_sym:
+                    out[raw_sym] = self._sanitize_quote(item, symbol=raw_sym)
             return out
 
         return await self.cache.get_or_set(key, self.settings.QUOTE_CACHE_TTL_SECONDS, _load)

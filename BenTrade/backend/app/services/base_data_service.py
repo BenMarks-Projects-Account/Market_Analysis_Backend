@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import math
+import os
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.clients.finnhub_client import FinnhubClient
 from app.clients.fred_client import FredClient
@@ -10,7 +13,16 @@ from app.clients.polygon_client import PolygonClient
 from app.clients.tradier_client import TradierClient
 from app.models.schemas import OptionContract
 from app.utils.http import UpstreamError
+from app.utils.snapshot import (
+    OptionChainSource,
+    SnapshotChainSource,
+    SnapshotRecorder,
+    TradierChainSource,
+)
 from app.utils.validation import clamp, parse_expiration, validate_bid_ask, validate_symbol
+
+if TYPE_CHECKING:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +34,17 @@ class BaseDataService:
         finnhub_client: FinnhubClient,
         fred_client: FredClient,
         polygon_client: PolygonClient | None = None,
+        *,
+        chain_source: OptionChainSource | None = None,
+        snapshot_recorder: SnapshotRecorder | None = None,
     ) -> None:
         self.tradier_client = tradier_client
         self.finnhub_client = finnhub_client
         self.fred_client = fred_client
         self.polygon_client = polygon_client
+        # Chain source abstraction: defaults to live Tradier
+        self.chain_source: OptionChainSource = chain_source or TradierChainSource(tradier_client)
+        self.snapshot_recorder: SnapshotRecorder | None = snapshot_recorder
         self._source_health: dict[str, dict[str, Any]] = {
             "finnhub": self._new_source_state(),
             "polygon": self._new_source_state(),
@@ -381,6 +399,41 @@ class BaseDataService:
                     symbol=row.get("symbol"),
                 )
             )
+        # ── DEBUG_CHAIN_MAP: one-shot diagnostic dump ──────────────────────
+        # Set env var DEBUG_CHAIN_MAP=1 to emit a single-run log showing how
+        # raw chain rows mapped to OptionContract fields.  Helps diagnose
+        # "bid/ask present in raw but missing in normalized" issues.
+        if os.environ.get("DEBUG_CHAIN_MAP") == "1" and contracts:
+            _sample_raw = contracts[0]
+            _greeks_raw = _sample_raw.get("greeks") or {}
+            _sample_norm = normalized[0] if normalized else None
+            _has_bid = sum(1 for c in normalized if c.bid is not None)
+            _has_ask = sum(1 for c in normalized if c.ask is not None)
+            _has_delta = sum(1 for c in normalized if c.delta is not None)
+            _has_iv = sum(1 for c in normalized if c.iv is not None)
+            _has_oi = sum(1 for c in normalized if c.open_interest is not None)
+            _has_vol = sum(1 for c in normalized if c.volume is not None)
+            _has_symbol = sum(1 for c in normalized if c.symbol is not None)
+            logger.warning(
+                "event=DEBUG_CHAIN_MAP raw_count=%d normalized_count=%d "
+                "raw_sample_keys=%s raw_greeks_keys=%s "
+                "raw_bid=%s raw_ask=%s raw_delta=%s raw_iv=%s "
+                "norm_bid=%s norm_ask=%s norm_delta=%s norm_iv=%s "
+                "has_bid=%d has_ask=%d has_delta=%d has_iv=%d "
+                "has_oi=%d has_vol=%d has_symbol=%d",
+                len(contracts), len(normalized),
+                sorted(_sample_raw.keys()),
+                sorted(_greeks_raw.keys()) if isinstance(_greeks_raw, dict) else "N/A",
+                _sample_raw.get("bid"), _sample_raw.get("ask"),
+                _greeks_raw.get("delta") if isinstance(_greeks_raw, dict) else None,
+                _sample_raw.get("iv"),
+                getattr(_sample_norm, "bid", None) if _sample_norm else None,
+                getattr(_sample_norm, "ask", None) if _sample_norm else None,
+                getattr(_sample_norm, "delta", None) if _sample_norm else None,
+                getattr(_sample_norm, "iv", None) if _sample_norm else None,
+                _has_bid, _has_ask, _has_delta, _has_iv,
+                _has_oi, _has_vol, _has_symbol,
+            )
         return normalized
 
     async def get_underlying_price(self, symbol: str) -> float | None:
@@ -563,12 +616,33 @@ class BaseDataService:
             return []
 
     async def _get_chain_with_health(self, symbol: str, expiration: str, greeks: bool = True) -> list[dict[str, Any]]:
+        _is_snapshot = isinstance(self.chain_source, SnapshotChainSource)
         try:
-            chain = await self.tradier_client.get_chain(symbol, expiration=expiration, greeks=greeks)
-            self._mark_success("tradier", http_status=200, message="chain ok")
+            chain = await self.chain_source.get_chain(symbol, expiration=expiration, greeks=greeks)
+            if not _is_snapshot:
+                self._mark_success("tradier", http_status=200, message="chain ok")
+            # Snapshot capture (when enabled and not replaying from disk)
+            if (
+                self.snapshot_recorder
+                and self.snapshot_recorder.should_capture(symbol)
+                and not _is_snapshot
+            ):
+                self.snapshot_recorder.save_chain_response(
+                    chain,
+                    provider="tradier",
+                    symbol=symbol,
+                    expiration=expiration,
+                    endpoint="/markets/options/chains",
+                    request_params={
+                        "symbol": symbol,
+                        "expiration": expiration,
+                        "greeks": str(greeks).lower(),
+                    },
+                )
             return chain
         except Exception as exc:
-            self._mark_failure("tradier", exc)
+            if not _is_snapshot:
+                self._mark_failure("tradier", exc)
             raise
 
     async def _get_vix_with_health(self) -> float | None:
@@ -591,50 +665,72 @@ class BaseDataService:
             self._mark_validation_warning("tradier", "invalid expiration")
             raise ValueError("invalid expiration")
 
-        quote_task = asyncio.create_task(self.get_underlying_price(normalized_symbol))
-        chain_task = asyncio.create_task(self._get_chain_with_health(normalized_symbol, expiration=normalized_expiration, greeks=True))
-        vix_task = asyncio.create_task(self._get_vix_with_health())
-        candles_task = asyncio.create_task(self.get_prices_history(normalized_symbol, lookback_days=365)) if include_prices_history else None
+        _is_snapshot = isinstance(self.chain_source, SnapshotChainSource)
 
-        if candles_task is not None:
-            underlying_price, chain_raw, candles_raw, vix = await asyncio.gather(
-                quote_task,
-                chain_task,
-                candles_task,
-                vix_task,
-                return_exceptions=True,
+        if _is_snapshot:
+            # ── Snapshot mode: zero Tradier calls ──────────────────────
+            chain_raw = await self._get_chain_with_health(
+                normalized_symbol, expiration=normalized_expiration, greeks=True,
             )
+            underlying_price = self.chain_source.get_underlying_price(normalized_symbol)
+            if underlying_price is None:
+                logger.warning(
+                    "event=snapshot_no_underlying_price symbol=%s",
+                    normalized_symbol,
+                )
+            # VIX from FRED (non-Tradier) — fine in snapshot mode
+            try:
+                vix: float | None = await self._get_vix_with_health()
+            except Exception:
+                vix = None
+            closes: list[float] = []
         else:
-            underlying_price, chain_raw, vix = await asyncio.gather(
-                quote_task,
-                chain_task,
-                vix_task,
-                return_exceptions=True,
-            )
-            candles_raw = []
+            # ── Live mode: parallel Tradier + FRED calls ───────────────
+            quote_task = asyncio.create_task(self.get_underlying_price(normalized_symbol))
+            chain_task = asyncio.create_task(self._get_chain_with_health(normalized_symbol, expiration=normalized_expiration, greeks=True))
+            vix_task = asyncio.create_task(self._get_vix_with_health())
+            candles_task = asyncio.create_task(self.get_prices_history(normalized_symbol, lookback_days=365)) if include_prices_history else None
 
-        if isinstance(underlying_price, Exception):
-            raise underlying_price
-        if isinstance(chain_raw, Exception):
-            raise chain_raw
-        if isinstance(candles_raw, Exception):
-            logger.warning(
-                "event=analysis_candles_unavailable symbol=%s expiration=%s error=%s",
-                normalized_symbol,
-                normalized_expiration,
-                str(candles_raw),
-            )
-            candles_raw = []
-        if isinstance(vix, Exception):
-            logger.warning(
-                "event=analysis_vix_unavailable symbol=%s expiration=%s error=%s",
-                normalized_symbol,
-                normalized_expiration,
-                str(vix),
-            )
-            vix = None
+            if candles_task is not None:
+                underlying_price, chain_raw, candles_raw, vix = await asyncio.gather(
+                    quote_task,
+                    chain_task,
+                    candles_task,
+                    vix_task,
+                    return_exceptions=True,
+                )
+            else:
+                underlying_price, chain_raw, vix = await asyncio.gather(
+                    quote_task,
+                    chain_task,
+                    vix_task,
+                    return_exceptions=True,
+                )
+                candles_raw: Any = []
 
-        closes = [float(x) for x in (candles_raw or []) if x is not None]
+            if isinstance(underlying_price, Exception):
+                raise underlying_price
+            if isinstance(chain_raw, Exception):
+                raise chain_raw
+            if isinstance(candles_raw, Exception):
+                logger.warning(
+                    "event=analysis_candles_unavailable symbol=%s expiration=%s error=%s",
+                    normalized_symbol,
+                    normalized_expiration,
+                    str(candles_raw),
+                )
+                candles_raw = []
+            if isinstance(vix, Exception):
+                logger.warning(
+                    "event=analysis_vix_unavailable symbol=%s expiration=%s error=%s",
+                    normalized_symbol,
+                    normalized_expiration,
+                    str(vix),
+                )
+                vix = None
+
+            closes = [float(x) for x in (candles_raw or []) if x is not None]
+
         contracts = self.normalize_chain(chain_raw)
 
         notes: list[str] = []

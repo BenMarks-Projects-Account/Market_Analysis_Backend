@@ -75,7 +75,7 @@ async def generate_strategy_report(
 async def generate_strategy_report_stream(strategy_id: str, request: Request):
     query = request.query_params
     request_payload: dict[str, Any] = {}
-    for key in ("symbol", "direction", "width", "distance_mode", "butterfly_type", "option_side", "center_mode", "moneyness", "preset"):
+    for key in ("symbol", "direction", "width", "distance_mode", "butterfly_type", "option_side", "center_mode", "moneyness", "preset", "data_quality_mode"):
         value = query.get(key)
         if value not in (None, ""):
             request_payload[key] = value

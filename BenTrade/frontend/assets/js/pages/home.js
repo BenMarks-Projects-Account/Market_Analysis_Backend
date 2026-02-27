@@ -588,21 +588,27 @@ window.BenTradePages.initHome = function initHome(rootEl){
       const summary = String(model.summary || '').trim();
       return summary ? `Error • ${summary}` : 'Error • Model analysis failed';
     }
-    const rec = String(model.recommendation || 'UNKNOWN').toUpperCase();
-    const confText = toNumber(model.confidence) === null ? '' : ` (${(toNumber(model.confidence) * 100).toFixed(0)}%)`;
-    const summary = String(model.summary || '').trim();
+    const rec = String(model.model_recommendation || model.recommendation || 'UNKNOWN').toUpperCase();
+    const confVal = toNumber(model.confidence_0_1 ?? model.confidence);
+    const confText = confVal === null ? '' : ` (${(confVal * 100).toFixed(0)}%)`;
+    const scoreText = toNumber(model.score_0_100) !== null ? ` [${model.score_0_100}/100]` : '';
+    const summary = String(model.thesis || model.summary || '').trim();
     if(summary){
-      return `${rec}${confText} • ${summary}`;
+      return `${rec}${confText}${scoreText} • ${summary}`;
     }
-    return `${rec}${confText}`;
+    return `${rec}${confText}${scoreText}`;
   }
 
   /**
    * Render trade model analysis output as inline HTML for a card.
-   * @param {object} model – { status, recommendation, confidence, summary }
+   * Supports both legacy (ACCEPT/NEUTRAL/REJECT) and new (TAKE/PASS/WATCH)
+   * recommendation vocabularies.  Shows Model Score (score_0_100) separately
+   * from BenTrade composite_score when available.
+   * @param {object} model – model_evaluation dict
+   * @param {number|null} compositeScore – BenTrade composite_score (optional)
    * @returns {string} HTML
    */
-  function _renderTradeModelOutput(model){
+  function _renderTradeModelOutput(model, compositeScore){
     if(!model) return '';
     const esc = escapeHtml;
 
@@ -615,22 +621,61 @@ window.BenTradePages.initHome = function initHome(rootEl){
       return `<div style="font-size:12px;color:#ff6b6b;padding:6px 10px;border:1px solid rgba(255,107,107,0.25);border-radius:6px;margin:4px 0;">\u26A0 ${esc(msg)}</div>`;
     }
 
-    const rec = String(model.recommendation || 'UNKNOWN').toUpperCase();
-    const confPct = toNumber(model.confidence) !== null ? ` (${(toNumber(model.confidence) * 100).toFixed(0)}%)` : '';
-    const summary = String(model.summary || '').trim();
+    // Determine the display recommendation — prefer model_recommendation (TAKE/PASS/WATCH)
+    const modelRec = String(model.model_recommendation || model.recommendation || 'UNKNOWN').toUpperCase();
+    const legacyRec = String(model.recommendation || 'UNKNOWN').toUpperCase();
 
+    const confVal = toNumber(model.confidence_0_1 ?? model.confidence);
+    const confPct = confVal !== null ? ` (${(confVal * 100).toFixed(0)}%)` : '';
+
+    const thesis = String(model.thesis || model.summary || '').trim();
+    const modelScore = toNumber(model.score_0_100);
+    const btScore = toNumber(compositeScore);
+
+    // Color map for both vocabularies
     const recColors = {
-      'ACCEPT': 'rgba(0,220,120,0.9)',
-      'REJECT': 'rgba(255,90,90,0.9)',
+      'TAKE':    'rgba(0,220,120,0.9)',
+      'ACCEPT':  'rgba(0,220,120,0.9)',
+      'PASS':    'rgba(255,90,90,0.9)',
+      'REJECT':  'rgba(255,90,90,0.9)',
+      'WATCH':   'rgba(255,200,60,0.9)',
       'NEUTRAL': 'rgba(180,180,200,0.85)',
     };
-    const color = recColors[rec] || recColors['NEUTRAL'];
+    const color = recColors[modelRec] || recColors[legacyRec] || recColors['NEUTRAL'];
 
     let html = `<div style="font-size:12px;padding:8px 10px;border:1px solid ${color.replace('0.9','0.3').replace('0.85','0.3')};border-radius:6px;margin:4px 0;">`;
-    html += `<div style="font-weight:700;color:${color};margin-bottom:4px;">${esc(rec)}${esc(confPct)}</div>`;
-    if(summary){
-      html += `<div style="color:var(--text-secondary,#ccc);line-height:1.4;">${esc(summary)}</div>`;
+
+    // Recommendation badge row
+    html += `<div style="font-weight:700;color:${color};margin-bottom:4px;">${esc(modelRec)}${esc(confPct)}</div>`;
+
+    // Score row — BenTrade Score vs Model Score side-by-side
+    if(modelScore !== null || btScore !== null){
+      html += '<div style="display:flex;gap:12px;margin-bottom:4px;font-size:11px;">';
+      if(modelScore !== null){
+        const mScoreColor = modelScore >= 60 ? '#00dc78' : modelScore >= 40 ? '#b4b4c8' : '#ff5a5a';
+        html += `<span style="color:${mScoreColor};">Model Score: <b>${modelScore}</b>/100</span>`;
+      }
+      if(btScore !== null){
+        html += `<span style="color:var(--text-secondary,#aaa);">BenTrade Score: <b>${fmt(btScore,1)}</b></span>`;
+      }
+      html += '</div>';
     }
+
+    // Thesis / summary
+    if(thesis){
+      html += `<div style="color:var(--text-secondary,#ccc);line-height:1.4;">${esc(thesis)}</div>`;
+    }
+
+    // Key drivers (compact list)
+    const drivers = model.key_drivers || model.key_factors;
+    if(Array.isArray(drivers) && drivers.length){
+      html += '<ul style="margin:4px 0 0 16px;padding:0;color:var(--text-secondary,#bbb);font-size:11px;line-height:1.4;">';
+      for(const d of drivers.slice(0, 4)){
+        html += `<li>${esc(String(d))}</li>`;
+      }
+      html += '</ul>';
+    }
+
     html += '</div>';
     return html;
   }
@@ -995,6 +1040,111 @@ window.BenTradePages.initHome = function initHome(rootEl){
     `;
   }
 
+  /* ── Dynamic Regime Summary Tooltip Builder ─────────────────── */
+
+  const FACTOR_NAMES = {
+    trend:      'Trend strength',
+    volatility: 'Volatility',
+    breadth:    'Breadth',
+    rates:      'Rates pressure',
+    momentum:   'Momentum',
+  };
+
+  function _volInterpretation(vix){
+    if(vix === null || vix === undefined) return 'unavailable';
+    if(vix < 16)  return 'low / compressed';
+    if(vix <= 22) return 'normal';
+    return 'elevated / riskier';
+  }
+
+  function _ratesInterpretation(tenYear){
+    if(tenYear === null || tenYear === undefined) return 'unavailable';
+    if(tenYear > 4.8)  return 'tightening — pressure on equities';
+    if(tenYear > 4.2) return 'mildly restrictive';
+    return 'supportive';
+  }
+
+  /**
+   * Build a dynamic regime tooltip from live data.
+   *
+   * Inputs:
+   *   regimeState: 'RISK_ON' | 'NEUTRAL' | 'RISK_OFF'
+   *   regimeScore: 0-100 total score
+   *   components:  { trend: {score, signals}, volatility: {score, signals}, ... }
+   *   vix:         number | null
+   *   tenYear:     number | null
+   *
+   * Returns: { title, lines[] } for BenTooltip buildHtml.
+   */
+  function _buildRegimeSummaryTip(regimeState, regimeScore, components, vix, tenYear){
+    const factors = ['trend', 'volatility', 'breadth', 'rates', 'momentum'];
+    const scored = factors.map((k) => {
+      const item = components[k] || {};
+      const score = toNumber(item?.score);
+      const signals = Array.isArray(item?.signals) ? item.signals : [];
+      return { key: k, score: score !== null ? Math.max(0, Math.min(100, score)) : 0, signals };
+    });
+    // Sort descending for drivers / ascending for weakness
+    const sorted = scored.slice().sort((a, b) => b.score - a.score);
+    const top1 = sorted[0];
+    const top2 = sorted[1];
+    const weak = sorted[sorted.length - 1];
+
+    const trendItem = scored.find((s) => s.key === 'trend');
+    const trendFact = (trendItem && trendItem.signals.length) ? trendItem.signals[0] : 'alignment data unavailable';
+
+    const breadthItem = scored.find((s) => s.key === 'breadth');
+    const breadthFact = (breadthItem && breadthItem.signals.length) ? breadthItem.signals[0] : 'sector data unavailable';
+
+    const volInterp = _volInterpretation(vix);
+    const ratesInterp = _ratesInterpretation(tenYear);
+
+    const lines = [];
+
+    if(regimeState === 'RISK_ON'){
+      lines.push('Market conditions favor risk assets and trend continuation.');
+      lines.push(`Drivers: ${FACTOR_NAMES[top1.key]} (${Math.round(top1.score)}) and ${FACTOR_NAMES[top2.key]} (${Math.round(top2.score)}).`);
+      lines.push(`Trend: ${trendFact}`);
+      lines.push(`Vol: VIX ${vix !== null && vix !== undefined ? fmt(vix) : '—'} (${volInterp})`);
+      lines.push(`Breadth: ${breadthFact}`);
+      if(weak.score < 60){
+        lines.push(`Watch: ${FACTOR_NAMES[weak.key]} (${Math.round(weak.score)}) is the main vulnerability.`);
+      }
+    } else if(regimeState === 'RISK_OFF'){
+      lines.push('Conditions are less supportive for risk assets.');
+      lines.push(`Stress drivers: ${FACTOR_NAMES[weak.key]} (${Math.round(weak.score)}) and ${FACTOR_NAMES[sorted[sorted.length - 2].key]} (${Math.round(sorted[sorted.length - 2].score)}).`);
+      lines.push(`Vol: VIX ${vix !== null && vix !== undefined ? fmt(vix) : '—'} (${volInterp})`);
+      lines.push(`Rates: 10Y ${tenYear !== null && tenYear !== undefined ? fmt(tenYear, 2) + '%' : '—'} (${ratesInterp})`);
+      lines.push(`Breadth: ${breadthFact}`);
+      lines.push('Approach: reduce exposure, prioritize protection.');
+    } else {
+      /* NEUTRAL */
+      lines.push('Signals are mixed — directional edge is weaker.');
+      lines.push(`Strength: ${FACTOR_NAMES[top1.key]} (${Math.round(top1.score)}) but ${FACTOR_NAMES[weak.key]} (${Math.round(weak.score)}) limits confidence.`);
+      lines.push(`Trend: ${trendFact}`);
+      lines.push(`Vol: VIX ${vix !== null && vix !== undefined ? fmt(vix) : '—'} (${volInterp})`);
+      lines.push(`Breadth: ${breadthFact}`);
+      lines.push('Approach: smaller size, defined risk, avoid chasing.');
+    }
+
+    const labelMap = { RISK_ON: 'Risk-On', RISK_OFF: 'Risk-Off', NEUTRAL: 'Neutral' };
+    return {
+      title: `${labelMap[regimeState] || 'Regime'} — Score ${fmt(regimeScore, 1)}/100`,
+      lines: lines,
+    };
+  }
+
+  /**
+   * Register the dynamic regime_summary tooltip so BenTradeBenTooltip
+   * can call it as a function each time the tooltip is shown.
+   */
+  function _registerRegimeSummaryTooltip(regimeState, regimeScore, components, vix, tenYear){
+    if(!window.BenTradeBenTooltip?.register) return;
+    window.BenTradeBenTooltip.register('regime_summary', function(){
+      return _buildRegimeSummaryTip(regimeState, regimeScore, components, vix, tenYear);
+    });
+  }
+
   function renderRegime(regimePayload, spySummary, macro){
     const spyLast = toNumber(spySummary?.price?.last);
     const vix = toNumber(spySummary?.options_context?.vix ?? macro?.vix);
@@ -1008,8 +1158,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
       <div class="statTile"><div class="statLabel">SPY</div><div class="statValue">${fmt(spyLast)}</div><div class="stock-note">${fmtPct(spySummary?.price?.change_pct)}</div></div>
       <div class="statTile"><div class="statLabel">VIX</div><div class="statValue">${fmt(vix)}</div></div>
       <div class="statTile"><div class="statLabel">10Y Yield</div><div class="statValue">${fmt(tenYear, 2)}%</div></div>
-      <div class="statTile home-regime-pill ${tone}"><div class="statLabel">Regime</div><div class="statValue">${regimeLabelText}</div><div class="stock-note">Score ${fmt(regimeScore, 1)}/100</div></div>
+      <div class="statTile home-regime-pill ${tone}" data-ben-tip="regime_summary"><div class="statLabel">Regime</div><div class="statValue">${regimeLabelText}</div><div class="stock-note">Score ${fmt(regimeScore, 1)}/100</div></div>
     `;
+
+    /* ── Register dynamic regime-summary tooltip ── */
+    _registerRegimeSummaryTooltip(regimeLabelRaw, regimeScore, regimePayload?.components || {}, vix, tenYear);
 
     const componentOrder = ['trend', 'volatility', 'breadth', 'rates', 'momentum'];
     const components = regimePayload?.components || {};
@@ -1042,7 +1195,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
       return `
         <div class="home-regime-row">
-          <div class="home-regime-name">${label}</div>
+          <div class="home-regime-name" data-ben-tip="regime_${key}">${label}</div>
           <div class="home-regime-track"><div class="home-regime-fill" style="width:${fillWidth}%;"></div></div>
           <div class="home-regime-score">${Math.round(score)}%</div>
           <div class="stock-note home-regime-note">${detailHtml}</div>
@@ -1057,11 +1210,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
     playbookChipsEl.innerHTML = `
       <div class="home-chip-group">
         <span class="stock-note">Primary:</span>
-        ${(primary.length ? primary : ['none']).map((item) => `<span class="qtPill">${String(item)}</span>`).join('')}
+        ${(primary.length ? primary : ['none']).map((item) => { const tipKey = window.BenTradeBenTooltip?.resolveKey?.(item) || ''; return `<span class="qtPill"${tipKey ? ' data-ben-tip="' + tipKey + '"' : ''}>${String(item)}</span>`; }).join('')}
       </div>
       <div class="home-chip-group">
         <span class="stock-note">Avoid:</span>
-        ${(avoid.length ? avoid : ['none']).map((item) => `<span class="qtPill qtPill-warn">${String(item)}</span>`).join('')}
+        ${(avoid.length ? avoid : ['none']).map((item) => { const tipKey = window.BenTradeBenTooltip?.resolveKey?.(item) || ''; return `<span class="qtPill qtPill-warn"${tipKey ? ' data-ben-tip="' + tipKey + '"' : ''}>${String(item)}</span>`; }).join('')}
       </div>
       <div class="home-playbook-notes">${notes.length ? notes.map((note) => `<div class="stock-note">• ${String(note)}</div>`).join('') : '<div class="stock-note">• No playbook notes.</div>'}</div>
     `;
@@ -1344,7 +1497,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
                 modelOutputEl.style.display = 'none';
               } else {
                 modelOutputEl.style.display = 'block';
-                modelOutputEl.innerHTML = _renderTradeModelOutput(modelResult);
+                modelOutputEl.innerHTML = _renderTradeModelOutput(modelResult, toNumber(idea?.score ?? idea?.rank ?? idea?.trade?.composite_score));
               }
             }
           }, 'home_card_action');
@@ -1645,6 +1798,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
     if(window.attachMetricTooltips){
       window.attachMetricTooltips(scope);
+    }
+    if(window.BenTradeBenTooltip?.bindAll){
+      window.BenTradeBenTooltip.bindAll(scope);
     }
   }
 

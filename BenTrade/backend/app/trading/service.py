@@ -25,6 +25,10 @@ from app.trading.models import (
     TradingSubmitRequest,
 )
 from app.trading.risk import evaluate_preview_risk, evaluate_submit_freshness
+from app.trading.tradier_credentials import (
+    log_execution_context,
+    resolve_tradier_credentials,
+)
 
 
 class TradingService:
@@ -285,16 +289,62 @@ class TradingService:
         if cached:
             return OrderSubmitResponse.model_validate(cached)
 
+        # ── Resolve credentials based on account mode ────────────
+        account_mode = req.mode  # "paper" | "live"
+        trade_capability_enabled = (
+            self.settings.ENABLE_LIVE_TRADING and self.settings.LIVE_TRADING_RUNTIME_ENABLED
+        )
+
         if req.mode == "live":
-            if not self.settings.ENABLE_LIVE_TRADING or not self.settings.LIVE_TRADING_RUNTIME_ENABLED:
+            if not trade_capability_enabled:
                 raise HTTPException(status_code=403, detail="Live trading is disabled")
+
+            # Resolve execution credentials — will raise ValueError if
+            # TRADING_LIVE_ENABLED is false and mode is "live".
+            try:
+                creds = resolve_tradier_credentials(
+                    purpose="EXECUTION",
+                    account_mode="live",
+                    live_api_key=self.settings.TRADIER_API_KEY_LIVE,
+                    live_account_id=self.settings.TRADIER_ACCOUNT_ID_LIVE,
+                    live_env=self.settings.TRADIER_ENV_LIVE,
+                    paper_api_key=self.settings.TRADIER_API_KEY_PAPER,
+                    paper_account_id=self.settings.TRADIER_ACCOUNT_ID_PAPER,
+                    paper_env=self.settings.TRADIER_ENV_PAPER,
+                    trading_live_enabled=self.settings.TRADING_LIVE_ENABLED,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+            log_execution_context(
+                creds,
+                trade_capability_enabled=trade_capability_enabled,
+                trading_live_enabled=self.settings.TRADING_LIVE_ENABLED,
+            )
 
             freshness = evaluate_submit_freshness(ticket, max_age_seconds=self.settings.LIVE_DATA_MAX_AGE_SECONDS)
             if not freshness["data_fresh"]:
                 raise HTTPException(status_code=400, detail=f"Live submit rejected: stale market data ({freshness})")
 
-            result = await self.live_broker.place_order(ticket)
+            result = await self.live_broker.place_order(ticket, creds=creds)
         else:
+            # Paper mode — resolve paper credentials for logging
+            creds = resolve_tradier_credentials(
+                purpose="EXECUTION",
+                account_mode="paper",
+                live_api_key=self.settings.TRADIER_API_KEY_LIVE,
+                live_account_id=self.settings.TRADIER_ACCOUNT_ID_LIVE,
+                live_env=self.settings.TRADIER_ENV_LIVE,
+                paper_api_key=self.settings.TRADIER_API_KEY_PAPER,
+                paper_account_id=self.settings.TRADIER_ACCOUNT_ID_PAPER,
+                paper_env=self.settings.TRADIER_ENV_PAPER,
+                trading_live_enabled=self.settings.TRADING_LIVE_ENABLED,
+            )
+            log_execution_context(
+                creds,
+                trade_capability_enabled=trade_capability_enabled,
+                trading_live_enabled=self.settings.TRADING_LIVE_ENABLED,
+            )
             result = await self.paper_broker.place_order(ticket)
 
         response = OrderSubmitResponse(
@@ -303,6 +353,7 @@ class TradingService:
             broker_order_id=result.broker_order_id,
             message=result.message,
             created_at=datetime.now(timezone.utc),
+            account_mode_used=account_mode,
         )
 
         order_record = {
