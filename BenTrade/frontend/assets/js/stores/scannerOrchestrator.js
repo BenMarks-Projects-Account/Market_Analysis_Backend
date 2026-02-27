@@ -241,7 +241,8 @@ window.BenTradeScannerOrchestrator = (function(){
    * Return the full list of available scanner IDs.
    */
   function allScannerIds(){
-    return [STOCK_SCANNER_DEF.id, ...OPTION_SCANNER_DEFS.map((d) => d.id)];
+    // Stock scanner disabled — only options scanners run in the Opportunity Engine.
+    return OPTION_SCANNER_DEFS.map((d) => d.id);
   }
 
   /**
@@ -249,12 +250,7 @@ window.BenTradeScannerOrchestrator = (function(){
    * All filter levels run every scanner.  Legacy quick/full_sweep preserved.
    */
   function presetToScannerIds(preset){
-    const mode = String(preset || 'balanced').toLowerCase();
-    if(mode === 'quick'){
-      return ['stock_scanner'];
-    }
-    // All filter levels (strict, conservative, balanced, wide) and full_sweep
-    // run every scanner.
+    // Stock scanner disabled — all presets run options scanners only.
     return allScannerIds();
   }
 
@@ -293,42 +289,10 @@ window.BenTradeScannerOrchestrator = (function(){
       ? symbols
       : (window.BenTradeSymbolUniverseStore?.getSymbols?.() || null);
 
-    /* ── Stock scanner ── */
-    if(idsToRun.includes(STOCK_SCANNER_DEF.id)){
-      const def = STOCK_SCANNER_DEF;
-      logLine(logFn, `Running: ${def.label}`);
-      try{
-        const response = await withRetry(
-          () => api.getStockScanner(),
-          getTimeoutMs(def, effectiveLevel),
-          def.label,
-          logFn,
-        );
-        const candidates = Array.isArray(response?.candidates) ? response.candidates : [];
-        candidates.forEach((row) => {
-          allCandidates.push(normalizeResult(row, def, 'stock'));
-        });
-
-        // Record session stats
-        if(window.BenTradeSessionStatsStore?.recordRun && (Array.isArray(response?.candidates) || response?.report_stats)){
-          window.BenTradeSessionStatsStore.recordRun(def.moduleId, response);
-        }
-
-        scannersRun.push(def.id);
-        logLine(logFn, `Success: ${def.label} (${candidates.length} candidates)`);
-        if(typeof onStepComplete === 'function'){
-          onStepComplete({ id: def.id, label: def.label, ok: true, error: null, tradeCount: candidates.length, moduleId: def.moduleId });
-        }
-      }catch(err){
-        const msg = String(err?.message || err || 'unknown error');
-        errors.push(`${def.label}: ${msg}`);
-        scannersFailed.push(def.id);
-        logLine(logFn, `Failed: ${def.label} — ${msg}`);
-        if(typeof onStepComplete === 'function'){
-          onStepComplete({ id: def.id, label: def.label, ok: false, error: msg, tradeCount: 0, moduleId: def.moduleId });
-        }
-      }
-    }
+    /* ── Stock scanner — DISABLED ── */
+    /* Stock scanner is excluded from the Opportunity Engine execution flow.
+       Only options scanners run.  The stock scanner page (#/stock-scanner)
+       still works independently when navigated to directly. */
 
     /* ── Options scanners (sequential) ── */
     for(const def of OPTION_SCANNER_DEFS){
@@ -337,11 +301,13 @@ window.BenTradeScannerOrchestrator = (function(){
       logLine(logFn, `Running: ${def.label}`);
       try{
         /* Merge profile params → scanner payload.  Profile values serve as
-           the baseline; def.payload overrides (e.g. spread_type for credit). */
+           the baseline; def.payload overrides (e.g. spread_type for credit).
+           Always include preset so the backend stamps _preset_name correctly. */
         const profileParams = (window.BenTradeScannerProfiles?.getProfile)
           ? (window.BenTradeScannerProfiles.getProfile(def.strategyId, effectiveLevel) || {})
           : {};
         const scanPayload = Object.assign({}, profileParams, def.payload || {});
+        scanPayload.preset = effectiveLevel;
         if(resolvedSymbols) scanPayload.symbols = resolvedSymbols;
         const response = await withRetry(
           () => api.generateStrategyReport(def.strategyId, scanPayload),

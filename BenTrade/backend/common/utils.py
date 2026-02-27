@@ -32,7 +32,9 @@ RESULTS_DIR = Path(__file__).parent.parent / 'results'
 # ---------------------------------------------------------------------------
 _CODE_FENCE_RE = re.compile(r'```(?:json)?\s*\n?(.*?)\n?\s*```', re.DOTALL)
 
-_MODEL_EVAL_KEYS = frozenset({'recommendation', 'confidence', 'risk_level', 'key_factors', 'summary'})
+_MODEL_EVAL_KEYS = frozenset({'recommendation', 'confidence', 'risk_level', 'key_factors', 'summary',
+                              'score_0_100', 'confidence_0_1', 'thesis', 'key_drivers',
+                              'risk_review', 'execution_notes', 'missing_data'})
 
 
 def _strip_code_fences(text: str) -> str:
@@ -133,12 +135,24 @@ def _looks_like_eval(d: dict) -> bool:
 
 
 def _normalize_eval(raw: dict) -> dict:
-    """Ensure the evaluation dict has the expected keys with safe types."""
-    rec = str(raw.get('recommendation') or 'NEUTRAL').strip().upper()
-    if rec not in ('ACCEPT', 'NEUTRAL', 'REJECT'):
-        rec = 'NEUTRAL'
+    """Ensure the evaluation dict has the expected keys with safe types.
 
-    conf = raw.get('confidence')
+    Handles both legacy (ACCEPT/NEUTRAL/REJECT) and new (TAKE/PASS/WATCH)
+    recommendation vocabularies.  New-schema fields are passed through when
+    present; legacy fields are always populated for backward compatibility.
+    """
+    # --- Recommendation: new vocab → legacy mapping for backward compat ---
+    _NEW_TO_LEGACY = {'TAKE': 'ACCEPT', 'PASS': 'REJECT', 'WATCH': 'NEUTRAL'}
+    rec_raw = str(raw.get('recommendation') or 'NEUTRAL').strip().upper()
+    # Accept either vocabulary
+    rec_legacy = _NEW_TO_LEGACY.get(rec_raw, rec_raw)
+    if rec_legacy not in ('ACCEPT', 'NEUTRAL', 'REJECT'):
+        rec_legacy = 'NEUTRAL'
+    # Keep the model's original word for the new field
+    rec_model = rec_raw if rec_raw in ('TAKE', 'PASS', 'WATCH') else _NEW_TO_LEGACY.get(rec_legacy, rec_legacy)
+
+    # --- Confidence (0-1 float) ---
+    conf = raw.get('confidence') or raw.get('confidence_0_1')
     try:
         conf = max(0.0, min(float(conf), 1.0))
     except (TypeError, ValueError):
@@ -153,15 +167,246 @@ def _normalize_eval(raw: dict) -> dict:
         kf = [str(kf)] if kf else []
     kf = [str(f) for f in kf if str(f or '').strip()][:6]
 
-    summary = str(raw.get('summary') or '').strip()
+    summary = str(raw.get('summary') or raw.get('thesis') or '').strip()
+
+    # --- New-schema fields (passthrough with safe defaults) ---
+    score = raw.get('score_0_100')
+    try:
+        score = max(0, min(int(score), 100))
+    except (TypeError, ValueError):
+        score = None
+
+    thesis = str(raw.get('thesis') or '').strip() or None
+
+    key_drivers = raw.get('key_drivers')
+    if not isinstance(key_drivers, list):
+        key_drivers = [str(key_drivers)] if key_drivers else []
+    key_drivers = [str(d) for d in key_drivers if str(d or '').strip()][:8]
+
+    risk_review = raw.get('risk_review')
+    if not isinstance(risk_review, dict):
+        risk_review = {}
+
+    execution_notes = raw.get('execution_notes')
+    if not isinstance(execution_notes, dict):
+        execution_notes = {}
+
+    missing_data = raw.get('missing_data')
+    if not isinstance(missing_data, list):
+        missing_data = []
+    missing_data = [str(m) for m in missing_data if str(m or '').strip()]
 
     return {
-        'recommendation': rec,
+        # Legacy fields (always set for backward compat)
+        'recommendation': rec_legacy,
         'confidence': conf,
         'risk_level': risk,
-        'key_factors': kf,
+        'key_factors': kf or key_drivers,
         'summary': summary,
+        # New-schema fields
+        'model_recommendation': rec_model,
+        'score_0_100': score,
+        'confidence_0_1': conf,
+        'thesis': thesis,
+        'key_drivers': key_drivers,
+        'risk_review': risk_review,
+        'execution_notes': execution_notes,
+        'missing_data': missing_data,
     }
+
+
+# ---------------------------------------------------------------------------
+# Anchoring-field regression guard  (requirement §6)
+# ---------------------------------------------------------------------------
+_ANCHORING_FORBIDDEN_TOKENS = [
+    "Risk-On", "Risk-Off",
+    "composite_score", "provisional_evaluation",
+    "regime_label", "regime_score", "regime_bias",
+    "suggested_strategy",
+]
+
+
+def _check_anchoring_regression(payload_str: str, tag: str = '[GUARD]') -> None:
+    """Scan serialised LLM payload for anchoring fields that must not be sent.
+
+    In development (``DEV_GUARD_ANCHORING=1`` env var) this will raise
+    ``ValueError``.  In production it logs a warning.
+    """
+    found = [tok for tok in _ANCHORING_FORBIDDEN_TOKENS if tok in payload_str]
+    if not found:
+        return
+
+    message = f"{tag} ANCHORING GUARD: forbidden tokens found in LLM payload: {found}"
+    dev_mode = os.environ.get("DEV_GUARD_ANCHORING", "1") == "1"
+    if dev_mode:
+        raise ValueError(message)
+    else:
+        print(f"WARNING: {message}")
+
+
+# ---------------------------------------------------------------------------
+# Facts-only payload builder  (requirement §1–§2)
+# ---------------------------------------------------------------------------
+def _build_facts_only_payload(trade: dict) -> dict:
+    """Extract raw factual trade + market data without any BenTrade-derived
+    conclusions, composite scores, regime labels, or recommendations.
+
+    Input fields → output mapping documented inline for traceability.
+    """
+    def _to_float(x):
+        if x is None:
+            return None
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return None
+
+    # ── Trade structure facts ────────────────────────────────────
+    trade_facts = {
+        "symbol": trade.get("symbol") or trade.get("underlying") or trade.get("underlying_symbol"),
+        "spread_type": trade.get("spread_type") or trade.get("strategy_id") or trade.get("type"),
+        "short_strike": _to_float(trade.get("short_strike")),
+        "long_strike": _to_float(trade.get("long_strike")),
+        "underlying_price": _to_float(trade.get("price") or trade.get("underlying_price")),
+        "expiration": trade.get("expiration"),
+        "dte": _to_float(trade.get("dte")),
+        "net_credit": _to_float(trade.get("net_credit") or trade.get("credit")),
+        "width": _to_float(trade.get("width")),
+    }
+
+    # ── Per-contract risk/reward facts (raw, not conclusions) ────
+    risk_reward_facts = {
+        "max_profit_per_share": _to_float(trade.get("max_profit_per_share") or trade.get("max_profit")),
+        "max_loss_per_share": _to_float(trade.get("max_loss_per_share") or trade.get("max_loss")),
+        "break_even": _to_float(trade.get("break_even")),
+        "ev_per_share": _to_float(trade.get("ev_per_share") or trade.get("expected_value")),
+        "pop": _to_float(trade.get("pop")),
+        "return_on_risk": _to_float(trade.get("return_on_risk")),
+        "kelly_fraction": _to_float(trade.get("kelly_fraction")),
+    }
+
+    # ── Volatility facts ─────────────────────────────────────────
+    volatility_facts = {
+        "iv": _to_float(trade.get("iv") or trade.get("implied_vol")),
+        "realized_vol_20d": _to_float(trade.get("realized_vol") or trade.get("realized_vol_20d")),
+        "iv_rv_ratio": _to_float(trade.get("iv_rv_ratio")),
+        "iv_rank": _to_float(trade.get("iv_rank")),
+        "vix": _to_float(trade.get("vix")),
+        "expected_move_1sigma": _to_float(trade.get("expected_move_1sigma") or trade.get("expected_move")),
+    }
+
+    # ── Liquidity facts ──────────────────────────────────────────
+    liquidity_facts = {
+        "bid": _to_float(trade.get("bid")),
+        "ask": _to_float(trade.get("ask")),
+        "bid_ask_spread_pct": _to_float(trade.get("bid_ask_spread_pct")),
+        "volume": _to_float(trade.get("volume")),
+        "open_interest": _to_float(trade.get("open_interest")),
+    }
+
+    # ── Market context facts (raw numbers, NO regime labels) ─────
+    # Build trend/breadth/momentum fact arrays from raw data
+    trend_facts = []
+    price = _to_float(trade.get("price") or trade.get("underlying_price"))
+    sma20 = _to_float(trade.get("sma20"))
+    sma50 = _to_float(trade.get("sma50"))
+    sma200 = _to_float(trade.get("sma200"))
+    ema20 = _to_float(trade.get("ema20"))
+    ema50 = _to_float(trade.get("ema50"))
+    if price is not None and ema20 is not None:
+        trend_facts.append(f"Close {'>' if price >= ema20 else '<'} EMA20")
+    if ema50 is not None and sma200 is not None:
+        trend_facts.append(f"EMA50 {'>' if ema50 >= sma200 else '<'} SMA200")
+    if price is not None and sma50 is not None:
+        trend_facts.append(f"Close {'>' if price >= sma50 else '<'} SMA50")
+
+    momentum_facts = []
+    rsi14 = _to_float(trade.get("rsi14"))
+    if rsi14 is not None:
+        if rsi14 < 30:
+            momentum_facts.append(f"RSI14 = {rsi14:.1f} (oversold zone)")
+        elif rsi14 > 70:
+            momentum_facts.append(f"RSI14 = {rsi14:.1f} (overbought zone)")
+        else:
+            momentum_facts.append(f"RSI14 = {rsi14:.1f}")
+
+    # Short-strike distance fact
+    short_strike_z = _to_float(trade.get("short_strike_z"))
+    strike_distance_pct = _to_float(trade.get("strike_distance_pct"))
+    distance_facts = []
+    if short_strike_z is not None:
+        distance_facts.append(f"Short strike is {short_strike_z:.2f} sigma from spot")
+    if strike_distance_pct is not None:
+        distance_facts.append(f"Short strike is {strike_distance_pct * 100:.1f}% from spot")
+
+    market_context = {
+        "vix": _to_float(trade.get("vix")),
+        "spy_price": price if str(trade.get("symbol") or "").upper() == "SPY" else None,
+        "underlying_price": price,
+        "trend_facts": trend_facts,
+        "momentum_facts": momentum_facts,
+        "distance_facts": distance_facts,
+    }
+
+    return {
+        "trade": trade_facts,
+        "risk_reward": risk_reward_facts,
+        "volatility": volatility_facts,
+        "liquidity": liquidity_facts,
+        "market_context": market_context,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Independent analysis system prompt  (requirement §3–§5)
+# ---------------------------------------------------------------------------
+_INDEPENDENT_ANALYSIS_PROMPT = """\
+You are an independent options risk analyst.
+
+CRITICAL INSTRUCTIONS:
+- Base your evaluation ONLY on the factual data provided below.
+- Do NOT assume any prior scoring, recommendation, or regime classification.
+- Do NOT assume the trade is good because metrics appear favourable.
+- If risk/reward is unattractive, you MUST say so clearly.
+- If key data is missing or weak, explicitly call it out.
+- Prefer cautious, risk-aware reasoning.
+- You are NOT confirming anyone else's analysis — you are forming your own.
+
+EVALUATION DIMENSIONS (consider all holistically):
+1. Reward vs risk profile (EV, max profit/loss ratio, return on risk)
+2. Distance to strikes / probability profile (POP, strike distance in sigma/%)
+3. Volatility environment (IV vs RV, IV rank, VIX level)
+4. Liquidity (open interest, volume, bid-ask spread)
+5. Tail risk exposure (width, max loss, extreme move scenarios)
+6. Execution realism (bid-ask spread, fill probability at limit price)
+7. Data quality (are critical fields present and plausible?)
+
+SCORING DEFINITION:
+- score_0_100: A holistic attractiveness score (0 = terrible, 100 = exceptional) \
+based ONLY on the provided facts. Most decent trades should fall in 40-70 range. \
+Reserve 80+ for truly exceptional setups. Below 30 = material concerns.
+
+OUTPUT FORMAT — return valid JSON only (no markdown, no code fences):
+{
+  "recommendation": "TAKE" | "PASS" | "WATCH",
+  "score_0_100": <integer 0-100>,
+  "confidence_0_1": <float 0.0-1.0>,
+  "thesis": "<1-2 sentence core thesis>",
+  "key_drivers": ["<string>", ...],
+  "risk_review": {
+    "primary_risk": "<string>",
+    "tail_scenario": "<string>",
+    "data_quality_flag": "<string or null>"
+  },
+  "execution_notes": {
+    "fill_probability": "<High|Medium|Low>",
+    "spread_concern": "<string or null>"
+  },
+  "missing_data": ["<field_name>", ...]
+}
+
+Return ONE JSON object with exactly these keys. No additional keys.
+"""
 
 
 def generate_mock_report() -> str:
@@ -537,19 +782,7 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     model_out_path = RESULTS_DIR / ("model_" + Path(source_filename).name)
 
-    PROMPT = (
-        "You are an options trading risk advisor.\n\n"
-        "You will receive a JSON object representing a single options trade.\n"
-        "Return ONLY a JSON object with EXACTLY these keys:\n"
-        "- recommendation: one of [\"ACCEPT\", \"NEUTRAL\", \"REJECT\"]\n"
-        "- confidence: number between 0 and 1\n"
-        "- risk_level: one of [\"Low\", \"Moderate\", \"High\"]\n"
-        "- key_factors: array of 2 to 6 short strings\n"
-        "- summary: one paragraph string\n\n"
-        "OUTPUT RULES:\n"
-        "- Output must be valid JSON only — NO code fences, no commentary, no surrounding text.\n"
-        "- Return ONE object (not an array), with only the five keys listed above.\n"
-    )
+    PROMPT = _INDEPENDENT_ANALYSIS_PROMPT
 
     # Pre-call deterministic override
     base_me = trade.get('model_evaluation') or {}
@@ -565,19 +798,18 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http:
         print(f"{TAG} Hard-gate forced evaluation: {forced_eval.get('recommendation')}")
         return new
 
-    # Prepare a compact payload — send ONLY trade data, don't ask the model to echo it back.
-    trade_for_payload = dict(trade)
-    # Remove any existing model_evaluation to avoid confusing the LLM
-    trade_for_payload.pop('model_evaluation', None)
-    if me_override and me_override.get('recommendation') in ('REJECT', 'NEUTRAL', 'ACCEPT'):
-        mcopy = dict(me_override)
-        mcopy.pop('_hard_gate_forced', None)
-        trade_for_payload['_provisional_evaluation'] = mcopy
+    # Build facts-only payload — NO anchoring fields (regime labels,
+    # composite scores, derived conclusions)
+    facts_payload = _build_facts_only_payload(trade)
+    facts_json = json.dumps(facts_payload, ensure_ascii=False, indent=None)
+
+    # Regression guard: verify no anchoring tokens leaked into the payload
+    _check_anchoring_regression(facts_json, TAG)
 
     payload = {
         'messages': [
             {'role': 'system', 'content': PROMPT},
-            {'role': 'user', 'content': json.dumps(trade_for_payload, ensure_ascii=False, indent=None)}
+            {'role': 'user', 'content': facts_json}
         ],
         'max_tokens': 1024,
         'temperature': 0.0,
@@ -647,7 +879,7 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http:
             new = dict(trade)
             new['model_evaluation'] = model_eval
             _persist_model_result(new, model_out_path, TAG)
-            print(f"{TAG} SUCCESS — recommendation={model_eval.get('recommendation')} confidence={model_eval.get('confidence')}")
+            print(f"{TAG} SUCCESS — recommendation={model_eval.get('recommendation')} model_rec={model_eval.get('model_recommendation')} score={model_eval.get('score_0_100')} confidence={model_eval.get('confidence')}")
             return new
 
         except RequestException as e:

@@ -501,6 +501,138 @@
         .metric-tooltip-line{ font-size:12px; line-height:1.35; color:#ddf9ff; margin-bottom:4px; }
         .metric-tooltip-sub{ font-size:11px; line-height:1.3; color:rgba(205,240,248,0.88); }
 
+        /* ── BenTooltip (rich regime / strategy chip tooltip) ───── */
+        .ben-tip{
+            position: fixed;
+            z-index: 4100;
+            min-width: 220px;
+            max-width: 320px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(0,234,255,0.30);
+            background: linear-gradient(180deg, rgba(6,12,22,0.97), rgba(4,8,18,0.95));
+            box-shadow: 0 14px 40px rgba(0,0,0,0.60),
+                        0 0 32px rgba(0,234,255,0.16),
+                        inset 0 0 0 1px rgba(0,234,255,0.08);
+            color: #dbfbff;
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(6px) scale(0.97);
+            transition: opacity .14s ease, transform .14s ease;
+        }
+        .ben-tip.is-open{
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+        .ben-tip-title{
+            font-family: 'Orbitron', sans-serif;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--accent-cyan);
+            margin-bottom: 6px;
+            text-shadow: 0 0 12px rgba(0,234,255,0.3);
+        }
+        .ben-tip-body{
+            font-size: 12px;
+            line-height: 1.45;
+            color: rgba(221,250,255,0.94);
+            margin-bottom: 8px;
+        }
+        .ben-tip-impact{
+            font-size: 11px;
+            line-height: 1.35;
+            color: rgba(165,230,242,0.92);
+            padding-top: 6px;
+            border-top: 1px solid rgba(0,234,255,0.12);
+        }
+        .ben-tip-impact-label{
+            font-weight: 700;
+            color: var(--accent-cyan);
+        }
+        .ben-tip-conditions-label{
+            font-size: 11px;
+            font-weight: 700;
+            color: rgba(126,247,184,0.95);
+            margin-bottom: 3px;
+        }
+        .ben-tip-conditions{
+            margin: 0;
+            padding: 0 0 0 14px;
+            font-size: 11px;
+            line-height: 1.4;
+            color: rgba(210,247,255,0.88);
+        }
+        .ben-tip-conditions li{
+            margin-bottom: 2px;
+        }
+        .ben-tip-risk{
+            font-size: 11px;
+            line-height: 1.35;
+            color: rgba(255,126,166,0.92);
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255,126,166,0.15);
+        }
+        .ben-tip-risk-label{
+            font-weight: 700;
+            color: rgba(255,126,166,1);
+        }
+
+        /* Dynamic bullet lines (regime summary tooltip) */
+        .ben-tip-lines{
+            margin: 0 0 6px 0;
+            padding: 0 0 0 14px;
+            font-size: 11.5px;
+            line-height: 1.45;
+            color: rgba(210,247,255,0.92);
+            list-style: disc;
+        }
+        .ben-tip-lines li{
+            margin-bottom: 3px;
+        }
+        .ben-tip-lines li:last-child{
+            margin-bottom: 0;
+        }
+
+        /* Make regime labels & chips show interactive cursor when tippable */
+        [data-ben-tip]{
+            cursor: help;
+        }
+        .home-regime-name[data-ben-tip]{
+            text-decoration-line: underline;
+            text-decoration-style: dotted;
+            text-decoration-color: rgba(0,234,255,0.35);
+            text-underline-offset: 2px;
+        }
+        .home-regime-pill[data-ben-tip]{
+            cursor: help;
+            transition: box-shadow .12s ease, filter .12s ease;
+        }
+        .home-regime-pill[data-ben-tip]:hover,
+        .home-regime-pill[data-ben-tip]:focus-visible{
+            box-shadow: 0 0 18px rgba(0,234,255,0.22), inset 0 0 0 1px rgba(0,234,255,0.15);
+            filter: brightness(1.08);
+            outline: none;
+        }
+
+        .qtPill[data-ben-tip]{
+            cursor: help;
+            transition: border-color .12s ease, box-shadow .12s ease;
+        }
+        .qtPill[data-ben-tip]:hover,
+        .qtPill[data-ben-tip]:focus-visible{
+            border-color: rgba(0,234,255,0.55);
+            box-shadow: inset 0 0 0 1px rgba(0,234,255,0.18), 0 0 20px rgba(0,234,255,0.22);
+            outline: none;
+        }
+        .qtPill-warn[data-ben-tip]:hover,
+        .qtPill-warn[data-ben-tip]:focus-visible{
+            border-color: rgba(255,126,166,0.65);
+            box-shadow: inset 0 0 0 1px rgba(255,126,166,0.22), 0 0 20px rgba(255,126,166,0.24);
+        }
+
         .metric-tip-toggle{
             margin-left:6px;
             border-radius:999px;
@@ -1071,6 +1203,478 @@
         #modalTitle{font-family:'Orbitron',sans-serif; letter-spacing:0.16em; color:var(--accent-cyan); font-size:14px; text-transform:uppercase; margin-bottom:10px; text-align:center;}
         #modalMsg{color:#e6fbff; font-size:14px; line-height:1.45; text-align:center; margin-bottom:14px;}
         #modalClose{width:100%;}
+
+/* ═══════════════════════════════════════════════════════════════
+   Trade Ticket Modal
+   ═══════════════════════════════════════════════════════════════ */
+        .tt-overlay{
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            background: rgba(2,6,18,0.82);
+            backdrop-filter: blur(6px);
+            align-items: center;
+            justify-content: center;
+            animation: ttFadeIn 0.15s ease;
+        }
+        @keyframes ttFadeIn{
+            from{ opacity:0; }
+            to{ opacity:1; }
+        }
+
+        .tt-card{
+            width: min(600px, 94vw);
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            border-radius: 16px;
+            background: linear-gradient(180deg, rgba(6,6,18,0.96), rgba(10,8,26,0.92));
+            border: 1px solid rgba(0,234,255,0.22);
+            box-shadow: 0 24px 80px rgba(0,220,255,0.12), 0 0 40px rgba(0,0,0,0.5);
+            animation: ttScaleIn 0.15s ease;
+            overflow: hidden;
+        }
+        @keyframes ttScaleIn{
+            from{ transform:scale(0.95); opacity:0; }
+            to{ transform:scale(1); opacity:1; }
+        }
+
+        /* ── Header ──────────────────────────────────── */
+        .tt-header{
+            position: relative;
+            padding: 16px 20px 12px;
+            border-bottom: 1px solid rgba(0,234,255,0.12);
+            text-align: center;
+        }
+        .tt-header-title{
+            font-family: 'Orbitron', sans-serif;
+            letter-spacing: 0.18em;
+            font-size: 13px;
+            color: var(--accent-cyan, #00eaff);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        .tt-header-sub{
+            font-size: 13px;
+            color: rgba(210,247,255,0.8);
+        }
+        .tt-header-symbol{
+            font-weight: 700;
+            color: #e6fbff;
+        }
+        .tt-header-sep{
+            margin: 0 6px;
+            color: rgba(0,234,255,0.4);
+        }
+        .tt-header-strategy{
+            color: rgba(210,247,255,0.7);
+        }
+        .tt-close-btn{
+            position: absolute;
+            top: 10px;
+            right: 12px;
+            background: none;
+            border: none;
+            color: rgba(210,247,255,0.5);
+            font-size: 22px;
+            cursor: pointer;
+            line-height: 1;
+            padding: 4px 8px;
+            transition: color 0.12s;
+        }
+        .tt-close-btn:hover{
+            color: rgba(255,126,166,1);
+        }
+
+        /* ── Body (scrollable) ───────────────────────── */
+        .tt-body{
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px 20px 12px;
+        }
+
+        /* ── Sections ────────────────────────────────── */
+        .tt-section{
+            margin-top: 14px;
+        }
+        .tt-section-title{
+            font-family: 'Orbitron', sans-serif;
+            font-size: 10px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: rgba(0,234,255,0.65);
+            margin-bottom: 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid rgba(0,234,255,0.08);
+        }
+
+        /* ── Grid rows ───────────────────────────────── */
+        .tt-grid{
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .tt-row{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+            padding: 3px 0;
+        }
+        .tt-label{
+            color: rgba(210,247,255,0.6);
+            white-space: nowrap;
+            margin-right: 12px;
+        }
+        .tt-val{
+            color: #e6fbff;
+            font-weight: 500;
+            text-align: right;
+        }
+        .tt-tone-positive{ color: #57ffa0; }
+        .tt-tone-negative{ color: #ff7ea6; }
+
+        /* ── Inputs / selects ────────────────────────── */
+        .tt-input, .tt-select{
+            background: rgba(10,14,30,0.8);
+            border: 1px solid rgba(0,234,255,0.2);
+            border-radius: 6px;
+            color: #e6fbff;
+            font-size: 13px;
+            padding: 4px 8px;
+            outline: none;
+            transition: border-color 0.12s;
+        }
+        .tt-input:focus, .tt-select:focus{
+            border-color: rgba(0,234,255,0.55);
+            box-shadow: 0 0 8px rgba(0,234,255,0.15);
+        }
+        .tt-qty{
+            width: 64px;
+            text-align: center;
+        }
+        .tt-limit{
+            width: 88px;
+            text-align: right;
+        }
+        .tt-select{
+            cursor: pointer;
+        }
+        .tt-mode-select{
+            width: 90px;
+        }
+
+        /* ── Legs table ──────────────────────────────── */
+        .tt-table-wrap{
+            overflow-x: auto;
+        }
+        .tt-legs-table{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .tt-legs-table th{
+            color: rgba(0,234,255,0.5);
+            font-weight: 600;
+            font-size: 10px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            padding: 5px 6px;
+            text-align: left;
+            border-bottom: 1px solid rgba(0,234,255,0.1);
+        }
+        .tt-legs-table td{
+            color: #e6fbff;
+            padding: 5px 6px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            white-space: nowrap;
+        }
+        .tt-occ{
+            font-size: 10px;
+            color: rgba(210,247,255,0.45);
+            font-family: 'Courier New', monospace;
+        }
+
+        /* ── Slippage warning ────────────────────────── */
+        .tt-slippage-warn{
+            margin-top: 6px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            background: rgba(255,180,50,0.1);
+            border: 1px solid rgba(255,180,50,0.25);
+            color: rgba(255,200,100,0.9);
+            font-size: 11px;
+        }
+
+        /* ── Safety panel ────────────────────────────── */
+        .tt-safety{
+            background: rgba(10,14,30,0.5);
+            border-radius: 8px;
+            padding: 10px 14px !important;
+            margin-top: 16px !important;
+            border: 1px solid rgba(255,255,255,0.06);
+        }
+        .tt-safety-row{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .tt-safety-label{
+            font-size: 12px;
+            color: rgba(210,247,255,0.6);
+        }
+        .tt-badge{
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            padding: 2px 10px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+        .tt-badge-live{
+            background: rgba(255,60,80,0.2);
+            color: #ff4d5e;
+            border: 1px solid rgba(255,60,80,0.4);
+        }
+        .tt-badge-dry{
+            background: rgba(255,180,50,0.15);
+            color: #ffb432;
+            border: 1px solid rgba(255,180,50,0.3);
+        }
+        .tt-badge-off{
+            background: rgba(100,120,140,0.15);
+            color: rgba(180,200,220,0.6);
+            border: 1px solid rgba(180,200,220,0.15);
+        }
+
+        /* ── Trade Capability Toggle ───────────────── */
+        .tt-toggle{
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: none;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .tt-toggle-track{
+            position: relative;
+            width: 36px;
+            height: 20px;
+            border-radius: 10px;
+            transition: background 0.18s ease;
+        }
+        .tt-toggle-thumb{
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #fff;
+            transition: transform 0.18s ease;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        .tt-toggle.off .tt-toggle-track{
+            background: rgba(255,60,70,0.55);
+            border: 1px solid rgba(255,60,70,0.7);
+        }
+        .tt-toggle.off .tt-toggle-label{
+            color: #ff4d5e;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .tt-toggle.on .tt-toggle-track{
+            background: rgba(50,205,100,0.55);
+            border: 1px solid rgba(50,205,100,0.7);
+        }
+        .tt-toggle.on .tt-toggle-thumb{
+            transform: translateX(16px);
+        }
+        .tt-toggle.on .tt-toggle-label{
+            color: #32cd64;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .tt-safety-msg{
+            font-size: 11px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            margin-top: 4px;
+        }
+        .tt-safety-live{
+            background: rgba(255,60,80,0.08);
+            color: rgba(255,100,120,0.9);
+            border: 1px solid rgba(255,60,80,0.2);
+        }
+        .tt-safety-dry{
+            background: rgba(255,180,50,0.08);
+            color: rgba(255,200,100,0.85);
+            border: 1px solid rgba(255,180,50,0.15);
+        }
+        .tt-safety-off{
+            background: rgba(100,120,140,0.08);
+            color: rgba(180,200,220,0.55);
+        }
+
+        /* ── Status messages ─────────────────────────── */
+        .tt-status{
+            margin-top: 12px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+        }
+        .tt-status-loading{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(0,234,255,0.06);
+            color: rgba(0,234,255,0.8);
+        }
+        .tt-spinner{
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(0,234,255,0.2);
+            border-top-color: rgba(0,234,255,0.8);
+            border-radius: 50%;
+            animation: ttSpin 0.7s linear infinite;
+        }
+        @keyframes ttSpin{
+            to{ transform: rotate(360deg); }
+        }
+        .tt-status-preview{
+            background: rgba(0,234,255,0.06);
+            border: 1px solid rgba(0,234,255,0.12);
+        }
+        .tt-preview-label{
+            color: rgba(0,234,255,0.9);
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+        .tt-preview-detail{
+            color: rgba(210,247,255,0.6);
+            font-size: 11px;
+        }
+        .tt-preview-warns{
+            margin: 4px 0 0 14px;
+            padding: 0;
+            font-size: 11px;
+            color: rgba(255,200,100,0.85);
+        }
+        .tt-preview-warns li{
+            margin-bottom: 2px;
+        }
+        .tt-status-success{
+            background: rgba(87,255,160,0.08);
+            color: rgba(87,255,160,0.9);
+            border: 1px solid rgba(87,255,160,0.2);
+            text-align: center;
+            font-weight: 600;
+        }
+
+        /* ── Footer ──────────────────────────────────── */
+        .tt-footer{
+            border-top: 1px solid rgba(0,234,255,0.12);
+            padding: 10px 20px 14px;
+            flex-shrink: 0;
+        }
+        .tt-footer-warns{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+        .tt-footer-warn{
+            font-size: 10px;
+            color: rgba(255,200,100,0.8);
+        }
+        .tt-footer-actions{
+            display: flex;
+            gap: 10px;
+        }
+        .tt-btn{
+            flex: 1;
+            padding: 10px 16px;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.12s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .tt-btn:disabled{
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .tt-btn-cancel{
+            background: rgba(255,60,80,0.1);
+            border-color: rgba(255,60,80,0.35);
+            color: #ff7ea6;
+        }
+        .tt-btn-cancel:hover:not(:disabled){
+            background: rgba(255,60,80,0.2);
+            border-color: rgba(255,60,80,0.5);
+        }
+        .tt-btn-confirm{
+            background: rgba(0,234,255,0.12);
+            border-color: rgba(0,234,255,0.4);
+            color: #00eaff;
+        }
+        .tt-btn-confirm:hover:not(:disabled){
+            background: rgba(0,234,255,0.22);
+            border-color: rgba(0,234,255,0.65);
+            box-shadow: 0 0 18px rgba(0,234,255,0.2);
+        }
+
+        /* ── Toast ───────────────────────────────────── */
+        .tt-toast{
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 4000;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            pointer-events: none;
+            animation: ttToastIn 0.25s ease;
+            max-width: 90vw;
+        }
+        .tt-toast-success{
+            background: rgba(87,255,160,0.15);
+            border: 1px solid rgba(87,255,160,0.35);
+            color: #57ffa0;
+        }
+        .tt-toast-error{
+            background: rgba(255,60,80,0.15);
+            border: 1px solid rgba(255,60,80,0.35);
+            color: #ff7ea6;
+        }
+        .tt-toast-info{
+            background: rgba(0,234,255,0.12);
+            border: 1px solid rgba(0,234,255,0.3);
+            color: #00eaff;
+        }
+        @keyframes ttToastIn{
+            from{ opacity:0; transform: translateX(-50%) translateY(12px); }
+            to{ opacity:1; transform: translateX(-50%) translateY(0); }
+        }
+        .tt-toast-fade{
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
 
     
         /* --- QWEN model analysis layout: label left, value right --- */
@@ -3247,4 +3851,184 @@ main.main{
 }
 .shake{ animation:chip-shake 0.3s ease; }
 
+/* ── Data Workbench Modal ───────────────────────────────────── */
 
+.dwb-modal-overlay{
+    position:fixed;
+    inset:0;
+    z-index:5000;
+    display:none;
+    align-items:center;
+    justify-content:center;
+    background: radial-gradient(circle at 40% 30%, rgba(0,234,255,0.05), rgba(2,6,10,0.90));
+    backdrop-filter: blur(4px);
+}
+.dwb-modal-overlay.is-open{
+    display:flex;
+}
+
+.dwb-modal{
+    width:min(720px, 94vw);
+    max-height:88vh;
+    display:flex;
+    flex-direction:column;
+    border:1px solid rgba(0,234,255,0.28);
+    border-radius:14px;
+    background: linear-gradient(180deg, rgba(8,13,22,0.98), rgba(4,8,14,0.99));
+    box-shadow: inset 0 0 0 1px rgba(0,234,255,0.08),
+                0 28px 64px rgba(0,0,0,0.55),
+                0 0 32px rgba(0,234,255,0.08);
+}
+
+.dwb-modal-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:16px 20px 10px;
+    border-bottom:1px solid rgba(0,234,255,0.12);
+}
+.dwb-modal-title{
+    margin:0;
+    font-size:15px;
+    font-weight:700;
+    color:rgba(210,247,255,0.92);
+    letter-spacing:0.02em;
+}
+.dwb-modal-close{
+    background:none;
+    border:none;
+    color:rgba(210,247,255,0.6);
+    font-size:22px;
+    cursor:pointer;
+    padding:2px 8px;
+    border-radius:6px;
+    transition: color 0.15s, background 0.15s;
+    line-height:1;
+}
+.dwb-modal-close:hover{
+    color:rgba(255,120,120,0.9);
+    background:rgba(255,120,120,0.1);
+}
+
+/* Tabs */
+.dwb-tabs{
+    display:flex;
+    gap:2px;
+    padding:0 20px;
+    border-bottom:1px solid rgba(0,234,255,0.10);
+}
+.dwb-tab{
+    background:none;
+    border:none;
+    border-bottom:2px solid transparent;
+    color:rgba(210,247,255,0.55);
+    font-size:12px;
+    font-weight:600;
+    padding:10px 14px;
+    cursor:pointer;
+    transition:color 0.15s, border-color 0.15s;
+    letter-spacing:0.03em;
+    text-transform:uppercase;
+}
+.dwb-tab:hover{
+    color:rgba(210,247,255,0.82);
+}
+.dwb-tab.dwb-tab-active{
+    color:rgba(0,234,255,0.92);
+    border-bottom-color:rgba(0,234,255,0.72);
+}
+
+/* Body / Panels */
+.dwb-body{
+    flex:1 1 auto;
+    overflow-y:auto;
+    padding:0;
+}
+.dwb-panel{
+    display:none;
+    padding:12px 20px 20px;
+}
+.dwb-panel.dwb-panel-active{
+    display:block;
+}
+
+.dwb-panel-toolbar{
+    display:flex;
+    justify-content:flex-end;
+    margin-bottom:8px;
+}
+.dwb-copy-btn{
+    background:rgba(0,234,255,0.08);
+    border:1px solid rgba(0,234,255,0.22);
+    color:rgba(210,247,255,0.78);
+    font-size:11px;
+    font-weight:600;
+    padding:4px 12px;
+    border-radius:6px;
+    cursor:pointer;
+    transition:background 0.15s, border-color 0.15s;
+}
+.dwb-copy-btn:hover{
+    background:rgba(0,234,255,0.15);
+    border-color:rgba(0,234,255,0.4);
+}
+
+.dwb-note{
+    font-size:12px;
+    color:rgba(255,200,100,0.7);
+    font-style:italic;
+    margin-bottom:8px;
+}
+
+.dwb-json{
+    margin:0;
+    padding:14px;
+    background:rgba(0,0,0,0.35);
+    border:1px solid rgba(0,234,255,0.10);
+    border-radius:8px;
+    font-family:'JetBrains Mono','Fira Code',monospace;
+    font-size:11.5px;
+    line-height:1.55;
+    color:rgba(210,247,255,0.82);
+    white-space:pre-wrap;
+    word-break:break-all;
+    overflow-x:auto;
+    max-height:52vh;
+}
+
+/* ── Overlay Root ───────────────────────────────────────────── */
+/* Passive container inside .shell for tooltips, modals, toasts.
+   Keeps overlay DOM inside the fullscreen subtree so they remain
+   visible when .shell enters requestFullscreen().               */
+#overlay-root{
+    position:absolute;
+    top:0;
+    left:0;
+    width:0;
+    height:0;
+    overflow:visible;
+    pointer-events:none;
+    /* Must be above ALL app content (titlebar, sticky headers z≤120,
+       loading overlays z≤1300) so modals/tooltips are never obstructed.
+       Modals inside use position:fixed for viewport coverage. */
+    z-index:9000;
+}
+/* Children (tooltips, modals) use position:fixed and restore
+   pointer-events on themselves, so overlay-root is invisible
+   to layout and clicks. */
+#overlay-root > *{
+    pointer-events:auto;
+}
+
+/* ── Modal-open state ─────────────────────────────────────────
+   Applied to .shell when a modal (trade ticket, DWB, etc.) opens.
+   Dims and disables the background UI so the modal is the only
+   interactive and visually dominant element.                     */
+.shell.modal-open > .titlebar,
+.shell.modal-open > .subtitlebar,
+.shell.modal-open > .shell-layout{
+    opacity: 0.35;
+    filter: blur(1.5px);
+    pointer-events: none;
+    transition: opacity 0.18s ease, filter 0.18s ease;
+}

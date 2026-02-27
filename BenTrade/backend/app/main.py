@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.routes_frontend import router as frontend_router
 from app.api.routes_admin import router as admin_router
+from app.api.routes_dev import router as dev_router
 from app.api.routes_health import router as health_router
 from app.api.routes_options import router as options_router
 from app.api.routes_active_trades import router as active_trades_router
@@ -51,6 +52,7 @@ from app.trading.service import TradingService
 from app.trading.tradier_broker import TradierBroker
 from app.utils.cache import TTLCache
 from app.utils.http import UpstreamError
+from app.utils.snapshot import SnapshotChainSource, SnapshotRecorder, TradierChainSource
 
 
 def _setup_logging() -> None:
@@ -69,6 +71,7 @@ def create_app() -> FastAPI:
     backend_dir = Path(__file__).resolve().parents[1]
     frontend_dir = backend_dir.parent / "frontend"
     results_dir = backend_dir / "results"
+    snapshot_dir = Path(settings.SNAPSHOT_DIR) if settings.SNAPSHOT_DIR else backend_dir / "data" / "snapshots"
 
     http_client = httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT_SECONDS)
     cache = TTLCache()
@@ -78,11 +81,39 @@ def create_app() -> FastAPI:
     polygon_client = PolygonClient(settings=settings, http_client=http_client, cache=cache)
     fred_client = FredClient(settings=settings, http_client=http_client, cache=cache)
 
+    # -- Snapshot chain source / recorder -----------------------------------
+    _logger = logging.getLogger(__name__)
+
+    if settings.OPTION_CHAIN_SOURCE == "snapshot":
+        chain_source = SnapshotChainSource(snapshot_dir, provider="tradier")
+        _logger.info("event=chain_source_mode mode=snapshot dir=%s", snapshot_dir)
+    else:
+        chain_source = TradierChainSource(tradier_client)
+
+    snapshot_recorder: SnapshotRecorder | None = None
+    if settings.SNAPSHOT_CAPTURE:
+        _capture_syms: set[str] | None = None
+        if settings.SNAPSHOT_CAPTURE_SYMBOLS:
+            _capture_syms = {s.strip().upper() for s in settings.SNAPSHOT_CAPTURE_SYMBOLS.split(",") if s.strip()}
+        _limit = settings.SNAPSHOT_CAPTURE_LIMIT_PER_SYMBOL or None
+        snapshot_recorder = SnapshotRecorder(
+            snapshot_dir,
+            enabled=True,
+            capture_symbols=_capture_syms if _capture_syms else None,
+            limit_per_symbol=_limit,
+        )
+        _logger.info(
+            "event=snapshot_capture_enabled symbols=%s limit=%s dir=%s",
+            _capture_syms or "ALL", _limit, snapshot_dir,
+        )
+
     base_data_service = BaseDataService(
         tradier_client=tradier_client,
         finnhub_client=finnhub_client,
         fred_client=fred_client,
         polygon_client=polygon_client,
+        chain_source=chain_source,
+        snapshot_recorder=snapshot_recorder,
     )
     signal_service = SignalService(base_data_service=base_data_service, cache=cache, ttl_seconds=45)
     spread_service = SpreadService(base_data_service=base_data_service)
@@ -144,6 +175,7 @@ def create_app() -> FastAPI:
     app.state.backend_dir = backend_dir
     app.state.frontend_dir = frontend_dir
     app.state.results_dir = results_dir
+    app.state.snapshot_dir = snapshot_dir
 
     app.include_router(health_router)
     app.include_router(options_router)
@@ -165,6 +197,7 @@ def create_app() -> FastAPI:
     app.include_router(reports_router)
     app.include_router(decisions_router)
     app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
+    app.include_router(dev_router)
     app.include_router(frontend_router)
 
     @app.exception_handler(UpstreamError)

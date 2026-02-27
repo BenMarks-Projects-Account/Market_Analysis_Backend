@@ -26,7 +26,18 @@ def _cfg(primary: str, *aliases: str, default: str = "") -> str:
 class Settings(BaseModel):
     ENABLE_LIVE_TRADING: bool = os.getenv("ENABLE_LIVE_TRADING", "false").lower() == "true"
     LIVE_TRADING_RUNTIME_ENABLED: bool = os.getenv("LIVE_TRADING_RUNTIME_ENABLED", "false").lower() == "true"
+    TRADING_LIVE_ENABLED: bool = os.getenv("TRADING_LIVE_ENABLED", "false").lower() == "true"
 
+    # ── Dual credential sets (LIVE + PAPER) ─────────────────────
+    TRADIER_API_KEY_LIVE: str = _cfg("TRADIER_API_KEY_LIVE", default="")
+    TRADIER_ACCOUNT_ID_LIVE: str = _cfg("TRADIER_ACCOUNT_ID_LIVE", default="")
+    TRADIER_ENV_LIVE: str = _cfg("TRADIER_ENV_LIVE", default="live").lower()
+
+    TRADIER_API_KEY_PAPER: str = _cfg("TRADIER_API_KEY_PAPER", default="")
+    TRADIER_ACCOUNT_ID_PAPER: str = _cfg("TRADIER_ACCOUNT_ID_PAPER", default="")
+    TRADIER_ENV_PAPER: str = _cfg("TRADIER_ENV_PAPER", default="sandbox").lower()
+
+    # ── DEPRECATED: legacy single-set vars (fall back for compat) ──
     TRADIER_ACCOUNT_ID: str = _cfg("TRADIER_ACCOUNT_ID", default="")
     TRADIER_TOKEN: str = _cfg("TRADIER_TOKEN", "TRADIER_API_KEY", "TRAIDER_API_KEY", default="")
     TRADIER_ENV: str = _cfg("TRADIER_ENV", default="live").lower()
@@ -66,12 +77,34 @@ class Settings(BaseModel):
     MAX_EXPIRATIONS_PER_SYMBOL: int = int(os.getenv("MAX_EXPIRATIONS_PER_SYMBOL", "6"))
     VALIDATION_MODE: bool = os.getenv("VALIDATION_MODE", "false").lower() == "true"
 
+    # -- Snapshot capture / replay ------------------------------------------
+    SNAPSHOT_CAPTURE: bool = os.getenv("SNAPSHOT_CAPTURE", "0") == "1"
+    SNAPSHOT_CAPTURE_SYMBOLS: str = os.getenv("SNAPSHOT_CAPTURE_SYMBOLS", "")
+    SNAPSHOT_CAPTURE_LIMIT_PER_SYMBOL: int = int(os.getenv("SNAPSHOT_CAPTURE_LIMIT_PER_SYMBOL", "0"))
+    OPTION_CHAIN_SOURCE: str = os.getenv("OPTION_CHAIN_SOURCE", "tradier").lower()
+    SNAPSHOT_DIR: str = os.getenv("SNAPSHOT_DIR", "")
+
     def model_post_init(self, __context) -> None:
-        self.TRADIER_BASE_URL = (
-            "https://sandbox.tradier.com/v1"
-            if self.TRADIER_ENV == "sandbox"
-            else "https://api.tradier.com/v1"
-        )
+        from app.trading.tradier_credentials import get_tradier_base_url
+
+        # ── Back-fill dual-cred vars from legacy single-set vars ──
+        # If user hasn't set the new LIVE vars yet, fall back to the
+        # old TRADIER_API_KEY / TRADIER_ACCOUNT_ID / TRADIER_ENV.
+        if not self.TRADIER_API_KEY_LIVE and self.TRADIER_TOKEN:
+            self.TRADIER_API_KEY_LIVE = self.TRADIER_TOKEN
+        if not self.TRADIER_ACCOUNT_ID_LIVE and self.TRADIER_ACCOUNT_ID:
+            self.TRADIER_ACCOUNT_ID_LIVE = self.TRADIER_ACCOUNT_ID
+        if not self.TRADIER_ENV_LIVE or self.TRADIER_ENV_LIVE == "live":
+            if self.TRADIER_ENV:
+                self.TRADIER_ENV_LIVE = self.TRADIER_ENV
+
+        # Keep legacy fields in sync for existing code paths
+        if not self.TRADIER_TOKEN and self.TRADIER_API_KEY_LIVE:
+            self.TRADIER_TOKEN = self.TRADIER_API_KEY_LIVE
+        if not self.TRADIER_ACCOUNT_ID and self.TRADIER_ACCOUNT_ID_LIVE:
+            self.TRADIER_ACCOUNT_ID = self.TRADIER_ACCOUNT_ID_LIVE
+
+        self.TRADIER_BASE_URL = get_tradier_base_url(self.TRADIER_ENV)
 
 
 _settings = Settings()

@@ -179,6 +179,103 @@ Calendar trades add `dte_front`, `dte_back`, `dte_label` (e.g. `"DTE 31/59"`).
 | Calendars | `strategies/calendars.py` | `calendar_spread`, `calendar_call_spread`, `calendar_put_spread` |
 | Income | `strategies/income.py` | `income`, `csp`, `covered_call` |
 
+## Filter Trace Instrumentation
+
+Every `StrategyService.generate()` call produces a `filter_trace` object in the report JSON, tracking the full candidate pipeline:
+
+**Pipeline Stages** (in order):
+1. **Snapshot Collection** — symbols × expirations → valid snapshots with chain data
+2. **Candidate Construction** — contracts → spread candidates (OTM matching, width selection)
+3. **Enrichment** — candidates → enriched trades (quote validation, metric computation via `enrich_trades_batch`)
+4. **Quality Gates** — enriched → accepted (evaluate thresholds: POP, EV/risk, ROR, liquidity, spread structure, data quality)
+5. **Dedup & Ranking** — accepted → unique trades ranked by composite score
+
+**Gate Breakdown** groups rejection reasons into categories:
+- `quote_validation` — missing/invalid quotes (`QUOTE_INVALID:leg:reason`), ask < bid, non-positive credit
+- `metrics_computation` — CreditSpread metrics computation failure
+- `probability` — POP below minimum
+- `expected_value` — EV/risk below floor or negative EV
+- `return_on_risk` — ROR below minimum
+- `spread_structure` — invalid width, spread too wide
+- `liquidity` — open interest or volume below minimum (threshold check, data IS present)
+- `data_quality` — missing OI/volume (`DQ_MISSING:open_interest`, `DQ_MISSING:volume`)
+
+### Quote Validation (Centralised)
+
+`validate_quote(bid, ask)` and `validate_spread_quotes(short_bid, short_ask, long_bid, long_ask)` in `credit_spread.py` provide a single source of truth for quote validity:
+- bid ≥ 0 (None → invalid)
+- ask > 0 (None → invalid)
+- ask ≥ bid (inverted market check)
+- mid = (bid + ask) / 2 > 0
+
+Rejection codes follow the format `QUOTE_INVALID:<leg>:<reason>` (12 codes total).
+
+### Data Quality Mode
+
+The `data_quality_mode` parameter controls how missing OI/volume is handled in Gate 6:
+| Mode | Missing OI/Volume Behaviour | Preset Level |
+|------|----------------------------|--------------|
+| `strict` | Reject with `DQ_MISSING:*` code | strict |
+| `balanced` | Reject with `DQ_MISSING:*` code | conservative, balanced |
+| `lenient` | Waive if bid-ask tight & credit ≥ min_credit | wide |
+
+The `lenient` mode requires both: (1) bid-ask spread ≤ limit, and (2) net_credit ≥ `min_credit_for_dq_waiver` (default $0.10). If either fails, the trade is still rejected with `DQ_MISSING:*`.
+
+**Trace payload shape:**
+```json
+{
+  "trace_id": "credit_spread_20250301_120000_abc12345",
+  "timestamp": "2025-03-01T12:00:00Z",
+  "strategy_id": "credit_spread",
+  "preset_name": "balanced",
+  "data_quality_mode": "balanced",
+  "resolved_thresholds": { "min_pop": 0.60, "..." : "..." },
+  "stages": [{ "name": "...", "input_count": 7, "output_count": 5 }],
+  "gate_breakdown": { "probability": 30, "data_quality": 8, "liquidity": 15 },
+  "rejection_reasons": { "pop_below_floor": 30, "DQ_MISSING:open_interest": 5, "..." : 0 },
+  "data_quality_flags": ["MISSING_PRICE_HISTORY"],
+  "missing_field_counts": {
+    "open_interest": 12, "volume": 15, "bid": 3, "ask": 2,
+    "quote_rejected": 5, "dq_waived": 0, "total_enriched": 78
+  },
+  "rejected_examples": []
+}
+```
+
+**Dev toggle:** Set `localStorage.setItem('bentrade_filter_trace_examples', 'true')` in the browser console to capture up to 3 rejected trade examples in the trace. The backend reads `_capture_trace_examples` from the SSE query params.
+
+**Frontend display:** The "No Trades Passed Filters" panel in `strategy_dashboard_shell.js` renders:
+- Preset badge + Data quality mode badge (colour-coded: red=strict, yellow=balanced, green=lenient)
+- Pipeline stages waterfall (bottleneck stages highlighted in red)
+- Gate breakdown table (includes "Data Quality (Missing Fields)" gate)
+- Collapsible resolved thresholds (includes Min ROR)
+- Data quality flags
+- Collapsible missing field counts (counts + % of enriched, DQ waived row for lenient mode)
+- Rejected examples (when dev toggle enabled)
+- "Copy Trace JSON" button
+
+## Preset Resolution
+
+Filter presets (strict / conservative / balanced / wide) are the single source of truth for all evaluate-gate thresholds. The resolution chain:
+
+1. **`StrategyService._PRESETS`** (backend) — canonical numeric thresholds per strategy × level
+2. **`StrategyService.resolve_thresholds(strategy_id, preset_name, overrides)`** — classmethod that returns the resolved threshold dict; unknown presets fall back to balanced with a log warning
+3. **`_apply_request_defaults()`** — pops `preset` from the request, resolves via `_PRESETS`, applies via `setdefault()`, stamps `_preset_name`
+4. **`evaluate()`** — reads all thresholds from `trade["_request"]` (the resolved payload); safety fallbacks match balanced level
+
+**Frontend mirrors** (must stay in sync with backend `_PRESETS`):
+- `profiles.js` — `BenTradeScannerProfiles.getProfile(strategyId, level)` — primary frontend source
+- `defaults.js` — `BenTradeStrategyDefaults.getStrategyDefaults()` — delegates to profiles.js, legacy fallback
+
+**Entry-point flows:**
+- **Strategy dashboard (SSE):** sends `preset=<level>` as query param → backend resolves thresholds
+- **Home dashboard (POST):** orchestrator merges `getProfile()` values into payload AND sets `preset=<level>` → backend validates, stamps `_preset_name`
+
+**Evaluate thresholds that vary by preset:**
+`min_pop`, `min_ev_to_risk`, `min_ror`, `max_bid_ask_spread_pct`, `min_open_interest`, `min_volume`
+
+**Ordering invariant (tested):** strict ≥ conservative ≥ balanced ≥ wide on all "higher-is-tighter" keys (min_pop, min_ror, etc.), and strict ≤ … ≤ wide on max_bid_ask_spread_pct.
+
 ## Data Sources
 
 | Source | Client | Data |

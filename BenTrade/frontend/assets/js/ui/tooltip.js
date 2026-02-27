@@ -62,7 +62,19 @@ window.BenTradeUI.Tooltip = (function(){
     'win rate': 'win_rate',
     'total p&l': 'total_pnl',
     'avg p&l': 'avg_pnl',
-    'max drawdown': 'max_drawdown'
+    'max drawdown': 'max_drawdown',
+    'trend': 'trend_score',
+    'trend score': 'trend_score',
+    'momentum': 'momentum_score',
+    'momentum score': 'momentum_score',
+    'pullback': 'pullback_score',
+    'pullback score': 'pullback_score',
+    'catalyst': 'catalyst_score',
+    'catalyst score': 'catalyst_score',
+    'volatility': 'volatility_score',
+    'volatility score': 'volatility_score',
+    'ema-20': 'ema_20',
+    'sma-50': 'sma_50'
   };
 
   function ensureTooltipEl(){
@@ -72,7 +84,12 @@ window.BenTradeUI.Tooltip = (function(){
     el.id = 'btMetricTooltip';
     el.setAttribute('role', 'tooltip');
     el.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(el);
+    // Mount inside overlay-root (inside .shell) so tooltip remains
+    // visible when the app enters browser fullscreen.
+    var root = (window.BenTradeOverlayRoot && window.BenTradeOverlayRoot.get)
+      ? window.BenTradeOverlayRoot.get()
+      : document.body;
+    root.appendChild(el);
     state.el = el;
     return el;
   }
@@ -155,6 +172,12 @@ window.BenTradeUI.Tooltip = (function(){
     target.setAttribute('aria-describedby', 'btMetricTooltip');
     state.activeTarget = target;
     positionTooltip(target);
+
+    if(window.__BEN_DEBUG_OVERLAYS){
+      console.debug('[BenTrade:overlay] showTooltip', metricId,
+        'parent:', el.parentElement?.id || el.parentElement?.tagName,
+        'fullscreenElement:', document.fullscreenElement?.className || null);
+    }
   }
 
   function isBound(el){

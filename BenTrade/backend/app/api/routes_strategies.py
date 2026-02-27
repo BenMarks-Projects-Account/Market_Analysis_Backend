@@ -75,7 +75,7 @@ async def generate_strategy_report(
 async def generate_strategy_report_stream(strategy_id: str, request: Request):
     query = request.query_params
     request_payload: dict[str, Any] = {}
-    for key in ("symbol", "direction", "width", "distance_mode", "butterfly_type", "option_side", "center_mode", "moneyness", "preset"):
+    for key in ("symbol", "direction", "width", "distance_mode", "butterfly_type", "option_side", "center_mode", "moneyness", "preset", "data_quality_mode"):
         value = query.get(key)
         if value not in (None, ""):
             request_payload[key] = value
@@ -128,6 +128,11 @@ async def generate_strategy_report_stream(strategy_id: str, request: Request):
     allow_skewed = query.get("allow_skewed")
     if allow_skewed not in (None, ""):
         request_payload["allow_skewed"] = str(allow_skewed)
+
+    # Dev toggle: capture rejected trade examples in filter trace
+    capture_examples = query.get("_capture_trace_examples")
+    if capture_examples not in (None, "", "0", "false"):
+        request_payload["_capture_trace_examples"] = True
 
     timeout_seconds = 180
     timeout_q = query.get("timeout_seconds")

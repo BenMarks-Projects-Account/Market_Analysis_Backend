@@ -61,7 +61,11 @@ window.BenTradeStrategyShell = (function(){
       el.style.boxShadow = '0 10px 24px rgba(0,0,0,0.45)';
       el.style.opacity = '0';
       el.style.transition = 'opacity 0.16s ease';
-      document.body.appendChild(el);
+      // Mount inside overlay-root so toast stays visible in fullscreen.
+      var overlayRoot = (window.BenTradeOverlayRoot && window.BenTradeOverlayRoot.get)
+        ? window.BenTradeOverlayRoot.get()
+        : document.body;
+      overlayRoot.appendChild(el);
     }
     el.textContent = String(message || 'Updated');
     el.style.opacity = '1';
@@ -132,6 +136,10 @@ window.BenTradeStrategyShell = (function(){
             qp.set(String(key), String(value));
           });
         }
+        // Dev toggle: capture rejected examples for filter trace
+        if(localStorage.getItem('bentrade_filter_trace_examples') === 'true'){
+          qp.set('_capture_trace_examples', '1');
+        }
         const suffix = qp.toString();
         if(suffix){
           mapped = `${mapped}${mapped.includes('?') ? '&' : '?'}${suffix}`;
@@ -157,6 +165,7 @@ window.BenTradeStrategyShell = (function(){
         { key: 'distance_max', label: 'OTM max', type: 'float', min: 0.01, max: 0.30, step: 0.01, width: '95px' },
         { key: 'min_pop', label: 'Min POP', type: 'float', min: 0, max: 1, step: 0.01, width: '100px' },
         { key: 'min_ev_to_risk', label: 'Min EV/Risk', type: 'float', min: 0, step: 0.01, width: '115px' },
+        { key: 'min_ror', label: 'Min RoR', type: 'float', min: 0, step: 0.005, width: '100px' },
         { key: 'max_bid_ask_spread_pct', label: 'Max spread %', type: 'float', min: 0.1, step: 0.1, width: '115px' },
         { key: 'min_open_interest', label: 'Min OI', type: 'int', min: 1, width: '90px' },
         { key: 'min_volume', label: 'Min Vol', type: 'int', min: 1, width: '90px' },
@@ -374,10 +383,11 @@ window.BenTradeStrategyShell = (function(){
     btnDefaults.className = 'btn';
     btnDefaults.textContent = 'Use Defaults';
 
-    const btnGenerateDefaults = document.createElement('button');
-    btnGenerateDefaults.type = 'button';
-    btnGenerateDefaults.className = 'btn';
-    btnGenerateDefaults.textContent = 'Generate With Defaults';
+    const btnGenerateAdvanced = document.createElement('button');
+    btnGenerateAdvanced.type = 'button';
+    btnGenerateAdvanced.className = 'btn';
+    btnGenerateAdvanced.textContent = 'Generate With Advanced Filters';
+    btnGenerateAdvanced.style.display = 'none'; // hidden until advanced toggle is on
 
     const btnReset = document.createElement('button');
     btnReset.type = 'button';
@@ -403,12 +413,29 @@ window.BenTradeStrategyShell = (function(){
     why.appendChild(summary);
     why.appendChild(list);
 
-    controls.appendChild(advancedToggleWrap);
+    controls.appendChild(btnDefaults);
+    controls.appendChild(btnGenerateAdvanced);
+    controls.appendChild(btnReset);
+    controls.appendChild(why);
 
-    // -- Preset toggle (Conservative / Strict) --
+    // Insert advanced toggle checkbox into the top control row (not the filter form)
+    const topAdvancedSlot = host.querySelector('#topAdvancedToggle');
+    if(topAdvancedSlot){
+      topAdvancedSlot.appendChild(advancedToggleWrap);
+    }else{
+      // Fallback: prepend to controls row
+      controls.prepend(advancedToggleWrap);
+    }
+
+    row.appendChild(fieldWrap);
+    row.appendChild(controls);
+    host.appendChild(row);
+
+    // -- Preset dropdown: placed in the TOP control row next to genBtn --
     const sKey = strategyKey(config);
     const presetNames = window.BenTradeStrategyDefaults?.getPresetNames?.(sKey) || [];
     let presetSelect = null;
+    const topControlGroup = host.querySelector('#topControlGroup');
     if(presetNames.length > 1){
       const presetWrap = document.createElement('label');
       presetWrap.style.display = 'inline-flex';
@@ -416,7 +443,6 @@ window.BenTradeStrategyShell = (function(){
       presetWrap.style.gap = '6px';
       presetWrap.style.fontSize = '12px';
       presetWrap.style.color = 'rgba(215,251,255,0.96)';
-      presetWrap.style.marginRight = '4px';
       const presetLabel = document.createElement('span');
       presetLabel.textContent = 'Preset:';
       presetSelect = document.createElement('select');
@@ -431,17 +457,19 @@ window.BenTradeStrategyShell = (function(){
       presetSelect.value = presetNames[0]; // default to first (conservative)
       presetWrap.appendChild(presetLabel);
       presetWrap.appendChild(presetSelect);
-      controls.appendChild(presetWrap);
+      // Insert into the TOP bar (right-aligned group) instead of the advanced controls row
+      if(topControlGroup){
+        topControlGroup.appendChild(presetWrap);
+      }else{
+        // Fallback: place next to genBtn
+        const genBtn = host.querySelector('#genBtn');
+        if(genBtn && genBtn.parentNode){
+          genBtn.parentNode.insertBefore(presetWrap, genBtn);
+        }else{
+          controls.appendChild(presetWrap);
+        }
+      }
     }
-
-    controls.appendChild(btnDefaults);
-    controls.appendChild(btnGenerateDefaults);
-    controls.appendChild(btnReset);
-    controls.appendChild(why);
-
-    row.appendChild(fieldWrap);
-    row.appendChild(controls);
-    host.appendChild(row);
 
     const sticky = { ...(config.defaultFilters || {}) };
     let currentPreset = presetNames.length ? presetNames[0] : '';
@@ -451,6 +479,7 @@ window.BenTradeStrategyShell = (function(){
       state.activeConfig.advancedEnabled = on;
       fieldWrap.style.display = on ? 'flex' : 'none';
       btnDefaults.style.display = on ? '' : 'none';
+      btnGenerateAdvanced.style.display = on ? '' : 'none';
       btnReset.style.display = on ? '' : 'none';
       why.style.display = on ? '' : 'none';
       /* Template manual-filter controls removed — shell owns its own. */
@@ -465,6 +494,9 @@ window.BenTradeStrategyShell = (function(){
           next[field.key] = value;
         }
       });
+      // Preserve preset — form fields don't include it, so carry forward
+      // from the existing currentFilters or the dropdown's current value.
+      next.preset = state.activeConfig.currentFilters?.preset || currentPreset;
       state.activeConfig.currentFilters = next;
     };
 
@@ -485,7 +517,9 @@ window.BenTradeStrategyShell = (function(){
         const input = row.querySelector(`#${CSS.escape(inputId(mode, field.key))}`);
         writeFieldValue(field, input, '');
       });
+      const savedPreset = state.activeConfig.currentFilters?.preset || currentPreset;
       state.activeConfig.currentFilters = { ...sticky };
+      state.activeConfig.currentFilters.preset = savedPreset;
       showToast('Inputs reset');
     };
 
@@ -498,7 +532,9 @@ window.BenTradeStrategyShell = (function(){
     advancedToggle.addEventListener('change', () => {
       setAdvancedEnabled(advancedToggle.checked);
       if(!advancedToggle.checked){
+        const savedPreset = state.activeConfig.currentFilters?.preset || currentPreset;
         state.activeConfig.currentFilters = { ...(config.defaultFilters || {}) };
+        state.activeConfig.currentFilters.preset = savedPreset;
       }
     });
 
@@ -514,20 +550,25 @@ window.BenTradeStrategyShell = (function(){
 
     btnDefaults.addEventListener('click', applyDefaults);
     btnReset.addEventListener('click', clearInputs);
-    btnGenerateDefaults.addEventListener('click', () => {
-      applyDefaults();
-      advancedToggle.checked = false;
-      setAdvancedEnabled(false);
-      // Ensure preset + symbols travel through the generate call
-      const defaults = window.BenTradeStrategyDefaults?.getStrategyDefaults?.(strategyKey(config), currentPreset) || {};
-      if(defaults.symbols){
-        state.activeConfig.currentFilters.symbols = defaults.symbols;
+    btnGenerateAdvanced.addEventListener('click', () => {
+      // Run scanner using manually-entered advanced filter values.
+      // Temporarily force advanced mode on so PatchedEventSource sends filter params,
+      // then restore state after SSE is opened.
+      writeFiltersFromInputs();
+      const wasAdvanced = state.activeConfig.advancedEnabled;
+      state.activeConfig.advancedEnabled = true;
+      // Mark as 'manual' — user tweaked thresholds, trace should reflect that
+      state.activeConfig.currentFilters.preset = 'manual';
+      console.info('[StrategyShell] Generate advanced scan:', { preset: 'manual', filters: { ...state.activeConfig.currentFilters } });
+      // Use the exposed startGeneration from mount scope
+      if(typeof state.startGeneration === 'function'){
+        state.startGeneration();
+      }else{
+        // Fallback: open SSE directly won't work, so log a warning
+        console.warn('[StrategyShell] startGeneration not yet available');
       }
-      state.activeConfig.currentFilters.preset = currentPreset;
-      const genBtn = document.getElementById('genBtn');
-      if(genBtn){
-        genBtn.click();
-      }
+      // Restore after SSE is opened (EventSource constructor is synchronous)
+      state.activeConfig.advancedEnabled = wasAdvanced;
     });
 
     applyDefaults();
@@ -964,23 +1005,384 @@ window.BenTradeStrategyShell = (function(){
         }
 
         if(trades.length === 0){
-          // Empty report — styled explanation box with warnings, diagnostics, rejection breakdown
+          // Empty report — styled explanation box with warnings, diagnostics, filter trace
           const stats = data?.report_stats || {};
           const symbols = Array.isArray(data?.symbols) ? data.symbols : [];
+          const ft = data?.filter_trace || null;
 
           let html = '<div style="border:1px solid rgba(255,187,51,0.35);border-radius:10px;padding:16px 18px;margin-top:6px;background:rgba(255,187,51,0.06);">';
-          html += '<div style="font-size:14px;font-weight:700;color:#ffbb33;margin-bottom:8px;">No Trades Passed Filters</div>';
+
+          // ── Header with preset badge ──
+          html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">';
+          html += '<div style="font-size:14px;font-weight:700;color:#ffbb33;">No Trades Passed Filters</div>';
+          if(ft && ft.preset_name){
+            const presetMatch = ft.requested_preset_name === ft.preset_name || !ft.requested_preset_name;
+            const badgeColor = presetMatch ? 'rgba(159,239,255,0.12)' : 'rgba(255,94,94,0.15)';
+            const badgeText = presetMatch ? '#9fefff' : '#ff5e5e';
+            html += `<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;background:${badgeColor};color:${badgeText};text-transform:uppercase;letter-spacing:0.5px;">${escapeHtml(ft.preset_name)}</span>`;
+            if(!presetMatch && ft.requested_preset_name){
+              html += `<span style="font-size:10px;color:rgba(255,94,94,0.8);">(requested: ${escapeHtml(ft.requested_preset_name)})</span>`;
+            }
+          }
+          html += '</div>';
+
           html += '<div style="font-size:12px;color:rgba(230,251,255,0.85);line-height:1.55;">';
           html += 'All candidates were filtered out by the evaluate thresholds. ';
           html += 'This is normal when market conditions or scan parameters produce candidates ';
           html += 'that don\'t meet the quality gates (EV/risk, liquidity, spread width).';
           html += '</div>';
 
+          // ── Scan Parameters Confirmation ──
+          if(ft){
+            const rt = ft.resolved_thresholds || {};
+            const keyThresholds = [
+              { label: 'Min POP', value: rt.min_pop },
+              { label: 'Min EV/Risk', value: rt.min_ev_to_risk },
+              { label: 'Max Spread %', value: rt.max_bid_ask_spread_pct },
+              { label: 'Min OI', value: rt.min_open_interest },
+              { label: 'Min Volume', value: rt.min_volume },
+              { label: 'DQ Mode', value: ft.data_quality_mode },
+            ].filter(t => t.value != null && t.value !== '');
+            if(keyThresholds.length){
+              html += '<div style="margin-top:10px;padding:8px 10px;border-radius:6px;background:rgba(159,239,255,0.05);border:1px solid rgba(159,239,255,0.12);">';
+              html += '<div style="font-size:10px;font-weight:600;color:rgba(159,239,255,0.6);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Scan Parameters Used</div>';
+              html += '<div style="display:flex;flex-wrap:wrap;gap:6px 14px;">';
+              keyThresholds.forEach(t => {
+                html += `<span style="font-size:11px;color:#e6fbff;"><span style="color:rgba(159,239,255,0.5);">${escapeHtml(t.label)}:</span> ${escapeHtml(String(t.value))}</span>`;
+              });
+              html += '</div></div>';
+            }
+          }
+
           if(reportWarnings.length){
             html += '<div style="margin-top:10px;font-size:12px;font-weight:600;color:#9fefff;">Warnings</div>';
             html += '<ul style="margin:4px 0 0 18px;padding:0;color:#9fefff;font-size:12px;line-height:1.5;">';
             reportWarnings.forEach(w => { html += `<li>${escapeHtml(w)}</li>`; });
             html += '</ul>';
+          }
+
+          // ── Top 3 Bottleneck Stages (largest dropoffs) ──
+          if(ft && Array.isArray(ft.stages) && ft.stages.length){
+            const _allStages = ft.stages.map(function(stage, i){
+              var inp = typeof stage.input_count === 'number' ? stage.input_count : 0;
+              var out = typeof stage.output_count === 'number' ? stage.output_count : 0;
+              return { idx: i, label: stage.label || stage.name, inp: inp, out: out, dropped: Math.max(0, inp - out) };
+            }).filter(function(s){ return s.dropped > 0; });
+            _allStages.sort(function(a,b){ return b.dropped - a.dropped; });
+            var _top3 = _allStages.slice(0, 3);
+            if(_top3.length){
+              html += '<div style="margin-top:14px;font-size:12px;font-weight:600;color:#9fefff;">Top Bottleneck Stages</div>';
+              html += '<div style="margin-top:6px;display:flex;flex-direction:column;gap:2px;">';
+              _top3.forEach(function(s){
+                var isKill = s.out === 0;
+                var barColor = isKill ? 'rgba(255,94,94,0.25)' : 'rgba(255,187,51,0.12)';
+                var borderColor = isKill ? 'rgba(255,94,94,0.5)' : 'rgba(255,187,51,0.3)';
+                var countColor = isKill ? '#ff5e5e' : '#ffbb33';
+                html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:6px;background:'+barColor+';border:1px solid '+borderColor+';">';
+                html += '<span style="font-size:10px;color:rgba(159,239,255,0.5);min-width:14px;text-align:center;">'+(s.idx+1)+'</span>';
+                html += '<span style="font-size:11px;color:#e6fbff;flex:1;">'+escapeHtml(s.label)+'</span>';
+                html += '<span style="font-size:11px;font-weight:600;color:'+countColor+';">'+s.inp+' \u2192 '+s.out+'</span>';
+                html += '<span style="font-size:10px;color:rgba(255,187,51,0.8);">(-'+s.dropped+')</span>';
+                html += '</div>';
+              });
+              html += '</div>';
+            }
+            // Full pipeline in collapsible details
+            html += '<details style="margin-top:6px;">';
+            html += '<summary style="font-size:11px;color:rgba(159,239,255,0.5);cursor:pointer;user-select:none;">All Pipeline Stages ('+ft.stages.length+')</summary>';
+            html += '<div style="margin-top:4px;display:flex;flex-direction:column;gap:2px;">';
+            ft.stages.forEach((stage, i) => {
+              const inp = stage.input_count != null ? stage.input_count : '?';
+              const out = stage.output_count != null ? stage.output_count : '?';
+              const dropped = (typeof inp === 'number' && typeof out === 'number') ? inp - out : null;
+              const isBottleneck = dropped !== null && dropped > 0 && out === 0;
+              const barColor = isBottleneck ? 'rgba(255,94,94,0.25)' : 'rgba(159,239,255,0.08)';
+              const borderColor = isBottleneck ? 'rgba(255,94,94,0.5)' : 'rgba(159,239,255,0.15)';
+              html += `<div style="display:flex;align-items:center;gap:8px;padding:4px 10px;border-radius:6px;background:${barColor};border:1px solid ${borderColor};">`;
+              html += `<span style="font-size:10px;color:rgba(159,239,255,0.5);min-width:14px;text-align:center;">${i + 1}</span>`;
+              html += `<span style="font-size:11px;color:#e6fbff;flex:1;">${escapeHtml(stage.label || stage.name)}</span>`;
+              html += `<span style="font-size:11px;font-weight:600;color:${isBottleneck ? '#ff5e5e' : '#9fefff'};">${inp} \u2192 ${out}</span>`;
+              if(dropped !== null && dropped > 0){
+                html += `<span style="font-size:10px;color:rgba(255,187,51,0.8);">(-${dropped})</span>`;
+              }
+              html += '</div>';
+            });
+            html += '</div>';
+            html += '</details>';
+          }
+
+          // ── Gate Breakdown ──
+          const gateBk = (ft && ft.gate_breakdown) ? ft.gate_breakdown : {};
+          const gateEntries = Object.entries(gateBk).filter(([,v]) => v > 0);
+          const rejBk = stats.rejection_breakdown || diagnostics.rejection_breakdown || {};
+          const rejEntries = Object.entries(rejBk).filter(([,v]) => v > 0);
+          if(gateEntries.length){
+            const gateLabels = {
+              quote_validation: 'Quote Validation',
+              metrics_computation: 'Metrics Computation',
+              probability: 'Probability (POP)',
+              expected_value: 'Expected Value (EV/Risk)',
+              return_on_risk: 'Return on Risk',
+              spread_structure: 'Spread Structure',
+              liquidity: 'Liquidity (OI/Volume)',
+              data_quality: 'Data Quality (Missing Fields)',
+              other: 'Other',
+            };
+            html += '<div style="margin-top:12px;font-size:12px;font-weight:600;color:#ffbb33;">Gate Breakdown</div>';
+            html += '<table style="margin-top:4px;font-size:11px;color:#ddd;border-collapse:collapse;width:100%;max-width:400px;">';
+            html += '<tr style="border-bottom:1px solid rgba(255,255,255,0.1);"><th style="text-align:left;padding:4px 10px 4px 0;font-weight:600;color:#9fefff;">Gate</th><th style="text-align:right;padding:4px 0;font-weight:600;color:#9fefff;">Rejected</th></tr>';
+            gateEntries.sort((a,b) => b[1] - a[1]);
+            gateEntries.forEach(([gate, count]) => {
+              const label = gateLabels[gate] || gate.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              html += `<tr><td style="padding:3px 10px 3px 0;">${escapeHtml(label)}</td><td style="text-align:right;padding:3px 0;">${count}</td></tr>`;
+            });
+            html += '</table>';
+          } else if(rejEntries.length){
+            // Fallback: plain rejection breakdown (no gate grouping)
+            html += '<div style="margin-top:12px;font-size:12px;font-weight:600;color:#ffbb33;">Rejection Breakdown</div>';
+            html += '<table style="margin-top:4px;font-size:11px;color:#ddd;border-collapse:collapse;width:100%;max-width:360px;">';
+            html += '<tr style="border-bottom:1px solid rgba(255,255,255,0.1);"><th style="text-align:left;padding:4px 10px 4px 0;font-weight:600;color:#9fefff;">Reason</th><th style="text-align:right;padding:4px 0;font-weight:600;color:#9fefff;">Count</th></tr>';
+            rejEntries.sort((a,b) => b[1] - a[1]);
+            rejEntries.forEach(([reason, count]) => {
+              const label = reason.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              html += `<tr><td style="padding:3px 10px 3px 0;">${escapeHtml(label)}</td><td style="text-align:right;padding:3px 0;">${count}</td></tr>`;
+            });
+            html += '</table>';
+          }
+
+          // ── Resolved Thresholds (collapsible) ──
+          if(ft && ft.resolved_thresholds && Object.keys(ft.resolved_thresholds).length){
+            html += '<details style="margin-top:12px;">';
+            html += '<summary style="font-size:12px;font-weight:600;color:#9fefff;cursor:pointer;user-select:none;">Resolved Thresholds</summary>';
+            html += '<table style="margin-top:4px;font-size:11px;color:#ddd;border-collapse:collapse;width:100%;max-width:400px;">';
+            const _thresholdLabels = {
+              dte_min:'DTE Min', dte_max:'DTE Max', distance_min:'OTM Distance Min', distance_max:'OTM Distance Max',
+              width_min:'Width Min', width_max:'Width Max', expected_move_multiple:'Exp Move Multiple',
+              min_pop:'Min POP', min_ev_to_risk:'Min EV/Risk', min_ror:'Min ROR', max_bid_ask_spread_pct:'Max Bid-Ask Spread %',
+              min_open_interest:'Min Open Interest', min_volume:'Min Volume',
+            };
+            Object.entries(ft.resolved_thresholds).forEach(([key, val]) => {
+              const label = _thresholdLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              html += `<tr><td style="padding:2px 10px 2px 0;color:rgba(230,251,255,0.7);">${escapeHtml(label)}</td><td style="text-align:right;padding:2px 0;">${val}</td></tr>`;
+            });
+            html += '</table>';
+            html += '</details>';
+          }
+
+          // ── Preset Comparison (diff vs Strict / Wide) ──
+          if(ft && ft.preset_name && ft.resolved_thresholds){
+            const _profiles = window.BenTradeScannerProfiles;
+            const _sId = state.activeConfig?.strategyId || 'credit_spread';
+            const _strictCfg = _profiles?.getProfile?.(_sId, 'strict');
+            const _wideCfg   = _profiles?.getProfile?.(_sId, 'wide');
+            if(_strictCfg && _wideCfg){
+              const _diffKeys = [
+                { key:'min_pop',               label:'Min POP',             fmt: v => v != null ? (v*100).toFixed(0)+'%' : '\u2014' },
+                { key:'min_ev_to_risk',        label:'Min EV / Risk',       fmt: v => v != null ? v.toFixed(3)          : '\u2014' },
+                { key:'min_ror',               label:'Min ROR',             fmt: v => v != null ? (v*100).toFixed(1)+'%' : '\u2014' },
+                { key:'max_bid_ask_spread_pct', label:'Max Bid-Ask %',      fmt: v => v != null ? v.toFixed(1)+'%'      : '\u2014' },
+                { key:'min_open_interest',     label:'Min Open Interest',    fmt: v => v != null ? String(v)            : '\u2014' },
+                { key:'min_volume',            label:'Min Volume',           fmt: v => v != null ? String(v)            : '\u2014' },
+              ];
+              const _curT = ft.resolved_thresholds;
+              html += '<details style="margin-top:12px;">';
+              html += '<summary style="font-size:12px;font-weight:600;color:#9fefff;cursor:pointer;user-select:none;">Preset Comparison</summary>';
+              html += '<table style="margin-top:4px;font-size:11px;color:#ddd;border-collapse:collapse;width:100%;max-width:480px;">';
+              html += '<tr style="border-bottom:1px solid rgba(255,255,255,0.1);">';
+              html += '<th style="text-align:left;padding:4px 8px 4px 0;font-weight:600;color:#9fefff;">Param</th>';
+              html += '<th style="text-align:right;padding:4px 6px;font-weight:600;color:rgba(255,94,94,0.9);">Strict</th>';
+              html += '<th style="text-align:right;padding:4px 6px;font-weight:600;color:#ffbb33;text-transform:capitalize;">'+escapeHtml(ft.preset_name)+'</th>';
+              html += '<th style="text-align:right;padding:4px 0 4px 6px;font-weight:600;color:#4ade80;">Wide</th>';
+              html += '</tr>';
+              _diffKeys.forEach(function(d){
+                var sV = _strictCfg[d.key], cV = _curT[d.key], wV = _wideCfg[d.key];
+                var differs = cV != null && sV != null && cV !== sV;
+                var cStyle = differs ? 'color:#ffbb33;font-weight:600;' : 'color:#ddd;';
+                html += '<tr>';
+                html += '<td style="padding:2px 8px 2px 0;color:rgba(230,251,255,0.7);">'+escapeHtml(d.label)+'</td>';
+                html += '<td style="text-align:right;padding:2px 6px;color:rgba(255,94,94,0.6);">'+d.fmt(sV)+'</td>';
+                html += '<td style="text-align:right;padding:2px 6px;'+cStyle+'">'+d.fmt(cV)+'</td>';
+                html += '<td style="text-align:right;padding:2px 0 2px 6px;color:rgba(74,222,128,0.7);">'+d.fmt(wV)+'</td>';
+                html += '</tr>';
+              });
+              html += '</table>';
+              html += '</details>';
+            }
+          }
+
+          // ── Data Quality Flags ──
+          if(ft && Array.isArray(ft.data_quality_flags) && ft.data_quality_flags.length){
+            html += '<div style="margin-top:10px;font-size:11px;color:rgba(255,187,51,0.8);">';
+            html += '<strong>Data Quality:</strong> ' + ft.data_quality_flags.map(f => escapeHtml(f)).join(', ');
+            html += '</div>';
+          }
+
+          // ── Data Quality Mode badge ──
+          if(ft && ft.data_quality_mode){
+            const dqModeColors = { strict: '#ff5e5e', balanced: '#ffbb33', lenient: '#4ade80' };
+            const dqColor = dqModeColors[ft.data_quality_mode] || '#9fefff';
+            html += `<div style="margin-top:6px;font-size:11px;color:rgba(230,251,255,0.7);">`;
+            html += `Data Quality Mode: <span style="font-weight:600;color:${dqColor};padding:1px 6px;border-radius:4px;background:rgba(255,255,255,0.06);border:1px solid ${dqColor}40;">${escapeHtml(ft.data_quality_mode)}</span>`;
+            html += `</div>`;
+          }
+
+          // ── Missing Field Counts ──
+          if(ft && ft.missing_field_counts && typeof ft.missing_field_counts === 'object'){
+            const mfc = ft.missing_field_counts;
+            const total = mfc.total_enriched || 0;
+            const hasMissing = (mfc.open_interest || 0) + (mfc.volume || 0) + (mfc.bid || 0) + (mfc.ask || 0) + (mfc.quote_rejected || 0) > 0;
+            if(hasMissing && total > 0){
+              html += '<details style="margin-top:8px;">';
+              html += '<summary style="font-size:12px;font-weight:600;color:rgba(255,187,51,0.9);cursor:pointer;user-select:none;">Missing Field Counts</summary>';
+              html += '<table style="margin-top:4px;font-size:11px;color:#ddd;border-collapse:collapse;width:100%;max-width:360px;">';
+              html += '<tr style="border-bottom:1px solid rgba(255,255,255,0.1);"><th style="text-align:left;padding:4px 10px 4px 0;font-weight:600;color:#9fefff;">Field</th><th style="text-align:right;padding:4px 0;font-weight:600;color:#9fefff;">Missing</th><th style="text-align:right;padding:4px 0 4px 8px;font-weight:600;color:#9fefff;">% of Total</th></tr>';
+              const mfcRows = [
+                ['Open Interest', mfc.open_interest],
+                ['Volume', mfc.volume],
+                ['Bid', mfc.bid],
+                ['Ask', mfc.ask],
+                ['Quote Rejected', mfc.quote_rejected],
+              ];
+              mfcRows.forEach(([label, count]) => {
+                if(count > 0){
+                  const pct = ((count / total) * 100).toFixed(1);
+                  html += `<tr><td style="padding:2px 10px 2px 0;">${label}</td><td style="text-align:right;padding:2px 0;">${count}</td><td style="text-align:right;padding:2px 0 2px 8px;color:rgba(255,187,51,0.8);">${pct}%</td></tr>`;
+                }
+              });
+              if(mfc.dq_waived > 0){
+                html += `<tr><td style="padding:2px 10px 2px 0;color:#4ade80;">DQ Waived (lenient)</td><td style="text-align:right;padding:2px 0;color:#4ade80;">${mfc.dq_waived}</td><td style="text-align:right;padding:2px 0 2px 8px;color:#4ade80;">\u2014</td></tr>`;
+              }
+              html += '</table>';
+              html += '</details>';
+            }
+          }
+
+          // ── Rejected Examples (dev toggle) ──
+          if(ft && Array.isArray(ft.rejected_examples) && ft.rejected_examples.length){
+            html += '<details style="margin-top:12px;">';
+            html += '<summary style="font-size:12px;font-weight:600;color:rgba(255,187,51,0.9);cursor:pointer;user-select:none;">Rejected Examples (' + ft.rejected_examples.length + ')</summary>';
+            html += '<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">';
+            ft.rejected_examples.forEach((ex, i) => {
+              html += '<div style="padding:6px 10px;border-radius:6px;background:rgba(255,94,94,0.06);border:1px solid rgba(255,94,94,0.2);font-size:11px;color:#ddd;">';
+              const sym = ex.symbol || '?';
+              const strikes = [ex.short_strike, ex.long_strike].filter(Boolean).join('/');
+              html += `<div style="font-weight:600;color:#e6fbff;">${escapeHtml(sym)} ${strikes} w=${ex.width || '?'}</div>`;
+              const fields = [];
+              if(ex.net_credit != null) fields.push(`credit=$${ex.net_credit}`);
+              if(ex.pop != null) fields.push(`POP=${(ex.pop * 100).toFixed(1)}%`);
+              if(ex.ev_to_risk != null) fields.push(`EV/Risk=${ex.ev_to_risk}`);
+              if(ex.ror != null) fields.push(`ROR=${(ex.ror * 100).toFixed(1)}%`);
+              if(ex.open_interest != null) fields.push(`OI=${ex.open_interest}`);
+              if(ex.volume != null) fields.push(`Vol=${ex.volume}`);
+              if(fields.length) html += `<div style="color:rgba(230,251,255,0.7);">${fields.join(' · ')}</div>`;
+              if(Array.isArray(ex.reasons) && ex.reasons.length){
+                html += `<div style="color:#ff5e5e;margin-top:2px;">Rejected: ${ex.reasons.map(r => escapeHtml(r)).join(', ')}</div>`;
+              }
+              html += '</div>';
+            });
+            html += '</div>';
+            html += '</details>';
+          }
+
+          // ── Near-Miss Candidates (auto when accepted==0) ──
+          if(ft && Array.isArray(ft.near_miss) && ft.near_miss.length){
+            const nm = ft.near_miss;
+            const nmJson = JSON.stringify(nm, null, 2);
+            html += '<details open style="margin-top:14px;">';
+            html += '<summary style="font-size:13px;font-weight:700;color:#f0c040;cursor:pointer;user-select:none;">';
+            html += '\uD83D\uDD0E Near-Miss Candidates (' + nm.length + ')';
+            html += ' <span style="font-weight:400;font-size:11px;color:rgba(240,192,64,0.6);">— closest to passing filters</span>';
+            html += '</summary>';
+            html += '<div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">';
+            nm.forEach(function(c, idx) {
+              // Card for each near-miss candidate
+              const score = c.nearness_score != null ? c.nearness_score.toFixed(2) : '?';
+              // Color: green-ish for high nearness, red-ish for low
+              const scoreColor = c.nearness_score > 0 ? '#4ade80' : c.nearness_score > -3 ? '#f0c040' : '#ff5e5e';
+              html += '<div style="padding:8px 12px;border-radius:8px;background:rgba(240,192,64,0.05);border:1px solid rgba(240,192,64,0.25);font-size:11px;color:#ddd;">';
+
+              // Header: rank, symbol, strikes, nearness badge
+              const sym = escapeHtml(c.symbol || '?');
+              const strikes = [c.short_strike, c.long_strike].filter(function(v){return v!=null;}).join('/');
+              const dte = c.dte != null ? c.dte + 'd' : '';
+              const exp = c.expiration ? escapeHtml(c.expiration) : '';
+              html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
+              html += '<span style="font-weight:700;color:#e6fbff;font-size:12px;">#' + (idx+1) + ' ' + sym + ' ' + strikes + '</span>';
+              if(dte) html += '<span style="color:rgba(230,251,255,0.6);">' + dte + '</span>';
+              if(exp) html += '<span style="color:rgba(230,251,255,0.5);font-size:10px;">' + exp + '</span>';
+              html += '<span style="margin-left:auto;padding:1px 6px;border-radius:4px;font-weight:600;font-size:10px;background:rgba(0,0,0,0.3);color:' + scoreColor + ';">score ' + score + '</span>';
+              html += '</div>';
+
+              // Row 2: per-leg quotes
+              const legs = [];
+              if(c.short_bid != null && c.short_ask != null){
+                const smid = c.short_mid != null ? c.short_mid.toFixed(2) : '?';
+                legs.push('Short: ' + c.short_bid.toFixed(2) + '/' + c.short_ask.toFixed(2) + ' (mid ' + smid + ')');
+              }
+              if(c.long_bid != null && c.long_ask != null){
+                const lmid = c.long_mid != null ? c.long_mid.toFixed(2) : '?';
+                legs.push('Long: ' + c.long_bid.toFixed(2) + '/' + c.long_ask.toFixed(2) + ' (mid ' + lmid + ')');
+              }
+              if(legs.length) html += '<div style="color:rgba(230,251,255,0.55);margin-top:3px;">' + legs.join(' &nbsp;\u2502&nbsp; ') + '</div>';
+
+              // Row 3: metrics chips
+              const chips = [];
+              if(c.net_credit != null) chips.push('Credit=$' + c.net_credit.toFixed(2));
+              if(c.max_loss != null) chips.push('MaxLoss=$' + Math.abs(c.max_loss).toFixed(2));
+              if(c.width != null) chips.push('W=' + c.width);
+              if(c.spread_pct != null) chips.push('Sprd=' + c.spread_pct.toFixed(1) + '%');
+              if(c.pop != null) chips.push('POP=' + (c.pop*100).toFixed(1) + '%');
+              if(c.ev != null) chips.push('EV=$' + c.ev.toFixed(3));
+              if(c.ev_to_risk != null) chips.push('EV/R=' + c.ev_to_risk.toFixed(4));
+              if(c.ror != null) chips.push('ROR=' + (c.ror*100).toFixed(1) + '%');
+              if(c.open_interest != null) chips.push('OI=' + c.open_interest);
+              if(c.volume != null) chips.push('Vol=' + c.volume);
+              if(chips.length){
+                html += '<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;">';
+                chips.forEach(function(ch){
+                  html += '<span style="padding:1px 5px;border-radius:3px;background:rgba(159,239,255,0.08);color:rgba(159,239,255,0.85);font-size:10px;">' + escapeHtml(ch) + '</span>';
+                });
+                html += '</div>';
+              }
+
+              // Row 4: gate deltas — show how far each metric was from threshold
+              if(c.gate_deltas && typeof c.gate_deltas === 'object'){
+                html += '<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px;">';
+                const deltaLabels = {ev_to_risk:'EV/Risk',ror:'ROR',pop:'POP',spread_pct:'Spread%',open_interest:'OI',volume:'Vol'};
+                Object.keys(c.gate_deltas).forEach(function(gk){
+                  const gd = c.gate_deltas[gk];
+                  if(!gd) return;
+                  const label = deltaLabels[gk] || gk;
+                  let txt = label + ': ';
+                  if(gd.actual == null){
+                    txt += 'MISSING';
+                  } else {
+                    const fmt = function(v){ return typeof v==='number' ? (Math.abs(v)<1 ? v.toFixed(4) : v.toFixed(2)) : String(v); };
+                    txt += fmt(gd.actual) + ' vs ' + fmt(gd.threshold);
+                    if(gd.delta != null){
+                      txt += ' (' + (gd.delta >= 0 ? '+' : '') + fmt(gd.delta) + ')';
+                    }
+                  }
+                  const passing = gd.delta != null && gd.delta >= 0;
+                  const dColor = gd.actual == null ? '#888' : passing ? '#4ade80' : '#ff5e5e';
+                  html += '<span style="padding:1px 5px;border-radius:3px;font-size:10px;border:1px solid ' + dColor + '40;color:' + dColor + ';">' + escapeHtml(txt) + '</span>';
+                });
+                html += '</div>';
+              }
+
+              // Row 5: rejection reasons
+              if(Array.isArray(c.reasons) && c.reasons.length){
+                html += '<div style="color:#ff5e5e;margin-top:3px;font-size:10px;">\u2716 ' + c.reasons.map(function(r){return escapeHtml(r);}).join(', ') + '</div>';
+              }
+
+              html += '</div>';
+            });
+            html += '</div>';
+            // Copy Near-Miss JSON button
+            html += '<div style="margin-top:6px;">';
+            html += '<button data-action="copy-near-miss" data-near-miss="' + escapeHtml(nmJson) + '" style="padding:4px 10px;font-size:10px;font-weight:600;border:1px solid rgba(240,192,64,0.3);border-radius:5px;background:rgba(240,192,64,0.08);color:#f0c040;cursor:pointer;">Copy Near-Miss JSON</button>';
+            html += '</div>';
+            html += '</details>';
           }
 
           // Diagnostics summary line
@@ -997,26 +1399,75 @@ window.BenTradeStrategyShell = (function(){
             html += `<div style="margin-top:10px;color:rgba(159,239,255,0.7);font-size:11px;">${escapeHtml(parts.join(' · '))}</div>`;
           }
 
-          // Rejection breakdown (from report_stats or diagnostics)
-          const rejBk = stats.rejection_breakdown || diagnostics.rejection_breakdown || {};
-          const rejEntries = Object.entries(rejBk).filter(([,v]) => v > 0);
-          if(rejEntries.length){
-            html += '<div style="margin-top:12px;font-size:12px;font-weight:600;color:#ffbb33;">Rejection Breakdown</div>';
-            html += '<table style="margin-top:4px;font-size:11px;color:#ddd;border-collapse:collapse;width:100%;max-width:360px;">';
-            html += '<tr style="border-bottom:1px solid rgba(255,255,255,0.1);"><th style="text-align:left;padding:4px 10px 4px 0;font-weight:600;color:#9fefff;">Reason</th><th style="text-align:right;padding:4px 0;font-weight:600;color:#9fefff;">Count</th></tr>';
-            rejEntries.sort((a,b) => b[1] - a[1]);
-            rejEntries.forEach(([reason, count]) => {
-              const label = reason.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-              html += `<tr><td style="padding:3px 10px 3px 0;">${escapeHtml(label)}</td><td style="text-align:right;padding:3px 0;">${count}</td></tr>`;
+          // ── Dynamic Suggestions based on gate breakdown ──
+          {
+            const _gb = (ft && ft.gate_breakdown) ? ft.gate_breakdown : {};
+            const _rej = stats.rejection_breakdown || diagnostics.rejection_breakdown || {};
+            // Determine dominant bottleneck category
+            const _gateScores = {
+              ev_to_risk:   (_gb.expected_value || 0) + (_rej.ev_to_risk_below_floor || 0) + (_rej.ror_below_floor || 0),
+              spread_width: (_gb.spread_structure || 0) + (_rej.spread_too_wide || 0),
+              liquidity:    (_gb.liquidity || 0) + (_rej.volume_below_min || 0) + (_rej.open_interest_below_min || 0),
+              pop:          (_gb.probability || 0) + (_rej.pop_below_floor || 0),
+              data_quality: (_gb.data_quality || 0) + (_gb.quote_validation || 0) + (_gb.metrics_computation || 0),
+            };
+            const _sortedGates = Object.entries(_gateScores).filter(function(e){ return e[1]>0; }).sort(function(a,b){ return b[1]-a[1]; });
+            const _tips = [];
+            const _dominant = _sortedGates.length ? _sortedGates[0][0] : null;
+
+            if(_dominant === 'ev_to_risk' || _gateScores.ev_to_risk > 0){
+              _tips.push('\u26a1 <strong>EV/Risk & ROR too low:</strong> Try widening spread width ($3\u2013$5), extending DTE to 30\u201345, or increasing OTM distance to capture more premium.');
+            }
+            if(_dominant === 'spread_width' || _gateScores.spread_width > 0){
+              _tips.push('\ud83d\udcc9 <strong>Bid-Ask spread too wide:</strong> Focus on the most liquid expirations (monthly opex), limit to SPY/QQQ, or raise minimum credit to filter illiquid strikes.');
+            }
+            if(_dominant === 'liquidity' || _gateScores.liquidity > 0){
+              _tips.push('\ud83d\udcca <strong>Low OI/Volume:</strong> Limit symbols to SPY/QQQ only, or switch to a looser preset that relaxes OI/volume floors.');
+            }
+            if(_gateScores.pop > 0){
+              _tips.push('\ud83c\udfaf <strong>POP too low:</strong> Move strikes further OTM (increase distance_min) or reduce width to narrow the breakeven range.');
+            }
+            if(_gateScores.data_quality > 0){
+              _tips.push('\u26a0\ufe0f <strong>Data quality issues:</strong> Missing bid/ask/OI data prevented evaluation. Try scanning during market hours for fresher quotes.');
+            }
+
+            if(_tips.length === 0){
+              _tips.push('Try the Conservative preset for wider scan parameters, scan multiple symbols (SPY + QQQ + IWM), or enable Advanced Filters to tune DTE / width / OTM distance.');
+            }
+
+            html += '<div style="margin-top:14px;font-size:11px;color:rgba(159,239,255,0.85);line-height:1.6;">';
+            html += '<div style="font-size:12px;font-weight:600;color:#9fefff;margin-bottom:4px;">Actionable Suggestions</div>';
+            _tips.forEach(function(tip){
+              html += '<div style="margin:3px 0;padding:4px 8px;border-radius:4px;background:rgba(159,239,255,0.04);border-left:2px solid rgba(159,239,255,0.3);">'+tip+'</div>';
             });
-            html += '</table>';
+            html += '</div>';
           }
 
-          // Suggestion
-          html += '<div style="margin-top:14px;font-size:11px;color:rgba(159,239,255,0.6);line-height:1.5;">';
-          html += '<strong>Suggestions:</strong> Try the Conservative preset for wider scan parameters, ';
-          html += 'scan multiple symbols (SPY + QQQ + IWM), or enable Advanced Filters to tune DTE / width / OTM distance.';
-          html += '</div>';
+          // ── Action buttons: Run Wide Preset + Open Data Workbench ──
+          {
+            const _presetName = (ft && ft.preset_name) ? String(ft.preset_name).toLowerCase() : '';
+            const _btns = [];
+
+            // Req 3: Run Wide Preset button (only if not already wide and 0 accepted)
+            if(_presetName && _presetName !== 'wide'){
+              _btns.push('<button data-action="run-wide-preset" style="padding:6px 14px;font-size:11px;font-weight:600;border:1px solid rgba(74,222,128,0.4);border-radius:6px;background:rgba(74,222,128,0.1);color:#4ade80;cursor:pointer;transition:background 0.15s;">\u26a1 Run Wide Preset</button>');
+            }
+
+            // Req 4: Open Data Workbench link for filter trace JSON
+            if(ft){
+              _btns.push('<button data-action="open-workbench-trace" style="padding:6px 14px;font-size:11px;font-weight:600;border:1px solid rgba(159,239,255,0.3);border-radius:6px;background:rgba(159,239,255,0.08);color:#9fefff;cursor:pointer;transition:background 0.15s;">\ud83d\udd0d Open Data Workbench</button>');
+            }
+
+            // Existing: Copy Trace JSON
+            if(ft){
+              const traceJson = JSON.stringify(ft, null, 2);
+              _btns.push('<button data-action="copy-trace" data-trace="'+escapeHtml(traceJson)+'" style="padding:6px 14px;font-size:11px;font-weight:600;border:1px solid rgba(159,239,255,0.3);border-radius:6px;background:rgba(159,239,255,0.08);color:#9fefff;cursor:pointer;transition:background 0.15s;">Copy Trace JSON</button>');
+            }
+
+            if(_btns.length){
+              html += '<div data-no-trades-actions data-filter-trace="'+escapeHtml(JSON.stringify(ft || null))+'" data-symbols="'+escapeHtml((Array.isArray(data?.symbols) ? data.symbols : []).join(','))+'" style="margin-top:14px;display:flex;flex-wrap:wrap;gap:8px;">'+_btns.join('')+'</div>';
+            }
+          }
 
           html += '</div>';  // close explanation box
           if(contentEl) contentEl.innerHTML = html;
@@ -1152,6 +1603,9 @@ window.BenTradeStrategyShell = (function(){
       }, 180000);
     }
 
+    // Expose startGeneration for buildForm closures (e.g. btnGenerateAdvanced)
+    state.startGeneration = startGeneration;
+
     function finishGeneration(){
       if(genBtn){
         genBtn.disabled = false;
@@ -1182,7 +1636,17 @@ window.BenTradeStrategyShell = (function(){
       genBtn.addEventListener('click', (e) => {
         e.preventDefault();
         if(genBtn.disabled) return;
+        // "Generate New Report" ALWAYS runs preset scan (ignores advanced filters).
+        // Temporarily force advancedEnabled=false for the SSE URL builder,
+        // then restore it so the UI checkbox state is preserved.
+        const wasAdvanced = state.activeConfig.advancedEnabled;
+        state.activeConfig.advancedEnabled = false;
+        // Use the dropdown's current value as the authoritative preset source
+        state.activeConfig.currentFilters.preset = state.activeConfig.currentFilters.preset || currentPreset;
+        console.info('[StrategyShell] Generate preset scan:', { preset: state.activeConfig.currentFilters.preset });
         startGeneration();
+        // Restore after SSE is opened (EventSource constructor is synchronous)
+        state.activeConfig.advancedEnabled = wasAdvanced;
       });
     }
 
@@ -1213,6 +1677,83 @@ window.BenTradeStrategyShell = (function(){
           e.preventDefault();
           e.stopPropagation();
           const action = btn.dataset.action;
+
+          // ── No-trades panel actions (no card context needed) ──
+          if(btn.closest('[data-no-trades-actions]')){
+            if(action === 'run-wide-preset'){
+              // Switch preset to wide and re-generate
+              const pSel = rootEl.querySelector('select');
+              if(pSel){
+                // Find the <select> that contains 'wide' option
+                const wideOpt = Array.from(pSel.options).find(o => o.value === 'wide');
+                if(wideOpt){
+                  pSel.value = 'wide';
+                  pSel.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+              }
+              // Also force the filters state
+              if(state.activeConfig){
+                state.activeConfig.currentFilters = state.activeConfig.currentFilters || {};
+                state.activeConfig.currentFilters.preset = 'wide';
+                // Merge wide profile defaults
+                var _wDefs = window.BenTradeStrategyDefaults?.getStrategyDefaults?.(
+                  state.activeConfig.strategyId || 'credit_spread', 'wide'
+                ) || {};
+                Object.keys(_wDefs).forEach(function(k){
+                  if(k !== 'symbols') state.activeConfig.currentFilters[k] = _wDefs[k];
+                });
+              }
+              // Click generate
+              if(genBtn && !genBtn.disabled){
+                genBtn.click();
+              }
+              return;
+            }
+
+            if(action === 'open-workbench-trace'){
+              // Open the Data Workbench modal with filter-trace JSON
+              var _actionsEl = btn.closest('[data-no-trades-actions]');
+              var _ftData = null;
+              try{ _ftData = JSON.parse(_actionsEl?.dataset?.filterTrace || 'null'); }catch(_){}
+              if(_ftData && window.BenTradeDataWorkbenchModal && window.BenTradeDataWorkbenchModal.open){
+                var _sym = (_actionsEl?.dataset?.symbols || '').split(',').filter(Boolean)[0] || 'Scanner';
+                window.BenTradeDataWorkbenchModal.open({
+                  symbol: _sym,
+                  normalized: _ftData,
+                  rawSource: _ftData,
+                  derived: { note: 'Filter trace from ' + (_ftData.preset_name || 'unknown') + ' preset scan' },
+                });
+              }else{
+                // Fallback: navigate to Data Workbench page
+                window.location.hash = '#/admin/data-workbench';
+              }
+              return;
+            }
+
+            if(action === 'copy-trace'){
+              var _traceText = btn.dataset.trace || '';
+              navigator.clipboard.writeText(_traceText).then(function(){
+                btn.textContent = 'Copied!';
+                setTimeout(function(){ btn.textContent = 'Copy Trace JSON'; }, 1500);
+              }).catch(function(){
+                prompt('Copy trace JSON:', _traceText);
+              });
+              return;
+            }
+
+            if(action === 'copy-near-miss'){
+              var _nmText = btn.dataset.nearMiss || '';
+              navigator.clipboard.writeText(_nmText).then(function(){
+                btn.textContent = 'Copied!';
+                setTimeout(function(){ btn.textContent = 'Copy Near-Miss JSON'; }, 1500);
+              }).catch(function(){
+                prompt('Copy near-miss JSON:', _nmText);
+              });
+              return;
+            }
+            return;
+          }
+
           const cardEl = btn.closest('.trade-card');
           const tradeIdx = cardEl ? parseInt(cardEl.dataset.idx, 10) : -1;
           const trade = currentTrades[tradeIdx];
