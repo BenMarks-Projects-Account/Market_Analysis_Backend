@@ -33,7 +33,9 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
   let latestPayload = null;
   let renderedRows = [];
   let lastEndpointUsed = '/api/stock/scanner';
-  const modelResults = {};
+  const modelResults = {};  // legacy compat — also mirrored to shared store
+  const _modelStore = window.BenTradeModelAnalysisStore;
+  const _modelUI    = window.BenTradeModelAnalysis;
   const REJECTED_KEY = 'bentrade_scanner_rejected_v1';
 
   function loadRejected(){
@@ -253,43 +255,17 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
     return html;
   }
 
-  /* ── Model output renderer (matches strategy_dashboard_shell) ── */
+  /* ── Model output renderer (delegates to shared module) ── */
   function _renderModelOutputHtml(result){
     if(!result) return '';
-    if(result.status === 'running'){
-      return '<div style="font-size:12px;color:var(--muted);padding:6px 10px;"><span class="home-scan-spinner" aria-hidden="true"></span> Running model analysis\u2026</div>';
+    if(_modelUI){
+      const parsed = _modelUI.parse(result);
+      return _modelUI.render(parsed);
     }
-    if(result.status === 'error'){
-      return '<div style="font-size:12px;color:#ff6b6b;padding:6px 10px;border:1px solid rgba(255,107,107,0.25);border-radius:6px;margin:4px 0;">\u26A0 ' + esc(String(result.summary || 'Model analysis failed')) + '</div>';
-    }
+    /* Fallback if shared module not loaded */
     const me = result.model_evaluation || result;
     const rec = String(me.recommendation || 'UNKNOWN').toUpperCase();
-    const confRaw = fmt.toNumber(me.confidence);
-    const confPct = confRaw !== null ? ' (' + (confRaw * 100).toFixed(0) + '%)' : '';
-    const summary = String(me.summary || '').trim();
-    const riskLevel = String(me.risk_level || '').trim();
-    const keyFactors = Array.isArray(me.key_factors) ? me.key_factors : [];
-    const risks = Array.isArray(me.risks) ? me.risks : [];
-    const recColors = { 'BUY': 'rgba(0,220,120,0.9)', 'ACCEPT': 'rgba(0,220,120,0.9)', 'SELL': 'rgba(255,90,90,0.9)', 'REJECT': 'rgba(255,90,90,0.9)', 'NEUTRAL': 'rgba(180,180,200,0.85)', 'WAIT': 'rgba(180,180,200,0.85)' };
-    const color = recColors[rec] || recColors['NEUTRAL'];
-    let html = '<div style="font-size:12px;padding:8px 10px;border:1px solid ' + color.replace('0.9','0.3').replace('0.85','0.3') + ';border-radius:6px;margin:4px 0;">';
-    html += '<div style="font-weight:700;color:' + color + ';margin-bottom:4px;">' + esc(rec) + esc(confPct);
-    if(riskLevel) html += ' <span style="font-weight:400;color:var(--muted);font-size:11px;">\u00B7 ' + esc(riskLevel) + ' risk</span>';
-    html += '</div>';
-    if(summary) html += '<div style="color:var(--text-secondary,#ccc);line-height:1.4;margin-bottom:4px;">' + esc(summary) + '</div>';
-    if(keyFactors.length){
-      html += '<ul style="margin:4px 0 0;padding-left:16px;color:var(--text-secondary,#ccc);font-size:11px;">';
-      keyFactors.forEach(f => { html += '<li>' + esc(String(f)) + '</li>'; });
-      html += '</ul>';
-    }
-    if(risks.length){
-      html += '<div style="font-weight:600;color:var(--muted);font-size:11px;margin-top:6px;">Risks:</div>';
-      html += '<ul style="margin:2px 0 0;padding-left:16px;color:var(--text-secondary,#ccc);font-size:11px;">';
-      risks.forEach(r => { html += '<li>' + esc(String(r)) + '</li>'; });
-      html += '</ul>';
-    }
-    html += '</div>';
-    return html;
+    return '<div style="font-size:12px;padding:8px;color:var(--text-secondary,#ccc);">' + esc(rec) + ' \u2014 ' + esc(String(me.summary || '')) + '</div>';
   }
 
   /* ── Render candidates using canonical TradeCard ── */
@@ -321,6 +297,11 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
 
     listEl.innerHTML = '<div class="trades-grid" style="width:100%">' + cardsHtml + '</div>';
 
+    /* Re-hydrate persisted model analysis results into freshly-created cards */
+    if(_modelStore && typeof _modelStore.hydrateContainer === 'function'){
+      _modelStore.hydrateContainer(listEl);
+    }
+
     /* ── Post-render DOM enhancements ── */
     renderedRows.forEach((row, idx) => {
       const cardEl = listEl.querySelector('.trade-card[data-idx="' + idx + '"]');
@@ -342,13 +323,24 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
         window.BenTradeNotes.attachNotes(host, 'notes:idea:' + ideaKey(row));
       }
 
-      /* Hydrate cached model results into model-output slot */
-      const key = ideaKey(row);
-      if(modelResults[key] && !modelResults[key]._inflight){
+      /* Hydrate cached model results into model-output slot (shared store) */
+      const tradeKeyForStore = String(candidateToTradeShape(row).trade_key || '').trim();
+      const storeEntry = tradeKeyForStore && _modelStore ? _modelStore.get(tradeKeyForStore) : null;
+      if(storeEntry && storeEntry.status === 'success' && storeEntry.result){
         const outputEl = cardEl.querySelector('[data-model-output]');
         if(outputEl){
           outputEl.style.display = 'block';
-          outputEl.innerHTML = _renderModelOutputHtml({ status: 'success', model_evaluation: modelResults[key] });
+          outputEl.innerHTML = _modelUI ? _modelUI.render(storeEntry.result) : '';
+        }
+      } else {
+        /* Legacy fallback: hydrate from local modelResults */
+        const key = ideaKey(row);
+        if(modelResults[key] && !modelResults[key]._inflight){
+          const outputEl = cardEl.querySelector('[data-model-output]');
+          if(outputEl){
+            outputEl.style.display = 'block';
+            outputEl.innerHTML = _renderModelOutputHtml({ status: 'success', model_evaluation: modelResults[key] });
+          }
         }
       }
     });
@@ -449,11 +441,14 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
     if(!row) return;
 
     const key = ideaKey(row);
+    const tradeObj = candidateToTradeShape(row);
+    const tradeKey = String(tradeObj.trade_key || '').trim();
     const outputEl = cardEl?.querySelector('[data-model-output]');
 
     /* Guard against duplicate clicks */
     if(modelResults[key]?._inflight) return;
     modelResults[key] = { _inflight: true };
+    if(tradeKey && _modelStore) _modelStore.setRunning(tradeKey);
 
     if(btn){
       btn.disabled = true;
@@ -467,29 +462,39 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
     try{
       const result = await api.modelAnalyzeStock(String(row?.symbol || ''), row, 'local_llm');
       modelResults[key] = result;
+
+      /* Persist in shared store */
+      if(tradeKey && _modelStore && _modelUI){
+        _modelStore.setSuccess(tradeKey, _modelUI.parse({ status: 'success', model_evaluation: result }));
+      }
+
       if(outputEl){
         outputEl.style.display = 'block';
         outputEl.innerHTML = _renderModelOutputHtml({ status: 'success', model_evaluation: result });
       }
     }catch(err){
+      const errMsg = String(err?.message || err || 'Model analysis failed');
       const errResult = {
         recommendation: 'WAIT',
         confidence: 0.2,
-        summary: String(err?.message || err || 'Model analysis failed'),
+        summary: errMsg,
         key_factors: ['Model analysis request failed'],
         risks: ['Unable to fetch model output'],
         time_horizon: '1W',
         trade_ideas: [],
       };
       modelResults[key] = errResult;
+      if(tradeKey && _modelStore) _modelStore.setError(tradeKey, errMsg);
       if(outputEl){
         outputEl.style.display = 'block';
-        outputEl.innerHTML = _renderModelOutputHtml({ status: 'error', summary: errResult.summary });
+        outputEl.innerHTML = _renderModelOutputHtml({ status: 'error', summary: errMsg });
       }
     }finally{
       if(btn){
         btn.disabled = false;
-        btn.textContent = 'Run Model Analysis';
+        const ts = new Date();
+        const hhmm = String(ts.getHours()).padStart(2,'0') + ':' + String(ts.getMinutes()).padStart(2,'0');
+        btn.textContent = '\u21BB Re-run Analysis ' + hhmm;
       }
     }
   }

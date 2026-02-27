@@ -197,18 +197,19 @@ class TestIronCondorMetrics:
         }
 
     def test_pop_via_normal_cdf(self, plugin):
-        """POP should match normal CDF between break-evens."""
+        """POP should match P(short_put < S_T < short_call) using conservative sigma."""
         candidate = self._condor_candidate(spot=100, put_short=90, call_short=110, credit=1.50)
         enriched = plugin.enrich([candidate], {"request": {}, "policy": {}})
         assert len(enriched) >= 1
         trade = enriched[0]
         pop = trade["p_win_used"]
-        # Verify against independent CDF calculation
-        total_credit = trade.get("total_credit") or trade.get("net_credit")
-        be_low = 90 - total_credit
-        be_high = 110 + total_credit
-        em = 100 * 0.05
-        expected_pop = _normal_cdf((be_high - 100) / em) - _normal_cdf((be_low - 100) / em)
+        # Verify against independent CDF calculation using short strikes.
+        # POP = CDF(z_call) - CDF(z_put)
+        # where sigma = max(sigma_put, sigma_call), or expected_move if IV absent
+        sigma_put = trade.get("sigma_put") or (100 * 0.05)
+        sigma_call = trade.get("sigma_call") or (100 * 0.05)
+        sigma = max(sigma_put, sigma_call)
+        expected_pop = _normal_cdf((110 - 100) / sigma) - _normal_cdf((90 - 100) / sigma)
         assert abs(pop - expected_pop) < 0.05, f"POP {pop:.4f} != expected {expected_pop:.4f}"
 
     def test_ev_is_real_not_rank_derived(self, plugin):

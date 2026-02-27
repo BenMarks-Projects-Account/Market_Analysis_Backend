@@ -530,7 +530,8 @@ class TestNearMiss:
             ),
         ]
 
-        result = StrategyService._build_near_miss(rows, {}, {}, limit=20)
+        svc = object.__new__(StrategyService)  # bare instance, no __init__
+        result = svc._build_near_miss(rows, {}, {}, limit=20)
 
         assert len(result) == 2
         # First entry should be the one closest to passing (only 1 reason)
@@ -603,7 +604,8 @@ class TestNearMiss:
             ),
         ]
 
-        result = StrategyService._build_near_miss(rows, {}, {}, limit=20)
+        svc = object.__new__(StrategyService)  # bare instance, no __init__
+        result = svc._build_near_miss(rows, {}, {}, limit=20)
         assert len(result) == 2
         # Threshold-only should rank higher than structural
         assert result[0]["nearness_score"] > result[1]["nearness_score"]
@@ -623,7 +625,8 @@ class TestNearMiss:
             for i in range(30)
         ]
 
-        result = StrategyService._build_near_miss(rows, {}, {}, limit=5)
+        svc = object.__new__(StrategyService)  # bare instance, no __init__
+        result = svc._build_near_miss(rows, {}, {}, limit=5)
         assert len(result) == 5
 
     @pytest.mark.anyio

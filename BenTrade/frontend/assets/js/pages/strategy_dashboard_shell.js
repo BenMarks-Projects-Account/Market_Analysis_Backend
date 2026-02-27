@@ -635,8 +635,9 @@ window.BenTradeStrategyShell = (function(){
     /* ---------- collapse state (persists across re-renders) ---------- */
     const _expandState = {};  // { [tradeKey]: true/false } — true = expanded
 
-    /* ---------- per-card model analysis state ---------- */
-    const _modelAnalysisState = {};  // { [tradeKey]: { status, result, error } }
+    /* ---------- per-card model analysis state (shared store) ---------- */
+    const _modelStore = window.BenTradeModelAnalysisStore;
+    const _modelUI    = window.BenTradeModelAnalysis;
 
     /* ---------- helpers ---------- */
 
@@ -663,49 +664,20 @@ window.BenTradeStrategyShell = (function(){
 
     /**
      * Render model analysis result as inline HTML for a card.
-     * @param {object} result – { status, recommendation, confidence, summary, risk_level, key_factors }
+     * Delegates to the shared BenTradeModelAnalysis renderer.
+     * @param {object} result – { status, model_evaluation } or model_evaluation itself
      * @returns {string} HTML
      */
     function _renderModelOutputHtml(result){
       if(!result) return '';
+      if(_modelUI){
+        const parsed = _modelUI.parse(result);
+        return _modelUI.render(parsed);
+      }
+      /* Fallback if shared module not loaded */
       const esc = escapeHtml;
-
-      if(result.status === 'running'){
-        return '<div style="font-size:12px;color:var(--muted);padding:6px 10px;"><span class="home-scan-spinner" aria-hidden="true"></span> Running model analysis\u2026</div>';
-      }
-
-      if(result.status === 'error'){
-        const msg = String(result.summary || 'Model analysis failed').trim();
-        return `<div style="font-size:12px;color:#ff6b6b;padding:6px 10px;border:1px solid rgba(255,107,107,0.25);border-radius:6px;margin:4px 0;">\u26A0 ${esc(msg)}</div>`;
-      }
-
-      const me = result.model_evaluation || result;
-      const rec = String(me.recommendation || 'UNKNOWN').toUpperCase();
-      const confRaw = toNumber(me.confidence);
-      const confPct = confRaw !== null ? ` (${(confRaw * 100).toFixed(0)}%)` : '';
-      const summary = String(me.summary || '').trim();
-      const riskLevel = String(me.risk_level || '').trim();
-      const keyFactors = Array.isArray(me.key_factors) ? me.key_factors : [];
-
-      const recColors = {
-        'ACCEPT': 'rgba(0,220,120,0.9)',
-        'REJECT': 'rgba(255,90,90,0.9)',
-        'NEUTRAL': 'rgba(180,180,200,0.85)',
-      };
-      const color = recColors[rec] || recColors['NEUTRAL'];
-
-      let html = `<div style="font-size:12px;padding:8px 10px;border:1px solid ${color.replace('0.9','0.3').replace('0.85','0.3')};border-radius:6px;margin:4px 0;">`;
-      html += `<div style="font-weight:700;color:${color};margin-bottom:4px;">${esc(rec)}${esc(confPct)}`;
-      if(riskLevel) html += ` <span style="font-weight:400;color:var(--muted);font-size:11px;">\u00B7 ${esc(riskLevel)} risk</span>`;
-      html += '</div>';
-      if(summary) html += `<div style="color:var(--text-secondary,#ccc);line-height:1.4;margin-bottom:4px;">${esc(summary)}</div>`;
-      if(keyFactors.length){
-        html += '<ul style="margin:4px 0 0;padding-left:16px;color:var(--text-secondary,#ccc);font-size:11px;">';
-        keyFactors.forEach(f => { html += `<li>${esc(String(f))}</li>`; });
-        html += '</ul>';
-      }
-      html += '</div>';
-      return html;
+      const rec = String((result.model_evaluation || result).recommendation || 'UNKNOWN').toUpperCase();
+      return `<div style="font-size:12px;padding:8px;color:var(--text-secondary,#ccc);">${esc(rec)} — ${esc(String((result.model_evaluation || result).summary || ''))}</div>`;
     }
 
     /**
@@ -719,13 +691,16 @@ window.BenTradeStrategyShell = (function(){
       const tradeKey = payload.tradeKey || '';
       const outputEl = cardEl?.querySelector('[data-model-output]');
 
-      /* Guard duplicate clicks — use tradeKey or fall back to a per-element flag */
+      /* Guard duplicate clicks — use shared store or per-element flag */
       const guardKey = tradeKey || ('_idx_' + (cardEl?.dataset?.idx ?? ''));
-      if(_modelAnalysisState[guardKey]?.status === 'running'){
+      const existing = tradeKey && _modelStore ? _modelStore.get(tradeKey) : null;
+      if(existing && existing.status === 'running'){
         INFO('[MODEL_TRACE] dedupe guard — already running for', guardKey);
         return;
       }
-      _modelAnalysisState[guardKey] = { status: 'running' };
+
+      /* Mark running in shared store */
+      if(tradeKey && _modelStore) _modelStore.setRunning(tradeKey);
       INFO('[MODEL_TRACE] _runModelAnalysisOnCard start', { guardKey, symbol: trade?.symbol || trade?.underlying, strategy: state.activeConfig?.strategyId });
 
       /* Show loading state */
@@ -746,13 +721,13 @@ window.BenTradeStrategyShell = (function(){
       INFO('[MODEL_TRACE] sourceFile resolved:', sourceFile || '(null)');
 
       if(!sourceFile){
-        const errResult = { status: 'error', summary: 'No report source available. Load a report first.' };
-        _modelAnalysisState[guardKey] = errResult;
+        const errMsg = 'No report source available. Load a report first.';
+        if(tradeKey && _modelStore) _modelStore.setError(tradeKey, errMsg);
         btn.disabled = false;
         btn.textContent = 'Run Model Analysis';
         if(outputEl){
           outputEl.style.display = 'block';
-          outputEl.innerHTML = _renderModelOutputHtml(errResult);
+          outputEl.innerHTML = _renderModelOutputHtml({ status: 'error', summary: errMsg });
         }
         INFO('[MODEL_TRACE] no sourceFile — aborting');
         return;
@@ -762,8 +737,14 @@ window.BenTradeStrategyShell = (function(){
         INFO('[MODEL_TRACE] calling api.modelAnalyze', { guardKey, sourceFile });
         const result = await api.modelAnalyze(trade, sourceFile);
         const me = result?.evaluated_trade?.model_evaluation || {};
-        const successResult = { status: 'success', model_evaluation: me };
-        _modelAnalysisState[guardKey] = successResult;
+        const engineCalc = result?.evaluated_trade?.engine_calculations || null;
+        const engineGateStatus = trade?.engine_gate_status || null;
+        const successResult = { status: 'success', model_evaluation: me, engine_calculations: engineCalc, engine_gate_status: engineGateStatus };
+
+        /* Persist in shared store */
+        if(tradeKey && _modelStore && _modelUI){
+          _modelStore.setSuccess(tradeKey, _modelUI.parse(successResult));
+        }
 
         if(outputEl){
           outputEl.style.display = 'block';
@@ -771,19 +752,18 @@ window.BenTradeStrategyShell = (function(){
         }
         INFO(`[MODEL_TRACE] complete for ${guardKey}: ${me.recommendation}`);
       }catch(err){
-        const errResult = {
-          status: 'error',
-          summary: String(err?.detail || err?.message || err || 'Model analysis failed'),
-        };
-        _modelAnalysisState[guardKey] = errResult;
+        const errMsg = String(err?.detail || err?.message || err || 'Model analysis failed');
+        if(tradeKey && _modelStore) _modelStore.setError(tradeKey, errMsg);
         if(outputEl){
           outputEl.style.display = 'block';
-          outputEl.innerHTML = _renderModelOutputHtml(errResult);
+          outputEl.innerHTML = _renderModelOutputHtml({ status: 'error', summary: errMsg });
         }
-        INFO(`[MODEL_TRACE] failed for ${guardKey}: ${errResult.summary}`);
+        INFO(`[MODEL_TRACE] failed for ${guardKey}: ${errMsg}`);
       }finally{
         btn.disabled = false;
-        btn.textContent = 'Run Model Analysis';
+        const ts = new Date();
+        const hhmm = String(ts.getHours()).padStart(2,'0') + ':' + String(ts.getMinutes()).padStart(2,'0');
+        btn.textContent = '\u21BB Re-run Analysis ' + hhmm;
       }
     }
 
@@ -921,6 +901,10 @@ window.BenTradeStrategyShell = (function(){
         return;
       }
       contentEl.innerHTML = trades.map((t, i) => renderTradeCard(t, i)).join('');
+      /* Re-hydrate persisted model analysis results into freshly-created cards */
+      if(_modelStore && typeof _modelStore.hydrateContainer === 'function'){
+        _modelStore.hydrateContainer(contentEl);
+      }
       if(countsBar) countsBar.textContent = `${trades.length} trade${trades.length !== 1 ? 's' : ''}`;
     }
 

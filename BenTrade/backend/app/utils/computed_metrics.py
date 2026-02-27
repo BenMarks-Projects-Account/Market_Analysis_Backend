@@ -1,13 +1,117 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Strategy classification helpers
+# ---------------------------------------------------------------------------
+
+# Strategies where the dominant cashflow is a CREDIT received up-front.
+_CREDIT_STRATEGIES: frozenset[str] = frozenset({
+    "put_credit_spread", "call_credit_spread",
+    "credit_spread",  # generic alias
+    "iron_condor", "iron_butterfly",
+    "csp", "covered_call", "income",
+    "single",  # CSP / covered-call singles
+})
+
+# Strategies where the dominant cashflow is a DEBIT paid up-front.
+_DEBIT_STRATEGIES: frozenset[str] = frozenset({
+    "call_debit", "put_debit",
+    "debit_spreads",  # generic alias
+    "butterfly_debit", "butterflies",
+    "calendar_call_spread", "calendar_put_spread", "calendar_spread",
+    "calendars",  # generic alias
+    "long_call", "long_put",
+})
+
+
+def is_credit_strategy(strategy_id: str | None) -> bool:
+    """Return True when strategy_id is a credit-based strategy."""
+    return (strategy_id or "").strip().lower() in _CREDIT_STRATEGIES
+
+
+def is_debit_strategy(strategy_id: str | None) -> bool:
+    """Return True when strategy_id is a debit-based strategy."""
+    return (strategy_id or "").strip().lower() in _DEBIT_STRATEGIES
+
+
+# ---------------------------------------------------------------------------
+# normalize_spread_cashflows — single source of truth for credit / debit
+# ---------------------------------------------------------------------------
+
+def normalize_spread_cashflows(
+    strategy_id: str | None,
+    net_value: float | None,
+    *,
+    width: float | None = None,
+) -> dict[str, float | None | list[str]]:
+    """Return canonical ``net_credit``, ``net_debit``, and any ``validation_warnings``.
+
+    Rules
+    -----
+    * Credit strategy  → ``net_credit = net_value``, ``net_debit = None``
+    * Debit strategy   → ``net_debit  = net_value``, ``net_credit = None``
+    * Unknown strategy → keep both None, emit warning.
+
+    Invariant checks (produce warnings, never silently drop):
+    * 0 < net_credit < width  (credit)
+    * 0 < net_debit  < width  (debit)
+
+    Parameters
+    ----------
+    strategy_id : canonical strategy id (e.g. ``put_credit_spread``)
+    net_value   : per-share net premium (positive)
+    width       : spread width in dollars (for invariant check)
+
+    Returns
+    -------
+    dict with keys: ``net_credit``, ``net_debit``, ``validation_warnings``
+    """
+    warnings: list[str] = []
+    sid = (strategy_id or "").strip().lower()
+
+    if is_credit_strategy(sid):
+        nc = net_value
+        nd = None
+        if nc is not None:
+            if nc <= 0:
+                warnings.append("SCHEMA_INVARIANT:net_credit_non_positive")
+            elif width is not None and nc >= width:
+                warnings.append("SCHEMA_INVARIANT:net_credit_ge_width")
+    elif is_debit_strategy(sid):
+        nc = None
+        nd = net_value
+        if nd is not None:
+            if nd <= 0:
+                warnings.append("SCHEMA_INVARIANT:net_debit_non_positive")
+            elif width is not None and nd >= width:
+                warnings.append("SCHEMA_INVARIANT:net_debit_ge_width")
+    else:
+        # Unknown — do not guess
+        nc = None
+        nd = None
+        if net_value is not None:
+            warnings.append(f"CASHFLOW_UNKNOWN_STRATEGY:{sid}")
+
+    return {"net_credit": nc, "net_debit": nd, "validation_warnings": warnings}
+
+
+# ---------------------------------------------------------------------------
+# Readiness & core-metric field lists
+# ---------------------------------------------------------------------------
 
 # Fields required for metrics_status.ready = True.
 # Only core pricing/risk metrics — advanced analytics do NOT block readiness.
-# 12 fields: pricing (max_profit, max_loss, break_even, net_debit),
+# 11 explicit fields + virtual cashflow gate (net_credit OR net_debit):
 #            risk (pop, expected_value, ev_to_risk, return_on_risk),
 #            liquidity (bid_ask_pct, open_interest, volume),
 #            structure (dte).
+# NOTE: net_credit/net_debit use a virtual readiness gate — readiness is
+#       satisfied when EITHER is non-None.  See build_metrics_status().
 READINESS_REQUIRED_FIELDS: tuple[str, ...] = (
     "max_profit",
     "max_loss",
@@ -20,7 +124,7 @@ READINESS_REQUIRED_FIELDS: tuple[str, ...] = (
     "open_interest",
     "volume",
     "dte",
-    "net_debit",
+    # net_credit / net_debit: virtual gate — checked separately in build_metrics_status
 )
 
 # Full set of computed metrics tracked for completeness reporting.
@@ -33,6 +137,7 @@ CORE_COMPUTED_METRIC_FIELDS: tuple[str, ...] = (
     "kelly_fraction",
     "break_even",
     "dte",
+    "net_credit",
     "net_debit",
     "expected_move",
     "iv_rank",
@@ -140,7 +245,9 @@ def build_computed_metrics(trade: dict[str, Any]) -> dict[str, float | None]:
         "rank_score": _first_number(containers, "rank_score"),
         "composite_score": _first_number(containers, "composite_score"),
         "ev_to_risk": _first_number(containers, "ev_to_risk"),
-        "net_debit": _first_number(containers, "net_debit", "net_credit"),
+        # ── Cashflow fields — NO cross-fallback (credit ≠ debit) ─────
+        "net_credit": _first_number(containers, "net_credit"),
+        "net_debit": _first_number(containers, "net_debit"),
     }
 
 
@@ -150,7 +257,20 @@ def build_metrics_status(computed_metrics: dict[str, Any]) -> dict[str, Any]:
     # Advanced metrics (iv_rank, rsi14, kelly_fraction, etc.) are tracked
     # as missing but do NOT block ready = True.
     missing_required = [f for f in READINESS_REQUIRED_FIELDS if metrics.get(f) is None]
-    _optional = set(CORE_COMPUTED_METRIC_FIELDS) - set(READINESS_REQUIRED_FIELDS)
+
+    # Virtual gate: at least one cashflow field (net_credit or net_debit) must
+    # be non-None.  When neither is present, report "net_credit" in missing
+    # (a real CORE field name) so downstream subset-of-CORE assertions hold.
+    has_cashflow = (metrics.get("net_credit") is not None
+                    or metrics.get("net_debit") is not None)
+    if not has_cashflow:
+        missing_required.append("net_credit")
+
+    # Cashflow fields are excluded from optional tracking — one being None is
+    # expected (credit strategies have no net_debit, debit strategies have no
+    # net_credit).  The virtual gate above handles readiness.
+    _cashflow = {"net_credit", "net_debit"}
+    _optional = set(CORE_COMPUTED_METRIC_FIELDS) - set(READINESS_REQUIRED_FIELDS) - _cashflow
     missing_optional = sorted(f for f in _optional if metrics.get(f) is None)
     return {
         "ready": len(missing_required) == 0,

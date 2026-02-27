@@ -51,7 +51,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   let latestOpportunities = [];
-  const opportunityModelState = new Map();
+  const _modelStore = window.BenTradeModelAnalysisStore;
+  const _modelUI = window.BenTradeModelAnalysis;
   const devLoggedCards = new Set();
 
   /* ── Scan Results Cache helpers (shared sessionStorage) ── */
@@ -601,83 +602,22 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
   /**
    * Render trade model analysis output as inline HTML for a card.
-   * Supports both legacy (ACCEPT/NEUTRAL/REJECT) and new (TAKE/PASS/WATCH)
-   * recommendation vocabularies.  Shows Model Score (score_0_100) separately
-   * from BenTrade composite_score when available.
-   * @param {object} model – model_evaluation dict
-   * @param {number|null} compositeScore – BenTrade composite_score (optional)
+   * Delegates to the shared BenTradeModelAnalysis renderer for pixel-identical
+   * output across Home + Scanner dashboards.
+   * @param {object} model – model_evaluation dict or raw result
+   * @param {number|null} compositeScore – unused (kept for call-site compat)
    * @returns {string} HTML
    */
   function _renderTradeModelOutput(model, compositeScore){
     if(!model) return '';
+    if(_modelUI){
+      const parsed = _modelUI.parse(model);
+      return _modelUI.render(parsed);
+    }
+    /* Fallback if shared module not loaded */
     const esc = escapeHtml;
-
-    if(model.status === 'running'){
-      return '<div style="font-size:12px;color:var(--muted);padding:6px 10px;"><span class="home-scan-spinner" aria-hidden="true"></span> Running model analysis\u2026</div>';
-    }
-
-    if(model.status === 'error'){
-      const msg = String(model.summary || 'Model analysis failed').trim();
-      return `<div style="font-size:12px;color:#ff6b6b;padding:6px 10px;border:1px solid rgba(255,107,107,0.25);border-radius:6px;margin:4px 0;">\u26A0 ${esc(msg)}</div>`;
-    }
-
-    // Determine the display recommendation — prefer model_recommendation (TAKE/PASS/WATCH)
-    const modelRec = String(model.model_recommendation || model.recommendation || 'UNKNOWN').toUpperCase();
-    const legacyRec = String(model.recommendation || 'UNKNOWN').toUpperCase();
-
-    const confVal = toNumber(model.confidence_0_1 ?? model.confidence);
-    const confPct = confVal !== null ? ` (${(confVal * 100).toFixed(0)}%)` : '';
-
-    const thesis = String(model.thesis || model.summary || '').trim();
-    const modelScore = toNumber(model.score_0_100);
-    const btScore = toNumber(compositeScore);
-
-    // Color map for both vocabularies
-    const recColors = {
-      'TAKE':    'rgba(0,220,120,0.9)',
-      'ACCEPT':  'rgba(0,220,120,0.9)',
-      'PASS':    'rgba(255,90,90,0.9)',
-      'REJECT':  'rgba(255,90,90,0.9)',
-      'WATCH':   'rgba(255,200,60,0.9)',
-      'NEUTRAL': 'rgba(180,180,200,0.85)',
-    };
-    const color = recColors[modelRec] || recColors[legacyRec] || recColors['NEUTRAL'];
-
-    let html = `<div style="font-size:12px;padding:8px 10px;border:1px solid ${color.replace('0.9','0.3').replace('0.85','0.3')};border-radius:6px;margin:4px 0;">`;
-
-    // Recommendation badge row
-    html += `<div style="font-weight:700;color:${color};margin-bottom:4px;">${esc(modelRec)}${esc(confPct)}</div>`;
-
-    // Score row — BenTrade Score vs Model Score side-by-side
-    if(modelScore !== null || btScore !== null){
-      html += '<div style="display:flex;gap:12px;margin-bottom:4px;font-size:11px;">';
-      if(modelScore !== null){
-        const mScoreColor = modelScore >= 60 ? '#00dc78' : modelScore >= 40 ? '#b4b4c8' : '#ff5a5a';
-        html += `<span style="color:${mScoreColor};">Model Score: <b>${modelScore}</b>/100</span>`;
-      }
-      if(btScore !== null){
-        html += `<span style="color:var(--text-secondary,#aaa);">BenTrade Score: <b>${fmt(btScore,1)}</b></span>`;
-      }
-      html += '</div>';
-    }
-
-    // Thesis / summary
-    if(thesis){
-      html += `<div style="color:var(--text-secondary,#ccc);line-height:1.4;">${esc(thesis)}</div>`;
-    }
-
-    // Key drivers (compact list)
-    const drivers = model.key_drivers || model.key_factors;
-    if(Array.isArray(drivers) && drivers.length){
-      html += '<ul style="margin:4px 0 0 16px;padding:0;color:var(--text-secondary,#bbb);font-size:11px;line-height:1.4;">';
-      for(const d of drivers.slice(0, 4)){
-        html += `<li>${esc(String(d))}</li>`;
-      }
-      html += '</ul>';
-    }
-
-    html += '</div>';
-    return html;
+    const rec = String(model.recommendation || 'UNKNOWN').toUpperCase();
+    return `<div style="font-size:12px;padding:8px;color:var(--text-secondary,#ccc);">${esc(rec)} — ${esc(String(model.summary || model.thesis || ''))}</div>`;
   }
 
   function routeForOpportunity(idea){
@@ -912,11 +852,14 @@ window.BenTradePages.initHome = function initHome(rootEl){
       const result = await api.modelAnalyze(tradePayload, sourceFile);
       console.info(_tag, 'response OK', { recommendation: result?.evaluated_trade?.model_evaluation?.recommendation });
       const me = result?.evaluated_trade?.model_evaluation || {};
+      const engineCalc = result?.evaluated_trade?.engine_calculations || null;
       const nextModel = {
         status: 'available',
+        ...me,
         recommendation: String(me?.recommendation || 'NEUTRAL').toUpperCase(),
         confidence: toNumber(me?.confidence),
         summary: String(me?.summary || '').trim(),
+        engine_calculations: engineCalc,
       };
       if(typeof onModel === 'function') onModel(nextModel);
       return true;
@@ -1288,14 +1231,21 @@ window.BenTradePages.initHome = function initHome(rootEl){
       const normalized = normalizeOpportunity(idea, idea?.sourceType);
       logOpportunityInstrumentationOnce(normalized, idx);
       const key = opportunityKey(normalized, idx);
-      const modelState = opportunityModelState.get(key);
-      if(modelState && typeof modelState === 'object'){
+      /* Look up persisted model state from the shared store (keyed by tradeKey).
+         We derive tradeKey the same way toScannerTrade does so the key is stable. */
+      const rawTrade = idea.trade && typeof idea.trade === 'object' ? idea.trade : idea;
+      const storeKey = String(rawTrade.trade_key || rawTrade.idea_key || '').trim();
+      const storeEntry = storeKey && _modelStore ? _modelStore.get(storeKey) : null;
+      if(storeEntry && storeEntry.status === 'success' && storeEntry.result){
+        const r = storeEntry.result;
         normalized.model = {
-          status: String(modelState.status || 'available'),
-          recommendation: String(modelState.recommendation || normalized.model?.recommendation || 'UNKNOWN').toUpperCase(),
-          confidence: toNumber(modelState.confidence),
-          summary: String(modelState.summary || '').trim(),
+          status: 'available',
+          recommendation: String(r.recommendation || 'UNKNOWN').toUpperCase(),
+          confidence: toNumber(r.confidence),
+          summary: String(r.thesis || r.summary || '').trim(),
         };
+      } else if(storeEntry && storeEntry.status === 'running'){
+        normalized.model = { status: 'running', recommendation: 'RUNNING', confidence: null, summary: 'Running…' };
       }
       normalized._opKey = key;
       /* Carry playbook metadata (from sortByPlaybook's _pb annotation) for UI */
@@ -1402,6 +1352,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
       ${cardsHtml.join('')}
     `;
 
+    /* ── Re-hydrate persisted model analysis results into freshly-created cards ── */
+    if(_modelStore && typeof _modelStore.hydrateContainer === 'function'){
+      _modelStore.hydrateContainer(scannerOpportunitiesEl);
+    }
+
     /* ── Action wiring — mirrors strategy_dashboard_shell.js exactly ── */
 
     /* Collapse/expand persistence via <details> toggle */
@@ -1470,26 +1425,38 @@ window.BenTradePages.initHome = function initHome(rootEl){
         }
 
         if(action === 'model-analysis'){
-          /* Run model analysis inline on this card — no navigation */
+          /* Run model analysis inline on this card — uses shared store for persistence */
           console.info('[MODEL_TRACE:home] button clicked', { cardIdx, symbol: idea?.symbol, strategy: idea?.strategy });
           const modelBtn = btn;
           const modelOutputEl = cardEl?.querySelector('[data-model-output]');
+          const tradeKey = String(trade.trade_key || '').trim();
+
+          /* Mark running in store → triggers immediate UI update via hydration */
+          if(tradeKey && _modelStore) _modelStore.setRunning(tradeKey);
           modelBtn.disabled = true;
           modelBtn.textContent = 'Running\u2026';
-          if(modelOutputEl){
+          if(modelOutputEl && _modelUI){
             modelOutputEl.style.display = 'block';
-            modelOutputEl.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:6px 10px;"><span class="home-scan-spinner" aria-hidden="true"></span> Running model analysis\u2026</div>';
+            modelOutputEl.innerHTML = _modelUI.render({ status: 'running' });
           }
 
           runModelForOpportunity(idea, (modelResult) => {
             console.info('[MODEL_TRACE:home] callback received', { status: modelResult?.status, recommendation: modelResult?.recommendation });
-            /* Update per-card state */
-            const opKey = idea._opKey || opportunityKey(idea, cardIdx);
-            opportunityModelState.set(opKey, modelResult);
 
-            /* Update button */
+            /* Persist result in shared store (keyed by tradeKey) */
+            if(tradeKey && _modelStore && _modelUI){
+              if(modelResult && modelResult.status !== 'error' && modelResult.status !== 'not_run'){
+                _modelStore.setSuccess(tradeKey, _modelUI.parse(modelResult));
+              } else if(modelResult && modelResult.status === 'error'){
+                _modelStore.setError(tradeKey, modelResult.summary || 'Model analysis failed');
+              }
+            }
+
+            /* Update button — show re-run timestamp */
             modelBtn.disabled = false;
-            modelBtn.textContent = 'Run Model Analysis';
+            const ts = new Date();
+            const hhmm = String(ts.getHours()).padStart(2,'0') + ':' + String(ts.getMinutes()).padStart(2,'0');
+            modelBtn.textContent = '\u21BB Re-run Analysis ' + hhmm;
 
             /* Render result in card */
             if(modelOutputEl){
@@ -1497,7 +1464,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
                 modelOutputEl.style.display = 'none';
               } else {
                 modelOutputEl.style.display = 'block';
-                modelOutputEl.innerHTML = _renderTradeModelOutput(modelResult, toNumber(idea?.score ?? idea?.rank ?? idea?.trade?.composite_score));
+                modelOutputEl.innerHTML = _renderTradeModelOutput(modelResult);
               }
             }
           }, 'home_card_action');

@@ -7,6 +7,9 @@ lookup, admin data workbench) calls ``normalize_trade()`` to guarantee:
 - per-contract monetary values as primary (per-share × multiplier)
 - ``computed``, ``details``, ``pills`` sub-dicts for UI consumption
 - ``computed_metrics`` + ``metrics_status`` via shared contract
+- spread pricing context (spread_mid, spread_natural) for execution
+- breakeven derivation for vertical spreads
+- OCC symbol validation on legs
 - validation warnings for missing key metrics
 
 Use ``strip_legacy_fields()`` at the API boundary to remove legacy flat
@@ -15,11 +18,14 @@ fields from trade dicts before returning to the frontend.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.utils.computed_metrics import apply_metrics_contract
 from app.utils.strategy_id_resolver import resolve_strategy_id_or_none
 from app.utils.trade_key import canonicalize_strategy_id, canonicalize_trade_key, trade_key
+
+_log = logging.getLogger("bentrade.normalize")
 
 
 # ── helpers ───────────────────────────────────────────────────────────
@@ -159,6 +165,202 @@ def _derive_key_strikes(row: dict[str, Any], spread_type: str) -> tuple[Any, Any
     return short, long
 
 
+# ── spread pricing helpers ────────────────────────────────────────────
+
+
+def _compute_spread_pricing(
+    normalized: dict[str, Any],
+    spread_type: str,
+) -> dict[str, float | None]:
+    """Derive spread_mid, spread_natural, spread_mark from legs.
+
+    For CREDIT spreads (selling):
+      spread_mid     = short_leg.mid − long_leg.mid
+      spread_natural = short_leg.bid − long_leg.ask   (worst-case fill for seller)
+
+    For DEBIT spreads (buying):
+      spread_mid     = long_leg.mid − short_leg.mid
+      spread_natural = long_leg.ask − short_leg.bid   (worst-case fill for buyer)
+
+    Inputs: legs[].bid, legs[].ask, legs[].mid
+    Outputs: spread_mid, spread_natural, spread_mark (avg of mid+natural)
+    """
+    from app.utils.computed_metrics import is_credit_strategy, is_debit_strategy
+
+    result: dict[str, float | None] = {
+        "spread_mid": None,
+        "spread_natural": None,
+        "spread_mark": None,
+    }
+
+    # Use upstream value if already computed
+    existing_mid = _to_float(normalized.get("spread_mid"))
+    if existing_mid is not None:
+        result["spread_mid"] = existing_mid
+
+    legs = normalized.get("legs")
+    if not isinstance(legs, list) or len(legs) < 2:
+        return result
+
+    # Identify short and long legs
+    short_leg = None
+    long_leg = None
+    for leg in legs:
+        if not isinstance(leg, dict):
+            continue
+        side = str(leg.get("side") or "").lower()
+        if side in ("sell", "sell_to_open") and short_leg is None:
+            short_leg = leg
+        elif side in ("buy", "buy_to_open") and long_leg is None:
+            long_leg = leg
+
+    if short_leg is None or long_leg is None:
+        return result
+
+    s_bid = _to_float(short_leg.get("bid"))
+    s_ask = _to_float(short_leg.get("ask"))
+    s_mid = _to_float(short_leg.get("mid"))
+    l_bid = _to_float(long_leg.get("bid"))
+    l_ask = _to_float(long_leg.get("ask"))
+    l_mid = _to_float(long_leg.get("mid"))
+
+    # Derive mid from bid+ask if not explicitly provided
+    if s_mid is None and s_bid is not None and s_ask is not None:
+        s_mid = (s_bid + s_ask) / 2.0
+    if l_mid is None and l_bid is not None and l_ask is not None:
+        l_mid = (l_bid + l_ask) / 2.0
+
+    is_credit = is_credit_strategy(spread_type)
+
+    # Spread mid
+    if s_mid is not None and l_mid is not None and result["spread_mid"] is None:
+        if is_credit:
+            result["spread_mid"] = round(s_mid - l_mid, 4)
+        else:
+            result["spread_mid"] = round(l_mid - s_mid, 4)
+
+    # Spread natural (worst-case fill)
+    if is_credit:
+        # Selling: natural = short_bid − long_ask
+        if s_bid is not None and l_ask is not None:
+            nat = round(s_bid - l_ask, 4)
+            if nat < 0:
+                # Negative natural means the market is inverted — null + warning.
+                # Input fields: short_leg.bid, long_leg.ask
+                # Formula: spread_natural = short_bid − long_ask
+                result["spread_natural"] = None
+                _upsert_warning(
+                    normalized,
+                    "NEGATIVE_NATURAL_PRICE",
+                )
+                _log.warning(
+                    "[normalize] NEGATIVE_NATURAL_PRICE: short_bid=%.4f long_ask=%.4f nat=%.4f spread_type=%s",
+                    s_bid, l_ask, nat, spread_type,
+                )
+            else:
+                result["spread_natural"] = nat
+    else:
+        # Buying: natural = long_ask − short_bid
+        if l_ask is not None and s_bid is not None:
+            result["spread_natural"] = round(l_ask - s_bid, 4)
+
+    # Spread mark = average of mid and natural when both available
+    mid_val = result["spread_mid"]
+    nat_val = result["spread_natural"]
+    if mid_val is not None and nat_val is not None:
+        result["spread_mark"] = round((mid_val + nat_val) / 2.0, 4)
+
+    return result
+
+
+def _compute_breakeven(
+    normalized: dict[str, Any],
+    spread_type: str,
+) -> float | None:
+    """Derive breakeven for vertical spreads.
+
+    For put credit spread:
+      breakeven = short_put_strike − net_credit
+
+    For call credit spread:
+      breakeven = short_call_strike + net_credit
+
+    For put debit spread:
+      breakeven = long_put_strike + net_debit
+
+    For call debit spread:
+      breakeven = long_call_strike − net_debit
+
+    Inputs: short_strike/long_strike, net_credit/net_debit
+    Output: breakeven price (float)
+    """
+    # Prefer upstream value if already computed
+    existing = _to_float(normalized.get("break_even")) or _to_float(normalized.get("break_even_low"))
+    if existing is not None:
+        return existing
+
+    sid = (spread_type or "").strip().lower()
+    short_strike = _to_float(normalized.get("short_strike"))
+    long_strike = _to_float(normalized.get("long_strike"))
+    net_credit = _to_float(normalized.get("net_credit"))
+    net_debit = _to_float(normalized.get("net_debit"))
+
+    if sid in ("put_credit_spread", "credit_spread"):
+        if short_strike is not None and net_credit is not None:
+            return round(short_strike - net_credit, 4)
+    elif sid == "call_credit_spread":
+        if short_strike is not None and net_credit is not None:
+            return round(short_strike + net_credit, 4)
+    elif sid in ("put_debit", "put_debit_spread"):
+        if long_strike is not None and net_debit is not None:
+            return round(long_strike + net_debit, 4)
+    elif sid in ("call_debit", "call_debit_spread"):
+        if long_strike is not None and net_debit is not None:
+            return round(long_strike - net_debit, 4)
+    elif sid == "iron_condor":
+        # Iron condor has two breakevens — compute lower (put-side)
+        # and return the more conservative one
+        sp = _to_float(normalized.get("short_put_strike"))
+        sc = _to_float(normalized.get("short_call_strike"))
+        if sp is not None and net_credit is not None:
+            return round(sp - net_credit, 4)
+        if short_strike is not None and net_credit is not None:
+            return round(short_strike - net_credit, 4)
+
+    return None
+
+
+def _validate_legs_occ(normalized: dict[str, Any]) -> None:
+    """Warn if any leg is missing its OCC symbol.
+
+    Checks each leg in legs[] for occ_symbol presence.
+    Appends MISSING_OCC_SYMBOL validation warning if any are absent.
+    Sets execution_invalid=True on the trade if OCC is missing.
+    """
+    legs = normalized.get("legs")
+    if not isinstance(legs, list) or len(legs) == 0:
+        return
+
+    missing_count = 0
+    for i, leg in enumerate(legs):
+        if not isinstance(leg, dict):
+            continue
+        occ = leg.get("occ_symbol") or leg.get("option_symbol")
+        if not occ or not str(occ).strip():
+            missing_count += 1
+            _log.warning(
+                "leg[%d] missing OCC symbol: strike=%s side=%s",
+                i, leg.get("strike"), leg.get("side"),
+            )
+
+    if missing_count > 0:
+        _upsert_warning(normalized, "MISSING_OCC_SYMBOL")
+        normalized["execution_invalid"] = True
+        normalized["execution_invalid_reason"] = (
+            f"{missing_count} leg(s) missing OCC symbol — execution blocked"
+        )
+
+
 # ── main entry point ─────────────────────────────────────────────────
 
 
@@ -200,10 +402,28 @@ def normalize_trade(
     # When a trade was previously normalized and saved with values
     # only in computed/details/computed_metrics sub-dicts (not at root),
     # re-normalization must be able to find them.
+    # GUARD: Never propagate the *wrong* cashflow field from an old
+    # sub-dict.  E.g. a stored report with a corrupted computed_metrics
+    # that has net_debit on a credit strategy must not seed root.net_debit.
+    from app.utils.computed_metrics import is_credit_strategy, is_debit_strategy
+    _step0_strat = (
+        str(normalized.get("spread_type")
+            or normalized.get("strategy")
+            or normalized.get("strategy_id")
+            or strategy_id
+            or "").strip().lower()
+    )
+    _step0_skip: set[str] = set()
+    if is_credit_strategy(_step0_strat):
+        _step0_skip.add("net_debit")       # never seed wrong cashflow
+    elif is_debit_strategy(_step0_strat):
+        _step0_skip.add("net_credit")
     for _subkey in ("computed", "computed_metrics", "details"):
         _sub = normalized.get(_subkey)
         if isinstance(_sub, dict):
             for _k, _v in _sub.items():
+                if _k in _step0_skip:
+                    continue
                 if normalized.get(_k) is None and _v is not None:
                     normalized[_k] = _v
 
@@ -303,6 +523,26 @@ def normalize_trade(
         else:
             max_loss_contract = _first_number(normalized, "max_loss")
 
+    # ── 7b. Spread pricing context (mid + natural) ─────────────────
+    # Derived from legs[].bid/ask/mid.  Upstream values preserved if present.
+    pricing = _compute_spread_pricing(normalized, spread_type)
+    if pricing["spread_mid"] is not None:
+        normalized["spread_mid"] = pricing["spread_mid"]
+    if pricing["spread_natural"] is not None:
+        normalized["spread_natural"] = pricing["spread_natural"]
+    if pricing["spread_mark"] is not None:
+        normalized["spread_mark"] = pricing["spread_mark"]
+
+    # ── 7c. Breakeven derivation ─────────────────────────────────────
+    # Derived from short_strike/long_strike + net_credit/net_debit.
+    # Prefer upstream value if already present.
+    breakeven = _compute_breakeven(normalized, spread_type)
+    if breakeven is not None:
+        normalized["break_even"] = breakeven
+
+    # ── 7d. OCC symbol validation on legs ────────────────────────────
+    _validate_legs_occ(normalized)
+
     # ── 8. Build computed / details / pills ──────────────────────────
     computed: dict[str, Any] = {
         "max_profit": max_profit_contract,
@@ -352,6 +592,14 @@ def normalize_trade(
         "market_regime": str(normalized.get("market_regime") or normalized.get("regime") or "").strip() or None,
     }
 
+    # ── 8b. Pricing context sub-dict ─────────────────────────────────
+    # Surfaces spread_mid, spread_natural, spread_mark for UI / ticket.
+    normalized["pricing"] = {
+        "spread_mid": _to_float(normalized.get("spread_mid")),
+        "spread_natural": _to_float(normalized.get("spread_natural")),
+        "spread_mark": _to_float(normalized.get("spread_mark")),
+    }
+
     dte_front = _first_number(normalized, "dte_near")
     dte_back = _first_number(normalized, "dte_far")
     pills: dict[str, Any] = {
@@ -377,6 +625,55 @@ def normalize_trade(
     # ── 9. apply_metrics_contract (computed_metrics + metrics_status) ─
     normalized = apply_metrics_contract(normalized)
 
+    # ── 9b. Cashflow schema invariant check & correction ───────────────
+    # Credit strategies must have net_credit, not net_debit.
+    # Debit strategies must have net_debit, not net_credit.
+    # Old stored reports may have swapped values — detect and FIX, not
+    # just warn.  Correction: move the wrong-side value to the correct
+    # side if the correct side is empty, then null the wrong side.
+    from app.utils.computed_metrics import is_credit_strategy, is_debit_strategy
+    _cm = normalized.get("computed_metrics") or {}
+    if is_credit_strategy(spread_type):
+        if _cm.get("net_debit") is not None:
+            _upsert_warning(normalized, "SCHEMA_MISMATCH_NET_DEBIT_FOR_CREDIT")
+            # Correct: if net_credit is missing, the net_debit is likely
+            # the swapped net_credit value.  Move it to the right field.
+            if _cm.get("net_credit") is None:
+                _cm["net_credit"] = _cm["net_debit"]
+            _cm["net_debit"] = None
+            normalized["computed_metrics"] = _cm
+        if _cm.get("net_credit") is None and normalized.get("net_credit") is not None:
+            _cm["net_credit"] = normalized["net_credit"]
+            normalized["computed_metrics"] = _cm
+            _upsert_warning(normalized, "SCHEMA_MISMATCH_NET_CREDIT_MISSING_IN_METRICS")
+        # Also ensure root is clean
+        normalized.pop("net_debit", None)
+    elif is_debit_strategy(spread_type):
+        if _cm.get("net_credit") is not None:
+            _upsert_warning(normalized, "SCHEMA_MISMATCH_NET_CREDIT_FOR_DEBIT")
+            if _cm.get("net_debit") is None:
+                _cm["net_debit"] = _cm["net_credit"]
+            _cm["net_credit"] = None
+            normalized["computed_metrics"] = _cm
+        if _cm.get("net_debit") is None and normalized.get("net_debit") is not None:
+            _cm["net_debit"] = normalized["net_debit"]
+            normalized["computed_metrics"] = _cm
+            _upsert_warning(normalized, "SCHEMA_MISMATCH_NET_DEBIT_MISSING_IN_METRICS")
+        # Also ensure root is clean
+        normalized.pop("net_credit", None)
+
+    # ── 9c. Engine gate status (for UI alignment with model analysis) ─
+    # Accepted trades carry selection_reasons=[] from evaluate().
+    # Expose a structured engine_gate_status so the frontend can
+    # display whether the engine accepted or rejected the trade,
+    # independently of the LLM model recommendation.
+    _sel_reasons = normalized.get("selection_reasons")
+    if isinstance(_sel_reasons, list):
+        normalized["engine_gate_status"] = {
+            "passed": len(_sel_reasons) == 0,
+            "failed_reasons": list(_sel_reasons),
+        }
+
     # ── 10. (removed) Legacy root-level back-fill aliases ────────────
     # Formerly wrote p_win_used, ev_per_contract, bid_ask_spread_pct,
     # etc. back to root from computed/details.  Consumers should now
@@ -397,5 +694,11 @@ def normalize_trade(
         _upsert_warning(normalized, "EXPECTED_VALUE_UNAVAILABLE")
     if computed["return_on_risk"] is None:
         _upsert_warning(normalized, "RETURN_ON_RISK_UNAVAILABLE")
+    if details["break_even"] is None:
+        _upsert_warning(normalized, "BREAKEVEN_UNAVAILABLE")
+    if normalized.get("pricing", {}).get("spread_mid") is None:
+        _upsert_warning(normalized, "SPREAD_MID_UNAVAILABLE")
+    if normalized.get("pricing", {}).get("spread_natural") is None:
+        _upsert_warning(normalized, "SPREAD_NATURAL_UNAVAILABLE")
 
     return normalized

@@ -555,10 +555,12 @@ class TestNearMissICFields:
     def test_near_miss_top_level_short_long_bid_ask(self):
         """Top-level short_bid/short_ask/long_bid/long_ask must NOT be null for IC."""
         from app.services.strategy_service import StrategyService
+        from app.services.strategies.iron_condor import IronCondorStrategyPlugin
 
         row = self._build_ic_row()
         rejected_rows = [(row, ["pop_below_threshold"])]
-        result = StrategyService._build_near_miss(rejected_rows, {}, {}, limit=5)
+        svc = object.__new__(StrategyService)
+        result = svc._build_near_miss(rejected_rows, {}, {}, limit=5, plugin=IronCondorStrategyPlugin())
         assert len(result) == 1
         nm = result[0]
         # These were the original null fields — must now be populated
@@ -570,10 +572,12 @@ class TestNearMissICFields:
     def test_near_miss_top_level_values_match_put_legs(self):
         """short_bid = short_put.bid, long_bid = long_put.bid (documented mapping)."""
         from app.services.strategy_service import StrategyService
+        from app.services.strategies.iron_condor import IronCondorStrategyPlugin
 
         row = self._build_ic_row()
         rejected_rows = [(row, ["pop_below_threshold"])]
-        result = StrategyService._build_near_miss(rejected_rows, {}, {}, limit=5)
+        svc = object.__new__(StrategyService)
+        result = svc._build_near_miss(rejected_rows, {}, {}, limit=5, plugin=IronCondorStrategyPlugin())
         nm = result[0]
         assert nm["short_bid"] == pytest.approx(0.85)
         assert nm["short_ask"] == pytest.approx(0.95)
@@ -583,10 +587,12 @@ class TestNearMissICFields:
     def test_near_miss_ic_per_leg_bid_ask(self):
         """IC-specific per-leg bid/ask fields must be populated."""
         from app.services.strategy_service import StrategyService
+        from app.services.strategies.iron_condor import IronCondorStrategyPlugin
 
         row = self._build_ic_row()
         rejected_rows = [(row, ["pop_below_threshold"])]
-        result = StrategyService._build_near_miss(rejected_rows, {}, {}, limit=5)
+        svc = object.__new__(StrategyService)
+        result = svc._build_near_miss(rejected_rows, {}, {}, limit=5, plugin=IronCondorStrategyPlugin())
         nm = result[0]
         assert nm["short_put_bid"] == pytest.approx(0.85)
         assert nm["short_call_bid"] == pytest.approx(0.85)
@@ -596,10 +602,12 @@ class TestNearMissICFields:
     def test_near_miss_spread_bid_ask(self):
         """Spread-level bid/ask must be present."""
         from app.services.strategy_service import StrategyService
+        from app.services.strategies.iron_condor import IronCondorStrategyPlugin
 
         row = self._build_ic_row()
         rejected_rows = [(row, ["pop_below_threshold"])]
-        result = StrategyService._build_near_miss(rejected_rows, {}, {}, limit=5)
+        svc = object.__new__(StrategyService)
+        result = svc._build_near_miss(rejected_rows, {}, {}, limit=5, plugin=IronCondorStrategyPlugin())
         nm = result[0]
         assert nm["spread_bid"] == pytest.approx(1.20)
         assert nm["spread_ask"] == pytest.approx(1.80)
@@ -607,10 +615,12 @@ class TestNearMissICFields:
     def test_near_miss_short_mid_computed(self):
         """When short_bid + short_ask are present, short_mid should be derived."""
         from app.services.strategy_service import StrategyService
+        from app.services.strategies.iron_condor import IronCondorStrategyPlugin
 
         row = self._build_ic_row()
         rejected_rows = [(row, ["pop_below_threshold"])]
-        result = StrategyService._build_near_miss(rejected_rows, {}, {}, limit=5)
+        svc = object.__new__(StrategyService)
+        result = svc._build_near_miss(rejected_rows, {}, {}, limit=5, plugin=IronCondorStrategyPlugin())
         nm = result[0]
         # short_mid = (short_bid + short_ask) / 2 = (0.85 + 0.95) / 2 = 0.90
         assert nm["short_mid"] == pytest.approx(0.90, abs=0.01)

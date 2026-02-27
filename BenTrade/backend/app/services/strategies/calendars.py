@@ -4,9 +4,10 @@ import math
 from typing import Any
 
 from app.services.ranking import safe_float
+from app.services.strategies.base import StrategyPlugin
 
 
-class CalendarsStrategyPlugin:
+class CalendarsStrategyPlugin(StrategyPlugin):
     id = "calendars"
     display_name = "Calendar Spread Analysis"
 

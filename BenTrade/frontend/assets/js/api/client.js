@@ -41,11 +41,52 @@ window.BenTradeApi = (function(){
     return jsonFetch(`/api/reports/${filename}`);
   }
 
+  /* ── Shared trade sanitizer for model analysis (multi-leg aware) ─── */
+  /**
+   * Ensure iron-condor trades carry the 4 numeric strike fields and legs[],
+   * and never send short_strike/long_strike as "P...|C..." strings.
+   * 2-leg spreads pass through unchanged.
+   */
+  function _sanitizeTradeForModel(trade) {
+    if (!trade || typeof trade !== 'object') return trade || {};
+    var out = Object.assign({}, trade);
+    var sid = String(out.spread_type || out.strategy_id || out.type || '').toLowerCase();
+
+    if (sid.indexOf('iron_condor') !== -1 || sid.indexOf('condor') !== -1) {
+      /* ── Iron condor: populate 4 numeric strikes, strip string encoding ── */
+      var parseStrikePair = function(val) {
+        if (typeof val !== 'string') return null;
+        var m = val.match(/P([\d.]+)\|C([\d.]+)/i);
+        return m ? { put: parseFloat(m[1]), call: parseFloat(m[2]) } : null;
+      };
+
+      /* Parse string-encoded strikes into numeric fields if needed */
+      var shortParsed = parseStrikePair(out.short_strike);
+      var longParsed  = parseStrikePair(out.long_strike);
+
+      if (shortParsed) {
+        if (out.short_put_strike  == null) out.short_put_strike  = shortParsed.put;
+        if (out.short_call_strike == null) out.short_call_strike = shortParsed.call;
+        out.short_strike = null;  // clear string — server expects float or null
+      }
+      if (longParsed) {
+        if (out.long_put_strike  == null) out.long_put_strike  = longParsed.put;
+        if (out.long_call_strike == null) out.long_call_strike = longParsed.call;
+        out.long_strike = null;
+      }
+
+      /* If short_strike/long_strike are still strings (but not parseable), null them */
+      if (typeof out.short_strike === 'string') out.short_strike = null;
+      if (typeof out.long_strike  === 'string') out.long_strike  = null;
+    }
+    return out;
+  }
+
   function modelAnalyze(trade, source){
     return jsonFetch('/api/model/analyze', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ trade, source }),
+      body: JSON.stringify({ trade: _sanitizeTradeForModel(trade), source }),
     });
   }
 

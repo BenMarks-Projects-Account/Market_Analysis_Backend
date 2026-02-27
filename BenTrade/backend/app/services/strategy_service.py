@@ -336,6 +336,7 @@ class StrategyService:
             "non_positive_debit", "debit_ge_width", "debit_too_close_to_width",
             # iron condor structural codes
             "credit_below_min", "condor_too_skewed", "distance_below_min_sigma",
+            "invalid_condor_penny_wing", "short_leg_no_bid",
         ],
         "liquidity": ["open_interest_below_min", "volume_below_min"],
         "data_quality": [
@@ -497,6 +498,94 @@ class StrategyService:
                 "data_quality_mode": "lenient",
             },
         },
+        "iron_condor": {
+            "strict": {
+                "dte_min": 21,
+                "dte_max": 45,
+                "distance_mode": "expected_move",
+                "distance_target": 1.2,
+                "min_sigma_distance": 1.2,
+                "wing_width_put": 5.0,
+                "wing_width_call": 5.0,
+                "wing_width_max": 10.0,
+                "allow_skewed": False,
+                "symmetry_target": 0.80,
+                "min_ror": 0.15,
+                "min_credit": 0.15,
+                "min_ev_to_risk": 0.05,
+                "min_pop": 0.55,
+                "max_candidates": 220,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                "min_open_interest": 1000,
+                "min_volume": 100,
+                "data_quality_mode": "strict",
+            },
+            "conservative": {
+                "dte_min": 21,
+                "dte_max": 45,
+                "distance_mode": "expected_move",
+                "distance_target": 1.1,
+                "min_sigma_distance": 1.1,
+                "wing_width_put": 5.0,
+                "wing_width_call": 5.0,
+                "wing_width_max": 10.0,
+                "allow_skewed": False,
+                "symmetry_target": 0.70,
+                "min_ror": 0.12,
+                "min_credit": 0.10,
+                "min_ev_to_risk": 0.02,
+                "min_pop": 0.50,
+                "max_candidates": 220,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                "min_open_interest": 500,
+                "min_volume": 50,
+                "data_quality_mode": "balanced",
+            },
+            "balanced": {
+                "dte_min": 14,
+                "dte_max": 45,
+                "distance_mode": "expected_move",
+                "distance_target": 1.0,
+                "min_sigma_distance": 1.0,
+                "wing_width_put": 5.0,
+                "wing_width_call": 5.0,
+                "wing_width_max": 10.0,
+                "allow_skewed": False,
+                "symmetry_target": 0.55,
+                "min_ror": 0.08,
+                "min_credit": 0.10,
+                "min_ev_to_risk": 0.00,
+                "min_pop": 0.45,
+                "max_candidates": 300,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                # Volume is optional in balanced — OI + quote quality
+                # are the primary liquidity gates instead.
+                "min_open_interest": 300,
+                "min_volume": 0,
+                "data_quality_mode": "balanced",
+            },
+            "wide": {
+                "dte_min": 7,
+                "dte_max": 60,
+                "distance_mode": "expected_move",
+                "distance_target": 0.9,
+                "min_sigma_distance": 0.9,
+                "wing_width_put": 5.0,
+                "wing_width_call": 5.0,
+                "wing_width_max": 15.0,
+                "allow_skewed": True,
+                "symmetry_target": 0.40,
+                "min_ror": 0.05,
+                "min_credit": 0.05,
+                "min_ev_to_risk": -0.05,
+                "min_pop": 0.35,
+                "max_candidates": 500,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                "min_open_interest": 100,
+                "min_volume": 0,
+                "data_quality_mode": "lenient",
+            },
+        },
     }
     _DEFAULT_PRESET = "balanced"
 
@@ -595,18 +684,31 @@ class StrategyService:
             req["_requested_data_quality_mode"] = str(payload.get("data_quality_mode") or "").lower() or None
 
         elif strategy_id == "iron_condor":
-            req.setdefault("dte_min", 21)
-            req.setdefault("dte_max", 45)
-            req.setdefault("distance_mode", "expected_move")
-            req.setdefault("distance_target", 1.1)
-            req.setdefault("min_sigma_distance", 1.1)
-            req.setdefault("wing_width_put", 5.0)
-            req.setdefault("wing_width_call", 5.0)
-            req.setdefault("wing_width_max", 10.0)
-            req.setdefault("min_ror", 0.12)
-            req.setdefault("symmetry_target", 0.70)
-            req.setdefault("min_open_interest", 500)
-            req.setdefault("min_volume", 50)
+            raw_preset = req.pop("preset", None)
+            requested_preset = str(raw_preset).lower() if raw_preset else None
+            if requested_preset == "manual":
+                preset_name = "manual"
+                logger.info("Preset requested='manual' for iron_condor — using caller-supplied thresholds")
+            else:
+                preset_name = str(raw_preset or self._DEFAULT_PRESET).lower()
+                presets = self._PRESETS.get(strategy_id, {})
+                if preset_name not in presets:
+                    logger.warning(
+                        "Unknown preset '%s' for strategy '%s'; falling back to '%s'",
+                        preset_name, strategy_id, self._DEFAULT_PRESET,
+                    )
+                    preset_name = self._DEFAULT_PRESET
+
+                preset_values = presets.get(preset_name, {})
+                user_specified_symbol = "symbol" in (payload or {}) or "symbols" in (payload or {})
+                for k, v in preset_values.items():
+                    if k == "symbols" and user_specified_symbol:
+                        continue
+                    req.setdefault(k, v)
+
+            req["_preset_name"] = preset_name
+            req["_requested_preset_name"] = requested_preset
+            req["_requested_data_quality_mode"] = str(payload.get("data_quality_mode") or "").lower() or None
 
         elif strategy_id == "butterflies":
             req.setdefault("dte_min", 7)
@@ -785,13 +887,13 @@ class StrategyService:
         "non_positive_debit", "debit_ge_width", "debit_too_close_to_width",
     })
 
-    @classmethod
     def _build_near_miss(
-        cls,
+        self,
         rejected_rows: list[tuple[dict[str, Any], list[str]]],
         payload: dict[str, Any],
         policy: dict[str, Any],
         limit: int = 20,
+        plugin: StrategyPlugin | None = None,
     ) -> list[dict[str, Any]]:
         """Score rejected candidates by proximity to passing, return top *limit*.
 
@@ -879,25 +981,30 @@ class StrategyService:
             # Penalty for quote/structural problems
             _quote_reasons = [r for r in reasons if r.startswith("QUOTE_INVALID:")
                               or r.startswith("MISSING_QUOTES:")
-                              or r in cls._STRUCTURAL_REASONS]
+                              or r in self._STRUCTURAL_REASONS]
             nearness -= 10.0 * len(_quote_reasons)
 
-            # Pre-extract per-leg quotes (preserve 0.0 — do NOT use `or`)
+            # Pre-extract per-leg quotes (preserve 0.0 — do NOT use `or`).
+            # For strategies with legs[], extract bid/ask from the first two
+            # legs generically (avoid hardcoded IC-specific field names).
             _sb_raw = row.get("_short_bid")
             _sa_raw = row.get("_short_ask")
-            _is_ic = str(row.get("spread_type") or row.get("strategy") or "") == "iron_condor"
-
-            # For IC: map top-level short/long bid/ask from the put-side legs.
-            # Documented: short_bid/ask = short_put.bid/ask,
-            #             long_bid/ask  = long_put.bid/ask.
-            if _is_ic and _sb_raw is None:
-                _sb_raw = row.get("_short_put_bid")
-                _sa_raw = row.get("_short_put_ask")
             _lb_raw = row.get("_long_bid")
             _la_raw = row.get("_long_ask")
-            if _is_ic and _lb_raw is None:
-                _lb_raw = row.get("_long_put_bid")
-                _la_raw = row.get("_long_put_ask")
+
+            # Fallback: if transient fields are absent, try canonical legs[]
+            _nm_legs = row.get("legs")
+            if isinstance(_nm_legs, list) and len(_nm_legs) >= 2:
+                # Find sell/buy legs for bid/ask mapping
+                for _nml in _nm_legs:
+                    if not isinstance(_nml, dict):
+                        continue
+                    if _nml.get("side") == "sell" and _sb_raw is None:
+                        _sb_raw = _nml.get("bid")
+                        _sa_raw = _nml.get("ask")
+                    elif _nml.get("side") == "buy" and _lb_raw is None:
+                        _lb_raw = _nml.get("bid")
+                        _la_raw = _nml.get("ask")
 
             # -- Build candidate entry -------------------------------------------
             entry: dict[str, Any] = {
@@ -911,8 +1018,8 @@ class StrategyService:
                 # Per-leg quotes — use `is not None` to preserve valid 0.0
                 "short_bid": safe_float(_sb_raw if _sb_raw is not None else row.get("bid")),
                 "short_ask": safe_float(_sa_raw if _sa_raw is not None else row.get("ask")),
-                "long_bid": safe_float(row.get("_long_bid")),
-                "long_ask": safe_float(row.get("_long_ask")),
+                "long_bid": safe_float(_lb_raw),
+                "long_ask": safe_float(_la_raw),
                 "short_mid": None,
                 "long_mid": None,
                 # Credit & risk (credit-spread) / Debit & risk (debit-spread)
@@ -948,34 +1055,13 @@ class StrategyService:
             if lb is not None and la is not None:
                 entry["long_mid"] = round((lb + la) / 2.0, 4)
 
-            # ── Iron condor specific near-miss fields ──────────────────
-            if _is_ic:
-                entry.update({
-                    "short_put_strike": row.get("short_put_strike") or row.get("put_short_strike"),
-                    "long_put_strike": row.get("long_put_strike") or row.get("put_long_strike"),
-                    "short_call_strike": row.get("short_call_strike") or row.get("call_short_strike"),
-                    "long_call_strike": row.get("long_call_strike") or row.get("call_long_strike"),
-                    "put_wing_width": safe_float(row.get("put_wing_width")),
-                    "call_wing_width": safe_float(row.get("call_wing_width")),
-                    "readiness": row.get("readiness"),
-                    # Per-leg mids
-                    "short_put_mid": safe_float(row.get("short_put_mid")),
-                    "long_put_mid": safe_float(row.get("long_put_mid")),
-                    "short_call_mid": safe_float(row.get("short_call_mid")),
-                    "long_call_mid": safe_float(row.get("long_call_mid")),
-                    # Per-leg bid/ask (from IC enriched output)
-                    "short_put_bid": safe_float(row.get("_short_put_bid")),
-                    "short_put_ask": safe_float(row.get("_short_put_ask")),
-                    "long_put_bid": safe_float(row.get("_long_put_bid")),
-                    "long_put_ask": safe_float(row.get("_long_put_ask")),
-                    "short_call_bid": safe_float(row.get("_short_call_bid")),
-                    "short_call_ask": safe_float(row.get("_short_call_ask")),
-                    "long_call_bid": safe_float(row.get("_long_call_bid")),
-                    "long_call_ask": safe_float(row.get("_long_call_ask")),
-                    # Spread-level bid/ask
-                    "spread_bid": safe_float(row.get("spread_bid")),
-                    "spread_ask": safe_float(row.get("spread_ask")),
-                })
+            # ── Strategy-specific near-miss fields ─────────────────────
+            # Delegate to plugin.build_near_miss_entry() so that IC-specific
+            # fields, sigma distances, etc. are added by the plugin — the
+            # orchestrator has no hardcoded knowledge of any strategy's
+            # internal diagnostic fields.
+            if plugin is not None:
+                entry = plugin.build_near_miss_entry(row, reasons, entry)
 
             scored.append((nearness, entry))
 
@@ -983,53 +1069,23 @@ class StrategyService:
         scored.sort(key=lambda x: x[0], reverse=True)
         result = [entry for _, entry in scored[:limit]]
 
-        # ── Debug snapshot: top near-miss trade (full legs + serialized fields) ──
-        # When DEBUG logging is enabled, dump the full structure for the #1
-        # near-miss trade so silent bid/ask/delta loss is impossible.
+        # ── Debug snapshot: top near-miss trades ──────────────────────────
         _nm_log_limit = min(3, len(result))
         for _nmi in range(_nm_log_limit):
             _nm = result[_nmi]
-            if _nm.get("spread_type") == "iron_condor":
-                logger.debug(
-                    "event=near_miss_ic_snapshot rank=%d symbol=%s expiration=%s "
-                    "readiness=%s "
-                    "top_short_bid=%s top_short_ask=%s top_long_bid=%s top_long_ask=%s "
-                    "sp_bid=%s sp_ask=%s lp_bid=%s lp_ask=%s "
-                    "sc_bid=%s sc_ask=%s lc_bid=%s lc_ask=%s "
-                    "sp_mid=%s lp_mid=%s sc_mid=%s lc_mid=%s "
-                    "spread_bid=%s spread_ask=%s net_credit=%s "
-                    "nearness=%s reasons=%s",
-                    _nmi + 1, _nm.get("symbol"), _nm.get("expiration"),
-                    _nm.get("readiness"),
-                    # Top-level 2-leg compat fields
-                    _nm.get("short_bid"), _nm.get("short_ask"),
-                    _nm.get("long_bid"), _nm.get("long_ask"),
-                    # IC per-leg bid/ask
-                    _nm.get("short_put_bid"), _nm.get("short_put_ask"),
-                    _nm.get("long_put_bid"), _nm.get("long_put_ask"),
-                    _nm.get("short_call_bid"), _nm.get("short_call_ask"),
-                    _nm.get("long_call_bid"), _nm.get("long_call_ask"),
-                    # IC per-leg mids
-                    _nm.get("short_put_mid"), _nm.get("long_put_mid"),
-                    _nm.get("short_call_mid"), _nm.get("long_call_mid"),
-                    # Spread-level
-                    _nm.get("spread_bid"), _nm.get("spread_ask"),
-                    _nm.get("net_credit"),
-                    _nm.get("nearness_score"),
-                    _nm.get("reasons"),
-                )
-            else:
-                logger.debug(
-                    "event=near_miss_snapshot rank=%d symbol=%s expiration=%s "
-                    "short_bid=%s short_ask=%s long_bid=%s long_ask=%s "
-                    "short_mid=%s long_mid=%s nearness=%s reasons=%s",
-                    _nmi + 1, _nm.get("symbol"), _nm.get("expiration"),
-                    _nm.get("short_bid"), _nm.get("short_ask"),
-                    _nm.get("long_bid"), _nm.get("long_ask"),
-                    _nm.get("short_mid"), _nm.get("long_mid"),
-                    _nm.get("nearness_score"),
-                    _nm.get("reasons"),
-                )
+            logger.debug(
+                "event=near_miss_snapshot rank=%d spread_type=%s symbol=%s "
+                "expiration=%s short_bid=%s short_ask=%s long_bid=%s long_ask=%s "
+                "short_mid=%s long_mid=%s net_credit=%s nearness=%s reasons=%s",
+                _nmi + 1, _nm.get("spread_type"),
+                _nm.get("symbol"), _nm.get("expiration"),
+                _nm.get("short_bid"), _nm.get("short_ask"),
+                _nm.get("long_bid"), _nm.get("long_ask"),
+                _nm.get("short_mid"), _nm.get("long_mid"),
+                _nm.get("net_credit"),
+                _nm.get("nearness_score"),
+                _nm.get("reasons"),
+            )
 
         return result
 
@@ -1707,20 +1763,20 @@ class StrategyService:
                                 )
                         continue
                     rank_score, tie_breaks = plugin.score(row)
+                    # ── POP attribution invariant check ────────────────────
+                    _pop_err = plugin.validate_pop_attribution(row)
+                    if _pop_err:
+                        logger.warning(
+                            "event=pop_attribution_violation strategy=%s %s",
+                            strategy_id, _pop_err,
+                        )
                     row.pop("_policy", None)
                     row.pop("_request", None)
-                    # Remove transient debug fields before persisting
-                    for _k in ("_quote_rejection", "_rejection_codes",
-                               "_short_bid", "_short_ask", "_long_bid", "_long_ask",
-                               "_short_oi", "_short_vol", "_long_oi", "_long_vol",
-                               "_credit_basis",
-                               # IC per-leg transient fields
-                               "_short_put_bid", "_short_put_ask",
-                               "_long_put_bid", "_long_put_ask",
-                               "_short_call_bid", "_short_call_ask",
-                               "_long_call_bid", "_long_call_ask",
-                               "_short_put_delta", "_long_put_delta",
-                               "_short_call_delta", "_long_call_delta"):
+                    # Remove transient debug fields before persisting.
+                    # Uses plugin.TRANSIENT_FIELDS so each strategy declares
+                    # its own transient set — strategy_service has no hardcoded
+                    # knowledge of IC-specific or debit-specific transient fields.
+                    for _k in plugin.TRANSIENT_FIELDS:
                         row.pop(_k, None)
                     row["rank_score"] = rank_score
                     row["tie_breaks"] = tie_breaks
@@ -1763,7 +1819,7 @@ class StrategyService:
         _near_miss: list[dict[str, Any]] = []
         if not accepted and _rejected_rows:
             _near_miss = self._build_near_miss(
-                _rejected_rows, payload, policy, _NEAR_MISS_MAX,
+                _rejected_rows, payload, policy, _NEAR_MISS_MAX, plugin,
             )
 
         await self._apply_context_scores(accepted)
@@ -2100,69 +2156,12 @@ class StrategyService:
         }
 
         # ── Quote/OI enrichment counters ────────────────────────────────────
-        # Answers "did we actually try to look up quotes, and did they arrive?"
-        # All counters are derived from the enriched rows — no separate lookup
-        # step is needed because quotes are baked into OptionContract objects
-        # by normalize_chain() before the plugin ever sees them.
-        #
-        # CRITICAL: For multi-leg strategies with a canonical `legs[]` array,
-        # ALL quote-presence checks read from legs[].bid / legs[].ask directly.
-        # This is the single source of truth — immune to transient-field stripping.
+        # Delegates to plugin.compute_enrichment_counters() so each strategy
+        # declares how to derive counters from its own enriched output.
+        # This eliminates strategy-specific field knowledge from the orchestrator.
+        enrichment_counters: dict[str, int] = plugin.compute_enrichment_counters(enriched)
+        # Supplement with OI/volume counters (universal, not strategy-specific)
         _eq_total = len(enriched)
-        _eq_has_all_quotes = 0
-        _eq_quote_partial = 0
-        _eq_spread_derived = 0
-        for _r in enriched:
-            if not isinstance(_r, dict):
-                continue
-            _ic_legs = _r.get("legs")
-            if isinstance(_ic_legs, list) and len(_ic_legs) >= 2:
-                # ── Multi-leg (IC): derive everything from legs[] ──────
-                _leg_bid_ok = [
-                    isinstance(lg, dict) and lg.get("bid") is not None
-                    for lg in _ic_legs
-                ]
-                _leg_ask_ok = [
-                    isinstance(lg, dict) and lg.get("ask") is not None
-                    for lg in _ic_legs
-                ]
-                _all_bid = all(_leg_bid_ok)
-                _all_ask = all(_leg_ask_ok)
-                if _all_bid and _all_ask:
-                    _eq_has_all_quotes += 1
-                    # spread_quote_derived: all legs have bid+ask
-                    # AND net_credit is finite (mids were computed)
-                    _nc = _r.get("net_credit")
-                    if _nc is not None:
-                        _eq_spread_derived += 1
-                else:
-                    # Partial: at least ONE leg has bid+ask
-                    _any_complete = any(
-                        b and a for b, a in zip(_leg_bid_ok, _leg_ask_ok)
-                    )
-                    if _any_complete:
-                        _eq_quote_partial += 1
-            else:
-                # ── 2-leg / legacy: use transient fields ───────────────
-                _sb = _r.get("_short_bid")
-                _sa = _r.get("_short_ask")
-                _lb = _r.get("_long_bid")
-                _la = _r.get("_long_ask")
-                _fields = [_sb, _sa, _lb, _la]
-                _present = sum(1 for f in _fields if f is not None)
-                if _present == 4:
-                    _eq_has_all_quotes += 1
-                    # spread_quote_derived: check spread_bid/spread_ask
-                    if (_r.get("spread_bid") is not None
-                            and _r.get("spread_ask") is not None):
-                        _eq_spread_derived += 1
-                elif _present > 0:
-                    _eq_quote_partial += 1
-        _eq_quote_failed = _eq_total - _eq_has_all_quotes
-        _eq_quote_missing = _eq_quote_failed - _eq_quote_partial
-        # Separate counter: candidates that hit _quote_rejection during
-        # enrich-time validation (may overlap with quote_failed but is a
-        # different concept — validation failure vs missing data).
         _eq_quote_rejected = sum(
             1 for _r in enriched if isinstance(_r, dict)
             and _r.get("_quote_rejection")
@@ -2175,25 +2174,13 @@ class StrategyService:
             1 for _r in enriched if isinstance(_r, dict)
             and _r.get("volume") is not None
         )
-        enrichment_counters: dict[str, int] = {
-            "total_enriched": _eq_total,
-            # Leg-level quote counters (success + partial + missing == attempted)
-            "leg_quote_lookup_attempted": _eq_total,
-            "leg_quote_lookup_success": _eq_has_all_quotes,
-            "leg_quote_lookup_failed": _eq_quote_failed,
-            "quote_lookup_partial": _eq_quote_partial,
-            "quote_lookup_missing": _eq_quote_missing,
-            # Spread-level quote derivation (debit spreads)
-            "spread_quote_derived_attempted": _eq_total,
-            "spread_quote_derived_success": _eq_spread_derived,
-            "spread_quote_derived_failed": _eq_total - _eq_spread_derived,
-            # Validation-level: quotes that failed structural checks
+        enrichment_counters.update({
             "quote_validation_rejected": _eq_quote_rejected,
-            # Legacy aliases (backward compat — same semantics as leg_quote_*)
+            # Legacy aliases (backward compat)
             "quote_lookup_attempted": _eq_total,
-            "quote_lookup_success": _eq_has_all_quotes,
-            "quote_lookup_failed": _eq_quote_failed,
-            # OI counters (trade-level: min of both legs)
+            "quote_lookup_success": enrichment_counters.get("leg_quote_lookup_success", 0),
+            "quote_lookup_failed": enrichment_counters.get("leg_quote_lookup_failed", 0),
+            # OI counters (trade-level)
             "oi_lookup_attempted": _eq_total,
             "oi_lookup_success": _eq_has_oi,
             "oi_lookup_failed": _mfc_oi,
@@ -2201,16 +2188,19 @@ class StrategyService:
             "volume_lookup_attempted": _eq_total,
             "volume_lookup_success": _eq_has_vol,
             "volume_lookup_failed": _mfc_vol,
-        }
+        })
 
-        # Log enrichment counters summary (after all counters computed)
+        # Log enrichment counters summary
         logger.info(
             "event=enrichment_counters strategy=%s total=%d "
             "quote_success=%d quote_partial=%d quote_missing=%d "
             "spread_derived_success=%d spread_derived_failed=%d",
             strategy_id, _eq_total,
-            _eq_has_all_quotes, _eq_quote_partial, _eq_quote_missing,
-            _eq_spread_derived, _eq_total - _eq_spread_derived,
+            enrichment_counters.get("leg_quote_lookup_success", 0),
+            enrichment_counters.get("quote_lookup_partial", 0),
+            enrichment_counters.get("quote_lookup_missing", 0),
+            enrichment_counters.get("spread_quote_derived_success", 0),
+            enrichment_counters.get("spread_quote_derived_failed", 0),
         )
 
         # ── Assertion guard: smoke-test vs counters consistency ────────────
@@ -2239,6 +2229,8 @@ class StrategyService:
                     )
                 # Smoke says all contracts have bid+ask AND counters ALSO
                 # say no missing → but spread_quote_derived still 0?
+                _eq_has_all_quotes = enrichment_counters.get("leg_quote_lookup_success", 0)
+                _eq_spread_derived = enrichment_counters.get("spread_quote_derived_success", 0)
                 if (_smoke_missing_bid == 0 and _smoke_missing_ask == 0
                         and _mfc_any_leg_quote_missing == 0
                         and _eq_has_all_quotes == _eq_total

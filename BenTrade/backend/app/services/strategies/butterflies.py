@@ -5,9 +5,10 @@ from statistics import pstdev
 from typing import Any
 
 from app.services.ranking import safe_float
+from app.services.strategies.base import StrategyPlugin
 
 
-class ButterfliesStrategyPlugin:
+class ButterfliesStrategyPlugin(StrategyPlugin):
     id = "butterflies"
     display_name = "Butterfly Analysis"
 

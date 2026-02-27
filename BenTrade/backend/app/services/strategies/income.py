@@ -5,9 +5,10 @@ from statistics import pstdev
 from typing import Any
 
 from app.services.ranking import safe_float
+from app.services.strategies.base import StrategyPlugin
 
 
-class IncomeStrategyPlugin:
+class IncomeStrategyPlugin(StrategyPlugin):
     id = "income"
     display_name = "Income Strategies"
 

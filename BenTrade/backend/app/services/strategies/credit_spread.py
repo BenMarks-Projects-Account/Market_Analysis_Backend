@@ -6,6 +6,11 @@ from collections import defaultdict
 from typing import Any
 
 from app.services.ranking import compute_rank_score, safe_float
+from app.services.strategies.base import (
+    POP_SOURCE_NONE,
+    POP_SOURCE_NORMAL_CDF,
+    StrategyPlugin,
+)
 from app.utils.dates import dte_ceil
 from common.quant_analysis import enrich_trades_batch
 
@@ -85,9 +90,12 @@ def validate_spread_quotes(
     return True, None
 
 
-class CreditSpreadStrategyPlugin:
+class CreditSpreadStrategyPlugin(StrategyPlugin):
     id = "credit_spread"
     display_name = "Credit Spread"
+
+    # ── Transient fields to strip before persisting ─────────────────────
+    TRANSIENT_FIELDS: frozenset[str] = StrategyPlugin.TRANSIENT_FIELDS
 
     @staticmethod
     def _to_float(value: Any) -> float | None:
@@ -458,6 +466,77 @@ class CreditSpreadStrategyPlugin:
             long_oi = getattr(long_leg, "open_interest", None)
             long_vol = getattr(long_leg, "volume", None)
 
+            # ── Per-leg IV, delta, occ_symbol for canonical legs[] ──────
+            short_iv = self._to_float(getattr(short_leg, "iv", None))
+            long_delta = self._to_float(getattr(long_leg, "delta", None))
+            long_iv = self._to_float(getattr(long_leg, "iv", None))
+            short_occ = getattr(short_leg, "symbol", None)
+            long_occ = getattr(long_leg, "symbol", None)
+
+            # ── Per-leg mid (for legs[] and spread derivation) ──────────
+            short_mid_q = (
+                (short_bid + short_ask) / 2.0
+                if (short_bid is not None and short_ask is not None)
+                else None
+            )
+            long_mid_q = (
+                (long_bid + long_ask) / 2.0
+                if (long_bid is not None and long_ask is not None)
+                else None
+            )
+
+            # ── Canonical legs[] array (matches IC schema) ──────────────
+            # Fields: name, right, side, strike, qty, bid, ask, mid,
+            #         delta, iv, open_interest, volume, occ_symbol
+            _legs = [
+                {
+                    "name": "short_put",
+                    "right": "put",
+                    "side": "sell",
+                    "strike": short_strike,
+                    "qty": 1,
+                    "bid": short_bid,
+                    "ask": short_ask,
+                    "mid": short_mid_q,
+                    "delta": raw_delta,
+                    "iv": short_iv,
+                    "open_interest": int(short_oi) if short_oi is not None else None,
+                    "volume": int(short_vol) if short_vol is not None else None,
+                    "occ_symbol": short_occ,
+                },
+                {
+                    "name": "long_put",
+                    "right": "put",
+                    "side": "buy",
+                    "strike": long_strike,
+                    "qty": 1,
+                    "bid": long_bid,
+                    "ask": long_ask,
+                    "mid": long_mid_q,
+                    "delta": long_delta,
+                    "iv": long_iv,
+                    "open_interest": int(long_oi) if long_oi is not None else None,
+                    "volume": int(long_vol) if long_vol is not None else None,
+                    "occ_symbol": long_occ,
+                },
+            ]
+
+            # ── Spread-level bid/ask/mid (derived from leg quotes) ──────
+            # spread_bid = short_bid − long_ask  (conservative natural credit)
+            # spread_ask = short_ask − long_bid  (best-case credit)
+            # spread_mid = (spread_bid + spread_ask) / 2.0
+            # Only computed when all 4 leg quotes are valid.
+            if quotes_ok and all(
+                q is not None for q in (short_bid, short_ask, long_bid, long_ask)
+            ):
+                _spread_bid = round(short_bid - long_ask, 4)
+                _spread_ask = round(short_ask - long_bid, 4)
+                _spread_mid = round((_spread_bid + _spread_ask) / 2.0, 4)
+            else:
+                _spread_bid = None
+                _spread_ask = None
+                _spread_mid = None
+
             # Canonical trade-level OI/volume = short-leg values (the leg we
             # are selling, so its liquidity matters most).  Per-leg raw values
             # are stored separately for diagnostics.
@@ -486,6 +565,7 @@ class CreditSpreadStrategyPlugin:
                     "implied_vol": self._to_float(getattr(short_leg, "iv", None)),
                     "width": width,
                     "net_credit": net_credit,
+                    "net_debit": None,  # credit strategy — net_debit must be absent
                     "_credit_basis": credit_basis,
                     "contractsMultiplier": 100,
                     # -- enrichment debug fields (consumed by evaluate, not persisted) --
@@ -500,6 +580,11 @@ class CreditSpreadStrategyPlugin:
                     "_short_vol": short_vol,
                     "_long_oi": long_oi,
                     "_long_vol": long_vol,
+                    # ── Canonical legs[] + spread-level quotes ──────────────
+                    "legs": _legs,
+                    "spread_bid": _spread_bid,
+                    "spread_ask": _spread_ask,
+                    "spread_mid": _spread_mid,
                 }
             )
 
@@ -513,6 +598,18 @@ class CreditSpreadStrategyPlugin:
             iv_low=None,
             iv_high=None,
         )
+
+        # ── pop_model_used labeling ─────────────────────────────────────
+        # CreditSpread model uses normal_cdf for POP.  Label is set based
+        # on whether p_win_used was successfully derived.
+        for trade in (enriched or []):
+            if not isinstance(trade, dict):
+                continue
+            if trade.get("p_win_used") is not None:
+                trade.setdefault("pop_model_used", POP_SOURCE_NORMAL_CDF)
+            else:
+                trade.setdefault("pop_model_used", POP_SOURCE_NONE)
+
         return [row for row in (enriched or []) if isinstance(row, dict)]
 
     def evaluate(self, trade: dict[str, Any]) -> tuple[bool, list[str]]:

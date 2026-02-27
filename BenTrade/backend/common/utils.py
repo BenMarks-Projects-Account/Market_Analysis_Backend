@@ -34,7 +34,9 @@ _CODE_FENCE_RE = re.compile(r'```(?:json)?\s*\n?(.*?)\n?\s*```', re.DOTALL)
 
 _MODEL_EVAL_KEYS = frozenset({'recommendation', 'confidence', 'risk_level', 'key_factors', 'summary',
                               'score_0_100', 'confidence_0_1', 'thesis', 'key_drivers',
-                              'risk_review', 'execution_notes', 'missing_data'})
+                              'risk_review', 'execution_notes', 'execution_assessment',
+                              'missing_data', 'model_calculations', 'edge_assessment',
+                              'data_quality_flags', 'cross_check_deltas'})
 
 
 def _strip_code_fences(text: str) -> str:
@@ -181,27 +183,172 @@ def _normalize_eval(raw: dict) -> dict:
     key_drivers = raw.get('key_drivers')
     if not isinstance(key_drivers, list):
         key_drivers = [str(key_drivers)] if key_drivers else []
-    key_drivers = [str(d) for d in key_drivers if str(d or '').strip()][:8]
+    # key_drivers can be structured objects {factor, impact, evidence}
+    # or plain strings (legacy). Preserve objects, coerce bare values to strings.
+    _clean_drivers = []
+    for d in key_drivers[:8]:
+        if isinstance(d, dict) and d.get('factor'):
+            _clean_drivers.append({
+                'factor': str(d['factor']),
+                'impact': str(d.get('impact', 'neutral')),
+                'evidence': str(d.get('evidence', '')),
+            })
+        elif d and str(d or '').strip():
+            _clean_drivers.append(str(d))
+    key_drivers = _clean_drivers
 
     risk_review = raw.get('risk_review')
     if not isinstance(risk_review, dict):
         risk_review = {}
 
+    # Normalize risk_review to expanded schema (support both old and new shapes)
+    if 'primary_risks' not in risk_review:
+        # Old shape: { primary_risk, tail_scenario, data_quality_flag }
+        legacy_risks = []
+        if risk_review.get('primary_risk'):
+            legacy_risks.append(str(risk_review['primary_risk']))
+        if risk_review.get('tail_scenario'):
+            legacy_risks.append(str(risk_review['tail_scenario']))
+        risk_review = {
+            'primary_risks': legacy_risks,
+            'liquidity_risks': [],
+            'assignment_risk': 'low',
+            'volatility_risk': 'low',
+            'event_risk': [],
+        }
+    else:
+        # Ensure all keys present with safe types
+        risk_review.setdefault('primary_risks', [])
+        risk_review.setdefault('liquidity_risks', [])
+        risk_review.setdefault('assignment_risk', 'low')
+        risk_review.setdefault('volatility_risk', 'low')
+        risk_review.setdefault('event_risk', [])
+        for list_key in ('primary_risks', 'liquidity_risks', 'event_risk'):
+            if not isinstance(risk_review[list_key], list):
+                risk_review[list_key] = []
+            risk_review[list_key] = [str(r) for r in risk_review[list_key] if str(r or '').strip()]
+
     execution_notes = raw.get('execution_notes')
     if not isinstance(execution_notes, dict):
         execution_notes = {}
+
+    # Expanded execution_assessment (new schema)
+    execution_assessment = raw.get('execution_assessment')
+    if not isinstance(execution_assessment, dict):
+        # Fall back to execution_notes if present
+        fill_raw = (execution_notes.get('fill_probability', 'average') if execution_notes else 'average') or 'average'
+        execution_assessment = {
+            'fill_quality': str(fill_raw).lower() if str(fill_raw).lower() in ('good', 'average', 'poor') else 'average',
+            'slippage_risk': 'medium',
+            'recommended_limit': None,
+            'entry_notes': str(execution_notes.get('spread_concern', '') if execution_notes else ''),
+        }
+    else:
+        execution_assessment.setdefault('fill_quality', 'average')
+        execution_assessment.setdefault('slippage_risk', 'medium')
+        execution_assessment.setdefault('recommended_limit', None)
+        execution_assessment.setdefault('entry_notes', '')
+
+    # Model calculations (independently computed by LLM)
+    model_calculations = raw.get('model_calculations')
+    if not isinstance(model_calculations, dict):
+        model_calculations = {
+            'max_profit_per_share': None,
+            'max_loss_per_share': None,
+            'expected_value_est': None,
+            'return_on_risk_est': None,
+            'probability_est': None,
+            'breakeven_est': None,
+            'assumptions': [],
+        }
+    else:
+        model_calculations.setdefault('max_profit_per_share', None)
+        model_calculations.setdefault('max_loss_per_share', None)
+        model_calculations.setdefault('expected_value_est', None)
+        model_calculations.setdefault('return_on_risk_est', None)
+        model_calculations.setdefault('probability_est', None)
+        model_calculations.setdefault('breakeven_est', None)
+        # Migrate legacy 'notes' string → 'assumptions' list
+        assumptions = model_calculations.get('assumptions')
+        if not isinstance(assumptions, list):
+            notes = model_calculations.get('notes') or ''
+            assumptions = [str(notes)] if notes else []
+        model_calculations['assumptions'] = [str(a) for a in assumptions if str(a or '').strip()]
+        model_calculations.pop('notes', None)
+
+    # Edge assessment (passthrough — kept for backward compat, no longer required by prompt)
+    edge_assessment = raw.get('edge_assessment')
+    if not isinstance(edge_assessment, dict):
+        edge_assessment = {
+            'premium_vs_risk': 'neutral',
+            'volatility_context': 'neutral',
+            'liquidity_quality': 'medium',
+            'tail_risk_profile': 'moderate',
+        }
+    else:
+        edge_assessment.setdefault('premium_vs_risk', 'neutral')
+        edge_assessment.setdefault('volatility_context', 'neutral')
+        edge_assessment.setdefault('liquidity_quality', 'medium')
+        edge_assessment.setdefault('tail_risk_profile', 'moderate')
+
+    # Cross-check deltas (new — model vs engine comparison)
+    cross_check_deltas = raw.get('cross_check_deltas')
+    if not isinstance(cross_check_deltas, dict):
+        cross_check_deltas = {}
+    # Ensure each delta entry has the expected shape
+    _clean_deltas = {}
+    for metric_name, delta_info in cross_check_deltas.items():
+        if isinstance(delta_info, dict):
+            _clean_deltas[str(metric_name)] = {
+                'model': delta_info.get('model'),
+                'engine': delta_info.get('engine'),
+                'delta_pct': delta_info.get('delta_pct'),
+                'note': str(delta_info.get('note', '')),
+            }
+    cross_check_deltas = _clean_deltas
+
+    # Data quality flags (new)
+    data_quality_flags = raw.get('data_quality_flags')
+    if not isinstance(data_quality_flags, list):
+        data_quality_flags = []
+    else:
+        data_quality_flags = [str(f) for f in data_quality_flags if str(f or '').strip()]
 
     missing_data = raw.get('missing_data')
     if not isinstance(missing_data, list):
         missing_data = []
     missing_data = [str(m) for m in missing_data if str(m or '').strip()]
 
+    # --- Content validation guards (§5) ---
+    _content_warnings = []
+    if not key_drivers or len(key_drivers) < 3:
+        _content_warnings.append(f'key_drivers count={len(key_drivers)} (minimum 3 expected)')
+    if thesis and len(thesis.split('.')) < 2:
+        _content_warnings.append(f'thesis has fewer than 2 sentences')
+    if model_calculations.get('expected_value_est') is None:
+        _content_warnings.append('model_calculations.expected_value_est is missing')
+    if model_calculations.get('return_on_risk_est') is None:
+        _content_warnings.append('model_calculations.return_on_risk_est is missing')
+    if _content_warnings:
+        import sys as _sys
+        for w in _content_warnings:
+            print(f'[MODEL_CONTENT_GUARD] WARNING: {w}', file=_sys.stderr)
+
+    # Legacy key_factors: always strings for backward compat
+    _kf_legacy = kf[:]
+    if not _kf_legacy and key_drivers:
+        for d in key_drivers:
+            if isinstance(d, dict):
+                _kf_legacy.append(str(d.get('factor', '')))
+            else:
+                _kf_legacy.append(str(d))
+
     return {
         # Legacy fields (always set for backward compat)
         'recommendation': rec_legacy,
         'confidence': conf,
         'risk_level': risk,
-        'key_factors': kf or key_drivers,
+        'key_factors': _kf_legacy,
         'summary': summary,
         # New-schema fields
         'model_recommendation': rec_model,
@@ -211,6 +358,11 @@ def _normalize_eval(raw: dict) -> dict:
         'key_drivers': key_drivers,
         'risk_review': risk_review,
         'execution_notes': execution_notes,
+        'execution_assessment': execution_assessment,
+        'model_calculations': model_calculations,
+        'edge_assessment': edge_assessment,
+        'cross_check_deltas': cross_check_deltas,
+        'data_quality_flags': data_quality_flags,
         'missing_data': missing_data,
     }
 
@@ -247,114 +399,49 @@ def _check_anchoring_regression(payload_str: str, tag: str = '[GUARD]') -> None:
 # ---------------------------------------------------------------------------
 # Facts-only payload builder  (requirement §1–§2)
 # ---------------------------------------------------------------------------
-def _build_facts_only_payload(trade: dict) -> dict:
-    """Extract raw factual trade + market data without any BenTrade-derived
-    conclusions, composite scores, regime labels, or recommendations.
+def _build_facts_only_payload(trade: dict, *, include_crosscheck: bool = True) -> dict:
+    """Build the LLM input payload using the new ``AnalysisFacts`` contract.
 
-    Input fields → output mapping documented inline for traceability.
+    Uses ``build_analysis_facts()`` to normalize the raw trade dict, then
+    optionally attaches deterministic engine metrics under a separate
+    ``engine_crosscheck`` key (controlled by *include_crosscheck* or the
+    ``MODEL_CROSSCHECK_MODE`` env-var, which defaults to ``"on"``).
+
+    Input fields → output mapping is documented in
+    ``trade_analysis_engine.build_analysis_facts`` and
+    ``trade_analysis_engine.compute_trade_metrics``.
     """
-    def _to_float(x):
-        if x is None:
-            return None
-        try:
-            return float(x)
-        except (TypeError, ValueError):
-            return None
+    from common.trade_analysis_engine import build_analysis_facts, compute_trade_metrics
 
-    # ── Trade structure facts ────────────────────────────────────
-    trade_facts = {
-        "symbol": trade.get("symbol") or trade.get("underlying") or trade.get("underlying_symbol"),
-        "spread_type": trade.get("spread_type") or trade.get("strategy_id") or trade.get("type"),
-        "short_strike": _to_float(trade.get("short_strike")),
-        "long_strike": _to_float(trade.get("long_strike")),
-        "underlying_price": _to_float(trade.get("price") or trade.get("underlying_price")),
-        "expiration": trade.get("expiration"),
-        "dte": _to_float(trade.get("dte")),
-        "net_credit": _to_float(trade.get("net_credit") or trade.get("credit")),
-        "width": _to_float(trade.get("width")),
+    facts = build_analysis_facts(trade)
+    engine_metrics = compute_trade_metrics(facts)
+
+    # Build the payload from the structured facts
+    payload = {
+        "trade": {
+            "symbol": (facts.get("underlying") or {}).get("symbol"),
+            "spread_type": (facts.get("structure") or {}).get("spread_type"),
+            "short_strike": (facts.get("structure") or {}).get("short_strike"),
+            "long_strike": (facts.get("structure") or {}).get("long_strike"),
+            "underlying_price": (facts.get("underlying") or {}).get("price"),
+            "expiration": (facts.get("structure") or {}).get("expiration"),
+            "dte": (facts.get("structure") or {}).get("dte"),
+            "net_credit": (facts.get("pricing") or {}).get("net_credit"),
+            "width": (facts.get("structure") or {}).get("width"),
+        },
+        "volatility": facts.get("volatility") or {},
+        "liquidity": facts.get("liquidity") or {},
+        "market_context": facts.get("market_context") or {},
+        "probability": facts.get("probability") or {},
+        "data_quality_flags": facts.get("data_quality_flags") or [],
     }
 
-    # ── Per-contract risk/reward facts (raw, not conclusions) ────
-    risk_reward_facts = {
-        "max_profit_per_share": _to_float(trade.get("max_profit_per_share") or trade.get("max_profit")),
-        "max_loss_per_share": _to_float(trade.get("max_loss_per_share") or trade.get("max_loss")),
-        "break_even": _to_float(trade.get("break_even")),
-        "ev_per_share": _to_float(trade.get("ev_per_share") or trade.get("expected_value")),
-        "pop": _to_float(trade.get("pop")),
-        "return_on_risk": _to_float(trade.get("return_on_risk")),
-        "kelly_fraction": _to_float(trade.get("kelly_fraction")),
-    }
+    # Optionally include deterministic engine calculations for cross-check
+    crosscheck_mode = os.environ.get("MODEL_CROSSCHECK_MODE", "on")
+    if include_crosscheck and crosscheck_mode != "off":
+        payload["engine_crosscheck"] = engine_metrics
 
-    # ── Volatility facts ─────────────────────────────────────────
-    volatility_facts = {
-        "iv": _to_float(trade.get("iv") or trade.get("implied_vol")),
-        "realized_vol_20d": _to_float(trade.get("realized_vol") or trade.get("realized_vol_20d")),
-        "iv_rv_ratio": _to_float(trade.get("iv_rv_ratio")),
-        "iv_rank": _to_float(trade.get("iv_rank")),
-        "vix": _to_float(trade.get("vix")),
-        "expected_move_1sigma": _to_float(trade.get("expected_move_1sigma") or trade.get("expected_move")),
-    }
-
-    # ── Liquidity facts ──────────────────────────────────────────
-    liquidity_facts = {
-        "bid": _to_float(trade.get("bid")),
-        "ask": _to_float(trade.get("ask")),
-        "bid_ask_spread_pct": _to_float(trade.get("bid_ask_spread_pct")),
-        "volume": _to_float(trade.get("volume")),
-        "open_interest": _to_float(trade.get("open_interest")),
-    }
-
-    # ── Market context facts (raw numbers, NO regime labels) ─────
-    # Build trend/breadth/momentum fact arrays from raw data
-    trend_facts = []
-    price = _to_float(trade.get("price") or trade.get("underlying_price"))
-    sma20 = _to_float(trade.get("sma20"))
-    sma50 = _to_float(trade.get("sma50"))
-    sma200 = _to_float(trade.get("sma200"))
-    ema20 = _to_float(trade.get("ema20"))
-    ema50 = _to_float(trade.get("ema50"))
-    if price is not None and ema20 is not None:
-        trend_facts.append(f"Close {'>' if price >= ema20 else '<'} EMA20")
-    if ema50 is not None and sma200 is not None:
-        trend_facts.append(f"EMA50 {'>' if ema50 >= sma200 else '<'} SMA200")
-    if price is not None and sma50 is not None:
-        trend_facts.append(f"Close {'>' if price >= sma50 else '<'} SMA50")
-
-    momentum_facts = []
-    rsi14 = _to_float(trade.get("rsi14"))
-    if rsi14 is not None:
-        if rsi14 < 30:
-            momentum_facts.append(f"RSI14 = {rsi14:.1f} (oversold zone)")
-        elif rsi14 > 70:
-            momentum_facts.append(f"RSI14 = {rsi14:.1f} (overbought zone)")
-        else:
-            momentum_facts.append(f"RSI14 = {rsi14:.1f}")
-
-    # Short-strike distance fact
-    short_strike_z = _to_float(trade.get("short_strike_z"))
-    strike_distance_pct = _to_float(trade.get("strike_distance_pct"))
-    distance_facts = []
-    if short_strike_z is not None:
-        distance_facts.append(f"Short strike is {short_strike_z:.2f} sigma from spot")
-    if strike_distance_pct is not None:
-        distance_facts.append(f"Short strike is {strike_distance_pct * 100:.1f}% from spot")
-
-    market_context = {
-        "vix": _to_float(trade.get("vix")),
-        "spy_price": price if str(trade.get("symbol") or "").upper() == "SPY" else None,
-        "underlying_price": price,
-        "trend_facts": trend_facts,
-        "momentum_facts": momentum_facts,
-        "distance_facts": distance_facts,
-    }
-
-    return {
-        "trade": trade_facts,
-        "risk_reward": risk_reward_facts,
-        "volatility": volatility_facts,
-        "liquidity": liquidity_facts,
-        "market_context": market_context,
-    }
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +449,10 @@ def _build_facts_only_payload(trade: dict) -> dict:
 # ---------------------------------------------------------------------------
 _INDEPENDENT_ANALYSIS_PROMPT = """\
 You are an independent options risk analyst.
+Write like a professional options risk analyst.
+Be concise but analytically specific.
+Avoid vague phrases like "looks good" or "appears strong."
+Always tie conclusions to provided data.
 
 CRITICAL INSTRUCTIONS:
 - Base your evaluation ONLY on the factual data provided below.
@@ -371,6 +462,34 @@ CRITICAL INSTRUCTIONS:
 - If key data is missing or weak, explicitly call it out.
 - Prefer cautious, risk-aware reasoning.
 - You are NOT confirming anyone else's analysis — you are forming your own.
+- Do NOT copy or reference any external scoring system — compute your own metrics.
+
+DATA QUALITY FLAGS:
+- The input includes a "data_quality_flags" array listing any fields that were \
+missing or invalid in the original trade data.  Be conservative when these flags \
+indicate important data is missing.
+
+CROSS-CHECK PROTOCOL:
+- The input MAY include an "engine_crosscheck" object with deterministic engine \
+calculations (max_profit, max_loss, breakeven, return_on_risk, EV, Kelly, POP proxy).
+- FIRST compute your own values independently (model_calculations).
+- THEN compare to engine_crosscheck values — if your values differ by more than \
+10%, explain WHY in model_calculations.notes and in cross_check_deltas.
+- The engine values are NOT authoritative — they can be wrong if inputs are bad.  \
+Your independent calculation takes precedence when you can justify it.
+
+YOU MUST INDEPENDENTLY COMPUTE (in model_calculations):
+- max_profit_per_share: net_credit for credit spreads.
+- max_loss_per_share: width - net_credit for credit spreads.
+- expected_value_est: Consider probability vs payoff asymmetry. \
+Use POP or short-strike delta as probability proxy. EV ~ (POP * max_profit) - ((1-POP) * max_loss).
+- return_on_risk_est: credit / (width - credit) or max_profit / max_loss.
+- probability_est: Use short-strike delta as a probability proxy if available, \
+or estimate from distance-to-strike / sigma.
+- breakeven_est: For credit spreads, short_strike +/- net_credit (direction depends on put/call).
+- assumptions: Array of strings explaining the assumptions behind your calculations.
+- Be conservative when liquidity is weak or data is sparse.
+- If insufficient data exists, estimate conservatively and note assumptions.
 
 EVALUATION DIMENSIONS (consider all holistically):
 1. Reward vs risk profile (EV, max profit/loss ratio, return on risk)
@@ -386,22 +505,63 @@ SCORING DEFINITION:
 based ONLY on the provided facts. Most decent trades should fall in 40-70 range. \
 Reserve 80+ for truly exceptional setups. Below 30 = material concerns.
 
+RULES FOR DEPTH:
+- thesis: MUST be 2-3 sentences minimum. State the core trade thesis and the single \
+biggest factor driving the recommendation.
+- key_drivers: Return AT LEAST 3 drivers. Each must be a structured object with \
+factor, impact (positive|negative|neutral), \
+and evidence (specific data that led to this assessment). \
+Prefer specific, data-linked reasoning over generic statements.
+- risk_review: Must include at least 2 primary_risks. Explicitly state the single \
+largest concern.
+- Mention the largest concern explicitly in risk_review or thesis.
+
 OUTPUT FORMAT — return valid JSON only (no markdown, no code fences):
 {
   "recommendation": "TAKE" | "PASS" | "WATCH",
   "score_0_100": <integer 0-100>,
   "confidence_0_1": <float 0.0-1.0>,
-  "thesis": "<1-2 sentence core thesis>",
-  "key_drivers": ["<string>", ...],
+
+  "thesis": "<2-3 sentence high-level summary>",
+
+  "model_calculations": {
+    "max_profit_per_share": <number or null>,
+    "max_loss_per_share": <number or null>,
+    "expected_value_est": <number or null>,
+    "return_on_risk_est": <number or null>,
+    "probability_est": <number or null>,
+    "breakeven_est": <number or null>,
+    "assumptions": ["<string>", ...]
+  },
+
+  "cross_check_deltas": {
+    "<metric_name>": {"model": <number>, "engine": <number>, "delta_pct": <number>, "note": "<why>"}
+  },
+
+  "key_drivers": [
+    {
+      "factor": "<string>",
+      "impact": "positive" | "negative" | "neutral",
+      "evidence": "<what data led to this>"
+    }
+  ],
+
   "risk_review": {
-    "primary_risk": "<string>",
-    "tail_scenario": "<string>",
-    "data_quality_flag": "<string or null>"
+    "primary_risks": ["<string>", ...],
+    "liquidity_risks": ["<string>", ...],
+    "assignment_risk": "low" | "medium" | "high",
+    "volatility_risk": "low" | "medium" | "high",
+    "event_risk": ["<string>", ...]
   },
-  "execution_notes": {
-    "fill_probability": "<High|Medium|Low>",
-    "spread_concern": "<string or null>"
+
+  "execution_assessment": {
+    "fill_quality": "good" | "average" | "poor",
+    "slippage_risk": "low" | "medium" | "high",
+    "recommended_limit": <number or null>,
+    "entry_notes": "<string>"
   },
+
+  "data_quality_flags": ["<string>", ...],
   "missing_data": ["<field_name>", ...]
 }
 
@@ -767,15 +927,26 @@ def generate_mock_report() -> str:
 def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http://localhost:1234/v1/chat/completions', retries=2, timeout=120):
     """Send a single trade to the local model and append the evaluated trade
     to ``results/model_<source_filename>``.  Returns the evaluated trade dict
-    (including ``model_evaluation``) on success.  On model-call failure a
-    provisional NEUTRAL evaluation is persisted and returned so the UI
-    receives a deterministic response (no 500).
+    (including ``model_evaluation`` and ``engine_calculations``) on success.
 
-    **Key changes from the previous version:**
-    - *timeout* raised from 30 → 120 s to accommodate slow local LLMs.
-    - Robust JSON extraction: strips code fences, tolerates multiple shapes.
-    - Detailed ``[MODEL_TRACE]`` logging with a per-call *requestId*.
+    **Pipeline:**
+    1. Hard-gate override (deterministic REJECT for clearly bad trades)
+    2. Build ``AnalysisFacts`` → compute deterministic engine metrics
+    3. Build facts-only LLM payload (with optional cross-check data)
+    4. Call LLM → extract JSON → coerce shape → normalize
+    5. Schema validate → repair retry if violations found
+    6. Attach both ``engine_calculations`` and ``model_evaluation`` to result
+
+
+    On model-call failure a provisional NEUTRAL evaluation is persisted and
+    returned so the UI receives a deterministic response (no 500).
     """
+    from common.trade_analysis_engine import (
+        build_analysis_facts,
+        compute_trade_metrics,
+        validate_model_schema,
+    )
+
     request_id = uuid.uuid4().hex[:10]
     TAG = f'[MODEL_TRACE:{request_id}]'
 
@@ -784,22 +955,26 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http:
 
     PROMPT = _INDEPENDENT_ANALYSIS_PROMPT
 
-    # Pre-call deterministic override
+    # ── Step 1: Pre-call deterministic override ──────────────────
     base_me = trade.get('model_evaluation') or {}
     me_override = hard_gate_override(trade, base_me)
 
-    # If hard gate forced a decision, persist and return immediately
+    # ── Step 2: Build AnalysisFacts + compute engine metrics ─────
+    analysis_facts = build_analysis_facts(trade)
+    engine_metrics = compute_trade_metrics(analysis_facts)
+
+    # If hard gate forced a decision, persist with engine metrics and return
     if me_override and me_override.get('_hard_gate_forced'):
         forced_eval = dict(me_override)
         forced_eval.pop('_hard_gate_forced', None)
         new = dict(trade)
         new['model_evaluation'] = forced_eval
+        new['engine_calculations'] = engine_metrics
         _persist_model_result(new, model_out_path, TAG)
         print(f"{TAG} Hard-gate forced evaluation: {forced_eval.get('recommendation')}")
         return new
 
-    # Build facts-only payload — NO anchoring fields (regime labels,
-    # composite scores, derived conclusions)
+    # ── Step 3: Build facts-only payload ─────────────────────────
     facts_payload = _build_facts_only_payload(trade)
     facts_json = json.dumps(facts_payload, ensure_ascii=False, indent=None)
 
@@ -811,7 +986,7 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http:
             {'role': 'system', 'content': PROMPT},
             {'role': 'user', 'content': facts_json}
         ],
-        'max_tokens': 1024,
+        'max_tokens': 2048,
         'temperature': 0.0,
         'stream': False,
     }
@@ -820,9 +995,11 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http:
     strategy = trade.get('strategy_id') or trade.get('spread_type') or '?'
     print(f"{TAG} start — symbol={symbol} strategy={strategy} source={source_filename} url={model_url} timeout={timeout}")
 
+    # ── Step 4: Call LLM ─────────────────────────────────────────
     attempt = 0
     last_err = None
     raw_snippet = None
+    model_eval = None
     while attempt <= retries:
         try:
             attempt += 1
@@ -875,9 +1052,24 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http:
                 last_err = f'unexpected_shape (requestId={request_id})'
                 break  # don't retry — shape issue won't change
 
+            # ── Step 5: Schema validation + repair retry ─────────
+            violations = validate_model_schema(model_eval)
+            if violations:
+                print(f"{TAG} SCHEMA_VIOLATIONS: {violations}")
+                repair_eval = _attempt_repair(
+                    model_eval, violations, facts_json, PROMPT,
+                    model_url, timeout, TAG,
+                )
+                if repair_eval is not None:
+                    model_eval = repair_eval
+                else:
+                    # Accept partial output — violations are logged but not fatal
+                    print(f"{TAG} REPAIR_FAILED — accepting partial model output with {len(violations)} violation(s)")
+
             # --- Success! ---
             new = dict(trade)
             new['model_evaluation'] = model_eval
+            new['engine_calculations'] = engine_metrics
             _persist_model_result(new, model_out_path, TAG)
             print(f"{TAG} SUCCESS — recommendation={model_eval.get('recommendation')} model_rec={model_eval.get('model_recommendation')} score={model_eval.get('score_0_100')} confidence={model_eval.get('confidence')}")
             return new
@@ -919,8 +1111,99 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http:
 
     new = dict(trade)
     new['model_evaluation'] = fallback_eval
+    new['engine_calculations'] = engine_metrics
     _persist_model_result(new, model_out_path, TAG)
     return new
+
+
+def _attempt_repair(
+    partial_eval: dict,
+    violations: list[str],
+    facts_json: str,
+    system_prompt: str,
+    model_url: str,
+    timeout: int,
+    tag: str,
+) -> dict | None:
+    """Attempt a single repair LLM call to fix schema violations.
+
+    Sends the partial output + violation list back to the model and asks it
+    to return a corrected JSON object.  Returns the repaired ``model_eval``
+    on success, ``None`` on failure.
+    """
+    repair_prompt = (
+        "Your previous response had schema violations.  Fix them and return "
+        "a COMPLETE, corrected JSON object matching the required schema.\n\n"
+        f"VIOLATIONS:\n{json.dumps(violations, indent=2)}\n\n"
+        f"YOUR PARTIAL OUTPUT:\n{json.dumps(partial_eval, indent=2, default=str)}\n\n"
+        "Return ONLY valid JSON matching the schema in the system prompt. "
+        "Do not include markdown, code fences, or commentary."
+    )
+
+    repair_payload = {
+        'messages': [
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': facts_json},
+            {'role': 'assistant', 'content': json.dumps(partial_eval, default=str)},
+            {'role': 'user', 'content': repair_prompt},
+        ],
+        'max_tokens': 2048,
+        'temperature': 0.0,
+        'stream': False,
+    }
+
+    try:
+        print(f"{tag} REPAIR attempt — {len(violations)} violation(s)")
+        resp = requests.post(model_url, json=repair_payload, timeout=timeout)
+        resp.raise_for_status()
+
+        resp_json = None
+        try:
+            resp_json = resp.json()
+        except Exception:
+            pass
+
+        assistant_text = None
+        if isinstance(resp_json, dict):
+            chs = resp_json.get('choices') or []
+            if chs and isinstance(chs, list):
+                first = chs[0]
+                if isinstance(first, dict):
+                    msg = first.get('message')
+                    if isinstance(msg, dict) and 'content' in msg:
+                        assistant_text = msg.get('content')
+                    elif 'text' in first:
+                        assistant_text = first.get('text')
+        if assistant_text is None:
+            assistant_text = getattr(resp, 'text', '') or ''
+
+        parsed = _find_json_block(assistant_text)
+        if parsed is None:
+            print(f"{tag} REPAIR_FAIL: could not parse repair response")
+            return None
+
+        repaired_eval = _coerce_model_evaluation(parsed)
+        if repaired_eval is None:
+            print(f"{tag} REPAIR_FAIL: coercion failed on repair response")
+            return None
+
+        # Re-validate
+        from common.trade_analysis_engine import validate_model_schema
+        new_violations = validate_model_schema(repaired_eval)
+        if new_violations:
+            print(f"{tag} REPAIR_PARTIAL: repair still has {len(new_violations)} violation(s): {new_violations}")
+            # Accept if fewer violations than before
+            if len(new_violations) < len(violations):
+                print(f"{tag} REPAIR_IMPROVED: accepting repaired output ({len(violations)} → {len(new_violations)} violations)")
+                return repaired_eval
+            return None
+
+        print(f"{tag} REPAIR_SUCCESS: all violations resolved")
+        return repaired_eval
+
+    except Exception as e:
+        print(f"{tag} REPAIR_ERROR: {e}")
+        return None
 
 
 def _try_legacy_list_shape(parsed, tag: str) -> dict | None:

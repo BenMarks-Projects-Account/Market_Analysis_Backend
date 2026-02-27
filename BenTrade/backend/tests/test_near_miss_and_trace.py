@@ -95,7 +95,8 @@ def _make_enriched_row(
 
 def _build_near_miss_one(row: dict[str, Any], reasons: list[str]) -> dict[str, Any]:
     """Call _build_near_miss with a single rejected row, return the entry."""
-    result = StrategyService._build_near_miss(
+    svc = object.__new__(StrategyService)  # bare instance, no __init__
+    result = svc._build_near_miss(
         rejected_rows=[(row, reasons)],
         payload={},
         policy={},

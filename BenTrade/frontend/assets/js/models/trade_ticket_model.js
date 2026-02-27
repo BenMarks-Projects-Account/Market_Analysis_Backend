@@ -78,6 +78,34 @@ window.BenTradeTradeTicketModel = (function () {
     return 'CREDIT';
   }
 
+  /* ── OCC symbol builder ──────────────────────────────────────── */
+
+  /**
+   * Build an OCC symbol from components when the backend didn't provide one.
+   * OCC format: ROOT(1-6 chars) + YYMMDD + P/C + 8-digit strike (strike * 1000, zero-padded).
+   * Returns empty string if any component is missing.
+   *
+   * Input fields: symbol (underlying), expiration (YYYY-MM-DD), strike (number), callput (put|call)
+   * Formula: OCC = SYMBOL + YYMMDD + P/C + sprintf("%08d", strike * 1000)
+   */
+  function _buildOccSymbol(symbol, expiration, strike, callput) {
+    if (!symbol || !expiration || strike == null || !callput) return '';
+    var sym = String(symbol).toUpperCase().replace(/[^A-Z]/g, '');
+    if (!sym || sym.length > 6) return '';
+    var parts = String(expiration).split('-');
+    if (parts.length !== 3) return '';
+    var yy = parts[0].slice(-2);
+    var mm = parts[1];
+    var dd = parts[2];
+    var pc = String(callput).charAt(0).toUpperCase();
+    if (pc !== 'P' && pc !== 'C') return '';
+    var strikeInt = Math.round(Number(strike) * 1000);
+    if (isNaN(strikeInt) || strikeInt <= 0) return '';
+    var strikeStr = String(strikeInt);
+    while (strikeStr.length < 8) strikeStr = '0' + strikeStr;
+    return sym + yy + mm + dd + pc + strikeStr;
+  }
+
   /* ── Resolve legs ──────────────────────────────────────────── */
 
   function _normalizeLegs(rawLegs, header) {
@@ -91,7 +119,7 @@ window.BenTradeTradeTicketModel = (function () {
       if (header.shortStrike != null) {
         legs.push({
           side:          isCredit ? 'sell_to_open' : 'buy_to_open',
-          optionSymbol:  '',
+          optionSymbol:  _buildOccSymbol(header.symbol, header.expiration, header.shortStrike, cp),
           expiration:    header.expiration || '',
           strike:        header.shortStrike,
           right:         cp,
@@ -102,7 +130,7 @@ window.BenTradeTradeTicketModel = (function () {
       if (header.longStrike != null) {
         legs.push({
           side:          isCredit ? 'buy_to_open' : 'sell_to_open',
-          optionSymbol:  '',
+          optionSymbol:  _buildOccSymbol(header.symbol, header.expiration, header.longStrike, cp),
           expiration:    header.expiration || '',
           strike:        header.longStrike,
           right:         cp,
@@ -189,7 +217,7 @@ window.BenTradeTradeTicketModel = (function () {
 
     // Resolve legs
     var rawLegs = input.legs || raw.legs || null;
-    var header = { strategyId: strategyId, expiration: expiration, shortStrike: shortStrike, longStrike: longStrike };
+    var header = { strategyId: strategyId, expiration: expiration, shortStrike: shortStrike, longStrike: longStrike, symbol: symbol };
     var legs = _normalizeLegs(rawLegs, header);
 
     // Risk / reward metrics
@@ -199,15 +227,26 @@ window.BenTradeTradeTicketModel = (function () {
     var ev         = _dig(raw, ['expected_value', 'ev']);
     var ror        = _dig(raw, ['return_on_risk', 'ror', 'ev_to_risk']);
 
-    // Breakevens
+    // Breakevens — resolve from multiple sources
+    // Input fields: breakevens, breakeven, computed.breakevens, details.breakevens,
+    //               details.break_even, break_even (root)
     var breakevens = null;
-    var be = raw.breakevens || raw.breakeven || (raw.computed && raw.computed.breakevens) || (raw.details && raw.details.breakevens);
+    var be = raw.breakevens || raw.breakeven
+      || (raw.computed && raw.computed.breakevens)
+      || (raw.details && (raw.details.breakevens || raw.details.break_even))
+      || raw.break_even;
     if (Array.isArray(be)) breakevens = be.map(function (v) { return toNum(v); }).filter(function (v) { return v != null; });
     else if (be != null) { var bv = toNum(be); if (bv != null) breakevens = [bv]; }
 
-    // Pricing context
-    var midPrice     = _dig(raw, ['mid_price', 'spread_mid', 'mid']);
-    var naturalPrice = _dig(raw, ['natural_price', 'natural']);
+    // Pricing context — resolve from pricing sub-dict first, then root
+    // Input fields: pricing.spread_mid, spread_mid, mid_price, mid (for mid)
+    //               pricing.spread_natural, spread_natural, natural_price, natural (for natural)
+    // Note: use explicit != null checks instead of || to handle 0 correctly.
+    var pricingSub = (raw.pricing && typeof raw.pricing === 'object') ? raw.pricing : {};
+    var midPrice     = toNum(pricingSub.spread_mid);
+    if (midPrice == null) midPrice = _dig(raw, ['spread_mid', 'mid_price', 'mid']);
+    var naturalPrice = toNum(pricingSub.spread_natural);
+    if (naturalPrice == null) naturalPrice = _dig(raw, ['spread_natural', 'natural_price', 'natural']);
 
     // IV / ranking
     var iv     = _dig(raw, ['iv', 'implied_volatility']);
@@ -215,6 +254,10 @@ window.BenTradeTradeTicketModel = (function () {
 
     // Limit price: default to net premium (which is per-spread mid-based)
     var limitPrice = netPremium != null ? Math.abs(netPremium) : (midPrice != null ? Math.abs(midPrice) : null);
+
+    // Execution readiness — backend may flag this when legs lack OCC
+    var executionInvalid = !!(raw.execution_invalid);
+    var executionInvalidReason = raw.execution_invalid_reason || null;
 
     return {
       underlying:      symbol,
@@ -244,6 +287,8 @@ window.BenTradeTradeTicketModel = (function () {
       iv:              iv,
       ivRank:          ivRank,
       legs:            legs,
+      executionInvalid:       executionInvalid,
+      executionInvalidReason: executionInvalidReason,
     };
   }
 
@@ -256,6 +301,7 @@ window.BenTradeTradeTicketModel = (function () {
       shortStrike: null, longStrike: null, netPremium: null, netPremiumLabel: '',
       priceEffect: 'CREDIT', midPrice: null, naturalPrice: null,
       iv: null, ivRank: null, legs: [],
+      executionInvalid: false, executionInvalidReason: null,
     };
   }
 
@@ -268,6 +314,18 @@ window.BenTradeTradeTicketModel = (function () {
   /**
    * Validate a TradeTicketModel before submission.
    * Returns { valid: boolean, errors: string[], warnings: string[] }
+   *
+   * Blocking errors (prevent execution):
+   *   - Symbol / strategy / legs missing
+   *   - Limit price invalid
+   *   - execution_invalid flag from backend (e.g. missing OCC)
+   *   - Any leg missing OCC symbol
+   *
+   * Warnings (non-blocking):
+   *   - Max loss unavailable
+   *   - Expiration missing
+   *   - Breakeven unavailable
+   *   - Mid / natural price missing
    */
   function validate(ticket) {
     var errors = [];
@@ -284,12 +342,51 @@ window.BenTradeTradeTicketModel = (function () {
       }
     }
 
+    // Execution-invalid flag from backend (e.g. missing OCC symbols)
+    if (ticket.executionInvalid) {
+      errors.push(ticket.executionInvalidReason || 'Trade flagged as execution-invalid by backend.');
+    }
+
+    // OCC symbol check on every leg
+    var occMissing = 0;
+    for (var i = 0; i < ticket.legs.length; i++) {
+      var leg = ticket.legs[i];
+      if (!leg.optionSymbol || !String(leg.optionSymbol).trim()) {
+        occMissing++;
+      }
+    }
+    if (occMissing > 0) {
+      errors.push(occMissing + ' leg(s) missing OCC symbol — cannot execute.');
+    }
+
     if (ticket.maxLoss == null || ticket.maxLoss === 0) {
       warnings.push('Max loss is unavailable — proceed with caution.');
     }
 
     if (!ticket.expiration) {
       warnings.push('Expiration is missing.');
+    }
+
+    if (!ticket.breakevens || ticket.breakevens.length === 0) {
+      warnings.push('Breakeven not computed — verify trade manually.');
+    }
+
+    if (ticket.midPrice == null) {
+      warnings.push('Spread mid price unavailable.');
+    }
+
+    if (ticket.naturalPrice == null) {
+      warnings.push('Natural price unavailable — fill quality uncertain.');
+    }
+
+    // Log validation result
+    if (typeof console !== 'undefined' && console.info) {
+      console.info(
+        '[ExecutionValidator] trade=' + ticket.underlying + ' ' + ticket.strategyId +
+        ' valid=' + (errors.length === 0) +
+        ' errors=' + errors.length +
+        ' warnings=[' + warnings.join('; ') + ']'
+      );
     }
 
     return { valid: errors.length === 0, errors: errors, warnings: warnings };

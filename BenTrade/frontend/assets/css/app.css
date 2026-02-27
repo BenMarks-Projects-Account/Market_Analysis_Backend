@@ -1637,6 +1637,29 @@
             box-shadow: 0 0 18px rgba(0,234,255,0.2);
         }
 
+        /* ── Execution-readiness indicators ──────────── */
+        .tt-occ-missing{
+            color: #ff5252;
+            font-weight: 700;
+            font-size: 11px;
+            animation: pulse-occ 1.2s ease-in-out infinite;
+        }
+        @keyframes pulse-occ{
+            0%,100%{ opacity: 1; }
+            50%{ opacity: 0.5; }
+        }
+        .tt-footer-errors{
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            margin-bottom: 8px;
+        }
+        .tt-footer-error{
+            font-size: 10px;
+            color: #ff5252;
+            font-weight: 600;
+        }
+
         /* ── Toast ───────────────────────────────────── */
         .tt-toast{
             position: fixed;

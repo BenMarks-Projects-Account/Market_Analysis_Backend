@@ -6,6 +6,13 @@ from statistics import pstdev
 from typing import Any
 
 from app.services.ranking import compute_rank_score, safe_float
+from app.services.strategies.base import (
+    POP_SOURCE_BREAKEVEN_LOGNORMAL,
+    POP_SOURCE_DELTA_ADJUSTED,
+    POP_SOURCE_DELTA_APPROX,
+    POP_SOURCE_NONE,
+    StrategyPlugin,
+)
 
 logger = logging.getLogger("bentrade.debit_spreads")
 
@@ -236,9 +243,15 @@ def _validate_debit_trade(trade: dict[str, Any], exp_move: float | None) -> None
     trade["_valid_for_ranking"] = valid
 
 
-class DebitSpreadsStrategyPlugin:
+class DebitSpreadsStrategyPlugin(StrategyPlugin):
     id = "debit_spreads"
     display_name = "Debit Spreads"
+
+    # ── Transient fields to strip before persisting ─────────────────────
+    TRANSIENT_FIELDS: frozenset[str] = StrategyPlugin.TRANSIENT_FIELDS | frozenset({
+        "_dq_flags", "_pop_gate_eval", "_gate_eval_snapshot",
+        "_primary_rejection_reason", "_valid_for_ranking",
+    })
 
     @staticmethod
     def _to_float(value: Any) -> float | None:
@@ -711,7 +724,7 @@ class DebitSpreadsStrategyPlugin:
 
             if pop_breakeven_lognormal is not None:
                 pop_refined = pop_breakeven_lognormal
-                pop_refined_model = "BREAKEVEN_LOGNORMAL"
+                pop_refined_model = POP_SOURCE_BREAKEVEN_LOGNORMAL
             elif pop_delta_approx is not None and debit_as_pct is not None:
                 abs_delta_short = (
                     self._clamp(abs(short_delta_raw))
@@ -725,7 +738,7 @@ class DebitSpreadsStrategyPlugin:
                     # Conservative: scale delta by remaining profit range
                     _pop_adj = pop_delta_approx * (1.0 - debit_as_pct)
                 pop_refined = self._clamp(_pop_adj)
-                pop_refined_model = "DELTA_ADJUSTED"
+                pop_refined_model = POP_SOURCE_DELTA_ADJUSTED
 
             # p_win_used: prefer refined (breakeven > delta_adjusted),
             # fall back to raw delta.
@@ -738,17 +751,17 @@ class DebitSpreadsStrategyPlugin:
                 pop_model_used = pop_refined_model
             elif pop_delta_approx is not None:
                 p_win_used = pop_delta_approx
-                pop_model_used = "DELTA_APPROX"
+                pop_model_used = POP_SOURCE_DELTA_APPROX
             else:
                 p_win_used = None
-                pop_model_used = None
+                pop_model_used = POP_SOURCE_NONE
 
             # DQ flags for POP
             if p_win_used is None:
                 dq_flags.append("MISSING_POP:all_models_unavailable")
             if pop_refined is None and pop_delta_approx is not None:
                 dq_flags.append("POP_FALLBACK_DELTA")
-            if long_delta_raw is None and pop_model_used not in ("BREAKEVEN_LOGNORMAL", "DELTA_ADJUSTED"):
+            if long_delta_raw is None and pop_model_used not in (POP_SOURCE_BREAKEVEN_LOGNORMAL, POP_SOURCE_DELTA_ADJUSTED):
                 dq_flags.append("MISSING_DELTA:long_leg")
 
             strike_distance = abs(short_strike - underlying_price)
@@ -871,6 +884,45 @@ class DebitSpreadsStrategyPlugin:
             }
 
             # ── Build the enriched output dict ──────────────────────────────
+            # ── Canonical legs[] array (matches IC schema) ──────────────
+            # Fields: name, right, side, strike, qty, bid, ask, mid,
+            #         delta, iv, open_interest, volume, occ_symbol
+            _option_right = "call" if strategy == "call_debit" else "put"
+            _long_name = f"long_{_option_right}"
+            _short_name = f"short_{_option_right}"
+            _legs = [
+                {
+                    "name": _long_name,
+                    "right": _option_right,
+                    "side": "buy",
+                    "strike": long_strike,
+                    "qty": 1,
+                    "bid": long_bid,
+                    "ask": long_ask,
+                    "mid": long_mid,
+                    "delta": long_delta_raw,
+                    "iv": iv_long,
+                    "open_interest": int(long_oi) if long_oi is not None else None,
+                    "volume": int(long_vol) if long_vol is not None else None,
+                    "occ_symbol": getattr(long_leg, "symbol", None),
+                },
+                {
+                    "name": _short_name,
+                    "right": _option_right,
+                    "side": "sell",
+                    "strike": short_strike,
+                    "qty": 1,
+                    "bid": short_bid,
+                    "ask": short_ask,
+                    "mid": short_mid,
+                    "delta": short_delta_raw,
+                    "iv": iv_short,
+                    "open_interest": int(short_oi) if short_oi is not None else None,
+                    "volume": int(short_vol) if short_vol is not None else None,
+                    "occ_symbol": getattr(short_leg, "symbol", None),
+                },
+            ]
+
             trade_dict: dict[str, Any] = {
                 "strategy": strategy,
                 "spread_type": strategy,
@@ -884,12 +936,15 @@ class DebitSpreadsStrategyPlugin:
                 "long_strike": long_strike,
                 "short_strike": short_strike,
                 "width": width,
+                # ── Canonical legs[] ────────────────────────────────────────
+                "legs": _legs,
                 # ── Spread-level quotes (Goal 1) ────────────────────────────
                 "spread_bid": spread_bid,
                 "spread_ask": spread_ask,
                 "spread_mid": spread_mid,
                 # ── Pricing ─────────────────────────────────────────────────
                 "net_debit": debit,
+                "net_credit": None,  # debit strategy — net_credit must be absent
                 "_debit_method": debit_method,
                 "max_profit": max_profit,
                 "max_profit_per_contract": max_profit,

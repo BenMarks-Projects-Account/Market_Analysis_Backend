@@ -273,7 +273,7 @@ class TestPOPDirectionCallDebit:
         assert trade["p_win_used"] is None
         assert trade["pop_delta_approx"] is None
         assert trade["pop_refined"] is None
-        assert trade["pop_model_used"] is None
+        assert trade["pop_model_used"] == "NONE"
         assert any("MISSING_POP" in f for f in trade["_dq_flags"])
 
     def test_pop_direction_put_debit(self):
@@ -732,7 +732,7 @@ class TestMissingDeltaNotDQWhenBreakevenModel:
         """When both delta and IV are missing, flag all_models_unavailable."""
         cand = _candidate(long_delta=None, short_delta=None, long_iv=None, short_iv=None)
         trade = _enrich_one(cand)
-        assert trade["pop_model_used"] is None
+        assert trade["pop_model_used"] == "NONE"
         assert trade["p_win_used"] is None
         dq = trade.get("_dq_flags", [])
         assert any("MISSING_POP:all_models_unavailable" in f for f in dq)

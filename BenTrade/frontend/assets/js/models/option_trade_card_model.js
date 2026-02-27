@@ -133,6 +133,32 @@ window.BenTradeOptionTradeCardModel = (function () {
   /* ── Legs derivation ─────────────────────────────────────── */
 
   /**
+   * Build an OCC symbol from components when the backend didn't provide one.
+   * OCC format: ROOT(1-6 chars) + YYMMDD + P/C + 8-digit strike (strike * 1000, zero-padded).
+   * Returns empty string if any component is missing.
+   *
+   * Input fields: symbol (underlying), expiration (YYYY-MM-DD), strike (number), callput (put|call)
+   * Formula: OCC = SYMBOL + YYMMDD + P/C + sprintf("%08d", strike * 1000)
+   */
+  function _buildOccSymbol(symbol, expiration, strike, callput) {
+    if (!symbol || !expiration || strike == null || !callput) return '';
+    var sym = String(symbol).toUpperCase().replace(/[^A-Z]/g, '');
+    if (!sym || sym.length > 6) return '';
+    var parts = String(expiration).split('-');
+    if (parts.length !== 3) return '';
+    var yy = parts[0].slice(-2);
+    var mm = parts[1];
+    var dd = parts[2];
+    var pc = String(callput).charAt(0).toUpperCase();
+    if (pc !== 'P' && pc !== 'C') return '';
+    var strikeInt = Math.round(Number(strike) * 1000);
+    if (isNaN(strikeInt) || strikeInt <= 0) return '';
+    var strikeStr = String(strikeInt);
+    while (strikeStr.length < 8) strikeStr = '0' + strikeStr;
+    return sym + yy + mm + dd + pc + strikeStr;
+  }
+
+  /**
    * Derive structured legs from the trade payload.
    * Real leg arrays are rare in current data; we synthesise from
    * strike / strategy fields when possible.
@@ -145,6 +171,8 @@ window.BenTradeOptionTradeCardModel = (function () {
 
     var sid = header.strategyId;
     var legs = [];
+    var sym = header.symbol || '';
+    var exp = header.expiration || '';
 
     /* 2. Iron condor – 4-leg composite */
     if (sid === 'iron_condor') {
@@ -152,10 +180,10 @@ window.BenTradeOptionTradeCardModel = (function () {
       var pl = fmt.toNumber(trade.put_long_strike);
       var cs = fmt.toNumber(trade.call_short_strike);
       var cl = fmt.toNumber(trade.call_long_strike);
-      if (ps !== null) legs.push({ strike: ps, side: 'sell', callput: 'put', qty: 1 });
-      if (pl !== null) legs.push({ strike: pl, side: 'buy',  callput: 'put', qty: 1 });
-      if (cs !== null) legs.push({ strike: cs, side: 'sell', callput: 'call', qty: 1 });
-      if (cl !== null) legs.push({ strike: cl, side: 'buy',  callput: 'call', qty: 1 });
+      if (ps !== null) legs.push({ strike: ps, side: 'sell', callput: 'put', qty: 1, occ_symbol: _buildOccSymbol(sym, exp, ps, 'put') });
+      if (pl !== null) legs.push({ strike: pl, side: 'buy',  callput: 'put', qty: 1, occ_symbol: _buildOccSymbol(sym, exp, pl, 'put') });
+      if (cs !== null) legs.push({ strike: cs, side: 'sell', callput: 'call', qty: 1, occ_symbol: _buildOccSymbol(sym, exp, cs, 'call') });
+      if (cl !== null) legs.push({ strike: cl, side: 'buy',  callput: 'call', qty: 1, occ_symbol: _buildOccSymbol(sym, exp, cl, 'call') });
       return legs.length ? legs : null;
     }
 
@@ -164,9 +192,9 @@ window.BenTradeOptionTradeCardModel = (function () {
       var center = fmt.toNumber(trade.center_strike || trade.short_strike);
       var lower  = fmt.toNumber(trade.lower_strike);
       var upper  = fmt.toNumber(trade.upper_strike);
-      if (center !== null) legs.push({ strike: center, side: 'sell', callput: 'put', qty: 2 });
-      if (lower  !== null) legs.push({ strike: lower,  side: 'buy',  callput: 'put', qty: 1 });
-      if (upper  !== null) legs.push({ strike: upper,  side: 'buy',  callput: 'put', qty: 1 });
+      if (center !== null) legs.push({ strike: center, side: 'sell', callput: 'put', qty: 2, occ_symbol: _buildOccSymbol(sym, exp, center, 'put') });
+      if (lower  !== null) legs.push({ strike: lower,  side: 'buy',  callput: 'put', qty: 1, occ_symbol: _buildOccSymbol(sym, exp, lower, 'put') });
+      if (upper  !== null) legs.push({ strike: upper,  side: 'buy',  callput: 'put', qty: 1, occ_symbol: _buildOccSymbol(sym, exp, upper, 'put') });
       return legs.length ? legs : null;
     }
 
@@ -174,8 +202,8 @@ window.BenTradeOptionTradeCardModel = (function () {
     if (header.shortStrike !== null || header.longStrike !== null) {
       var isCredit = sid.indexOf('credit') !== -1 || sid === 'csp';
       var cp = sid.indexOf('call') !== -1 ? 'call' : 'put';
-      if (header.shortStrike !== null) legs.push({ strike: header.shortStrike, side: isCredit ? 'sell' : 'buy',  callput: cp, qty: 1 });
-      if (header.longStrike  !== null) legs.push({ strike: header.longStrike,  side: isCredit ? 'buy'  : 'sell', callput: cp, qty: 1 });
+      if (header.shortStrike !== null) legs.push({ strike: header.shortStrike, side: isCredit ? 'sell' : 'buy',  callput: cp, qty: 1, occ_symbol: _buildOccSymbol(sym, exp, header.shortStrike, cp) });
+      if (header.longStrike  !== null) legs.push({ strike: header.longStrike,  side: isCredit ? 'buy'  : 'sell', callput: cp, qty: 1, occ_symbol: _buildOccSymbol(sym, exp, header.longStrike, cp) });
       return legs;
     }
 

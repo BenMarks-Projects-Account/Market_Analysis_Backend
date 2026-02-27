@@ -177,6 +177,9 @@ window.BenTradeTradeTicket = (function () {
     for (var i = 0; i < t.legs.length; i++) {
       var leg = t.legs[i];
       var sideLabel = String(leg.side || '').replace(/_/g, ' ').toUpperCase();
+      var occOk = !!(leg.optionSymbol && String(leg.optionSymbol).trim());
+      var occClass = occOk ? 'tt-occ' : 'tt-occ tt-occ-missing';
+      var occDisplay = occOk ? leg.optionSymbol : '\u26A0 MISSING';
       rows += '<tr>' +
         '<td>' + sideLabel + '</td>' +
         '<td>' + String(leg.right || '').toUpperCase() + '</td>' +
@@ -184,7 +187,7 @@ window.BenTradeTradeTicket = (function () {
         '<td>' + _num(leg.strike, 0) + '</td>' +
         '<td>' + (leg.quantity || 1) + '</td>' +
         '<td>' + _money(leg.mid) + '</td>' +
-        '<td class="tt-occ">' + _dash(leg.optionSymbol) + '</td>' +
+        '<td class="' + occClass + '">' + occDisplay + '</td>' +
       '</tr>';
     }
 
@@ -250,6 +253,7 @@ window.BenTradeTradeTicket = (function () {
 
   function _renderSafetyPanel(tradeCapOn, dryRun, env) {
     var tradingLiveEnabled = _status ? _status.trading_live_enabled : false;
+    var enableLiveTrading  = _status ? _status.enable_live_trading : false;
     var paperConfigured    = _status ? _status.paper_configured    : false;
 
     // Trade capability toggle
@@ -276,6 +280,11 @@ window.BenTradeTradeTicket = (function () {
     if (_mode === 'live' && !tradingLiveEnabled) {
       liveGateHtml = '<div class="tt-safety-msg tt-safety-live">' +
         '\u26A0 TRADING_LIVE_ENABLED is OFF — live execution will be blocked by the backend.' +
+      '</div>';
+    }
+    if (_mode === 'live' && tradeCapOn && !enableLiveTrading) {
+      liveGateHtml += '<div class="tt-safety-msg tt-safety-live">' +
+        '\u26A0 ENABLE_LIVE_TRADING env var is OFF — live orders will be rejected at submission.' +
       '</div>';
     }
 
@@ -344,14 +353,19 @@ window.BenTradeTradeTicket = (function () {
   function _renderFooter(t, tradeCapOn, val) {
     var confirmLabel, confirmDisabled, confirmTitle;
 
+    // Even if trade capability is ON, block execution if validation fails
+    var actuallyValid = val.valid;
+
     if (_step === 'review') {
       confirmLabel    = 'Preview Order';
-      confirmDisabled = !val.valid;
-      confirmTitle    = !val.valid ? val.errors.join(' ') : '';
+      confirmDisabled = !actuallyValid;
+      confirmTitle    = !actuallyValid ? val.errors.join(' ') : '';
     } else if (_step === 'confirmed' || _step === 'error') {
       confirmLabel    = 'Confirm Trade';
-      confirmDisabled = !tradeCapOn;
-      confirmTitle    = !tradeCapOn ? 'Live trading is disabled.' : '';
+      confirmDisabled = !tradeCapOn || !actuallyValid;
+      confirmTitle    = !actuallyValid
+        ? val.errors.join(' ')
+        : (!tradeCapOn ? 'Live trading is disabled.' : '');
     } else {
       confirmLabel    = 'Processing\u2026';
       confirmDisabled = true;
@@ -366,8 +380,17 @@ window.BenTradeTradeTicket = (function () {
 
     var warnList = '';
     var val2 = validate(t);
+
+    // Show blocking errors as red items
+    if (val2.errors.length) {
+      warnList += '<div class="tt-footer-errors">' +
+        val2.errors.map(function (e) { return '<span class="tt-footer-error">\u274C ' + e + '</span>'; }).join('') +
+      '</div>';
+    }
+
+    // Show warnings as amber items
     if (val2.warnings.length) {
-      warnList = '<div class="tt-footer-warns">' +
+      warnList += '<div class="tt-footer-warns">' +
         val2.warnings.map(function (w) { return '<span class="tt-footer-warn">\u26A0 ' + w + '</span>'; }).join('') +
       '</div>';
     }
@@ -577,6 +600,28 @@ window.BenTradeTradeTicket = (function () {
     _step    = 'review';
     _loading = false;
     _mode    = 'paper';
+
+    // ── Diagnostic breadcrumb: log missing OCC / pricing at open ──
+    if (typeof console !== 'undefined' && console.debug) {
+      var _diagLegs = _ticket.legs || [];
+      var _diagOccMissing = 0;
+      for (var _d = 0; _d < _diagLegs.length; _d++) {
+        if (!_diagLegs[_d].optionSymbol || !String(_diagLegs[_d].optionSymbol).trim()) _diagOccMissing++;
+      }
+      if (_diagOccMissing > 0 || _ticket.midPrice == null || _ticket.naturalPrice == null) {
+        console.debug(
+          '[BenTrade:TradeTicket] DIAGNOSTIC open() — ',
+          'underlying=' + _ticket.underlying,
+          'strategy=' + _ticket.strategyId,
+          'legsCount=' + _diagLegs.length,
+          'occMissing=' + _diagOccMissing,
+          'midPrice=' + _ticket.midPrice,
+          'naturalPrice=' + _ticket.naturalPrice,
+          'breakevens=' + JSON.stringify(_ticket.breakevens),
+          'sourceKeys=' + (source ? Object.keys(source).join(',') : 'null')
+        );
+      }
+    }
 
     // Fetch trading status from backend
     _status = null;
