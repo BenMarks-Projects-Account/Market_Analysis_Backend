@@ -18,9 +18,15 @@ Reference trade that motivated these gates:
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
+
+BACKEND_ROOT = Path(__file__).resolve().parent.parent
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +283,19 @@ class TestEngineGateStatus:
             "symbol": "SPY",
             "expiration": "2026-06-01",
             "net_credit": 2.50,
+            # All READINESS_REQUIRED_FIELDS must be populated so
+            # metrics_status.ready=true and engine_gate_status.passed=true.
+            "max_profit": 250.0,
+            "max_loss": 250.0,
+            "break_even": 600.0,
+            "p_win_used": 0.65,
+            "expected_value": 50.0,
+            "ev_to_risk": 0.10,
+            "return_on_risk": 0.20,
+            "bid_ask_spread_pct": 0.05,
+            "open_interest": 1000,
+            "volume": 200,
+            "dte": 30,
             "selection_reasons": [],  # accepted — no rejections
         }
         result = normalize_trade(trade, strategy_id="iron_condor")

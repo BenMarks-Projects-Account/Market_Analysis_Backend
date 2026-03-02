@@ -117,10 +117,13 @@ class TestButterflyMetrics:
         assert -1000 < ev < 5000, f"EV out of range: {ev}"
 
     def test_min_debit_guard_filters_cheap_trades(self, plugin):
-        """Trades with debit < $0.05/share must be filtered out."""
+        """Trades with debit < $0.05/share must be marked execution_invalid."""
         candidate = self._debit_butterfly_candidate(spot=100, center=100, wing=5, debit=0.04)
         enriched = plugin.enrich([candidate], {"policy": {}})
-        assert len(enriched) == 0, "Should filter butterfly with $0.04 debit"
+        # enricher now keeps the row but marks it invalid so evaluate rejects it
+        assert len(enriched) >= 1
+        assert enriched[0]["execution_invalid"] is True
+        assert enriched[0]["rank_score"] == 0.0
 
     def test_pop_uses_normal_cdf(self, plugin):
         """POP should match the analytical normal CDF between break-evens."""

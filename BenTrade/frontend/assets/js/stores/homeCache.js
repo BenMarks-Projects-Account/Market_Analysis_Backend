@@ -2,7 +2,6 @@ window.BenTradeHomeCacheStore = (function(){
   const STORAGE_KEY = 'bentrade_home_cache_v1';
   const FRESH_TTL_MS = 60 * 1000;
   const MAX_STALE_MS = 15 * 60 * 1000;
-  const REFRESH_INTERVAL_MS = 90 * 1000;
 
   const INDEX_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA'];
   const SECTOR_SYMBOLS = ['XLF', 'XLK', 'XLE', 'XLY', 'XLP', 'XLV', 'XLI', 'XLB', 'XLRE', 'XLU', 'XLC'];
@@ -336,6 +335,5 @@ window.BenTradeHomeCacheStore = (function(){
     setRenderer,
     FRESH_TTL_MS,
     MAX_STALE_MS,
-    REFRESH_INTERVAL_MS,
   };
 })();

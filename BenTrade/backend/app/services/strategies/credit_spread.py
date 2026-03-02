@@ -12,6 +12,7 @@ from app.services.strategies.base import (
     StrategyPlugin,
 )
 from app.utils.dates import dte_ceil
+from app.utils.expected_fill import apply_expected_fill
 from common.quant_analysis import enrich_trades_batch
 
 logger = logging.getLogger("bentrade.credit_spread")
@@ -149,9 +150,9 @@ class CreditSpreadStrategyPlugin(StrategyPlugin):
                 target_widths_list.append(w)
         target_widths = tuple(target_widths_list)
 
-        # ── Candidate cap: configurable via payload / preset ─────────────────
-        # Defaults: wide=800, balanced=400, strict=200.  Old hardcoded value was 80.
-        max_candidates = int(self._to_float(payload.get("max_candidates")) or 400)
+        # ── Safety ceiling only — preset max_candidates is applied centrally ──
+        # by select_top_n() in strategy_service.generate().
+        max_candidates = int(inputs.get("_generation_cap") or 20_000)
 
         # ── Sub-stage instrumentation ────────────────────────────────────────
         # Tracks counts at each pruning point so the filter trace can show
@@ -265,7 +266,12 @@ class CreditSpreadStrategyPlugin(StrategyPlugin):
 
         # ── Bucket-based cap: allocate slots evenly across width buckets ──
         # This guarantees width diversity — wider spreads aren't truncated
-        # just because narrow ones were generated first.
+        # ── Safety-ceiling truncation only ──────────────────────────────
+        # The preset max_candidates cap is applied centrally by
+        # select_top_n() in strategy_service.generate().  Here we only
+        # enforce the generation_cap safety ceiling to prevent runaway
+        # combinatorial explosions.  Under normal presets (200–800),
+        # this ceiling (20 000) will never bind.
         sub_stages["candidates_before_cap"] = len(raw_candidates)
 
         # Sort key: prefer positive credit, then highest credit/width ratio
@@ -276,54 +282,16 @@ class CreditSpreadStrategyPlugin(StrategyPlugin):
             return (has_credit, -(pct or 0.0))
 
         if len(raw_candidates) > max_candidates:
-            # Group by target width bucket (center-first order preserved)
-            by_width: dict[float, list[dict]] = defaultdict(list)
-            for c in raw_candidates:
-                by_width[c.get("_target_width", c["width"])].append(c)
-
-            # Sort each bucket by credit quality internally
-            for bucket in by_width.values():
-                bucket.sort(key=_prune_key)
-
-            # Pass 1: allocate base quota per bucket
-            width_order = [w for w in target_widths if w in by_width]
-            quota = math.ceil(max_candidates / max(len(width_order), 1))
-            capped: list[dict] = []
-            remaining_slots = max_candidates
-            bucket_used: dict[float, int] = {}
-
-            for w in width_order:
-                bucket = by_width[w]
-                take = min(len(bucket), quota, remaining_slots)
-                capped.extend(bucket[:take])
-                bucket_used[w] = take
-                remaining_slots -= take
-                if remaining_slots <= 0:
-                    break
-
-            # Pass 2: if some buckets were small, fill remaining slots from
-            # left-over candidates in center-first order.
-            if remaining_slots > 0:
-                used_ids = set(id(c) for c in capped)
-                for w in width_order:
-                    for c in by_width[w]:
-                        if remaining_slots <= 0:
-                            break
-                        if id(c) not in used_ids:
-                            capped.append(c)
-                            used_ids.add(id(c))
-                            remaining_slots -= 1
-                            bucket_used[w] = bucket_used.get(w, 0) + 1
-
-            raw_candidates = capped
+            # Safety ceiling reached — keep the best candidates by credit quality
+            raw_candidates.sort(key=_prune_key)
+            raw_candidates = raw_candidates[:max_candidates]
             logger.info(
-                "event=candidate_cap_applied max_candidates=%d "
-                "total_before_cap=%d bucket_used=%s",
+                "event=generation_safety_cap_applied generation_cap=%d "
+                "total_before_cap=%d",
                 max_candidates, sub_stages["candidates_before_cap"],
-                {str(w): n for w, n in bucket_used.items()},
             )
         else:
-            # No cap needed — still sort for deterministic ordering
+            # Sort for deterministic ordering
             raw_candidates.sort(key=_prune_key)
 
         sub_stages["after_cap"] = len(raw_candidates)
@@ -610,6 +578,16 @@ class CreditSpreadStrategyPlugin(StrategyPlugin):
             else:
                 trade.setdefault("pop_model_used", POP_SOURCE_NONE)
 
+        # ── Expected fill pricing ───────────────────────────────────────────
+        # Apply expected-fill model to each enriched trade.  Adds:
+        #   expected_fill_price, expected_fill_weight_w, slippage_vs_mid,
+        #   slippage_pct, fill_confidence, max_profit_fill, max_loss_fill,
+        #   ror_fill, ev_fill, ev_to_risk_fill, plus _mid aliases.
+        for trade in (enriched or []):
+            if not isinstance(trade, dict):
+                continue
+            apply_expected_fill(trade)
+
         return [row for row in (enriched or []) if isinstance(row, dict)]
 
     def evaluate(self, trade: dict[str, Any]) -> tuple[bool, list[str]]:
@@ -642,10 +620,13 @@ class CreditSpreadStrategyPlugin(StrategyPlugin):
             dq_mode = _DEFAULT_DATA_QUALITY_MODE
 
         # ── Read trade metrics ───────────────────────────────────────────────
+        # Fill-aware: prefer fill-based metrics for gating when available,
+        # fall back to mid-based.  Structural checks (net_credit, width)
+        # remain on mid values since they validate the trade exists.
         pop = safe_float(trade.get("p_win_used") or trade.get("pop_delta_approx"))
         ev = safe_float(trade.get("ev_per_share") or trade.get("expected_value"))
-        ev_to_risk = safe_float(trade.get("ev_to_risk"))
-        ror = safe_float(trade.get("return_on_risk"))
+        ev_to_risk = safe_float(trade.get("ev_to_risk_fill")) or safe_float(trade.get("ev_to_risk"))
+        ror = safe_float(trade.get("ror_fill")) or safe_float(trade.get("return_on_risk"))
         width = safe_float(trade.get("width"))
         net_credit = safe_float(trade.get("net_credit"))
         spread_pct = safe_float(trade.get("bid_ask_spread_pct"))

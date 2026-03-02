@@ -13,6 +13,7 @@ from app.services.strategies.base import (
     POP_SOURCE_NONE,
     StrategyPlugin,
 )
+from app.utils.expected_fill import apply_expected_fill
 
 logger = logging.getLogger("bentrade.debit_spreads")
 
@@ -321,7 +322,9 @@ class DebitSpreadsStrategyPlugin(StrategyPlugin):
         if direction not in {"both", "call", "put"}:
             direction = "both"
 
-        max_candidates = int(payload.get("max_candidates") or 260)
+        # Safety ceiling only — preset max_candidates is applied centrally
+        # by select_top_n() in strategy_service.generate().
+        max_candidates = int(inputs.get("_generation_cap") or 20_000)
 
         # ── Sub-stage instrumentation (mirrors credit_spread.py) ────────────
         # Tracks counts at each pruning point so the filter trace can show
@@ -1065,6 +1068,12 @@ class DebitSpreadsStrategyPlugin(StrategyPlugin):
                 logger.error(msg)
                 raise DataQualityError(msg)
 
+        # ── Expected fill pricing ─────────────────────────────────────────
+        # Apply expected-fill model to each enriched debit trade.
+        # Debit spreads have spread_mid and spread_ask (= natural for debits).
+        for trade in out:
+            apply_expected_fill(trade)
+
         return out
 
     def evaluate(self, trade: dict[str, Any]) -> tuple[bool, list[str]]:
@@ -1106,8 +1115,11 @@ class DebitSpreadsStrategyPlugin(StrategyPlugin):
             dq_mode = _DEFAULT_DATA_QUALITY_MODE
 
         # ── Read trade metrics ───────────────────────────────────────────────
+        # Fill-aware: prefer fill-based metrics for gating when available,
+        # fall back to mid-based.  Structural checks (net_debit, width)
+        # remain on mid values since they validate the trade exists.
         pop = safe_float(trade.get("p_win_used"))
-        ev_to_risk = safe_float(trade.get("ev_to_risk"))
+        ev_to_risk = safe_float(trade.get("ev_to_risk_fill")) or safe_float(trade.get("ev_to_risk"))
         net_debit = safe_float(trade.get("net_debit"))
         width = safe_float(trade.get("width"))
         spread_pct = safe_float(trade.get("bid_ask_spread_pct"))

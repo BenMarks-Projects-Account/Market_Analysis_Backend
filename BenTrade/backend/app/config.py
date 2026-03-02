@@ -83,6 +83,8 @@ class Settings(BaseModel):
     SNAPSHOT_CAPTURE_LIMIT_PER_SYMBOL: int = int(os.getenv("SNAPSHOT_CAPTURE_LIMIT_PER_SYMBOL", "0"))
     OPTION_CHAIN_SOURCE: str = os.getenv("OPTION_CHAIN_SOURCE", "tradier").lower()
     SNAPSHOT_DIR: str = os.getenv("SNAPSHOT_DIR", "")
+    SNAPSHOT_MAX_AGE_HOURS: int = int(os.getenv("SNAPSHOT_MAX_AGE_HOURS", "48"))
+    SNAPSHOT_RETENTION_DAYS: int = int(os.getenv("SNAPSHOT_RETENTION_DAYS", "7"))
 
     def model_post_init(self, __context) -> None:
         from app.trading.tradier_credentials import get_tradier_base_url

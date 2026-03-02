@@ -21,6 +21,7 @@ from app.services.strategies.iron_condor import IronCondorStrategyPlugin
 from app.services.validation_events import ValidationEventsService
 from app.utils.computed_metrics import apply_metrics_contract
 from app.utils.dates import dte_ceil
+from app.utils.expected_fill import build_fill_trace
 from app.utils.normalize import normalize_trade
 from app.utils.report_conformance import validate_report_file
 from app.utils.snapshot import SnapshotChainSource
@@ -40,12 +41,16 @@ class StrategyService:
         risk_policy_service: Any | None = None,
         signal_service: Any | None = None,
         regime_service: Any | None = None,
+        platform_settings: Any | None = None,
+        snapshot_dir: Path | None = None,
     ) -> None:
         self.base_data_service = base_data_service
         self.results_dir = results_dir
         self.risk_policy_service = risk_policy_service
         self.signal_service = signal_service
         self.regime_service = regime_service
+        self.platform_settings = platform_settings
+        self._snapshot_dir = snapshot_dir
         self.results_dir.mkdir(parents=True, exist_ok=True)
         self.validation_events = ValidationEventsService(results_dir=self.results_dir)
         self.data_workbench_records_path = self.results_dir / "data_workbench_records.jsonl"
@@ -96,7 +101,11 @@ class StrategyService:
         return datetime.now(timezone.utc).isoformat()
 
     @staticmethod
-    def _build_input_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
+    def _build_input_snapshot(
+        snapshot: dict[str, Any] | None,
+        *,
+        data_source_mode: str = "live",
+    ) -> dict[str, Any] | None:
         data = snapshot if isinstance(snapshot, dict) else None
         if not data:
             return None
@@ -106,6 +115,13 @@ class StrategyService:
         dte = StrategyService._to_float(data.get("dte"))
         contracts = data.get("contracts") if isinstance(data.get("contracts"), list) else []
         closes = data.get("prices_history") if isinstance(data.get("prices_history"), list) else []
+
+        # pricing_source reflects actual data source
+        # Derived: data_source_mode → pricing_source label
+        if data_source_mode == "snapshot":
+            pricing_source = "snapshot+fred"
+        else:
+            pricing_source = "tradier+fred+polygon"
 
         return {
             "underlying_snapshot": {
@@ -120,7 +136,8 @@ class StrategyService:
                 "prices_history_points": len(closes),
                 "has_prices_history": bool(closes),
             },
-            "pricing_source": "tradier+fred+polygon",
+            "pricing_source": pricing_source,
+            "data_source_mode": data_source_mode,
             "timestamp": StrategyService._utc_now_iso(),
         }
 
@@ -232,6 +249,8 @@ class StrategyService:
         self,
         trade: dict[str, Any],
         snapshot_index: dict[tuple[str, str], dict[str, Any]],
+        *,
+        data_source_mode: str = "live",
     ) -> tuple[dict[str, Any] | None, str | None]:
         if isinstance(trade.get("input_snapshot"), dict):
             return trade.get("input_snapshot"), "embedded"
@@ -240,7 +259,7 @@ class StrategyService:
         expiration = str(trade.get("expiration") or "").strip()
         if symbol and expiration:
             snap = snapshot_index.get((symbol, expiration))
-            built = self._build_input_snapshot(snap)
+            built = self._build_input_snapshot(snap, data_source_mode=data_source_mode)
             if built is not None:
                 return built, "analysis_inputs"
 
@@ -250,14 +269,22 @@ class StrategyService:
 
         return None, None
 
-    def _attach_input_snapshots_to_trades(self, accepted: list[dict[str, Any]], snapshots: list[dict[str, Any]]) -> None:
+    def _attach_input_snapshots_to_trades(
+        self,
+        accepted: list[dict[str, Any]],
+        snapshots: list[dict[str, Any]],
+        *,
+        data_source_mode: str = "live",
+    ) -> None:
         if not accepted:
             return
         snapshot_index = self._snapshot_index(snapshots)
         for trade in accepted:
             if not isinstance(trade, dict):
                 continue
-            snapshot, source = self._resolve_trade_input_snapshot(trade, snapshot_index)
+            snapshot, source = self._resolve_trade_input_snapshot(
+                trade, snapshot_index, data_source_mode=data_source_mode,
+            )
             if snapshot is not None:
                 trade["input_snapshot"] = snapshot
                 trade["input_snapshot_source"] = source
@@ -519,6 +546,9 @@ class StrategyService:
                 "min_open_interest": 1000,
                 "min_volume": 100,
                 "data_quality_mode": "strict",
+                # Penny-wing prechecks (candidate construction)
+                "min_short_leg_mid": 0.10,
+                "min_side_credit": 0.10,
             },
             "conservative": {
                 "dte_min": 21,
@@ -540,6 +570,9 @@ class StrategyService:
                 "min_open_interest": 500,
                 "min_volume": 50,
                 "data_quality_mode": "balanced",
+                # Penny-wing prechecks (candidate construction)
+                "min_short_leg_mid": 0.08,
+                "min_side_credit": 0.08,
             },
             "balanced": {
                 "dte_min": 14,
@@ -563,9 +596,12 @@ class StrategyService:
                 "min_open_interest": 300,
                 "min_volume": 0,
                 "data_quality_mode": "balanced",
+                # Penny-wing prechecks (candidate construction)
+                "min_short_leg_mid": 0.05,
+                "min_side_credit": 0.05,
             },
             "wide": {
-                "dte_min": 7,
+                "dte_min": 14,
                 "dte_max": 60,
                 "distance_mode": "expected_move",
                 "distance_target": 0.9,
@@ -584,10 +620,177 @@ class StrategyService:
                 "min_open_interest": 100,
                 "min_volume": 0,
                 "data_quality_mode": "lenient",
+                "max_bid_ask_spread_pct": 2.0,
+                # Penny-wing prechecks (candidate construction)
+                # Wide is lenient but still rejects zero-value wings
+                "min_short_leg_mid": 0.05,
+                "min_side_credit": 0.03,
+            },
+        },
+        # ── Butterfly presets ─────────────────────────────────────────
+        # Covers debit_call_butterfly, debit_put_butterfly, iron_butterfly.
+        # Iron butterflies are credit structures; debit butterflies are debit.
+        "butterflies": {
+            "strict": {
+                "dte_min": 7,
+                "dte_max": 21,
+                "width_min": 2.0,
+                "width_max": 10.0,
+                "max_candidates": 200,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                "min_open_interest": 1000,
+                "min_volume": 100,
+                "max_bid_ask_spread_pct": 1.0,
+                "min_pop": 0.08,
+                "min_ev_to_risk": 0.01,
+                "min_expected_value": 0.0,
+                "min_cost_efficiency": 2.0,
+                "max_debit_pct_width": 0.35,
+                "data_quality_mode": "strict",
+            },
+            "conservative": {
+                "dte_min": 7,
+                "dte_max": 30,
+                "width_min": 2.0,
+                "width_max": 10.0,
+                "max_candidates": 260,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                "min_open_interest": 500,
+                "min_volume": 50,
+                "max_bid_ask_spread_pct": 1.5,
+                "min_pop": 0.06,
+                "min_ev_to_risk": 0.005,
+                "min_expected_value": 0.0,
+                "min_cost_efficiency": 1.5,
+                "max_debit_pct_width": 0.45,
+                "data_quality_mode": "balanced",
+            },
+            "balanced": {
+                "dte_min": 7,
+                "dte_max": 45,
+                "width_min": 1.0,
+                "width_max": 15.0,
+                "max_candidates": 400,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                "min_open_interest": 300,
+                "min_volume": 20,
+                "max_bid_ask_spread_pct": 2.0,
+                "min_pop": 0.04,
+                "min_ev_to_risk": -0.01,
+                "min_expected_value": -10.0,
+                "min_cost_efficiency": 1.0,
+                "max_debit_pct_width": 0.60,
+                "data_quality_mode": "balanced",
+            },
+            "wide": {
+                "dte_min": 3,
+                "dte_max": 60,
+                "width_min": 0.5,
+                "width_max": 20.0,
+                "max_candidates": 800,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                "min_open_interest": 50,
+                "min_volume": 5,
+                "max_bid_ask_spread_pct": 3.0,
+                "min_pop": 0.02,
+                "min_ev_to_risk": -0.05,
+                "min_expected_value": -50.0,
+                "min_cost_efficiency": 0.5,
+                "max_debit_pct_width": 0.80,
+                "data_quality_mode": "lenient",
+            },
+        },
+        # ── Calendar spread presets ──────────────────────────────────
+        # Calendars currently lack full POP/EV modelling.
+        # All presets set required_metrics_complete=True so that the
+        # METRICS_NOT_IMPLEMENTED gate in evaluate() rejects every
+        # candidate until a proper pricing model is built.
+        "calendars": {
+            "strict": {
+                "near_dte_min": 7,
+                "near_dte_max": 14,
+                "far_dte_min": 30,
+                "far_dte_max": 60,
+                "dte_min": 7,
+                "dte_max": 60,
+                "max_candidates": 120,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                "min_open_interest": 1000,
+                "min_volume": 100,
+                "max_bid_ask_spread_pct": 1.0,
+                "required_metrics_complete": True,
+                "data_quality_mode": "strict",
+            },
+            "conservative": {
+                "near_dte_min": 7,
+                "near_dte_max": 14,
+                "far_dte_min": 28,
+                "far_dte_max": 60,
+                "dte_min": 7,
+                "dte_max": 60,
+                "max_candidates": 180,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                "min_open_interest": 500,
+                "min_volume": 50,
+                "max_bid_ask_spread_pct": 1.5,
+                "required_metrics_complete": True,
+                "data_quality_mode": "balanced",
+            },
+            "balanced": {
+                "near_dte_min": 7,
+                "near_dte_max": 21,
+                "far_dte_min": 21,
+                "far_dte_max": 60,
+                "dte_min": 7,
+                "dte_max": 60,
+                "max_candidates": 240,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                "min_open_interest": 300,
+                "min_volume": 20,
+                "max_bid_ask_spread_pct": 2.0,
+                "required_metrics_complete": True,
+                "data_quality_mode": "balanced",
+            },
+            "wide": {
+                "near_dte_min": 5,
+                "near_dte_max": 28,
+                "far_dte_min": 21,
+                "far_dte_max": 90,
+                "dte_min": 5,
+                "dte_max": 90,
+                "max_candidates": 400,
+                "symbols": list(DEFAULT_SCANNER_SYMBOLS),
+                "min_open_interest": 100,
+                "min_volume": 5,
+                "max_bid_ask_spread_pct": 3.0,
+                "required_metrics_complete": True,
+                "data_quality_mode": "lenient",
             },
         },
     }
     _DEFAULT_PRESET = "balanced"
+
+    # ── Preset-based data requirements ──────────────────────────────
+    # Wide preset relaxes price-history requirement so scans can proceed
+    # when candles are missing.  All other presets treat missing price
+    # history as fatal at snapshot-validation time.
+    _PRICE_HISTORY_OPTIONAL_PRESETS: frozenset[str] = frozenset({"wide"})
+
+    @classmethod
+    def is_price_history_required(cls, preset_name: str) -> bool:
+        """Whether missing price history should reject a snapshot.
+
+        Returns ``False`` for the *wide* preset (scans proceed without
+        candles); ``True`` for all other presets.
+        """
+        return str(preset_name).lower() not in cls._PRICE_HISTORY_OPTIONAL_PRESETS
+
+    # ── Safety ceiling for raw candidate generation ───────────────────
+    # Prevents runaway combinatorial explosions in build_candidates().
+    # This is NOT the quality-based cap — that is resolved_thresholds.max_candidates,
+    # applied centrally by select_top_n AFTER generation completes.
+    # The generation cap is strategy-agnostic and must be >> any preset max_candidates.
+    DEFAULT_MAX_GENERATED_CANDIDATES: int = 20_000
 
     @classmethod
     def resolve_thresholds(cls, strategy_id: str, preset_name: str | None = None, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -711,27 +914,58 @@ class StrategyService:
             req["_requested_data_quality_mode"] = str(payload.get("data_quality_mode") or "").lower() or None
 
         elif strategy_id == "butterflies":
-            req.setdefault("dte_min", 7)
-            req.setdefault("dte_max", 21)
-            req.setdefault("center_mode", "spot")
-            req.setdefault("width_min", 2.0)
-            req.setdefault("width_max", 10.0)
-            req.setdefault("min_cost_efficiency", 2.0)
-            req.setdefault("min_open_interest", 500)
-            req.setdefault("min_volume", 50)
+            raw_preset = req.pop("preset", None)
+            requested_preset = str(raw_preset).lower() if raw_preset else None
+            if requested_preset == "manual":
+                preset_name = "manual"
+                logger.info("Preset requested='manual' for butterflies — using caller-supplied thresholds")
+            else:
+                preset_name = str(raw_preset or self._DEFAULT_PRESET).lower()
+                presets = self._PRESETS.get(strategy_id, {})
+                if preset_name not in presets:
+                    logger.warning(
+                        "Unknown preset '%s' for strategy '%s'; falling back to '%s'",
+                        preset_name, strategy_id, self._DEFAULT_PRESET,
+                    )
+                    preset_name = self._DEFAULT_PRESET
+
+                preset_values = presets.get(preset_name, {})
+                user_specified_symbol = "symbol" in (payload or {}) or "symbols" in (payload or {})
+                for k, v in preset_values.items():
+                    if k == "symbols" and user_specified_symbol:
+                        continue
+                    req.setdefault(k, v)
+
+            req["_preset_name"] = preset_name
+            req["_requested_preset_name"] = requested_preset
+            req["_requested_data_quality_mode"] = str(payload.get("data_quality_mode") or "").lower() or None
 
         elif strategy_id == "calendars":
-            req.setdefault("near_dte_min", 7)
-            req.setdefault("near_dte_max", 14)
-            req.setdefault("far_dte_min", 30)
-            req.setdefault("far_dte_max", 60)
-            req.setdefault("dte_min", 7)
-            req.setdefault("dte_max", 60)
-            req.setdefault("moneyness", "atm")
-            req.setdefault("prefer_term_structure", 1)
-            req.setdefault("max_bid_ask_spread_pct", 1.5)
-            req.setdefault("min_open_interest", 500)
-            req.setdefault("min_volume", 50)
+            raw_preset = req.pop("preset", None)
+            requested_preset = str(raw_preset).lower() if raw_preset else None
+            if requested_preset == "manual":
+                preset_name = "manual"
+                logger.info("Preset requested='manual' for calendars — using caller-supplied thresholds")
+            else:
+                preset_name = str(raw_preset or self._DEFAULT_PRESET).lower()
+                presets = self._PRESETS.get(strategy_id, {})
+                if preset_name not in presets:
+                    logger.warning(
+                        "Unknown preset '%s' for strategy '%s'; falling back to '%s'",
+                        preset_name, strategy_id, self._DEFAULT_PRESET,
+                    )
+                    preset_name = self._DEFAULT_PRESET
+
+                preset_values = presets.get(preset_name, {})
+                user_specified_symbol = "symbol" in (payload or {}) or "symbols" in (payload or {})
+                for k, v in preset_values.items():
+                    if k == "symbols" and user_specified_symbol:
+                        continue
+                    req.setdefault(k, v)
+
+            req["_preset_name"] = preset_name
+            req["_requested_preset_name"] = requested_preset
+            req["_requested_data_quality_mode"] = str(payload.get("data_quality_mode") or "").lower() or None
 
         elif strategy_id == "income":
             req.setdefault("dte_min", 14)
@@ -1245,6 +1479,7 @@ class StrategyService:
         return {
             "strategyId": strategy_id,
             "generated_at": self._utc_now_iso(),
+            "data_source_mode": (filter_trace or {}).get("data_source_mode", "live"),
             "report_status": report_status,
             "report_warnings": report_warnings,
             "symbol": (primary or {}).get("symbol") if isinstance(primary, dict) else (symbol_list[0] if symbol_list else None),
@@ -1548,6 +1783,70 @@ class StrategyService:
         payload = self._apply_request_defaults(strategy_id, request_payload or {})
         notes: list[str] = []
 
+        # ── Resolve runtime data source mode ──────────────────────────
+        # Priority: platform_settings (runtime toggle) > env OPTION_CHAIN_SOURCE
+        # "stock" scanner is excluded — always uses live.
+        _data_source_mode = "live"
+        _snapshot_chain_source: SnapshotChainSource | None = None
+        _snapshot_staleness_info: list[dict[str, Any]] = []
+
+        if self.platform_settings is not None:
+            _data_source_mode = self.platform_settings.data_source_mode
+        elif isinstance(self.base_data_service.chain_source, SnapshotChainSource):
+            _data_source_mode = "snapshot"
+
+        # Stock scanner is excluded from snapshot mode
+        if strategy_id == "stock":
+            _data_source_mode = "live"
+
+        if _data_source_mode == "snapshot" and self._snapshot_dir:
+            from app.config import get_settings as _get_settings
+            _snap_settings = _get_settings()
+            _max_age = int(getattr(_snap_settings, "SNAPSHOT_MAX_AGE_HOURS", 48))
+            _snapshot_chain_source = SnapshotChainSource(
+                self._snapshot_dir,
+                provider="tradier",
+                max_age_hours=_max_age,
+            )
+
+        logger.info(
+            "event=generate_data_source_mode strategy=%s mode=%s",
+            strategy_id, _data_source_mode,
+        )
+
+        # ── Temporarily swap chain source for this run if snapshot mode ──
+        _original_chain_source = self.base_data_service.chain_source
+        if _snapshot_chain_source is not None:
+            self.base_data_service.chain_source = _snapshot_chain_source
+
+        try:
+            return await self._generate_inner(
+                strategy_id=strategy_id,
+                plugin=plugin,
+                payload=payload,
+                notes=notes,
+                progress_callback=progress_callback,
+                data_source_mode=_data_source_mode,
+                snapshot_chain_source=_snapshot_chain_source,
+                snapshot_staleness_info=_snapshot_staleness_info,
+            )
+        finally:
+            # Always restore original chain source
+            self.base_data_service.chain_source = _original_chain_source
+
+    async def _generate_inner(
+        self,
+        *,
+        strategy_id: str,
+        plugin: Any,
+        payload: dict[str, Any],
+        notes: list[str],
+        progress_callback: Any | None,
+        data_source_mode: str,
+        snapshot_chain_source: SnapshotChainSource | None,
+        snapshot_staleness_info: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+
         # Reset snapshot recorder for this run (fresh trace_id + counters)
         _recorder = self.base_data_service.snapshot_recorder
         if _recorder and _recorder.enabled:
@@ -1560,34 +1859,145 @@ class StrategyService:
         # If no symbols resolved from payload at all, use the full scanner universe
         if not symbol_list or symbol_list == [""]:
             symbol_list = list(DEFAULT_SCANNER_SYMBOLS)
-        logger.info("[SCANNER] %s generate — symbols=%s", strategy_id, symbol_list)
+        logger.info("[SCANNER] %s generate — symbols=%s mode=%s", strategy_id, symbol_list, data_source_mode)
 
         snapshots: list[dict[str, Any]] = []
+        _captured_history_symbols: set[str] = set()
+
+        # ── Preset-based price history requirement ────────────────────
+        # Resolved once before the loop so the rule is centralized.
+        _resolved_preset = str(payload.get("_preset_name") or self._DEFAULT_PRESET).lower()
+        _price_history_required = self.is_price_history_required(_resolved_preset)
+
+        # Per-symbol snapshot status for trace instrumentation
+        _snapshot_symbol_details: list[str] = []
+
         for symbol in symbol_list:
             try:
                 expirations = await self._resolve_expirations(symbol, payload, strategy_id)
             except Exception as exc:
                 notes.append(f"{symbol}: expirations unavailable ({exc})")
+                _snapshot_symbol_details.append(f"{symbol}: REJECTED (EXPIRATIONS_UNAVAILABLE)")
                 continue
 
             for expiration in expirations:
+                # ── Staleness check in snapshot mode ──────────────────
+                if data_source_mode == "snapshot" and snapshot_chain_source is not None:
+                    staleness = snapshot_chain_source.check_staleness(symbol, expiration)
+                    if staleness.get("stale"):
+                        warning_msg = staleness.get("warning") or f"Stale snapshot: {symbol} {expiration}"
+                        notes.append(f"SNAPSHOT_STALE: {warning_msg}")
+                        snapshot_staleness_info.append({
+                            "symbol": symbol,
+                            "expiration": expiration,
+                            **staleness,
+                        })
+                        logger.warning(
+                            "event=snapshot_stale symbol=%s expiration=%s age_seconds=%s max_hours=%s",
+                            symbol, expiration,
+                            staleness.get("age_seconds"),
+                            staleness.get("max_age_hours"),
+                        )
+                        # In offline mode, do NOT fall back to live — skip
+                        _snapshot_symbol_details.append(f"{symbol}/{expiration}: REJECTED (SNAPSHOT_STALE)")
+                        continue
+                    snapshot_staleness_info.append({
+                        "symbol": symbol,
+                        "expiration": expiration,
+                        **staleness,
+                    })
+
                 try:
                     snapshot_inputs = await self.base_data_service.get_analysis_inputs(symbol, expiration)
                 except Exception as exc:
                     notes.append(f"{symbol} {expiration}: analysis inputs unavailable ({exc})")
+                    _snapshot_symbol_details.append(f"{symbol}/{expiration}: REJECTED (ANALYSIS_INPUTS_UNAVAILABLE)")
                     continue
+
+                # ── In snapshot mode: load prices_history from disk ───
+                if data_source_mode == "snapshot" and snapshot_chain_source is not None:
+                    closes = snapshot_chain_source.get_prices_history(symbol)
+                    if closes:
+                        snapshot_inputs["prices_history"] = closes
+                    elif not snapshot_inputs.get("prices_history"):
+                        notes.append(f"{symbol}: prices_history unavailable in snapshot mode")
+
+                    # ── Underlying price fallback ─────────────────────
+                    if snapshot_inputs.get("underlying_price") is None:
+                        fallback_price = snapshot_chain_source.get_underlying_price(symbol)
+                        if fallback_price is not None:
+                            snapshot_inputs["underlying_price"] = fallback_price
+                            notes.append(f"{symbol}: underlying_price derived from snapshot chain data")
+                        else:
+                            notes.append(f"{symbol} {expiration}: underlying_price missing in snapshot — skipping")
+                            logger.warning(
+                                "event=snapshot_underlying_price_missing symbol=%s expiration=%s",
+                                symbol, expiration,
+                            )
+                            _snapshot_symbol_details.append(f"{symbol}/{expiration}: REJECTED (MISSING_UNDERLYING_PRICE)")
+                            continue
 
                 contracts = snapshot_inputs.get("contracts") or []
                 if not contracts:
                     notes.append(f"{symbol} {expiration}: no_chain")
+                    _snapshot_symbol_details.append(f"{symbol}/{expiration}: REJECTED (NO_CHAIN)")
                     continue
 
-                snapshots.append({
+                # ── Price-history validation (preset-dependent) ───────
+                # Tier-1 checks above (underlying price, chain) are always
+                # required.  Price history is Tier-2: required for all
+                # presets EXCEPT wide.
+                _closes = snapshot_inputs.get("prices_history") or []
+                _has_valid_history = bool(_closes) and any(float(c) > 0 for c in _closes if c is not None)
+                _history_flag = None
+                if not _has_valid_history:
+                    if _price_history_required:
+                        notes.append(f"{symbol} {expiration}: prices_history missing — rejected (preset={_resolved_preset})")
+                        logger.info(
+                            "event=snapshot_rejected_missing_history symbol=%s expiration=%s preset=%s",
+                            symbol, expiration, _resolved_preset,
+                        )
+                        _snapshot_symbol_details.append(f"{symbol}/{expiration}: REJECTED (MISSING_PRICE_HISTORY)")
+                        continue
+                    else:
+                        # Wide preset: flag but accept
+                        _history_flag = "MISSING_PRICE_HISTORY"
+                        logger.info(
+                            "event=snapshot_accepted_missing_history symbol=%s expiration=%s preset=%s",
+                            symbol, expiration, _resolved_preset,
+                        )
+
+                # ── Capture prices_history alongside chain (live mode) ──
+                if (
+                    data_source_mode == "live"
+                    and _recorder
+                    and _recorder.enabled
+                    and symbol not in _captured_history_symbols
+                ):
+                    closes_to_save = snapshot_inputs.get("prices_history") or []
+                    if closes_to_save:
+                        _recorder.save_prices_history(
+                            closes_to_save,
+                            provider="tradier",
+                            symbol=symbol,
+                        )
+                        _captured_history_symbols.add(symbol)
+
+                _snap_entry = {
                     **snapshot_inputs,
                     "symbol": symbol,
                     "expiration": expiration,
                     "dte": dte_ceil(expiration),
-                })
+                }
+                if _history_flag:
+                    _snap_entry.setdefault("data_quality_flags", []).append(_history_flag)
+                snapshots.append(_snap_entry)
+
+                # Trace detail
+                if _history_flag:
+                    _snapshot_symbol_details.append(f"{symbol}/{expiration}: VALID ({_history_flag})")
+                else:
+                    _snapshot_symbol_details.append(f"{symbol}/{expiration}: VALID")
 
         await self._emit_progress(progress_callback, "snapshots", "Snapshots collected", {"count": len(snapshots)})
 
@@ -1622,6 +2032,7 @@ class StrategyService:
         enriched: list[dict[str, Any]] = []
         accepted: list[dict[str, Any]] = []
         rejection_breakdown: dict[str, int] = {}
+        _cap_summary: dict[str, Any] | None = None
         _capture_examples = bool(payload.get("_capture_trace_examples"))
         _rejected_examples: list[dict[str, Any]] = []
         _MAX_EXAMPLES = 3
@@ -1653,11 +2064,37 @@ class StrategyService:
 
         if snapshots:
             await self._emit_progress(progress_callback, "build_candidates", "Building candidates")
+
+            # ── Pass generation_cap into inputs for plugin builders ────
+            # Plugins use this as a safety ceiling, NOT the preset max_candidates.
+            _generation_cap = int(
+                payload.get("max_generated_candidates")
+                or self.DEFAULT_MAX_GENERATED_CANDIDATES
+            )
+            inputs["_generation_cap"] = _generation_cap
+
             try:
                 candidates = plugin.build_candidates(inputs)
             except Exception as exc:
                 notes.append(f"build_candidates failed: {exc}")
                 raise
+
+            # ── Track how many the builder produced before any capping ──
+            _generated_total = len(candidates)
+            _generation_cap_reached = _generated_total >= _generation_cap
+
+            # ── Soft cap: quality-based candidate selection ────────────
+            # resolved_thresholds.max_candidates is the ONLY cap that
+            # determines how many candidates reach enrichment.
+            # Uses heap-based top-N by pre_score (chain-level data, no API calls).
+            from app.utils.candidate_sampler import select_top_n
+
+            _enrichment_cap = int(payload.get("max_candidates") or 400)
+            candidates, _cap_summary = select_top_n(
+                candidates,
+                _enrichment_cap,
+                generation_cap=_generation_cap,
+            )
 
             await self._emit_progress(progress_callback, "enrich", "Enriching candidates", {"count": len(candidates)})
             try:
@@ -1846,7 +2283,9 @@ class StrategyService:
             reverse=True,
         )
 
-        self._attach_input_snapshots_to_trades(accepted=accepted, snapshots=snapshots)
+        self._attach_input_snapshots_to_trades(
+            accepted=accepted, snapshots=snapshots, data_source_mode=data_source_mode,
+        )
 
         await self._emit_progress(progress_callback, "write_report", "Writing report", {"accepted_count": len(accepted)})
 
@@ -2247,6 +2686,7 @@ class StrategyService:
             "trace_id": f"{strategy_id}_{ts_name}_{uuid.uuid4().hex[:8]}",
             "timestamp": self._utc_now_iso(),
             "strategy_id": strategy_id,
+            "data_source_mode": data_source_mode,
             "preset_name": preset_name,
             "requested_preset_name": payload.get("_requested_preset_name"),
             "data_quality_mode": _dq_mode_used or "balanced",
@@ -2259,14 +2699,28 @@ class StrategyService:
                     "input_count": len(symbol_list),
                     "output_count": len(snapshots),
                     "detail": f"{len(symbol_list)} symbols \u2192 {len(snapshots)} valid snapshots",
+                    "price_history_required": _price_history_required,
+                    "preset_name": _resolved_preset,
+                    "per_symbol": _snapshot_symbol_details,
                 },
                 {
                     "name": "candidate_construction",
                     "label": "Candidate Construction",
                     "input_count": total_contracts,
-                    "output_count": len(candidates),
-                    "detail": f"{total_contracts} contracts \u2192 {len(candidates)} spread candidates",
+                    "output_count": (_cap_summary or {}).get("generated_total", len(candidates)),
+                    "detail": f"{total_contracts} contracts \u2192 {(_cap_summary or {}).get('generated_total', len(candidates))} spread candidates",
                     "sub_stages": inputs.get("_build_sub_stages"),
+                },
+                {
+                    "name": "soft_cap",
+                    "label": "Soft Cap (top-N by pre_score)",
+                    "input_count": (_cap_summary or {}).get("generated_total", len(candidates)),
+                    "output_count": len(candidates),
+                    "detail": (
+                        f"{(_cap_summary or {}).get('generated_total', len(candidates))} candidates "
+                        f"\u2192 {len(candidates)} after soft cap"
+                    ),
+                    "cap_summary": _cap_summary,
                 },
                 {
                     "name": "enrichment",
@@ -2297,6 +2751,16 @@ class StrategyService:
             "enrichment_counters": enrichment_counters,
             "dq_summary": dq_summary,
         }
+
+        # ── Expected Fill trace ─────────────────────────────────────────────
+        # Builds fill_model_summary, fill_impact, fill_samples from enriched
+        # and accepted trades.  Additive-only — no existing fields affected.
+        try:
+            _fill_trace = build_fill_trace(enriched, accepted)
+            filter_trace.update(_fill_trace)
+        except Exception:
+            logger.warning("event=fill_trace_build_failed", exc_info=True)
+
         if _capture_examples and _rejected_examples:
             filter_trace["rejected_examples"] = _rejected_examples
         if _near_miss:
@@ -2309,6 +2773,14 @@ class StrategyService:
         # Quote smoke test diagnostic (always attached when available)
         if _quote_smoke:
             filter_trace["quote_smoke_test"] = _quote_smoke
+
+        # Snapshot-mode metadata
+        if data_source_mode == "snapshot":
+            filter_trace["pricing_source"] = "snapshot+fred"
+            if snapshot_staleness_info:
+                filter_trace["snapshot_staleness"] = snapshot_staleness_info
+        else:
+            filter_trace["pricing_source"] = "tradier+fred+polygon"
 
         blob = self._build_report_blob(
             strategy_id=strategy_id,

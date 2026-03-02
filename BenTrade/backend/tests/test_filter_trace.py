@@ -10,11 +10,17 @@ Tests verify:
 """
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+
+BACKEND_ROOT = Path(__file__).resolve().parent.parent
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.services.strategies.credit_spread import CreditSpreadStrategyPlugin
 
@@ -290,13 +296,14 @@ class TestGenerateFilterTrace:
         assert ft["preset_name"] == "wide"
         assert "resolved_thresholds" in ft
         assert "stages" in ft
-        assert len(ft["stages"]) == 5
+        assert len(ft["stages"]) == 6
 
         # Verify stage order
         stage_names = [s["name"] for s in ft["stages"]]
         assert stage_names == [
             "snapshot_collection",
             "candidate_construction",
+            "soft_cap",
             "enrichment",
             "evaluate_gates",
             "dedup_ranking",

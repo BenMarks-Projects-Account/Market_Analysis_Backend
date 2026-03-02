@@ -506,14 +506,23 @@ class TestR8_DQFlags:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestR9_CandidateCap:
-    """max_candidates setting limits output."""
+    """_generation_cap safety ceiling limits builder output.
+
+    Note: the preset max_candidates (enrichment cap) is now applied
+    centrally by select_top_n() in strategy_service, NOT inside the
+    builder.  The builder only honours _generation_cap as a safety ceiling.
+    """
 
     def test_cap_enforced(self):
-        """Setting max_candidates=5 caps output."""
-        candidates, _, _ = _build_and_enrich(
-            request={"max_candidates": 5},
-            snapshots=[_snapshot(num_strikes=30)],
-        )
+        """Setting _generation_cap=5 caps builder output."""
+        plugin = DebitSpreadsStrategyPlugin()
+        inputs: dict[str, Any] = {
+            "snapshots": [_snapshot(num_strikes=30)],
+            "request": {},
+            "policy": {},
+            "_generation_cap": 5,
+        }
+        candidates = plugin.build_candidates(inputs)
         assert len(candidates) <= 5
 
 

@@ -392,7 +392,13 @@ class TestBuildCandidates:
         assert isinstance(sub["width_order_used"], list)
 
     def test_bucket_cap_preserves_width_diversity(self) -> None:
-        """When cap is hit, each width bucket should get a fair share."""
+        """When generation_cap binds, safety ceiling truncates output.
+
+        Note: the old bucket-based width-diversity cap was removed.
+        Width diversity is now achieved centrally via select_top_n()
+        which selects by pre_score (liquidity + spread quality),
+        not by generation order or credit ratio.
+        """
         # Create many strikes so we produce lots of candidates
         strikes = [600.0 - i for i in range(1, 60)]  # 599 down to 541
         snap = {
@@ -406,19 +412,17 @@ class TestBuildCandidates:
             "request": {
                 "width_min": 1.0, "width_max": 5.0,
                 "distance_min": 0.001, "distance_max": 0.12,
-                "max_candidates": 20,
             },
+            # Safety ceiling — small enough to bind for this test
+            "_generation_cap": 20,
         }
         candidates = self.plugin.build_candidates(inputs)
         sub = inputs["_build_sub_stages"]
-        wd = sub["width_distribution"]
 
-        # Multiple width values should be represented in the output
-        assert len(wd) >= 2, (
-            f"Expected diversity across widths, got only: {wd}"
+        # Safety ceiling should limit output
+        assert len(candidates) <= 20
+        # candidates_before_cap should be larger (ceiling bound)
+        assert sub["candidates_before_cap"] > 20, (
+            "Test requires enough candidates to trigger the safety ceiling"
         )
-        # No single width should consume all 20 slots
-        for w_str, cnt in wd.items():
-            assert cnt < 20, (
-                f"Width {w_str} consumed all {cnt} slots — cap diversity failed"
-            )
+        assert sub["candidates_after_cap"] == len(candidates)

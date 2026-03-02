@@ -33,12 +33,12 @@ window.BenTradePages.initHome = function initHome(rootEl){
   const strategyPlaybookEl = scope.querySelector('#homeStrategyPlaybook');
   const fullRefreshBtnEl = scope.querySelector('#homeFullRefreshBtn');
   const refreshBtnEl = scope.querySelector('#homeRefreshBtn');
-  const pauseRefreshBtnEl = scope.querySelector('#homePauseRefreshBtn');
   const refreshingBadgeEl = scope.querySelector('#homeRefreshingBadge');
   const lastUpdatedEl = scope.querySelector('#homeLastUpdated');
   const vixChartEl = scope.querySelector('#homeVixChart');
   const errorEl = scope.querySelector('#homeError');
   const regimeModelBtnEl = scope.querySelector('#homeRegimeModelBtn');
+  const regimeComparisonEl = scope.querySelector('#homeRegimeComparisonTable');
   const regimeModelOutputEl = scope.querySelector('#homeRegimeModelOutput');
   const activeTradesCountEl = scope.querySelector('#homeActiveTradesCount');
   const equityCurveEl = scope.querySelector('#homeEquityCurve');
@@ -140,6 +140,94 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
   /* ── Market Regime Model Analysis ──────────────────────────────── */
 
+  /**
+   * Render the Engine vs Model comparison table.
+   * @param {object} result – full API response from /api/model/analyze_regime
+   */
+  function _renderRegimeComparisonTable(result){
+    if(!regimeComparisonEl) return;
+    const engine = result?.engine_summary;
+    const model  = result?.model_summary;
+    const comp   = result?.comparison;
+    const trace  = result?.regime_comparison_trace;
+    if(!engine || !model || !comp){
+      regimeComparisonEl.style.display = 'none';
+      return;
+    }
+    const dc = comp.disagreement_count || 0;
+    const deltas = comp.deltas || {};
+    const badgeCls = dc === 0 ? 'regime-comparison-badge--agree' : 'regime-comparison-badge--disagree';
+    const badgeText = dc === 0 ? 'Full Agreement' : `${dc} Disagreement${dc > 1 ? 's' : ''}`;
+
+    // Helper – return Δ cell content
+    function deltaCell(key){
+      const d = deltas[key];
+      if(!d) return '<td>—</td>';
+      if(d.match) return `<td class="regime-delta-match">✓ Match</td>`;
+      const detail = d.detail ? ` (${_esc(d.detail)})` : '';
+      return `<td class="regime-delta-mismatch">✗ Mismatch${detail}</td>`;
+    }
+
+    // Confidence display helper
+    function fmtConf(v){ return v != null ? `${(v * 100).toFixed(0)}%` : '—'; }
+
+    // Rows: Risk, Trend, Volatility, Confidence
+    const rows = [
+      { label: 'Risk Regime', eVal: engine.risk_regime_label, mVal: model.risk_regime_label, key: 'risk' },
+      { label: 'Trend',       eVal: engine.trend_label,        mVal: model.trend_label,        key: 'trend' },
+      { label: 'Volatility',  eVal: engine.vol_regime_label,   mVal: model.vol_regime_label,   key: 'vol' },
+      { label: 'Confidence',  eVal: fmtConf(engine.confidence), mVal: fmtConf(model.confidence), key: 'confidence' },
+    ];
+    const rowsHtml = rows.map(r =>
+      `<tr><td>${_esc(r.label)}</td><td>${_esc(r.eVal || '—')}</td><td>${_esc(r.mVal || '—')}</td>${deltaCell(r.key)}</tr>`
+    ).join('');
+
+    // Drivers (side by side)
+    const eDrv = Array.isArray(engine.key_drivers) ? engine.key_drivers : [];
+    const mDrv = Array.isArray(model.key_drivers) ? model.key_drivers : [];
+    const drvHtml = (eDrv.length || mDrv.length)
+      ? `<div class="regime-comparison-drivers">
+           <div><div class="regime-comparison-drivers-col-title">Engine Drivers</div>${eDrv.length ? '<ol style="margin:0;padding-left:16px;">' + eDrv.map(d => `<li>${_esc(String(d))}</li>`).join('') + '</ol>' : '<span style="opacity:0.5;">—</span>'}</div>
+           <div><div class="regime-comparison-drivers-col-title">Model Drivers</div>${mDrv.length ? '<ol style="margin:0;padding-left:16px;">' + mDrv.map(d => `<li>${_esc(String(d))}</li>`).join('') + '</ol>' : '<span style="opacity:0.5;">—</span>'}</div>
+         </div>`
+      : '';
+
+    // Trace (collapsed)
+    let traceHtml = '';
+    if(trace){
+      const tLines = [
+        `Input mode: ${_esc(trace.input_mode || '?')}`,
+        `Raw input keys: ${(trace.raw_input_keys || []).length}`,
+        `Disagreements: ${trace.disagreement_count ?? '?'}`,
+      ];
+      if(trace.timestamps){
+        if(trace.timestamps.engine_ts) tLines.push(`Engine ts: ${_esc(trace.timestamps.engine_ts)}`);
+        if(trace.timestamps.model_ts) tLines.push(`Model ts: ${_esc(trace.timestamps.model_ts)}`);
+      }
+      traceHtml = `<details class="regime-comparison-trace"><summary style="cursor:pointer;font-size:11px;font-weight:600;color:var(--accent,#00eaff);">Comparison Trace</summary><ul style="margin:4px 0 0;padding-left:16px;">${tLines.map(l => `<li>${l}</li>`).join('')}</ul></details>`;
+    }
+
+    regimeComparisonEl.innerHTML = `
+      <div class="regime-comparison-wrapper">
+        <details open>
+          <summary class="regime-comparison-header">
+            <span class="regime-comparison-title">Market Regime: Engine vs Model</span>
+            <span class="regime-comparison-badge ${badgeCls}">${badgeText}</span>
+          </summary>
+          <div class="regime-comparison-body">
+            <table class="regime-comparison-table">
+              <thead><tr><th>Metric</th><th>Engine</th><th>Model</th><th>Δ</th></tr></thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+            ${drvHtml}
+            ${traceHtml}
+          </div>
+        </details>
+      </div>`;
+    regimeComparisonEl.style.display = 'block';
+    console.debug('[REGIME_COMPARISON] rendered', { disagreement_count: dc, deltas });
+  }
+
   function _renderRegimeModelOutput(analysis){
     if(!regimeModelOutputEl) return;
     if(!analysis){
@@ -189,6 +277,38 @@ window.BenTradePages.initHome = function initHome(rootEl){
       sections.push(`<div class="regime-model-section"><div class="regime-model-section-title">Confidence &amp; Caveats${confPct}</div><div class="regime-model-section-body">${_esc(analysis.confidence_caveats)}</div></div>`);
     }
 
+    // Raw inputs cross-check / transparency block
+    if(analysis.raw_inputs_used && typeof analysis.raw_inputs_used === 'object'){
+      const riu = analysis.raw_inputs_used;
+      const entries = Object.entries(riu).filter(([k]) => k !== 'missing');
+      const missing = Array.isArray(riu.missing) ? riu.missing : [];
+      let riuHtml = '<div class="regime-model-section"><div class="regime-model-section-title">Derived by Model from Raw Inputs</div>';
+      if(entries.length){
+        const items = entries.map(([k, v]) => `<li><strong>${_esc(k)}:</strong> ${_esc(String(v))}</li>`).join('');
+        riuHtml += `<ul class="regime-model-list">${items}</ul>`;
+      }
+      if(missing.length){
+        riuHtml += `<div class="regime-model-section-body" style="margin-top:0.3em;color:var(--text-muted,#888);">Missing inputs: ${missing.map((m) => _esc(String(m))).join(', ')}</div>`;
+      }
+      riuHtml += '</div>';
+      sections.push(riuHtml);
+    }
+
+    // Trace metadata (collapsed)
+    if(analysis._trace && typeof analysis._trace === 'object'){
+      const t = analysis._trace;
+      const traceLines = [
+        `Input mode: ${_esc(String(t.model_regime_input_mode || 'unknown'))}`,
+        `Included fields: ${t.included_fields_count ?? '?'}`,
+        `Excluded derived fields: ${t.excluded_fields_count ?? '?'}`,
+      ];
+      if(Array.isArray(t.missing_raw_fields) && t.missing_raw_fields.length){
+        traceLines.push(`Missing raw: ${t.missing_raw_fields.map((f) => _esc(String(f))).join(', ')}`);
+      }
+      const traceHtml = traceLines.map((l) => `<li>${l}</li>`).join('');
+      sections.push(`<div class="regime-model-section"><details><summary class="regime-model-section-title" style="cursor:pointer;">Trace / Debug</summary><ul class="regime-model-list" style="font-size:0.85em;opacity:0.75;">${traceHtml}</ul></details></div>`);
+    }
+
     regimeModelOutputEl.innerHTML = `<details class="regime-model-details" open><summary class="regime-model-summary">Model Analysis Output</summary><div class="regime-model-body">${sections.join('')}</div></details>`;
     regimeModelOutputEl.style.display = 'block';
   }
@@ -224,6 +344,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     try{
       const result = await promise;
       if(_regimeModelInflight !== promise) return; // stale
+      _renderRegimeComparisonTable(result);
       _renderRegimeModelOutput(result?.analysis || result);
     }catch(err){
       if(_regimeModelInflight !== promise) return;
@@ -1793,7 +1914,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
   function bindRetry(){
     strategyPlaybookEl.querySelector('[data-action="retry-playbook"]')?.addEventListener('click', () => {
-      runLoadSequence({ force: true, showOverlay: true }).catch(() => {});
+      runLoadSequence({ force: true, showOverlay: true, reason: 'manual_retry' }).catch(() => {});
     });
   }
 
@@ -2170,7 +2291,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
         setScanError(`Full App Refresh failed at ${fatalFailure.label}: ${fatalFailure.detail}`);
         setScanStatus('Full App Refresh stopped on critical failure');
       }else{
-        await runLoadSequence({ force: true, showOverlay: false, homeOnly: false }).catch(() => {});
+        await runLoadSequence({ force: true, showOverlay: false, homeOnly: false, reason: 'full_app_refresh' }).catch(() => {});
         setScanStatus(`Full App Refresh complete${warnings ? ` (${warnings} warnings)` : ''} • ${new Date().toLocaleTimeString()}`);
         pushLog('Full App Refresh complete');
         updateHomeScanCacheUI();
@@ -2276,7 +2397,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
         }
       }
 
-      await runLoadSequence({ force: true, showOverlay: false, homeOnly: false }).catch(() => {});
+      await runLoadSequence({ force: true, showOverlay: false, homeOnly: false, reason: 'post_scan' }).catch(() => {});
       updateHomeScanCacheUI();
     }finally{
       if(runId === queueState.runId){
@@ -2298,51 +2419,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   const cacheStore = window.BenTradeHomeCacheStore;
-  let refreshInterval = null;
   let activeLoadToken = 0;
   let _loadInFlight = null;       // singleton guard — prevents overlapping load sequences
   const overlay = window.BenTradeHomeLoadingOverlay?.create?.(scope) || null;
-
-  /* ── Auto-refresh pause/resume state (persisted in localStorage) ── */
-  const PAUSE_STORAGE_KEY = 'bentrade_home_autorefresh_paused';
-  let autoRefreshPaused = localStorage.getItem(PAUSE_STORAGE_KEY) === '1';
-
-  function _clearRefreshInterval(){
-    if(refreshInterval){
-      window.clearInterval(refreshInterval);
-      refreshInterval = null;
-    }
-  }
-
-  function _startRefreshInterval(){
-    _clearRefreshInterval();
-    refreshInterval = window.setInterval(() => {
-      if(autoRefreshPaused) return;
-      runLoadSequence({ force: false, showOverlay: false }).catch(() => {});
-    }, Number(cacheStore.REFRESH_INTERVAL_MS || 90000));
-  }
-
-  function _syncPauseButton(){
-    if(!pauseRefreshBtnEl) return;
-    pauseRefreshBtnEl.textContent = autoRefreshPaused ? 'Resume' : 'Pause';
-    pauseRefreshBtnEl.title = autoRefreshPaused
-      ? 'Resume scheduled auto-refresh'
-      : 'Pause scheduled auto-refresh';
-    pauseRefreshBtnEl.style.opacity = autoRefreshPaused ? '0.65' : '1';
-  }
-
-  function toggleAutoRefreshPause(){
-    autoRefreshPaused = !autoRefreshPaused;
-    localStorage.setItem(PAUSE_STORAGE_KEY, autoRefreshPaused ? '1' : '0');
-    _syncPauseButton();
-    if(autoRefreshPaused){
-      _clearRefreshInterval();
-    } else {
-      _startRefreshInterval();
-    }
-  }
-
-  _syncPauseButton();
 
   if(!cacheStore){
     renderFallbackBlank();
@@ -2355,16 +2434,27 @@ window.BenTradePages.initHome = function initHome(rootEl){
     bindRetry();
   });
 
-  function runLoadSequence({ force = false, showOverlay = false, homeOnly = true } = {}){
+  /**
+   * @param {Object} opts
+   * @param {boolean} [opts.force=false]
+   * @param {boolean} [opts.showOverlay=false]
+   * @param {boolean} [opts.homeOnly=true]
+   * @param {string}  [opts.reason='unknown'] - Refresh reason for logging: 'bootstrap'|'manual'|'full_app_refresh'|'post_scan'
+   */
+  function runLoadSequence({ force = false, showOverlay = false, homeOnly = true, reason = 'unknown' } = {}){
+    const _t0 = Date.now();
+    console.log(`[HOME_REFRESH] ${reason} started (force=${force}, overlay=${showOverlay}, homeOnly=${homeOnly})`);
+
     /* ── Singleton guard: if a non-forced load is already running, reuse it ── */
     if(_loadInFlight && !force){
+      console.log(`[HOME_REFRESH] ${reason} reusing in-flight load`);
       // If caller wants the overlay but it's not open yet, open it now
       if(showOverlay && overlay && !overlay.isOpen()){
         overlay.open({
           status: 'Loading...',
           logs: logHistory,
           onCancel: () => { overlay.close(); },
-          onRetry: () => { runLoadSequence({ force: true, showOverlay: true, homeOnly }).catch(() => {}); },
+          onRetry: () => { runLoadSequence({ force: true, showOverlay: true, homeOnly, reason: 'manual_retry' }).catch(() => {}); },
         });
       }
       return _loadInFlight;
@@ -2382,7 +2472,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
           overlay.close();
         },
         onRetry: () => {
-          runLoadSequence({ force: true, showOverlay: true, homeOnly }).catch(() => {});
+          runLoadSequence({ force: true, showOverlay: true, homeOnly, reason: 'manual_retry' }).catch(() => {});
         },
       });
     }
@@ -2399,7 +2489,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
     _loadInFlight = refreshPromise
       .then((snapshot) => {
+        const elapsed = ((Date.now() - _t0) / 1000).toFixed(1);
         pushLog('Home ready.');
+        console.log(`[HOME_REFRESH] ${reason} completed in ${elapsed}s`);
         setError('');
         window.BenTradeSessionStatsStore?.recordHomeRefresh?.();
         if(overlay && overlay.isOpen()){
@@ -2409,8 +2501,10 @@ window.BenTradePages.initHome = function initHome(rootEl){
         return snapshot;
       })
       .catch((err) => {
+        const elapsed = ((Date.now() - _t0) / 1000).toFixed(1);
         const message = String(err?.message || err || 'Refresh failed');
         pushLog(`Error: home n/a ${message}`);
+        console.warn(`[HOME_REFRESH] ${reason} failed after ${elapsed}s: ${message}`);
         if(overlay && overlay.isOpen()){
           overlay.setStatus('Load finished with errors');
           // Leave overlay open so user can see the error, but make Cancel visible
@@ -2445,34 +2539,18 @@ window.BenTradePages.initHome = function initHome(rootEl){
         });
       } else {
         /* Home Dashboard Refresh only — no scanners */
-        runLoadSequence({ force: true, showOverlay: true, homeOnly: true }).catch(() => {
+        runLoadSequence({ force: true, showOverlay: true, homeOnly: true, reason: 'bootstrap' }).catch(() => {
           bindRetry();
         });
       }
-      if(!autoRefreshPaused){
-        _startRefreshInterval();
-      }
     });
   } else {
-    /* Already chose this session (SPA re-mount) — silent refresh from cache */
-    if(hadCached){
-      runLoadSequence({ force: false, showOverlay: false }).catch(() => {
-        bindRetry();
-      });
-    } else {
-      runLoadSequence({ force: false, showOverlay: true }).catch(() => {
-        bindRetry();
-      });
+    /* Already chose this session (SPA re-mount) — render cached data only.
+       No automatic refresh or overlay. User must click Refresh manually. */
+    console.log('[HOME_REFRESH] SPA re-mount — rendering cached data only (no auto-refresh)');
+    if(!hadCached){
+      bindRetry();
     }
-    if(!autoRefreshPaused){
-      _startRefreshInterval();
-    }
-  }
-
-  if(pauseRefreshBtnEl){
-    pauseRefreshBtnEl.addEventListener('click', () => {
-      toggleAutoRefreshPause();
-    });
   }
 
   if(regimeModelBtnEl){
@@ -2486,7 +2564,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     refreshBtnEl.disabled = true;
     refreshBtnEl.textContent = 'Refreshing...';
     try{
-      await runLoadSequence({ force: true, showOverlay: true });
+      await runLoadSequence({ force: true, showOverlay: true, reason: 'manual' });
       setError('');
     }catch(err){
       setError(String(err?.message || err || 'Refresh failed'));
@@ -2532,7 +2610,6 @@ window.BenTradePages.initHome = function initHome(rootEl){
     queueState.stopRequested = true;
     queueState.isRunning = false;
     queueState.runId += 1;
-    _clearRefreshInterval();
     _loadInFlight = null;
     activeLoadToken += 1;
     if(overlay){

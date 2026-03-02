@@ -23,6 +23,7 @@ _DEBIT_STRATEGIES: frozenset[str] = frozenset({
     "call_debit", "put_debit",
     "debit_spreads",  # generic alias
     "butterfly_debit", "butterflies",
+    "debit_call_butterfly", "debit_put_butterfly",
     "calendar_call_spread", "calendar_put_spread", "calendar_spread",
     "calendars",  # generic alias
     "long_call", "long_put",
@@ -217,8 +218,11 @@ def build_computed_metrics(trade: dict[str, Any]) -> dict[str, float | None]:
             "p_win_used",
             "pop_delta_approx",
             "pop_approx",
-            "probability_of_touch_center",
+            "pop_butterfly",
             "implied_prob_profit",
+            # NOTE: probability_of_touch_center is NOT a POP measure —
+            # it measures touch probability, not profit probability.
+            # Do not include it in the POP fallback chain.
         ),
         "expected_value": expected_value,
         "return_on_risk": _first_number(containers, "return_on_risk", "ror"),
@@ -251,7 +255,7 @@ def build_computed_metrics(trade: dict[str, Any]) -> dict[str, float | None]:
     }
 
 
-def build_metrics_status(computed_metrics: dict[str, Any]) -> dict[str, Any]:
+def build_metrics_status(computed_metrics: dict[str, Any], *, strategy_id: str | None = None) -> dict[str, Any]:
     metrics = computed_metrics if isinstance(computed_metrics, dict) else {}
     # Readiness gated only on core pricing/risk fields.
     # Advanced metrics (iv_rank, rsi14, kelly_fraction, etc.) are tracked
@@ -259,12 +263,18 @@ def build_metrics_status(computed_metrics: dict[str, Any]) -> dict[str, Any]:
     missing_required = [f for f in READINESS_REQUIRED_FIELDS if metrics.get(f) is None]
 
     # Virtual gate: at least one cashflow field (net_credit or net_debit) must
-    # be non-None.  When neither is present, report "net_credit" in missing
-    # (a real CORE field name) so downstream subset-of-CORE assertions hold.
+    # be non-None.  When neither is present, report the correct field name
+    # based on strategy type so that debit strategies show "net_debit" missing
+    # (not "net_credit") and vice-versa.
     has_cashflow = (metrics.get("net_credit") is not None
                     or metrics.get("net_debit") is not None)
     if not has_cashflow:
-        missing_required.append("net_credit")
+        # Pick the correct field name for the strategy type
+        if is_debit_strategy(strategy_id):
+            missing_required.append("net_debit")
+        else:
+            # Default to net_credit for credit strategies and unknown
+            missing_required.append("net_credit")
 
     # Cashflow fields are excluded from optional tracking — one being None is
     # expected (credit strategies have no net_debit, debit strategies have no
@@ -285,5 +295,12 @@ def apply_metrics_contract(trade: dict[str, Any]) -> dict[str, Any]:
     payload = dict(trade or {})
     computed_metrics = build_computed_metrics(payload)
     payload["computed_metrics"] = computed_metrics
-    payload["metrics_status"] = build_metrics_status(computed_metrics)
+    # Derive strategy_id for correct cashflow field naming in missing_required
+    _sid = (
+        payload.get("strategy_id")
+        or payload.get("spread_type")
+        or payload.get("strategy")
+        or ""
+    )
+    payload["metrics_status"] = build_metrics_status(computed_metrics, strategy_id=_sid)
     return payload

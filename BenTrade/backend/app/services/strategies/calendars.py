@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any
 
 from app.services.ranking import safe_float
-from app.services.strategies.base import StrategyPlugin
+from app.services.strategies.base import POP_SOURCE_NONE, StrategyPlugin
+
+logger = logging.getLogger(__name__)
 
 
 class CalendarsStrategyPlugin(StrategyPlugin):
@@ -61,7 +64,9 @@ class CalendarsStrategyPlugin(StrategyPlugin):
         if moneyness not in {"atm", "itm", "otm"}:
             moneyness = "atm"
 
-        max_candidates = int(payload.get("max_candidates") or 240)
+        # Safety ceiling only — preset max_candidates is applied centrally
+        # by select_top_n() in strategy_service.generate().
+        max_candidates = int(inputs.get("_generation_cap") or 20_000)
         results: list[dict[str, Any]] = []
 
         for symbol in symbols:
@@ -180,29 +185,88 @@ class CalendarsStrategyPlugin(StrategyPlugin):
             near_exp = str(row.get("expiration_near") or "")
             far_exp = str(row.get("expiration_far") or "")
 
+            # ── Per-leg bid/ask extraction (None-safe) ───────────────
             near_bid = safe_float(getattr(near_leg, "bid", None))
             near_ask = safe_float(getattr(near_leg, "ask", None))
             far_bid = safe_float(getattr(far_leg, "bid", None))
             far_ask = safe_float(getattr(far_leg, "ask", None))
-            if near_bid is None and near_ask is None:
-                continue
-            if far_bid is None and far_ask is None:
+
+            # ── Per-leg mid (None if either bid or ask missing) ──────
+            # Formula: mid = (bid + ask) / 2.  None if either missing.
+            near_mid: float | None = None
+            if near_bid is not None and near_ask is not None:
+                near_mid = (near_bid + near_ask) / 2.0
+            far_mid: float | None = None
+            if far_bid is not None and far_ask is not None:
+                far_mid = (far_bid + far_ask) / 2.0
+
+            # ── Spread pricing ───────────────────────────────────────
+            # spread_mid = mid(far) - mid(near)  (mid-market fill)
+            # spread_natural = ask(far) - bid(near)  (worst-case fill)
+            # spread_mark = spread_mid  (initially = mid)
+            spread_mid: float | None = None
+            if far_mid is not None and near_mid is not None:
+                spread_mid = far_mid - near_mid
+            spread_natural: float | None = None
+            if far_ask is not None and near_bid is not None:
+                spread_natural = far_ask - near_bid
+            spread_mark = spread_mid  # mark = mid initially
+
+            # ── execution_invalid gating ─────────────────────────────
+            execution_invalid = False
+            execution_invalid_reason: str | None = None
+
+            # Gate: both legs must have both bid and ask
+            _near_missing = near_bid is None or near_ask is None
+            _far_missing = far_bid is None or far_ask is None
+            if _near_missing or _far_missing:
+                execution_invalid = True
+                execution_invalid_reason = "leg_quote_missing"
+
+            # Gate: spread_mid must be computable
+            if not execution_invalid and spread_mid is None:
+                execution_invalid = True
+                execution_invalid_reason = "pricing_unavailable"
+
+            # ── net_debit computation ────────────────────────────────
+            # Primary: spread_mid.  Fallback: spread_natural.
+            # Formula: net_debit = spread_mid (preferred) or spread_natural
+            net_debit: float | None = spread_mid
+            if net_debit is None:
+                net_debit = spread_natural
+
+            # Gate: net_debit must be positive
+            if not execution_invalid:
+                if net_debit is None or net_debit <= 0:
+                    execution_invalid = True
+                    execution_invalid_reason = "net_debit_non_positive"
+            # Gate: small debit (< $0.05/share)
+            if not execution_invalid and net_debit is not None and net_debit < 0.05:
+                execution_invalid = True
+                execution_invalid_reason = "net_debit_too_small"
+
+            # max_debit cap (skip entirely if over cap)
+            if net_debit is not None and max_debit_req is not None and net_debit > max_debit_req:
                 continue
 
-            near_mid = ((near_bid or 0.0) + (near_ask or near_bid or 0.0)) / 2.0
-            far_mid = ((far_bid or 0.0) + (far_ask or far_bid or 0.0)) / 2.0
-            net_debit_cross = (far_ask - near_bid) if (far_ask is not None and near_bid is not None) else None
-            net_debit_mid = far_mid - near_mid
-            if net_debit_cross is not None and net_debit_cross > 0:
-                net_debit = net_debit_cross
-            else:
-                net_debit = net_debit_mid
+            # ── max_loss (= debit paid × 100) ───────────────────────
+            # Max loss on a calendar = the debit paid.
+            max_loss: float | None = None
+            if net_debit is not None and net_debit > 0:
+                max_loss = net_debit * 100.0
 
-            if net_debit <= 0:
-                continue
-            if max_debit_req is not None and net_debit > max_debit_req:
-                continue
+            # ── max_profit: unknown for calendars (path-dependent) ───
+            # Calendar max profit depends on near-term IV and price at
+            # near expiration — not solvable from static quotes alone.
+            max_profit: float | None = None
+            max_profit_per_contract: float | None = None
+            return_on_risk: float | None = None
+            expected_value: float | None = None
+            ev_per_contract: float | None = None
+            ev_per_share: float | None = None
+            p_win_used: float | None = None
 
+            # ── Greeks & structure ───────────────────────────────────
             theta_near = safe_float(getattr(near_leg, "theta", None)) or 0.0
             theta_far = safe_float(getattr(far_leg, "theta", None)) or 0.0
             theta_structure = (-theta_near) - (-theta_far)
@@ -220,9 +284,10 @@ class CalendarsStrategyPlugin(StrategyPlugin):
             expected_move_near = spot * max(iv_near or iv_far or 0.20, 0.05) * math.sqrt(max(dte_near, 1) / 365.0)
             blow_through_risk = self._clamp(max(0.0, abs(spot - strike) / max(expected_move_near, 0.1)))
 
-            break_even_low = strike - (net_debit * 1.5)
-            break_even_high = strike + (net_debit * 1.5)
+            break_even_low = strike - (net_debit * 1.5) if net_debit is not None and net_debit > 0 else None
+            break_even_high = strike + (net_debit * 1.5) if net_debit is not None and net_debit > 0 else None
 
+            # ── Liquidity ────────────────────────────────────────────
             near_oi = int(safe_float(getattr(near_leg, "open_interest", None)) or 0)
             far_oi = int(safe_float(getattr(far_leg, "open_interest", None)) or 0)
             near_vol = int(safe_float(getattr(near_leg, "volume", None)) or 0)
@@ -238,23 +303,43 @@ class CalendarsStrategyPlugin(StrategyPlugin):
             vol_ref = max(float(policy.get("min_volume") or 20), 1.0)
             oi_score = self._clamp((min_oi / oi_ref) / 1.5)
             vol_score = self._clamp((min_vol / vol_ref) / 1.5)
-            spread_score = self._clamp(1.0 - (worst_spread / max(net_debit * 1.5, 0.25)))
+            spread_score = self._clamp(1.0 - (worst_spread / max((net_debit or 0.01) * 1.5, 0.25)))
             liquidity_score = self._clamp((0.45 * oi_score) + (0.30 * vol_score) + (0.25 * spread_score))
 
             move_risk_score = self._clamp(1.0 - (abs(spot - strike) / max(expected_move_near, 0.25)))
-            debit_vs_move_penalty = self._clamp((net_debit / max(expected_move_near, 0.1) - 0.45) / 0.8)
+            debit_vs_move_penalty = self._clamp(((net_debit or 0) / max(expected_move_near, 0.1) - 0.45) / 0.8)
 
+            # ── Sanity / diagnostic metrics ──────────────────────────
+            # These are NOT substitutes for POP/EV — diagnostics only.
+            # debit_as_pct_of_underlying = net_debit / underlying_price
+            debit_as_pct_of_underlying: float | None = None
+            if net_debit is not None and spot > 0:
+                debit_as_pct_of_underlying = round(net_debit / spot, 6)
+            # debit_as_pct_of_expected_move = net_debit / expected_move_near
+            debit_as_pct_of_expected_move: float | None = None
+            if net_debit is not None and expected_move_near > 0:
+                debit_as_pct_of_expected_move = round(net_debit / expected_move_near, 4)
+            # term_structure_ok: True if iv_term_structure_score >= 0.40
+            term_structure_ok = iv_term_structure_score >= 0.40
+
+            # ── Ranking ──────────────────────────────────────────────
             why_term_structure = iv_term_structure_score
             why_move_risk = move_risk_score
             why_liquidity = liquidity_score
 
-            rank_score = self._clamp(
-                (0.36 * why_term_structure)
-                + (0.28 * why_move_risk)
-                + (0.24 * why_liquidity)
-                + (0.12 * self._clamp((vega_exposure + 0.05) / 0.25))
-                - (0.18 * debit_vs_move_penalty)
-            )
+            if execution_invalid:
+                # Invalid trades get rank_score = 0 so they never surface
+                rank_score = 0.0
+            else:
+                rank_score = self._clamp(
+                    (0.36 * why_term_structure)
+                    + (0.28 * why_move_risk)
+                    + (0.24 * why_liquidity)
+                    + (0.12 * self._clamp((vega_exposure + 0.05) / 0.25))
+                    - (0.18 * debit_vs_move_penalty)
+                )
+
+            bid_ask_spread_pct = self._clamp(worst_spread / max(net_debit or 0.10, 0.10), 0.0, 9.99)
 
             trade_key = f"{symbol}|{near_exp}->{far_exp}|{spread_type}|K{strike}|{dte_near}->{dte_far}"
 
@@ -276,12 +361,32 @@ class CalendarsStrategyPlugin(StrategyPlugin):
                     "strike": strike,
                     "short_strike": strike,
                     "long_strike": strike,
+                    # ── Pricing (Requirement 1) ──────────────────────
+                    "spread_mid": spread_mid,
+                    "spread_natural": spread_natural,
+                    "spread_mark": spread_mark,
                     "net_debit": net_debit,
-                    "max_profit": None,
-                    "max_profit_per_contract": None,
-                    "max_loss": net_debit * 100.0,
-                    "max_loss_per_contract": net_debit * 100.0,
-                    "return_on_risk": None,
+                    "net_credit": None,
+                    # Per-leg quotes for traceability
+                    "near_bid": near_bid,
+                    "near_ask": near_ask,
+                    "near_mid": near_mid,
+                    "far_bid": far_bid,
+                    "far_ask": far_ask,
+                    "far_mid": far_mid,
+                    # ── Payoff ───────────────────────────────────────
+                    "max_profit": max_profit,
+                    "max_profit_per_contract": max_profit_per_contract,
+                    "max_loss": max_loss,
+                    "max_loss_per_contract": max_loss if max_loss is not None else None,
+                    "return_on_risk": return_on_risk,
+                    # ── Probability / EV ─────────────────────────────
+                    "p_win_used": p_win_used,
+                    "pop_model_used": POP_SOURCE_NONE,
+                    "ev_per_contract": ev_per_contract,
+                    "ev_per_share": ev_per_share,
+                    "expected_value": expected_value,
+                    # ── Greeks & structure ────────────────────────────
                     "theta_structure": theta_structure,
                     "vega_exposure": vega_exposure,
                     "iv_term_structure_score": iv_term_structure_score,
@@ -291,20 +396,27 @@ class CalendarsStrategyPlugin(StrategyPlugin):
                     "break_evens_low": break_even_low,
                     "break_evens_high": break_even_high,
                     "break_even": break_even_low,
+                    # ── Liquidity ────────────────────────────────────
                     "liquidity_score": liquidity_score,
                     "open_interest": min_oi,
                     "volume": min_vol,
                     "worst_leg_spread": worst_spread,
-                    "bid_ask_spread_pct": self._clamp(worst_spread / max(net_debit, 0.10), 0.0, 9.99),
+                    "bid_ask_spread_pct": bid_ask_spread_pct,
+                    # ── Risk & diagnostics ───────────────────────────
                     "event_risk_flag": event_risk_flag,
                     "move_risk_score": move_risk_score,
                     "why_term_structure": why_term_structure,
                     "why_move_risk": why_move_risk,
                     "why_liquidity": why_liquidity,
-                    "ev_per_contract": None,
-                    "ev_per_share": None,
-                    "expected_value": None,
-                    "p_win_used": None,
+                    # ── Sanity metrics (Requirement 5) ───────────────
+                    "debit_as_pct_of_underlying": debit_as_pct_of_underlying,
+                    "debit_as_pct_of_expected_move": debit_as_pct_of_expected_move,
+                    "term_structure_ok": term_structure_ok,
+                    # ── Execution gating (Requirement 2) ─────────────
+                    "execution_invalid": execution_invalid,
+                    "execution_invalid_reason": execution_invalid_reason,
+                    "readiness": not execution_invalid,
+                    # ── Scoring ──────────────────────────────────────
                     "trade_key": trade_key,
                     "rank_score": rank_score,
                     "contractsMultiplier": 100,
@@ -319,10 +431,45 @@ class CalendarsStrategyPlugin(StrategyPlugin):
         policy = trade.get("_policy") if isinstance(trade.get("_policy"), dict) else {}
         request_payload = trade.get("_request") if isinstance(trade.get("_request"), dict) else {}
 
+        # ── Gate 0: execution_invalid pre-check ──────────────────────
+        if trade.get("execution_invalid"):
+            reason = trade.get("execution_invalid_reason") or "pricing_unavailable"
+            reasons.append(f"execution_invalid:{reason}")
+            return False, reasons
+
+        # ── Gate 0a: pricing must exist ──────────────────────────────
+        if trade.get("spread_mid") is None and trade.get("net_debit") is None:
+            reasons.append("pricing_unavailable")
+            return False, reasons
+
+        # ── Gate 0b: strategy_metrics_complete ───────────────────────
+        # Calendars intentionally lack POP / EV / max_profit.
+        # This is NOT a data-quality failure — these metrics are
+        # unknowable without a full pricing model.  Mark as
+        # METRICS_NOT_IMPLEMENTED so the UI can show "INCOMPLETE METRICS"
+        # and block execution.  Per-field METRICS_MISSING reasons are
+        # also emitted for traceability.
+        _strategy_incomplete_fields: list[str] = []
+        if trade.get("p_win_used") is None:
+            _strategy_incomplete_fields.append("pop")
+        if trade.get("expected_value") is None:
+            _strategy_incomplete_fields.append("expected_value")
+        if trade.get("max_profit") is None:
+            _strategy_incomplete_fields.append("max_profit")
+        if trade.get("return_on_risk") is None:
+            _strategy_incomplete_fields.append("return_on_risk")
+
+        if _strategy_incomplete_fields:
+            reasons.append("METRICS_NOT_IMPLEMENTED")
+            for _sif in _strategy_incomplete_fields:
+                reasons.append(f"METRICS_MISSING:{_sif}")
+
+        # ── Gate 1: event risk ───────────────────────────────────────
         allow_event_risk = str(request_payload.get("allow_event_risk") or "false").lower() in {"1", "true", "yes", "y"}
         if bool(trade.get("event_risk_flag")) and not allow_event_risk:
             reasons.append("event_risk_flagged")
 
+        # ── Gate 2: liquidity (OI / volume) ──────────────────────────
         min_oi_policy = int(safe_float(request_payload.get("min_open_interest")) or 0)
         if min_oi_policy <= 0:
             min_oi_policy = max(int(safe_float(policy.get("min_open_interest")) or 0), 500)
@@ -342,6 +489,7 @@ class CalendarsStrategyPlugin(StrategyPlugin):
         if (safe_float(trade.get("liquidity_score")) or 0.0) < 0.15:
             reasons.append("calendar_liquidity_score_low")
 
+        # ── Gate 3: bid-ask spread ───────────────────────────────────
         spread_pct_limit = self._to_float(request_payload.get("max_bid_ask_spread_pct"))
         if spread_pct_limit is None:
             spread_pct_limit = self._to_float(policy.get("max_bid_ask_spread_pct"))
@@ -352,6 +500,7 @@ class CalendarsStrategyPlugin(StrategyPlugin):
         if spread_pct is not None and (spread_pct * 100.0) > spread_pct_limit:
             reasons.append("calendar_spread_too_wide")
 
+        # ── Gate 4: max debit ────────────────────────────────────────
         max_debit = self._to_float(request_payload.get("max_debit"))
         net_debit = self._to_float(trade.get("net_debit"))
         if max_debit is not None and net_debit is not None and net_debit > max_debit:

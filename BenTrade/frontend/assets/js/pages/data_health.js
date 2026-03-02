@@ -4,6 +4,7 @@ window.BenTradePages.initDataHealth = function initDataHealth(rootEl){
   const doc = (rootEl && rootEl.ownerDocument) ? rootEl.ownerDocument : document;
   const scope = rootEl || doc;
   const DATA_HEALTH_URL = '/api/admin/data-health';
+  const DATA_SOURCE_URL = '/api/admin/platform/data-source';
 
   const refreshBtn = scope.querySelector('#dhRefreshBtn');
   const errorEl = scope.querySelector('#dhError');
@@ -11,6 +12,9 @@ window.BenTradePages.initDataHealth = function initDataHealth(rootEl){
   const eventsBodyEl = scope.querySelector('#dhEventsBody');
   const topCodesEl = scope.querySelector('#dhTopCodes');
   const severityCountsEl = scope.querySelector('#dhSeverityCounts');
+  const dataSourceToggleEl = scope.querySelector('#dhDataSourceToggle');
+  const dataSourceMetaEl = scope.querySelector('#dhDataSourceMeta');
+  const dataSourceWarningEl = scope.querySelector('#dhDataSourceWarning');
 
   if(!refreshBtn || !providerTilesEl || !eventsBodyEl || !topCodesEl || !severityCountsEl){
     return;
@@ -48,6 +52,114 @@ window.BenTradePages.initDataHealth = function initDataHealth(rootEl){
       <pre style="white-space:pre-wrap; word-break:break-word; margin:6px 0 0;">${safeSnippet}</pre>
     `;
   }
+
+  // ── Platform Data Source toggle ──────────────────────────────────────
+
+  let _currentMode = 'live';
+
+  function formatTimestamp(isoStr){
+    if(!isoStr) return '';
+    try{
+      const d = new Date(isoStr);
+      return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'medium' });
+    }catch(_e){
+      return String(isoStr);
+    }
+  }
+
+  function renderDataSourceState(state){
+    if(!dataSourceToggleEl) return;
+    const mode = (state && state.data_source_mode) || 'live';
+    _currentMode = mode;
+
+    const buttons = dataSourceToggleEl.querySelectorAll('.ds-toggle-btn');
+    buttons.forEach((btn) => {
+      const btnMode = btn.getAttribute('data-mode');
+      const isActive = btnMode === mode;
+      btn.setAttribute('aria-pressed', String(isActive));
+      btn.classList.toggle('ds-toggle-active', isActive);
+    });
+
+    if(dataSourceMetaEl){
+      let meta = '';
+      if(state && state.updated_at){
+        meta = 'Last changed: ' + formatTimestamp(state.updated_at);
+      }
+      if(state && mode === 'snapshot' && !state.has_snapshots){
+        meta += (meta ? ' · ' : '') + 'No snapshots on disk';
+      }
+      dataSourceMetaEl.textContent = meta;
+    }
+
+    if(dataSourceWarningEl){
+      if(mode === 'snapshot' && state && !state.has_snapshots){
+        dataSourceWarningEl.style.display = 'block';
+        dataSourceWarningEl.textContent = 'Warning: No snapshot files found on disk. Scans in Offline mode will produce no results. Capture snapshots first.';
+      }else{
+        dataSourceWarningEl.style.display = 'none';
+        dataSourceWarningEl.textContent = '';
+      }
+    }
+  }
+
+  async function fetchDataSourceState(){
+    try{
+      const res = await fetch(DATA_SOURCE_URL, { method: 'GET' });
+      if(!res.ok) return null;
+      return await res.json();
+    }catch(_e){
+      return null;
+    }
+  }
+
+  async function setDataSourceMode(mode){
+    if(!dataSourceToggleEl) return;
+    const buttons = dataSourceToggleEl.querySelectorAll('.ds-toggle-btn');
+    buttons.forEach((btn) => { btn.disabled = true; });
+
+    try{
+      const res = await fetch(DATA_SOURCE_URL, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data_source_mode: mode }),
+      });
+
+      if(!res.ok){
+        const body = await res.text().catch(() => '');
+        if(dataSourceWarningEl){
+          dataSourceWarningEl.style.display = 'block';
+          dataSourceWarningEl.textContent = 'Failed to update data source: ' + (body || res.statusText);
+        }
+        return;
+      }
+
+      const result = await res.json();
+      renderDataSourceState(result);
+
+      // Refresh the full data health panel
+      loadDataHealth();
+    }catch(err){
+      if(dataSourceWarningEl){
+        dataSourceWarningEl.style.display = 'block';
+        dataSourceWarningEl.textContent = 'Failed to update data source: ' + (err.message || 'Network error');
+      }
+    }finally{
+      buttons.forEach((btn) => { btn.disabled = false; });
+    }
+  }
+
+  if(dataSourceToggleEl){
+    dataSourceToggleEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('.ds-toggle-btn');
+      if(!btn) return;
+      const mode = btn.getAttribute('data-mode');
+      if(mode && mode !== _currentMode){
+        setDataSourceMode(mode);
+      }
+    });
+  }
+
+  // ── Data Health fetching ─────────────────────────────────────────────
 
   async function fetchDataHealth(){
     const response = await fetch(DATA_HEALTH_URL, { method: 'GET' });
@@ -157,6 +269,9 @@ window.BenTradePages.initDataHealth = function initDataHealth(rootEl){
     topCodesEl.innerHTML = '<div class="loading">Loading rollups…</div>';
     severityCountsEl.innerHTML = '<div class="loading">Loading rollups…</div>';
 
+    // Load data source state in parallel
+    const dataSourcePromise = fetchDataSourceState();
+
     try{
       const payload = await fetchDataHealth();
       renderProviders(payload?.source_health || {});
@@ -173,6 +288,16 @@ window.BenTradePages.initDataHealth = function initDataHealth(rootEl){
       eventsBodyEl.innerHTML = '<tr><td colspan="5" class="loading">Validation events unavailable.</td></tr>';
       topCodesEl.innerHTML = '<div class="stock-note">Rollups unavailable.</div>';
       severityCountsEl.innerHTML = '<div class="stock-note">Rollups unavailable.</div>';
+    }
+
+    // Render data source toggle state
+    try{
+      const dsState = await dataSourcePromise;
+      if(dsState){
+        renderDataSourceState(dsState);
+      }
+    }catch(_e){
+      // non-critical
     }
   }
 

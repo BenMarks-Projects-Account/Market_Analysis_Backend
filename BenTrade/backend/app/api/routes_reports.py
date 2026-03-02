@@ -286,7 +286,11 @@ async def model_analyze(payload: dict):
 
 @router.post("/api/model/analyze_regime")
 async def model_analyze_regime(payload: dict, request: Request):
-    """On-demand LLM analysis of the current Market Regime + Suggested Playbook."""
+    """On-demand LLM analysis of the current Market Regime + Suggested Playbook.
+
+    Returns engine-derived summary, model-inferred summary (raw-only), and
+    a side-by-side comparison with per-row delta indicators.
+    """
     regime_data = payload.get("regime")
     if not regime_data or not isinstance(regime_data, dict):
         raise HTTPException(status_code=400, detail='Missing or invalid "regime" in request body')
@@ -294,18 +298,77 @@ async def model_analyze_regime(payload: dict, request: Request):
     playbook_data = payload.get("playbook")  # optional enriched playbook
 
     try:
-        from common.model_analysis import LocalModelUnavailableError, analyze_regime
+        from common.model_analysis import (
+            LocalModelUnavailableError,
+            _extract_regime_raw_inputs,
+            analyze_regime,
+            compute_regime_deltas,
+            extract_engine_regime_summary,
+        )
 
+        # ── 1. Extract engine summary (derived labels/scores) ──────
+        engine_summary = extract_engine_regime_summary(regime_data)
+
+        # ── 2. Run model analysis (raw-only inputs) ────────────────
         model_output = analyze_regime(
             regime_data=regime_data,
             playbook_data=playbook_data if isinstance(playbook_data, dict) else None,
         )
+
+        # ── 3. Extract model summary labels for comparison ─────────
+        model_summary = {
+            "risk_regime_label": model_output.get("risk_regime_label"),
+            "trend_label": model_output.get("trend_label"),
+            "vol_regime_label": model_output.get("vol_regime_label"),
+            "confidence": model_output.get("confidence"),
+            "key_drivers": model_output.get("key_drivers"),
+        }
+
+        # ── 4. Compute deltas ──────────────────────────────────────
+        comparison = compute_regime_deltas(engine_summary, model_summary)
+
+        # ── 5. Build trace for the comparison ──────────────────────
+        raw_inputs = _extract_regime_raw_inputs(regime_data)
+        comparison_trace = {
+            "input_mode": "raw_only",
+            "raw_input_keys": [k for k in raw_inputs if raw_inputs[k] is not None],
+            "excluded_engine_keys": [
+                "regime_label", "regime_score", "suggested_playbook",
+                "components.*.score", "components.*.raw_points", "components.*.signals",
+            ],
+            "engine_summary": {
+                "risk": engine_summary.get("risk_regime_label"),
+                "trend": engine_summary.get("trend_label"),
+                "vol": engine_summary.get("vol_regime_label"),
+                "confidence": engine_summary.get("confidence"),
+            },
+            "model_summary": {
+                "risk": model_summary.get("risk_regime_label"),
+                "trend": model_summary.get("trend_label"),
+                "vol": model_summary.get("vol_regime_label"),
+                "confidence": model_summary.get("confidence"),
+            },
+            "deltas": comparison["deltas"],
+            "disagreement_count": comparison["disagreement_count"],
+            "timestamps": {
+                "engine_ts": regime_data.get("as_of"),
+                "model_ts": model_output.get("_trace", {}).get("regime_raw_inputs_snapshot", {}).get("timestamp"),
+            },
+        }
+
     except LocalModelUnavailableError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Regime model analysis failed: {exc}") from exc
 
-    return {"ok": True, "analysis": model_output}
+    return {
+        "ok": True,
+        "analysis": model_output,
+        "engine_summary": engine_summary,
+        "model_summary": model_summary,
+        "comparison": comparison,
+        "regime_comparison_trace": comparison_trace,
+    }
 
 
 @router.post("/api/model/analyze_stock")

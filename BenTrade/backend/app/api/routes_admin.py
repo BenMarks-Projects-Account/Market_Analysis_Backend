@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.services.data_workbench_service import DataWorkbenchService
+from app.services.platform_settings import PlatformSettings
 from app.services.validation_events import ValidationEventsService, build_rollups
 from app.utils.trade_key import canonicalize_trade_key
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -129,3 +133,84 @@ async def search_data_workbench_trades(
         "items": rows,
         "count": len(rows),
     }
+
+
+# ── Platform Data Source ──────────────────────────────────────────────────
+
+
+def _get_platform_settings(request: Request) -> PlatformSettings:
+    ps = getattr(request.app.state, "platform_settings", None)
+    if isinstance(ps, PlatformSettings):
+        return ps
+    raise RuntimeError("platform_settings not initialised on app.state")
+
+
+@router.get("/platform/data-source")
+async def get_platform_data_source(request: Request) -> dict:
+    """Return current platform data-source mode + metadata."""
+    ps = _get_platform_settings(request)
+    state = ps.get_state()
+    # Include snapshot availability info
+    snapshot_dir = getattr(request.app.state, "snapshot_dir", None)
+    has_snapshots = False
+    if snapshot_dir:
+        snapshot_path = Path(snapshot_dir)
+        if snapshot_path.is_dir():
+            has_snapshots = any(snapshot_path.rglob("chain_*.json"))
+    state["has_snapshots"] = has_snapshots
+    return state
+
+
+@router.put("/platform/data-source")
+async def set_platform_data_source(request: Request) -> dict:
+    """Set platform data-source mode (``live`` | ``snapshot``).
+
+    Body: ``{"data_source_mode": "live" | "snapshot"}``
+    """
+    ps = _get_platform_settings(request)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"code": "INVALID_JSON", "message": "Request body must be valid JSON"}},
+        )
+    mode = body.get("data_source_mode") if isinstance(body, dict) else None
+    if not mode:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"code": "MISSING_FIELD", "message": "data_source_mode is required"}},
+        )
+    try:
+        result = ps.set_data_source_mode(mode)
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"code": "INVALID_VALUE", "message": str(exc)}},
+        )
+    return result
+
+
+@router.post("/platform/snapshot-cleanup")
+async def trigger_snapshot_cleanup(request: Request) -> dict:
+    """Manually trigger snapshot retention cleanup."""
+    from app.utils.snapshot import run_snapshot_cleanup
+
+    snapshot_dir = getattr(request.app.state, "snapshot_dir", None)
+    if not snapshot_dir:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"code": "NO_SNAPSHOT_DIR", "message": "Snapshot directory not configured"}},
+        )
+    try:
+        from app.config import get_settings
+        settings = get_settings()
+        retention_days = int(getattr(settings, "SNAPSHOT_RETENTION_DAYS", 7))
+        removed = run_snapshot_cleanup(Path(snapshot_dir), retention_days=retention_days)
+        return {"status": "ok", "removed_directories": removed}
+    except Exception as exc:
+        logger.error("event=snapshot_cleanup_error error=%s", exc)
+        return JSONResponse(
+            status_code=500,
+            content={"error": {"code": "CLEANUP_ERROR", "message": str(exc)}},
+        )

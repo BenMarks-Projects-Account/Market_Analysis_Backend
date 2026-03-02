@@ -281,10 +281,14 @@ window.BenTradeTradeCard = (function(){
     var model = mapper.map(rawTrade, o.strategyHint || '');
     var h = model.header;
 
-    /* 2. Rank badge */
+    /* 2. Rank badge — suppressed when metrics not ready */
     var rankDesc = { key: 'rank_score', computedKey: 'rank_score', rootFallbacks: ['composite_score'] };
     var rankVal = mapper.resolveMetric(rawTrade, rankDesc);
     if(rankVal === null && o.rankOverride != null) rankVal = o.rankOverride;
+    /* If metrics_status.ready is explicitly false, suppress the score badge
+       so incomplete trades don't display misleading scores. */
+    var _ms = (rawTrade.metrics_status && typeof rawTrade.metrics_status === 'object') ? rawTrade.metrics_status : null;
+    if(_ms && _ms.ready === false) rankVal = null;
     var rankBadge = rankVal !== null
       ? '<span class="trade-rank-badge" style="font-size:14px;font-weight:700;color:var(--accent-cyan);background:rgba(0,220,255,0.08);border:1px solid rgba(0,220,255,0.24);border-radius:8px;padding:3px 10px;white-space:nowrap;">Score ' + fmtLib.formatScore(rankVal, 1) + '</span>'
       : '';
@@ -344,12 +348,41 @@ window.BenTradeTradeCard = (function(){
     }
 
     /* 6. Action buttons — 3 rows, identical to scanner pages */
+    /* 6a. Determine execution readiness from backend flags */
+    var execInvalid = !!(rawTrade.execution_invalid);
+    var metricsStatus = (rawTrade.metrics_status && typeof rawTrade.metrics_status === 'object') ? rawTrade.metrics_status : null;
+    var metricsReady = metricsStatus ? (metricsStatus.ready !== false) : true;
+    var engineGate = (rawTrade.engine_gate_status && typeof rawTrade.engine_gate_status === 'object') ? rawTrade.engine_gate_status : null;
+    var enginePassed = engineGate ? (engineGate.passed !== false) : true;
+    var canExecute = !execInvalid && metricsReady && enginePassed;
+
     var tradeKeyAttr = model.tradeKey ? ' data-trade-key="' + esc(model.tradeKey) + '"' : '';
     var modelBtnLabel = (o.modelStatus === 'running') ? 'Running\u2026' : 'Run Model Analysis';
-    var actionsHtml = '<div class="trade-actions">'
+
+    /* 6b. INCOMPLETE METRICS badge when not ready */
+    var incompleteBadge = '';
+    if (!canExecute) {
+      var badgeReasons = [];
+      if (execInvalid) badgeReasons.push(esc(String(rawTrade.execution_invalid_reason || 'execution_invalid')));
+      if (metricsStatus && !metricsReady && Array.isArray(metricsStatus.missing_fields)) {
+        badgeReasons.push('missing: ' + esc(metricsStatus.missing_fields.join(', ')));
+      }
+      if (engineGate && !enginePassed && Array.isArray(engineGate.failed_reasons)) {
+        badgeReasons.push(esc(engineGate.failed_reasons.join(', ')));
+      }
+      var badgeTitle = badgeReasons.length ? badgeReasons.join(' | ') : 'Incomplete data';
+      incompleteBadge = '<div class="incomplete-metrics-badge" style="text-align:center;padding:4px 8px;margin-bottom:4px;font-size:11px;font-weight:600;color:#ffbb33;background:rgba(255,187,51,0.10);border:1px solid rgba(255,187,51,0.30);border-radius:6px;" title="' + esc(badgeTitle) + '">'
+        + '\u26A0 INCOMPLETE METRICS' + (badgeReasons.length ? ' \u2014 ' + badgeTitle : '')
+        + '</div>';
+    }
+
+    /* 6c. Build action buttons */
+    var execDisabledAttr = canExecute ? '' : ' disabled style="opacity:0.4;cursor:not-allowed;"';
+    var execTitle = canExecute ? 'Open execution modal' : 'Cannot execute: incomplete metrics';
+    var actionsHtml = incompleteBadge + '<div class="trade-actions">'
       + '<div class="run-row"><button type="button" class="btn btn-run btn-action" data-action="model-analysis"' + tradeKeyAttr + ' title="Run model analysis on this trade">' + modelBtnLabel + '</button></div>'
       + '<div class="trade-model-output" data-model-output' + tradeKeyAttr + ' style="display:none;"></div>'
-      + '<div class="actions-row"><button type="button" class="btn btn-exec btn-action" data-action="execute"' + tradeKeyAttr + ' title="Open execution modal">Execute Trade</button>'
+      + '<div class="actions-row"><button type="button" class="btn btn-exec btn-action" data-action="execute"' + tradeKeyAttr + execDisabledAttr + ' title="' + esc(execTitle) + '">Execute Trade</button>'
       + '<button type="button" class="btn btn-reject btn-action" data-action="reject"' + tradeKeyAttr + ' title="Reject this trade">Reject</button></div>'
       + '<div class="actions-row"><button type="button" class="btn btn-action" data-action="workbench"' + tradeKeyAttr + ' title="Send to Testing Workbench">Send to Testing Workbench</button>'
       + '<button type="button" class="btn btn-action" data-action="data-workbench"' + tradeKeyAttr + ' title="Send to Data Workbench">Send to Data Workbench</button></div>'

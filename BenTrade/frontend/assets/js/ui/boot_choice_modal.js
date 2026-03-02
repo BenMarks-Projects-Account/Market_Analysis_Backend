@@ -56,7 +56,7 @@ window.BenTradeBootChoiceModal = (function(){
   /**
    * Clear all session-scoped data from localStorage.
    * Called ONCE on fresh app boot (before any loading begins).
-   * User preferences (debug flags, watchlist, notes, auto-refresh pause) are preserved.
+   * User preferences (debug flags, watchlist, notes) are preserved.
    */
   function clearSessionData(){
     SESSION_DATA_KEYS.forEach(function(key){

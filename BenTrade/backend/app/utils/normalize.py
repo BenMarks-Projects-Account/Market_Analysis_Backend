@@ -552,9 +552,12 @@ def normalize_trade(
             "p_win_used",
             "pop_delta_approx",
             "pop_approx",
-            "probability_of_touch_center",
+            "pop_butterfly",
             "implied_prob_profit",
             "pop",
+            # NOTE: probability_of_touch_center is NOT a POP measure —
+            # it measures touch probability, not profit probability.
+            # Do not include it in the POP fallback chain.
         ),
         "return_on_risk": _first_number(normalized, "return_on_risk", "ror"),
         "expected_value": expected_value_contract,
@@ -667,12 +670,32 @@ def normalize_trade(
     # Expose a structured engine_gate_status so the frontend can
     # display whether the engine accepted or rejected the trade,
     # independently of the LLM model recommendation.
+    #
+    # HARD RULE: metrics_status.ready == false MUST imply
+    # engine_gate_status.passed == false.  This prevents junk trades
+    # with missing POP/EV/max_profit from reaching the UI with
+    # passed=true + validation_warnings.
     _sel_reasons = normalized.get("selection_reasons")
+    _gate_failed_reasons: list[str] = []
     if isinstance(_sel_reasons, list):
-        normalized["engine_gate_status"] = {
-            "passed": len(_sel_reasons) == 0,
-            "failed_reasons": list(_sel_reasons),
-        }
+        _gate_failed_reasons = list(_sel_reasons)
+
+    # Enforce: metrics_status.ready == false → engine gate fails
+    _ms = normalized.get("metrics_status") or {}
+    if not _ms.get("ready", True):
+        _missing_fields = _ms.get("missing_required") or _ms.get("missing_fields") or []
+        for _mf in _missing_fields:
+            _reason = f"METRICS_MISSING:{_mf}"
+            if _reason not in _gate_failed_reasons:
+                _gate_failed_reasons.append(_reason)
+        # If no missing fields but still not ready, add generic reason
+        if not _missing_fields and "METRICS_INCOMPLETE" not in _gate_failed_reasons:
+            _gate_failed_reasons.append("METRICS_INCOMPLETE")
+
+    normalized["engine_gate_status"] = {
+        "passed": len(_gate_failed_reasons) == 0,
+        "failed_reasons": _gate_failed_reasons,
+    }
 
     # ── 10. (removed) Legacy root-level back-fill aliases ────────────
     # Formerly wrote p_win_used, ev_per_contract, bid_ask_spread_pct,

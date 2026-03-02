@@ -52,7 +52,8 @@ from app.trading.service import TradingService
 from app.trading.tradier_broker import TradierBroker
 from app.utils.cache import TTLCache
 from app.utils.http import UpstreamError
-from app.utils.snapshot import SnapshotChainSource, SnapshotRecorder, TradierChainSource
+from app.utils.snapshot import SnapshotChainSource, SnapshotRecorder, TradierChainSource, run_snapshot_cleanup
+from app.services.platform_settings import PlatformSettings
 
 
 def _setup_logging() -> None:
@@ -115,6 +116,26 @@ def create_app() -> FastAPI:
         chain_source=chain_source,
         snapshot_recorder=snapshot_recorder,
     )
+
+    # -- Platform settings (runtime data-source toggle) --------------------
+    data_dir = backend_dir / "data"
+    platform_settings = PlatformSettings(
+        data_dir,
+        env_default_mode="snapshot" if settings.OPTION_CHAIN_SOURCE == "snapshot" else "live",
+    )
+    _logger.info(
+        "event=platform_settings_init mode=%s",
+        platform_settings.data_source_mode,
+    )
+
+    # -- Snapshot retention cleanup on startup ─────────────────────────────
+    try:
+        _cleaned = run_snapshot_cleanup(snapshot_dir, retention_days=settings.SNAPSHOT_RETENTION_DAYS)
+        if _cleaned:
+            _logger.info("event=startup_snapshot_cleanup removed=%d", len(_cleaned))
+    except Exception as _exc:
+        _logger.warning("event=startup_snapshot_cleanup_error error=%s", _exc)
+
     signal_service = SignalService(base_data_service=base_data_service, cache=cache, ttl_seconds=45)
     spread_service = SpreadService(base_data_service=base_data_service)
     stock_analysis_service = StockAnalysisService(base_data_service=base_data_service, results_dir=results_dir, signal_service=signal_service)
@@ -127,6 +148,8 @@ def create_app() -> FastAPI:
         risk_policy_service=risk_policy_service,
         signal_service=signal_service,
         regime_service=regime_service,
+        platform_settings=platform_settings,
+        snapshot_dir=snapshot_dir,
     )
     playbook_service = PlaybookService(regime_service=regime_service, signal_service=signal_service)
     recommendation_service = RecommendationService(
@@ -176,6 +199,7 @@ def create_app() -> FastAPI:
     app.state.frontend_dir = frontend_dir
     app.state.results_dir = results_dir
     app.state.snapshot_dir = snapshot_dir
+    app.state.platform_settings = platform_settings
 
     app.include_router(health_router)
     app.include_router(options_router)
