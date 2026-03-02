@@ -204,11 +204,20 @@ def compute_pre_score(candidate: dict[str, Any]) -> float:
     return round(pre_score, 6)
 
 
+# ── High-water safety ceiling for bypass mode ──────────────────────────
+# When bypass_enrichment_cap is True, all candidates pass through.
+# To prevent accidental OOM or multi-hour enrichment, clamp at this
+# ceiling and log a warning.
+BYPASS_HIGH_WATER_MARK: int = 20_000
+
+
 def select_top_n(
     candidates: list[dict[str, Any]],
     n: int,
     *,
     generation_cap: int = 20_000,
+    bypass_enrichment_cap: bool = False,
+    bypass_reason: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Heap-based top-N selection by pre_score.
 
@@ -220,16 +229,26 @@ def select_top_n(
         ceiling inside the plugin.
     n : int
         Enrichment cap — resolved_thresholds.max_candidates.
-        This is the ONLY cap controlling how many candidates reach enrichment.
+        This is the ONLY cap controlling how many candidates reach enrichment
+        **unless** ``bypass_enrichment_cap`` is True.
     generation_cap : int
         Safety ceiling used during candidate generation.
         Passed through for observability only (the truncation itself
         happens inside the plugin builder, not here).
+    bypass_enrichment_cap : bool
+        When True, keep ALL candidates (up to BYPASS_HIGH_WATER_MARK)
+        regardless of ``n``.  Candidates are still scored and sorted by
+        pre_score descending.  The cap_summary will include bypass
+        metadata for experiment tracing.
+    bypass_reason : str | None
+        Human-readable reason for bypass (e.g. "credit_spread_wide_experiment").
+        Recorded in cap_summary for trace visibility.
 
     Returns
     -------
     (selected, cap_summary) : tuple
-        selected: list of up to *n* candidates, highest pre_score first.
+        selected: list of up to *n* candidates (or all if bypassed),
+                  highest pre_score first.
         cap_summary: observability dict (see module docstring).
     """
     # generated_total is what the builder actually returned.
@@ -240,8 +259,29 @@ def select_top_n(
     # discarded_due_to_generation_cap is only knowable when the cap bound.
     discarded_gen = 0  # unknowable without builder cooperation
 
+    # ── Bypass mode: override enrichment cap ──────────────────────────
+    original_enrichment_cap = n
+    _bypass_high_water_clamped = False
+    if bypass_enrichment_cap:
+        if generated_total > BYPASS_HIGH_WATER_MARK:
+            logger.warning(
+                "event=bypass_high_water_clamped generated_total=%d "
+                "high_water_mark=%d — clamping bypass to safety ceiling",
+                generated_total, BYPASS_HIGH_WATER_MARK,
+            )
+            n = BYPASS_HIGH_WATER_MARK
+            _bypass_high_water_clamped = True
+        else:
+            # Let all candidates through
+            n = generated_total
+        logger.info(
+            "event=soft_cap_bypass_active original_enrichment_cap=%d "
+            "effective_enrichment_cap=%d generated_total=%d",
+            original_enrichment_cap, n, generated_total,
+        )
+
     if generated_total == 0:
-        return [], _build_cap_summary(
+        _summary = _build_cap_summary(
             generation_cap=generation_cap,
             enrichment_cap=n,
             generated_total=0,
@@ -256,6 +296,16 @@ def select_top_n(
             penny_count=0,
             missing_quote_count=0,
         )
+        if bypass_enrichment_cap:
+            _summary["bypassed"] = True
+            _summary["bypass_enabled"] = True
+            _summary["bypass_reason"] = bypass_reason or "experiment"
+            _summary["original_enrichment_cap"] = original_enrichment_cap
+            _summary["effective_enrichment_cap"] = 0
+            _summary["high_water_clamped"] = False
+        else:
+            _summary["bypassed"] = False
+        return [], _summary
 
     # Score every candidate (cheap — no API calls)
     scored: list[tuple[float, int, dict[str, Any]]] = []
@@ -311,13 +361,25 @@ def select_top_n(
         missing_quote_count=missing_total,
     )
 
+    # ── Bypass metadata in cap_summary ────────────────────────────────
+    if bypass_enrichment_cap:
+        summary["bypassed"] = True
+        summary["bypass_enabled"] = True
+        summary["bypass_reason"] = bypass_reason or "experiment"
+        summary["original_enrichment_cap"] = original_enrichment_cap
+        summary["effective_enrichment_cap"] = n
+        summary["high_water_clamped"] = _bypass_high_water_clamped
+    else:
+        summary["bypassed"] = False
+
     if cap_reached_enrichment:
         logger.info(
             "event=soft_cap_applied generated_total=%d enrichment_cap=%d "
-            "kept=%d cutoff=%.4f median=%.4f",
+            "kept=%d cutoff=%.4f median=%.4f bypass=%s",
             generated_total, n, len(selected),
             cutoff or 0.0,
             summary.get("pre_score_median") or 0.0,
+            bypass_enrichment_cap,
         )
 
     return selected, summary

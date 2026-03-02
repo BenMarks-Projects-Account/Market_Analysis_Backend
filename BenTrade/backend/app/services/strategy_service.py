@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2062,6 +2063,13 @@ class StrategyService:
         }
         inputs["request"] = payload
 
+        # ── Initialize experiment/diagnostic vars (used in filter_trace) ──
+        _bypass_soft_cap = False
+        _bypass_reason: str | None = None
+        _enrichment_cap = 0
+        _enrich_elapsed = 0.0
+        _gate_pass_counts: dict[str, int] = {}
+
         if snapshots:
             await self._emit_progress(progress_callback, "build_candidates", "Building candidates")
 
@@ -2090,11 +2098,37 @@ class StrategyService:
             from app.utils.candidate_sampler import select_top_n
 
             _enrichment_cap = int(payload.get("max_candidates") or 400)
+
+            # ── Experiment: bypass soft-cap for credit_spread + wide ──
+            # Hard rule: credit_spread with preset "wide" bypasses the
+            # enrichment cap so ALL candidates reach enrichment + gates.
+            # Also activatable via payload flag or env var as fallback.
+            _resolved_preset_for_bypass = str(payload.get("_preset_name") or "").lower()
+            _bypass_soft_cap = False
+            _bypass_reason: str | None = None
+            if strategy_id == "credit_spread":
+                if _resolved_preset_for_bypass == "wide":
+                    _bypass_soft_cap = True
+                    _bypass_reason = "credit_spread_wide_experiment"
+                elif payload.get("bypass_soft_cap_for_enrichment"):
+                    _bypass_soft_cap = True
+                    _bypass_reason = "payload_flag"
+                else:
+                    from app.config import get_settings as _get_settings
+                    if _get_settings().CREDIT_SPREAD_BYPASS_SOFT_CAP:
+                        _bypass_soft_cap = True
+                        _bypass_reason = "env_var"
+
             candidates, _cap_summary = select_top_n(
                 candidates,
                 _enrichment_cap,
                 generation_cap=_generation_cap,
+                bypass_enrichment_cap=_bypass_soft_cap,
+                bypass_reason=_bypass_reason,
             )
+
+            # ── Enrichment timing ─────────────────────────────────────
+            _enrich_start = time.monotonic()
 
             await self._emit_progress(progress_callback, "enrich", "Enriching candidates", {"count": len(candidates)})
             try:
@@ -2102,6 +2136,8 @@ class StrategyService:
             except Exception as exc:
                 notes.append(f"enrich failed: {exc}")
                 raise
+
+            _enrich_elapsed = time.monotonic() - _enrich_start
 
             await self._emit_progress(progress_callback, "evaluate", "Evaluating and scoring candidates", {"count": len(enriched)})
             _MAX_REJECTION_LOGS = 20
@@ -2121,6 +2157,7 @@ class StrategyService:
                         ok = False
                         reasons = ["LEG_QUOTE_INCOMPLETE"]
                     else:
+                        _gate_pass_counts["readiness_check"] = _gate_pass_counts.get("readiness_check", 0) + 1
                         ok, reasons = plugin.evaluate(row)
                     if not ok:
                         # -- Aggregate rejection reason counters --
@@ -2199,6 +2236,8 @@ class StrategyService:
                                     reasons,
                                 )
                         continue
+                    # ── Track gate passes (all gates passed for this row) ──
+                    _gate_pass_counts["all_gates_passed"] = _gate_pass_counts.get("all_gates_passed", 0) + 1
                     rank_score, tie_breaks = plugin.score(row)
                     # ── POP attribution invariant check ────────────────────
                     _pop_err = plugin.validate_pop_attribution(row)
@@ -2719,7 +2758,12 @@ class StrategyService:
                     "detail": (
                         f"{(_cap_summary or {}).get('generated_total', len(candidates))} candidates "
                         f"\u2192 {len(candidates)} after soft cap"
+                        + (" (BYPASSED)" if _bypass_soft_cap else "")
                     ),
+                    "bypassed": _bypass_soft_cap,
+                    "bypass_reason": _bypass_reason if _bypass_soft_cap else None,
+                    "original_enrichment_cap": (_cap_summary or {}).get("original_enrichment_cap", _enrichment_cap),
+                    "effective_enrichment_cap": (_cap_summary or {}).get("effective_enrichment_cap", len(candidates)),
                     "cap_summary": _cap_summary,
                 },
                 {
@@ -2728,6 +2772,17 @@ class StrategyService:
                     "input_count": len(candidates),
                     "output_count": len(enriched),
                     "detail": f"{len(candidates)} candidates \u2192 {len(enriched)} enriched trades",
+                    "elapsed_seconds": round(_enrich_elapsed, 3),
+                    "elapsed_ms": round(_enrich_elapsed * 1000, 1),
+                    "total_enriched": len(enriched),
+                    "enrichment_mode": "cpu_local",
+                    "batching": {
+                        "note": "Enrichment is CPU-only (no external API calls); "
+                                 "quotes come from pre-fetched chain data.",
+                        "batch_count": 1,
+                        "batch_size": len(enriched),
+                        "max_in_flight": 1,
+                    },
                 },
                 {
                     "name": "evaluate_gates",
@@ -2735,6 +2790,7 @@ class StrategyService:
                     "input_count": len(enriched),
                     "output_count": accepted_pre_dedup,
                     "detail": f"{len(enriched)} enriched \u2192 {accepted_pre_dedup} passed all gates",
+                    "gate_pass_counts": _gate_pass_counts,
                 },
                 {
                     "name": "dedup_ranking",
@@ -2750,6 +2806,10 @@ class StrategyService:
             "missing_field_counts": missing_field_counts,
             "enrichment_counters": enrichment_counters,
             "dq_summary": dq_summary,
+            "experiment_flags": {
+                "credit_spread_wide_bypass_soft_cap": _bypass_soft_cap,
+                "bypass_reason": _bypass_reason,
+            },
         }
 
         # ── Expected Fill trace ─────────────────────────────────────────────

@@ -86,6 +86,15 @@ class Settings(BaseModel):
     SNAPSHOT_MAX_AGE_HOURS: int = int(os.getenv("SNAPSHOT_MAX_AGE_HOURS", "48"))
     SNAPSHOT_RETENTION_DAYS: int = int(os.getenv("SNAPSHOT_RETENTION_DAYS", "7"))
 
+    # ── Experiment flags ───────────────────────────────────────────
+    # Bypass the enrichment soft-cap for credit_spread so ALL
+    # generated candidates reach enrichment + quality-gate evaluation.
+    # Set env BENTRADE_CREDIT_SPREAD_BYPASS_SOFT_CAP=1 to enable.
+    # Default OFF.  High-water safety guard: 50 000 candidates max.
+    CREDIT_SPREAD_BYPASS_SOFT_CAP: bool = (
+        os.getenv("BENTRADE_CREDIT_SPREAD_BYPASS_SOFT_CAP", "0") == "1"
+    )
+
     def model_post_init(self, __context) -> None:
         from app.trading.tradier_credentials import get_tradier_base_url
 
