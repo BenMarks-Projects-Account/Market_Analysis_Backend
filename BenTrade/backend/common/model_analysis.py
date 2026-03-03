@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from requests.exceptions import RequestException
@@ -636,3 +637,377 @@ def analyze_stock_idea(
     if isinstance(last_error, RequestException):
         raise LocalModelUnavailableError(f"Local model endpoint unavailable at {model_url}: {last_error}") from last_error
     raise RuntimeError(f"Stock model analysis failed: {last_error}")
+
+
+# ── Stock Strategy Model Analysis (scanner TradeCard) ────────────────────
+
+def _coerce_stock_strategy_output(candidate: Any) -> dict[str, Any] | None:
+    """Normalize the LLM response for stock strategy analysis into the output contract.
+
+    Output contract:
+      recommendation: "BUY" | "PASS"
+      score: int 0-100
+      confidence: int 0-100
+      summary: str
+      key_drivers: [{ factor, impact, evidence }]
+      risk_review: { primary_risks, volatility_risk, timing_risk, data_quality_flag }
+      engine_vs_model: { engine_score, model_score, agreement, notes }
+      data_quality: { provider, warnings }
+    """
+    if isinstance(candidate, list) and candidate:
+        first = candidate[0]
+        if isinstance(first, dict):
+            candidate = first
+    if not isinstance(candidate, dict):
+        return None
+
+    # ── Recommendation ──
+    recommendation = str(candidate.get("recommendation") or "PASS").strip().upper()
+    if recommendation not in {"BUY", "PASS"}:
+        recommendation = "PASS"
+
+    # ── Score ──
+    score_raw = candidate.get("score")
+    try:
+        score = int(float(score_raw))
+    except (TypeError, ValueError):
+        score = 50
+    score = max(0, min(score, 100))
+
+    # ── Confidence ──
+    confidence_raw = candidate.get("confidence")
+    try:
+        confidence = int(float(confidence_raw))
+    except (TypeError, ValueError):
+        confidence = 50
+    # Handle 0-1 scale → 0-100
+    if confidence <= 1:
+        confidence = int(confidence * 100)
+    confidence = max(0, min(confidence, 100))
+
+    # ── Summary ──
+    summary = str(candidate.get("summary") or "Model returned no summary.").strip()
+
+    # ── Key Drivers ──
+    raw_drivers = candidate.get("key_drivers") or []
+    key_drivers: list[dict[str, str]] = []
+    if isinstance(raw_drivers, list):
+        for d in raw_drivers:
+            if isinstance(d, dict):
+                key_drivers.append({
+                    "factor": str(d.get("factor") or d.get("name") or ""),
+                    "impact": str(d.get("impact") or "neutral"),
+                    "evidence": str(d.get("evidence") or d.get("detail") or ""),
+                })
+            elif isinstance(d, str) and d.strip():
+                key_drivers.append({"factor": d.strip(), "impact": "neutral", "evidence": ""})
+
+    # ── Risk Review ──
+    rr_raw = candidate.get("risk_review") or {}
+    if not isinstance(rr_raw, dict):
+        rr_raw = {}
+    risk_review = {
+        "primary_risks": [str(r) for r in (rr_raw.get("primary_risks") or []) if isinstance(r, str) and r.strip()],
+        "volatility_risk": str(rr_raw.get("volatility_risk") or "medium"),
+        "timing_risk": str(rr_raw.get("timing_risk") or "medium"),
+        "data_quality_flag": rr_raw.get("data_quality_flag"),
+    }
+
+    # ── Engine vs Model ──
+    evm_raw = candidate.get("engine_vs_model") or {}
+    if not isinstance(evm_raw, dict):
+        evm_raw = {}
+    engine_score_raw = evm_raw.get("engine_score")
+    model_score_raw = evm_raw.get("model_score")
+    try:
+        engine_score_val = float(engine_score_raw) if engine_score_raw is not None else None
+    except (TypeError, ValueError):
+        engine_score_val = None
+    try:
+        model_score_val = float(model_score_raw) if model_score_raw is not None else None
+    except (TypeError, ValueError):
+        model_score_val = None
+
+    agreement = str(evm_raw.get("agreement") or "mixed").lower()
+    if agreement not in {"agree", "disagree", "mixed"}:
+        agreement = "mixed"
+
+    evm_notes = evm_raw.get("notes") or []
+    if not isinstance(evm_notes, list):
+        evm_notes = [str(evm_notes)] if evm_notes else []
+
+    engine_vs_model = {
+        "engine_score": engine_score_val,
+        "model_score": model_score_val,
+        "agreement": agreement,
+        "notes": [str(n) for n in evm_notes if str(n or "").strip()],
+    }
+
+    # ── Data Quality ──
+    dq_raw = candidate.get("data_quality") or {}
+    if not isinstance(dq_raw, dict):
+        dq_raw = {}
+    data_quality = {
+        "provider": str(dq_raw.get("provider") or "tradier"),
+        "warnings": [str(w) for w in (dq_raw.get("warnings") or []) if isinstance(w, str) and w.strip()],
+    }
+
+    return {
+        "recommendation": recommendation,
+        "score": score,
+        "confidence": confidence,
+        "summary": summary,
+        "key_drivers": key_drivers,
+        "risk_review": risk_review,
+        "engine_vs_model": engine_vs_model,
+        "data_quality": data_quality,
+    }
+
+
+def _build_fallback_stock_analysis(
+    candidate: dict[str, Any],
+    strategy_id: str,
+    reason: str,
+    raw_text: str | None = None,
+) -> dict[str, Any]:
+    """Build a valid PASS fallback when all JSON parsing/repair fails.
+
+    This guarantees the endpoint NEVER returns a 500 for parse errors.
+    The frontend receives a well-formed analysis with clear warnings.
+
+    Derived fields:
+      - score: candidate["composite_score"] (engine score) or 50
+      - confidence: fixed 20 (low — indicates model failure, not model judgment)
+      - recommendation: always "PASS" (cannot trust an unparsed model)
+    """
+    engine_score_raw = candidate.get("composite_score")
+    try:
+        engine_score = int(float(engine_score_raw))
+    except (TypeError, ValueError):
+        engine_score = 50
+
+    return {
+        "recommendation": "PASS",
+        "score": max(0, min(engine_score, 100)),
+        "confidence": 20,
+        "summary": f"Model output could not be parsed. Defaulting to PASS. Reason: {reason}",
+        "key_drivers": [],
+        "risk_review": {
+            "primary_risks": ["Model parse failure — review manually"],
+            "volatility_risk": "unknown",
+            "timing_risk": "unknown",
+            "data_quality_flag": "MODEL_PARSE_FAILED",
+        },
+        "engine_vs_model": {
+            "engine_score": engine_score,
+            "model_score": None,
+            "agreement": "mixed",
+            "notes": [f"Model analysis unavailable: {reason}"],
+        },
+        "data_quality": {
+            "provider": "tradier",
+            "warnings": ["MODEL_PARSE_FAILED"],
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "_fallback": True,
+        "_raw_text_preview": (raw_text or "")[:500] if raw_text else None,
+    }
+
+
+def analyze_stock_strategy(
+    *,
+    strategy_id: str,
+    candidate: dict[str, Any],
+    model_url: str = "http://localhost:1234/v1/chat/completions",
+    retries: int = 1,
+    timeout: int = 60,
+) -> dict[str, Any]:
+    """Run LLM model analysis on a stock strategy scanner candidate.
+
+    Uses the stock_strategy_prompts library for strategy-specific prompt building.
+    Returns the structured output matching the stock strategy analysis contract.
+
+    Pipeline:
+      1. Call LLM with strategy-specific prompt.
+      2. Extract JSON via repair pipeline (handles fences, trailing commas, etc.).
+      3. Normalize/coerce output to canonical schema.
+      4. On parse failure: one retry asking LLM to fix its own JSON.
+      5. On total failure: return a valid PASS fallback (never HTTP 500 for parse errors).
+
+    Input fields:
+      strategy_id: one of stock_pullback_swing, stock_momentum_breakout,
+                   stock_mean_reversion, stock_volatility_expansion
+      candidate: full candidate dict from the scanner (includes metrics, thesis, scores)
+
+    Raises:
+      LocalModelUnavailableError: if the local LLM endpoint is unreachable
+      ValueError: if strategy_id is unknown
+    """
+    import logging
+    import requests as _requests
+
+    from common.json_repair import REPAIR_METRICS, extract_and_repair_json
+    from common.stock_strategy_prompts import (
+        STOCK_STRATEGY_SYSTEM_PROMPT,
+        build_stock_strategy_user_prompt,
+    )
+
+    _log = logging.getLogger("bentrade.model_analysis")
+
+    # Build prompts
+    user_prompt = build_stock_strategy_user_prompt(strategy_id, candidate)
+    symbol = candidate.get("symbol", "???")
+
+    _log.info(
+        "[MODEL_STOCK_STRATEGY_TRACE] strategy=%s symbol=%s engine_score=%s",
+        strategy_id,
+        symbol,
+        candidate.get("composite_score"),
+    )
+
+    payload = {
+        "messages": [
+            {"role": "system", "content": STOCK_STRATEGY_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        "max_tokens": 2048,
+        "temperature": 0.0,
+    }
+
+    def _call_llm(messages: list[dict], label: str) -> str | None:
+        """POST to LLM and extract assistant text. Returns None on network error."""
+        try:
+            resp = _requests.post(
+                model_url,
+                json={"messages": messages, "max_tokens": 2048, "temperature": 0.0},
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+        except RequestException as exc:
+            _log.warning("[MODEL_STOCK_STRATEGY_TRACE] %s network error: %s", label, exc)
+            raise
+
+        response_json = None
+        try:
+            response_json = resp.json()
+        except Exception:
+            pass
+
+        assistant_text = None
+        if isinstance(response_json, dict):
+            choices = response_json.get("choices") or []
+            if choices and isinstance(choices, list) and isinstance(choices[0], dict):
+                first = choices[0]
+                message = first.get("message")
+                if isinstance(message, dict) and "content" in message:
+                    assistant_text = message.get("content")
+                elif "text" in first:
+                    assistant_text = first.get("text")
+        if assistant_text is None:
+            assistant_text = getattr(resp, "text", "")
+
+        return assistant_text
+
+    # ── Main attempt loop (network retries) ──────────────────────
+    last_error: Exception | None = None
+    assistant_text: str | None = None
+    attempt = 0
+    while attempt <= int(max(retries, 0)):
+        attempt += 1
+        try:
+            assistant_text = _call_llm(payload["messages"], f"attempt-{attempt}")
+            break  # network OK — proceed to parse
+        except RequestException as exc:
+            last_error = exc
+            _log.warning(
+                "[MODEL_STOCK_STRATEGY_TRACE] attempt %d/%d network fail: %s",
+                attempt, retries + 1, exc,
+            )
+
+    # All network retries exhausted
+    if assistant_text is None:
+        if isinstance(last_error, RequestException):
+            raise LocalModelUnavailableError(
+                f"Local model endpoint unavailable at {model_url}: {last_error}"
+            ) from last_error
+        raise RuntimeError(f"Stock strategy model analysis failed: {last_error}")
+
+    _log.debug(
+        "[MODEL_STOCK_STRATEGY_TRACE] raw_response_len=%d", len(assistant_text or ""),
+    )
+
+    # ── Parse + repair pipeline ──────────────────────────────────
+    parsed, parse_method = extract_and_repair_json(assistant_text)
+
+    if parse_method and parse_method != "direct":
+        _log.info(
+            "[MODEL_STOCK_STRATEGY_TRACE] JSON required repair: method=%s strategy=%s symbol=%s",
+            parse_method, strategy_id, symbol,
+        )
+
+    # ── Normalize ────────────────────────────────────────────────
+    normalized = _coerce_stock_strategy_output(parsed) if parsed is not None else None
+
+    # ── Retry-with-fix on parse failure ──────────────────────────
+    if normalized is None and assistant_text:
+        _log.warning(
+            "[MODEL_STOCK_STRATEGY_TRACE] parse failed, attempting retry-with-fix strategy=%s symbol=%s first_200=%r",
+            strategy_id, symbol, (assistant_text or "")[:200],
+        )
+
+        fix_messages = payload["messages"] + [
+            {"role": "assistant", "content": assistant_text},
+            {
+                "role": "user",
+                "content": (
+                    "Your previous response was not valid JSON. "
+                    "Return ONLY the corrected JSON object — no markdown fences, "
+                    "no explanation, no trailing commas. Start with { and end with }."
+                ),
+            },
+        ]
+
+        try:
+            fix_text = _call_llm(fix_messages, "retry-fix")
+            if fix_text:
+                parsed2, parse_method2 = extract_and_repair_json(fix_text)
+                normalized = _coerce_stock_strategy_output(parsed2) if parsed2 is not None else None
+                if normalized is not None:
+                    parse_method = f"retry_fix+{parse_method2 or 'unknown'}"
+                    _log.info(
+                        "[MODEL_STOCK_STRATEGY_TRACE] retry-with-fix SUCCEEDED strategy=%s symbol=%s method=%s",
+                        strategy_id, symbol, parse_method,
+                    )
+        except RequestException:
+            _log.warning("[MODEL_STOCK_STRATEGY_TRACE] retry-fix network error, proceeding to fallback")
+
+    # ── Fallback on total failure ────────────────────────────────
+    if normalized is None:
+        _log.error(
+            "[MODEL_STOCK_STRATEGY_TRACE] ALL PARSE FAILED — returning fallback strategy=%s symbol=%s metrics=%s",
+            strategy_id, symbol, dict(REPAIR_METRICS),
+        )
+        return _build_fallback_stock_analysis(
+            candidate, strategy_id,
+            reason="JSON extraction + repair + retry all failed",
+            raw_text=assistant_text,
+        )
+
+    # ── Success path ─────────────────────────────────────────────
+    normalized["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+    # Tag parse method in data_quality for diagnostics
+    if parse_method and parse_method != "direct":
+        dq = normalized.setdefault("data_quality", {})
+        warnings = dq.setdefault("warnings", [])
+        warnings.append(f"JSON_REPAIR:{parse_method}")
+
+    _log.info(
+        "[MODEL_STOCK_STRATEGY_TRACE] OK strategy=%s symbol=%s recommendation=%s score=%s parse=%s",
+        strategy_id, symbol,
+        normalized.get("recommendation"),
+        normalized.get("score"),
+        parse_method,
+    )
+
+    return normalized

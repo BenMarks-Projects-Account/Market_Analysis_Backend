@@ -16,9 +16,12 @@ async def request_json(
     *,
     params: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
+    data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
-        response = await client.request(method, url, params=params, headers=headers)
+        response = await client.request(
+            method, url, params=params, headers=headers, data=data,
+        )
     except httpx.HTTPError as exc:
         raise UpstreamError(
             f"Network error calling upstream: {url}",

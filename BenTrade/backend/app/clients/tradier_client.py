@@ -279,6 +279,56 @@ class TradierClient:
 
         return await self.cache.get_or_set(key, self.settings.CANDLES_CACHE_TTL_SECONDS, _load)
 
+    async def get_daily_bars(self, symbol: str, start_date: str, end_date: str) -> list[dict[str, Any]]:
+        """Return full OHLCV daily bars: ``[{"date", "open", "high", "low", "close", "volume"}, ...]``."""
+        normalized_symbol = self._normalize_symbol(symbol)
+        if not normalized_symbol:
+            return []
+
+        key = f"tradier:bars:{normalized_symbol}:{start_date}:{end_date}"
+        url = f"{self.settings.TRADIER_BASE_URL}/markets/history"
+
+        async def _load() -> list[dict[str, Any]]:
+            payload = await request_json(
+                self.http_client,
+                "GET",
+                url,
+                params={
+                    "symbol": normalized_symbol,
+                    "interval": "daily",
+                    "start": start_date,
+                    "end": end_date,
+                },
+                headers=self._headers,
+            )
+
+            days = ((payload.get("history") or {}).get("day")) or []
+            if isinstance(days, dict):
+                days = [days]
+
+            result: list[dict[str, Any]] = []
+            for day in days:
+                if not isinstance(day, dict):
+                    continue
+                close = day.get("close")
+                day_date = day.get("date")
+                if close is None or day_date is None:
+                    continue
+                try:
+                    result.append({
+                        "date": str(day_date),
+                        "open": float(day["open"]) if day.get("open") is not None else None,
+                        "high": float(day["high"]) if day.get("high") is not None else None,
+                        "low": float(day["low"]) if day.get("low") is not None else None,
+                        "close": float(close),
+                        "volume": int(day["volume"]) if day.get("volume") is not None else None,
+                    })
+                except (TypeError, ValueError, KeyError):
+                    continue
+            return result
+
+        return await self.cache.get_or_set(key, self.settings.CANDLES_CACHE_TTL_SECONDS, _load)
+
     async def health(self) -> bool:
         try:
             await self.get_quote("SPY")

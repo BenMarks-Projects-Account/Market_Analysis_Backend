@@ -31,6 +31,11 @@ _SPREAD_TYPE_ALIASES: dict[str, str] = {
     "long_call": "long_call",
     "long_put": "long_put",
     "income": "income",
+    # Stock strategies
+    "stock_pullback_swing": "stock_pullback_swing",
+    "stock_momentum_breakout": "stock_momentum_breakout",
+    "stock_mean_reversion": "stock_mean_reversion",
+    "stock_volatility_expansion": "stock_volatility_expansion",
 }
 
 CANONICAL_STRATEGY_IDS: set[str] = {
@@ -50,6 +55,11 @@ CANONICAL_STRATEGY_IDS: set[str] = {
     "single",
     "long_call",
     "long_put",
+    # Stock strategies
+    "stock_pullback_swing",
+    "stock_momentum_breakout",
+    "stock_mean_reversion",
+    "stock_volatility_expansion",
 }
 
 
@@ -168,3 +178,25 @@ def trade_key(
             dte_value = str(dte).strip() or "NA"
 
     return f"{underlying_value}|{expiration_value}|{spread_value}|{short_value}|{long_value}|{dte_value}"
+
+
+def stock_trade_key(underlying: Any, strategy_id: str = "stock_pullback_swing") -> str:
+    """Build a canonical 6-part trade key for a stock-long idea.
+
+    Schema: SYMBOL|STOCK|strategy_id|NA|NA|NA
+    The ``STOCK`` marker occupies the expiration slot.
+    """
+    return trade_key(
+        underlying=underlying,
+        expiration="STOCK",
+        spread_type=strategy_id,
+        short_strike=None,
+        long_strike=None,
+        dte=None,
+    )
+
+
+def stock_idea_key(underlying: Any, strategy_id: str = "stock_pullback_swing") -> str:
+    """Short-form idea key for stock strategies: SYMBOL|strategy_id."""
+    symbol = str(underlying or "").strip().upper() or "NA"
+    return f"{symbol}|{strategy_id}"

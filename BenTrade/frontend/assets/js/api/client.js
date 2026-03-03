@@ -102,6 +102,17 @@ window.BenTradeApi = (function(){
     });
   }
 
+  function modelAnalyzeStockStrategy(strategyId, candidate){
+    return jsonFetch('/api/model/analyze_stock_strategy', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        strategy_id: String(strategyId || ''),
+        candidate: (candidate && typeof candidate === 'object') ? candidate : {},
+      }),
+    });
+  }
+
   function modelAnalyzeRegime(regime, playbook){
     return jsonFetch('/api/model/analyze_regime', {
       method: 'POST',
@@ -325,11 +336,24 @@ window.BenTradeApi = (function(){
     return jsonFetch('/api/trading/kill-switch/off', { method: 'POST' });
   }
 
+  /* ── Stock execution ───────────────────────────────────── */
+  function stockExecute(payload){
+    return jsonFetch('/api/stocks/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
+  function getStockExecutionStatus(){
+    return jsonFetch('/api/stocks/execute/status');
+  }
+
   return {
     listReports,
     getReport,
     modelAnalyze,
     modelAnalyzeStock,
+    modelAnalyzeStockStrategy,
     modelAnalyzeRegime,
     persistRejectDecision,
     getRejectDecisions,
@@ -370,5 +394,7 @@ window.BenTradeApi = (function(){
     tradingSubmit,
     tradingKillSwitchOn,
     tradingKillSwitchOff,
+    stockExecute,
+    getStockExecutionStatus,
   };
 })();

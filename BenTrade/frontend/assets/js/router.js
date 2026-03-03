@@ -184,7 +184,11 @@
     "active-trade": { title: "Active Trade Dashboard", group: "Trading", subgroup: "Execution & Monitoring", description: "Broker positions/orders" },
     "trade-testing": { title: "Trade Testing Workbench", group: "Trading", subgroup: "Execution & Monitoring", description: "What-if lab + scenarios" },
     "stock-analysis": { title: "Stock Analysis Dashboard", group: "Analysis", subgroup: "Equities", description: "Stock analysis" },
-    "stock-scanner": { title: "Stock Scanner", group: "Analysis", subgroup: "Equities", description: "Auto-ranked stock ideas" },
+    "stock-scanner": { title: "Stock Scanner (Deprecated)", group: "Analysis", subgroup: "Equities", description: "Legacy generic scanner" },
+    "stocks/pullback-swing": { title: "Pullback Swing — Stock Scanner", group: "Stock Strategies", subgroup: "Equities → Swing", description: "Dip buys in trend" },
+    "stocks/momentum-breakout": { title: "Momentum Breakout — Stock Scanner", group: "Stock Strategies", subgroup: "Equities → Momentum", description: "Breakout entries" },
+    "stocks/mean-reversion": { title: "Mean Reversion — Stock Scanner", group: "Stock Strategies", subgroup: "Equities → Reversion", description: "Oversold bounces" },
+    "stocks/volatility-expansion": { title: "Volatility Expansion — Stock Scanner", group: "Stock Strategies", subgroup: "Equities → Volatility", description: "IV spike entries" },
     "risk-capital": { title: "Risk & Capital Management Dashboard", group: "Risk", subgroup: "Institutional controls", description: "Policies + limits" },
     "portfolio-risk": { title: "Portfolio Risk Matrix", group: "Risk", subgroup: "Institutional controls", description: "Greeks + scenarios" },
     "trade-lifecycle": { title: "Trade Lifecycle", group: "Lifecycle", subgroup: "Process & journaling", description: "States + history" },
@@ -253,6 +257,26 @@
       view: "dashboards/stock_scanner.html",
       init: () => window.BenTradePages?.initStockScanner?.(document.getElementById('view')),
       title: routeMeta["stock-scanner"].title
+    },
+    "stocks/pullback-swing": {
+      view: "dashboards/stock_strategy.html",
+      init: () => window.BenTradePages?.initStockPullbackSwing?.(document.getElementById('view')),
+      title: routeMeta["stocks/pullback-swing"].title
+    },
+    "stocks/momentum-breakout": {
+      view: "dashboards/stock_strategy.html",
+      init: () => window.BenTradePages?.initStockMomentumBreakout?.(document.getElementById('view')),
+      title: routeMeta["stocks/momentum-breakout"].title
+    },
+    "stocks/mean-reversion": {
+      view: "dashboards/stock_strategy.html",
+      init: () => window.BenTradePages?.initStockMeanReversion?.(document.getElementById('view')),
+      title: routeMeta["stocks/mean-reversion"].title
+    },
+    "stocks/volatility-expansion": {
+      view: "dashboards/stock_strategy.html",
+      init: () => window.BenTradePages?.initStockVolatilityExpansion?.(document.getElementById('view')),
+      title: routeMeta["stocks/volatility-expansion"].title
     },
     "risk-capital": {
       view: "dashboards/risk_capital.html",

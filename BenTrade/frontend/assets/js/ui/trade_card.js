@@ -386,6 +386,7 @@ window.BenTradeTradeCard = (function(){
       + '<button type="button" class="btn btn-reject btn-action" data-action="reject"' + tradeKeyAttr + ' title="Reject this trade">Reject</button></div>'
       + '<div class="actions-row"><button type="button" class="btn btn-action" data-action="workbench"' + tradeKeyAttr + ' title="Send to Testing Workbench">Send to Testing Workbench</button>'
       + '<button type="button" class="btn btn-action" data-action="data-workbench"' + tradeKeyAttr + ' title="Send to Data Workbench">Send to Data Workbench</button></div>'
+      + (o.extraActionsHtml || '')
       + '</div>';
 
     /* 7. Debug warnings */

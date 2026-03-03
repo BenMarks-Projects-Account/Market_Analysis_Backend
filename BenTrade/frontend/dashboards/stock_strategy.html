@@ -1,0 +1,181 @@
+<!-- BenTrade — Stock Strategy Dashboard Shell (shared template) -->
+<div class="view-wrap">
+<div class="dashboard-layout">
+  <main class="main" style="max-width:1200px;margin:0 auto;">
+
+    <!-- ── HEADER ── -->
+    <div id="stockStrategyHeader" class="file-selector" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+      <div style="flex:1 1 auto;">
+        <h2 id="stockStrategyTitle" style="margin:0;font-size:1.35rem;"></h2>
+        <div id="stockStrategySubtitle" style="font-size:12px;color:rgba(190,236,244,0.6);margin-top:2px;"></div>
+      </div>
+      <span id="stockStrategyBadge" class="badge" style="
+        display:inline-block;
+        padding:3px 10px;
+        font-size:10px;
+        border-radius:20px;
+        text-transform:uppercase;
+        letter-spacing:0.08em;
+        background:rgba(0,234,255,0.10);
+        border:1px solid rgba(0,234,255,0.30);
+        color:rgba(0,234,255,0.90);
+      ">Scaffold</span>
+      <button id="stockStrategyRunBtn" class="btn btn-primary" style="
+        padding:7px 18px;
+        font-size:12px;
+        border-radius:8px;
+        cursor:pointer;
+        background:rgba(0,234,255,0.12);
+        border:1px solid rgba(0,234,255,0.35);
+        color:rgba(0,234,255,0.95);
+        font-weight:600;
+        letter-spacing:0.04em;
+        transition:background 0.2s;
+      ">▶ Run Scan</button>
+    </div>
+
+    <!-- ── METRICS ROW ── -->
+    <div id="stockStrategyMetrics" style="
+      display:grid;
+      grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));
+      gap:12px;
+      margin-top:18px;
+    ">
+      <div class="metric-tile" data-metric="candidates">
+        <div class="metric-tile-label">Candidates Found</div>
+        <div class="metric-tile-value">—</div>
+      </div>
+      <div class="metric-tile" data-metric="universe">
+        <div class="metric-tile-label">Universe Size</div>
+        <div class="metric-tile-value">—</div>
+      </div>
+      <div class="metric-tile" data-metric="lastScan">
+        <div class="metric-tile-label">Last Scan</div>
+        <div class="metric-tile-value">—</div>
+      </div>
+      <div class="metric-tile" data-metric="dataStatus">
+        <div class="metric-tile-label">Data Status</div>
+        <div class="metric-tile-value">—</div>
+      </div>
+    </div>
+
+    <!-- ── STRATEGY INFO BANNER (shown once per session, then dismissible) ── -->
+    <div id="stockStrategyBanner" style="
+      margin-top:24px;
+      padding:22px 28px 22px 24px;
+      border-radius:14px;
+      border:1px solid rgba(0,234,255,0.18);
+      background:linear-gradient(135deg, rgba(8,18,26,0.92) 0%, rgba(14,28,38,0.88) 100%);
+      position:relative;
+      overflow:hidden;
+      display:none;
+    ">
+      <!-- shimmer overlay -->
+      <div style="
+        position:absolute;inset:0;
+        background:linear-gradient(110deg,
+          transparent 30%,
+          rgba(0,234,255,0.04) 45%,
+          rgba(0,234,255,0.08) 50%,
+          rgba(0,234,255,0.04) 55%,
+          transparent 70%);
+        background-size:200% 100%;
+        animation:shimmerSlide 3s ease-in-out infinite;
+        pointer-events:none;
+      "></div>
+      <div style="display:flex;align-items:flex-start;gap:16px;position:relative;z-index:1;">
+        <!-- Quantum icon (shared across all stock strategy pages) -->
+        <div id="stockBannerIcon" style="
+          font-size:28px;
+          line-height:1;
+          flex-shrink:0;
+          margin-top:2px;
+          filter:drop-shadow(0 0 6px rgba(0,234,255,0.35));
+        ">◈</div>
+        <div style="flex:1 1 auto;min-width:0;">
+          <div id="stockBannerTitle" style="font-size:14px;color:rgba(215,251,255,0.92);font-weight:600;margin-bottom:4px;"></div>
+          <div id="stockBannerDesc" style="font-size:12px;color:rgba(190,236,244,0.6);line-height:1.5;max-width:560px;"></div>
+        </div>
+        <button id="stockBannerDismiss" title="Dismiss" style="
+          flex-shrink:0;
+          background:none;
+          border:1px solid rgba(0,234,255,0.18);
+          border-radius:6px;
+          color:rgba(190,236,244,0.55);
+          font-size:16px;
+          cursor:pointer;
+          padding:2px 7px;
+          line-height:1;
+          transition:color 0.2s, border-color 0.2s;
+        " onmouseover="this.style.color='rgba(0,234,255,0.9)';this.style.borderColor='rgba(0,234,255,0.4)'"
+           onmouseout="this.style.color='rgba(190,236,244,0.55)';this.style.borderColor='rgba(0,234,255,0.18)'"
+        >✕</button>
+      </div>
+    </div>
+
+    <!-- ── EMPTY STATE PANEL (shown when no candidates yet) ── -->
+    <div id="stockStrategyEmptyState" style="
+      margin-top:32px;
+      padding:48px 28px;
+      text-align:center;
+      border-radius:14px;
+      border:1px solid rgba(0,234,255,0.18);
+      background:linear-gradient(135deg, rgba(8,18,26,0.92) 0%, rgba(14,28,38,0.88) 100%);
+      position:relative;
+      overflow:hidden;
+    ">
+      <!-- shimmer overlay -->
+      <div style="
+        position:absolute;inset:0;
+        background:linear-gradient(110deg,
+          transparent 30%,
+          rgba(0,234,255,0.04) 45%,
+          rgba(0,234,255,0.08) 50%,
+          rgba(0,234,255,0.04) 55%,
+          transparent 70%);
+        background-size:200% 100%;
+        animation:shimmerSlide 3s ease-in-out infinite;
+        pointer-events:none;
+      "></div>
+
+      <div id="stockStrategyIcon" style="font-size:36px;margin-bottom:12px;"></div>
+      <div style="font-size:15px;color:rgba(215,251,255,0.92);font-weight:600;margin-bottom:6px;">
+        No candidates loaded.
+      </div>
+      <div style="font-size:13px;color:rgba(190,236,244,0.55);max-width:380px;margin:0 auto;">
+        Click <strong style="color:rgba(0,234,255,0.85);">▶ Run Scan</strong> to scan the universe for opportunities.
+      </div>
+    </div>
+
+    <!-- ── RESULTS CONTAINER ── -->
+    <div id="stockStrategyCandidates" class="trades-grid" style="margin-top:24px;"></div>
+
+  </main>
+</div>
+</div>
+
+<style>
+  @keyframes shimmerSlide {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  .metric-tile {
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: rgba(8,18,26,0.85);
+    border: 1px solid rgba(0,234,255,0.12);
+    min-height: 60px;
+  }
+  .metric-tile-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: rgba(190,236,244,0.50);
+    margin-bottom: 4px;
+  }
+  .metric-tile-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: rgba(215,251,255,0.92);
+  }
+</style>

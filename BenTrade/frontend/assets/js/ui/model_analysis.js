@@ -262,10 +262,11 @@ window.BenTradeModelAnalysis = (function(){
     var confPct = confVal !== null ? (confVal * 100).toFixed(0) + '%' : '';
     var modelScore = parsed.score_0_100;
 
-    /* Recommendation styles */
+    /* Recommendation styles — shared by options (TAKE/PASS) and stock strategies (BUY/PASS) */
     var recStyles = {
       'TAKE':    { color: '#00dc78', glow: '0 0 12px rgba(0,220,120,0.35)', border: 'rgba(0,220,120,0.4)' },
       'ACCEPT':  { color: '#00dc78', glow: '0 0 12px rgba(0,220,120,0.35)', border: 'rgba(0,220,120,0.4)' },
+      'BUY':     { color: '#00dc78', glow: '0 0 12px rgba(0,220,120,0.35)', border: 'rgba(0,220,120,0.4)' },
       'PASS':    { color: '#ff5a5a', glow: '0 0 12px rgba(255,90,90,0.35)',  border: 'rgba(255,90,90,0.4)' },
       'REJECT':  { color: '#ff5a5a', glow: '0 0 12px rgba(255,90,90,0.35)',  border: 'rgba(255,90,90,0.4)' },
       'WATCH':   { color: '#ffc83c', glow: '0 0 12px rgba(255,200,60,0.35)', border: 'rgba(255,200,60,0.4)' },
@@ -277,7 +278,7 @@ window.BenTradeModelAnalysis = (function(){
 
     /* ── Recommendation Banner ── */
     html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">';
-    html += '<span style="font-size:18px;font-weight:800;color:' + style.color + ';letter-spacing:0.5px;">' + esc(rec) + '</span>';
+    html += '<span style="font-size:18px;font-weight:800;color:' + style.color + ';letter-spacing:0.5px;text-shadow:' + style.glow + ';">' + esc(rec) + '</span>';
     if(modelScore !== null){
       var mScoreColor = modelScore >= 60 ? '#00dc78' : modelScore >= 40 ? '#ffc83c' : '#ff5a5a';
       html += '<span style="font-size:16px;font-weight:700;color:' + mScoreColor + ';">' + modelScore + '<span style="font-size:11px;font-weight:400;color:var(--muted);">/100</span></span>';

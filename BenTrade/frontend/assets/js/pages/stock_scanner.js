@@ -1,3 +1,14 @@
+/**
+ * @deprecated This generic stock scanner page is deprecated.
+ * Use the dedicated strategy dashboards instead:
+ *   - #/stocks/pullback-swing      (stock_pullback_swing.js)
+ *   - #/stocks/momentum-breakout   (stock_momentum_breakout.js)
+ *   - #/stocks/mean-reversion      (stock_mean_reversion.js)
+ *   - #/stocks/volatility-expansion (stock_volatility_expansion.js)
+ *
+ * This file is retained for backward compatibility and will be
+ * removed in a future release.
+ */
 window.BenTradePages = window.BenTradePages || {};
 
 window.BenTradePages.initStockScanner = function initStockScanner(rootEl){

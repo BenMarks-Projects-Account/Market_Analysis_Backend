@@ -65,6 +65,11 @@ class StockModelAnalyzeRequest(BaseModel):
     source: str = "local_llm"
 
 
+class StockStrategyAnalyzeRequest(BaseModel):
+    strategy_id: str
+    candidate: dict[str, Any]
+
+
 def _to_float(value):
     if value in (None, ""):
         return None
@@ -433,3 +438,104 @@ async def model_analyze_stock(payload: StockModelAnalyzeRequest, request: Reques
         raise HTTPException(status_code=500, detail=f"Failed to persist stock model artifact: {exc}") from exc
 
     return model_output
+
+
+@router.post("/api/model/analyze_stock_strategy")
+async def model_analyze_stock_strategy(payload: StockStrategyAnalyzeRequest, request: Request):
+    """Run LLM model analysis on a stock strategy scanner candidate.
+
+    Accepts the full scanner candidate object and a strategy_id.
+    Returns a structured analysis with recommendation, score, drivers, risk review,
+    and engine-vs-model comparison.
+    """
+    import logging as _logging
+
+    _log = _logging.getLogger("bentrade.model_trace")
+
+    strategy_id = str(payload.strategy_id or "").strip()
+    _VALID_STRATEGIES = {
+        "stock_pullback_swing",
+        "stock_momentum_breakout",
+        "stock_mean_reversion",
+        "stock_volatility_expansion",
+    }
+    if strategy_id not in _VALID_STRATEGIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f'Invalid strategy_id "{strategy_id}". Must be one of: {", ".join(sorted(_VALID_STRATEGIES))}',
+        )
+
+    candidate = payload.candidate
+    if not candidate or not isinstance(candidate, dict):
+        raise HTTPException(status_code=400, detail='Missing or invalid "candidate" in request body')
+
+    symbol = str(candidate.get("symbol") or "").strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=400, detail='Missing "symbol" in candidate')
+
+    _log.info(
+        "[MODEL_TRACE] /api/model/analyze_stock_strategy hit — strategy=%s symbol=%s",
+        strategy_id,
+        symbol,
+    )
+
+    try:
+        from common.model_analysis import LocalModelUnavailableError, analyze_stock_strategy
+
+        model_output = analyze_stock_strategy(
+            strategy_id=strategy_id,
+            candidate=candidate,
+        )
+    except LocalModelUnavailableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        _log.exception("[MODEL_TRACE] /api/model/analyze_stock_strategy error — strategy=%s symbol=%s", strategy_id, symbol)
+        raise HTTPException(status_code=500, detail=f"Stock strategy model analysis failed: {exc}") from exc
+
+    # ── Persist artifact ──
+    artifact_path: Path = request.app.state.results_dir / f"model_stock_strategy_{strategy_id}.jsonl"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "strategy_id": strategy_id,
+        "symbol": symbol,
+        "trade_key": candidate.get("trade_key", ""),
+        "model_output": model_output,
+        "input_snapshot": {
+            "strategy_id": strategy_id,
+            "symbol": symbol,
+            "composite_score": candidate.get("composite_score"),
+        },
+    }
+    numeric_warnings: list[str] = []
+    record = _sanitize_finite(record, warnings=numeric_warnings)
+
+    for warning_path in numeric_warnings:
+        emit_validation_event(
+            severity="error",
+            code="NUMERIC_NONFINITE",
+            message="Non-finite numeric value was sanitized before stock strategy model artifact persistence",
+            context={
+                "strategy_id": strategy_id,
+                "symbol": symbol,
+                "path": warning_path,
+            },
+        )
+
+    try:
+        with open(artifact_path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    except Exception as exc:
+        _log.warning("Failed to persist stock strategy model artifact: %s", exc)
+
+    _log.info(
+        "[MODEL_TRACE] /api/model/analyze_stock_strategy OK — strategy=%s symbol=%s recommendation=%s",
+        strategy_id,
+        symbol,
+        model_output.get("recommendation"),
+    )
+
+    return {"ok": True, "analysis": model_output}

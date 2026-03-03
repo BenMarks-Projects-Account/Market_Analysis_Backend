@@ -4,6 +4,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes_frontend import router as frontend_router
@@ -21,6 +22,7 @@ from app.api.routes_reports import router as reports_router
 from app.api.routes_risk_capital import router as risk_capital_router
 from app.api.routes_signals import router as signals_router
 from app.api.routes_stock_analysis import router as stock_analysis_router
+from app.api.routes_stock_strategies import router as stock_strategies_router
 from app.api.routes_spreads import router as spreads_router
 from app.api.routes_strategies import router as strategies_router
 from app.api.routes_strategy_analytics import router as strategy_analytics_router
@@ -42,6 +44,11 @@ from app.services.recommendation_service import RecommendationService
 from app.services.report_service import ReportService
 from app.services.signal_service import SignalService
 from app.services.stock_analysis_service import StockAnalysisService
+from app.services.stock_execution_service import StockExecutionService
+from app.services.pullback_swing_service import PullbackSwingService
+from app.services.momentum_breakout_service import MomentumBreakoutService
+from app.services.mean_reversion_service import MeanReversionService
+from app.services.volatility_expansion_service import VolatilityExpansionService
 from app.services.spread_service import SpreadService
 from app.services.strategy_service import StrategyService
 from app.services.trade_lifecycle_service import TradeLifecycleService
@@ -68,6 +75,14 @@ def create_app() -> FastAPI:
     settings = get_settings()
 
     app = FastAPI(title="BenTrade FastAPI Service", version="0.1.0")
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     backend_dir = Path(__file__).resolve().parents[1]
     frontend_dir = backend_dir.parent / "frontend"
@@ -139,6 +154,10 @@ def create_app() -> FastAPI:
     signal_service = SignalService(base_data_service=base_data_service, cache=cache, ttl_seconds=45)
     spread_service = SpreadService(base_data_service=base_data_service)
     stock_analysis_service = StockAnalysisService(base_data_service=base_data_service, results_dir=results_dir, signal_service=signal_service)
+    pullback_swing_service = PullbackSwingService(base_data_service=base_data_service)
+    momentum_breakout_service = MomentumBreakoutService(base_data_service=base_data_service)
+    mean_reversion_service = MeanReversionService(base_data_service=base_data_service)
+    volatility_expansion_service = VolatilityExpansionService(base_data_service=base_data_service)
     trade_lifecycle_service = TradeLifecycleService(results_dir=results_dir)
     risk_policy_service = RiskPolicyService(results_dir=results_dir)
     regime_service = RegimeService(base_data_service=base_data_service, cache=cache, ttl_seconds=45)
@@ -174,6 +193,11 @@ def create_app() -> FastAPI:
         paper_broker=paper_broker,
         live_broker=tradier_broker,
     )
+    stock_execution_service = StockExecutionService(
+        settings=settings,
+        http_client=http_client,
+        repository=trading_repository,
+    )
 
     app.state.http_client = http_client
     app.state.tradier_client = tradier_client
@@ -184,6 +208,10 @@ def create_app() -> FastAPI:
     app.state.signal_service = signal_service
     app.state.spread_service = spread_service
     app.state.stock_analysis_service = stock_analysis_service
+    app.state.pullback_swing_service = pullback_swing_service
+    app.state.momentum_breakout_service = momentum_breakout_service
+    app.state.mean_reversion_service = mean_reversion_service
+    app.state.volatility_expansion_service = volatility_expansion_service
     app.state.strategy_service = strategy_service
     app.state.trade_lifecycle_service = trade_lifecycle_service
     app.state.risk_policy_service = risk_policy_service
@@ -195,6 +223,8 @@ def create_app() -> FastAPI:
     app.state.validation_events = validation_events_service
     app.state.trading_repository = trading_repository
     app.state.trading_service = trading_service
+    app.state.stock_execution_service = stock_execution_service
+    app.state.settings = settings
     app.state.backend_dir = backend_dir
     app.state.frontend_dir = frontend_dir
     app.state.results_dir = results_dir
@@ -206,6 +236,7 @@ def create_app() -> FastAPI:
     app.include_router(underlying_router)
     app.include_router(spreads_router)
     app.include_router(stock_analysis_router)
+    app.include_router(stock_strategies_router)
     app.include_router(signals_router)
     app.include_router(playbook_router)
     app.include_router(strategies_router)

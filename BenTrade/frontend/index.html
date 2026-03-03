@@ -245,11 +245,35 @@
                 <span class="nav-item-sub">Analysis → Stocks → Single symbol</span>
               </span>
             </a>
-            <a class="nav-link" href="#/stock-scanner" data-route="stock-scanner">
+
+            <div class="nav-parent-label">Stock Strategies</div>
+            <div class="nav-subgroup-desc">Dedicated stock strategy scanners</div>
+            <a class="nav-link" href="#/stocks/pullback-swing" data-route="stocks/pullback-swing">
               <span class="nav-dot"></span>
               <span class="nav-item-text">
-                <span class="nav-item-title">Stock Scanner</span>
-                <span class="nav-item-sub">Analysis → Stocks → Ranked ideas</span>
+                <span class="nav-item-title">Pullback Swing</span>
+                <span class="nav-item-sub">Stocks → Dip buys in trend</span>
+              </span>
+            </a>
+            <a class="nav-link" href="#/stocks/momentum-breakout" data-route="stocks/momentum-breakout">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Momentum Breakout</span>
+                <span class="nav-item-sub">Stocks → Breakout entries</span>
+              </span>
+            </a>
+            <a class="nav-link" href="#/stocks/mean-reversion" data-route="stocks/mean-reversion">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Mean Reversion</span>
+                <span class="nav-item-sub">Stocks → Oversold bounces</span>
+              </span>
+            </a>
+            <a class="nav-link" href="#/stocks/volatility-expansion" data-route="stocks/volatility-expansion">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Volatility Expansion</span>
+                <span class="nav-item-sub">Stocks → IV spike entries</span>
               </span>
             </a>
 
@@ -429,7 +453,7 @@
   <script src="assets/js/utils/debug.js?v=20260217a"></script>
   <script src="assets/js/utils/overlayRoot.js?v=20260227a"></script>
   <script src="assets/js/state/session_state.js?v=20260215a"></script>
-  <script src="assets/js/api/client.js?v=20260216e"></script>
+  <script src="assets/js/api/client.js?v=20260302e"></script>
   <script src="assets/js/utils/tradeKey.js?v=20260216a"></script>
   <script src="assets/js/utils/format.js?v=20260217a"></script>
   <script src="assets/js/utils/tradeAccessor.js?v=20260217a"></script>
@@ -455,14 +479,21 @@
   <script src="assets/js/stores/symbolUniverse.js?v=20260218a"></script>
   <script src="assets/js/ui/symbolUniverseSelector.js?v=20260218a"></script>
   <script src="assets/js/config/strategy_card_config.js?v=20260218a"></script>
+  <script src="assets/js/config/stock_strategies.js?v=20260302a"></script>
   <script src="assets/js/models/option_trade_card_model.js?v=20260218a"></script>
+  <script src="assets/js/models/stock_trade_card_mapper.js?v=20260302e"></script>
   <script src="assets/js/models/trade_ticket_model.js?v=20260227a"></script>
   <script src="assets/js/ui/trade_ticket.js?v=20260227a"></script>
+  <script src="assets/js/ui/stock_execute_modal.js?v=20260302f"></script>
   <script src="assets/js/pages/strategy_dashboard_shell.js?v=20260218a"></script>
   <script src="assets/js/pages/active_trades.js?v=20260217a"></script>
   <script src="assets/js/pages/trade_workbench.js?v=20260217a"></script>
   <script src="assets/js/pages/stock_analysis.js?v=20260216d"></script>
   <script src="assets/js/pages/stock_scanner.js?v=20260217a"></script>
+  <script src="assets/js/pages/stock_pullback_swing.js?v=20260302e"></script>
+  <script src="assets/js/pages/stock_momentum_breakout.js?v=20260302e"></script>
+  <script src="assets/js/pages/stock_mean_reversion.js?v=20260302e"></script>
+  <script src="assets/js/pages/stock_volatility_expansion.js?v=20260302e"></script>
   <script src="assets/js/pages/home.js?v=20260217a"></script>
   <script src="assets/js/pages/risk_capital.js?v=20260216a"></script>
   <script src="assets/js/pages/portfolio_risk.js?v=20260216a"></script>

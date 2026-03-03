@@ -198,6 +198,90 @@ window.BenTradeStrategyCardConfig = (function () {
     csp:          { alias: 'income' },
     covered_call: { alias: 'income' },
 
+    /* ── Stock Pullback Swing (dedicated stock strategy scanner) ── */
+    stock_pullback_swing: {
+      strategyLabel: 'Pullback Swing',
+      headerFields: ['symbol', 'strategy_label'],
+      coreMetrics: [
+        SHARED.rank_score,
+        { key: 'trend_score',    computedKey: 'trend_score',    rootFallbacks: ['trend_score'],    label: 'Trend',    format: 'score' },
+        { key: 'pullback_score', computedKey: 'pullback_score', rootFallbacks: ['pullback_score'], label: 'Pullback', format: 'score' },
+        { key: 'reset_score',    computedKey: 'reset_score',    rootFallbacks: ['reset_score'],    label: 'Reset',    format: 'score' },
+        SHARED.liquidity_score,
+      ],
+      detailFields: [
+        { key: 'rsi14',                  computedKey: 'rsi14',                  rootFallbacks: ['rsi14'],                  label: 'RSI 14',           format: 'num' },
+        { key: 'sma20',                  computedKey: 'sma20',                  rootFallbacks: ['sma20'],                  label: 'SMA-20',           format: 'dollars' },
+        { key: 'sma50',                  computedKey: 'sma50',                  rootFallbacks: ['sma50'],                  label: 'SMA-50',           format: 'dollars' },
+        { key: 'pullback_from_20d_high', computedKey: 'pullback_from_20d_high', rootFallbacks: ['pullback_from_20d_high'], label: 'PB from 20D High', format: 'pct' },
+        { key: 'distance_to_sma20',      computedKey: 'distance_to_sma20',      rootFallbacks: ['distance_to_sma20'],      label: 'Dist to SMA-20',   format: 'pct' },
+      ],
+      requiredKeys: [],
+    },
+
+    /* ── Stock Momentum Breakout (breakout scanner) ──────────────── */
+    stock_momentum_breakout: {
+      strategyLabel: 'Momentum Breakout',
+      headerFields: ['symbol', 'strategy_label'],
+      coreMetrics: [
+        SHARED.rank_score,
+        { key: 'breakout_score',     computedKey: 'breakout_score',     rootFallbacks: ['breakout_score'],     label: 'Breakout',  format: 'score' },
+        { key: 'volume_score',       computedKey: 'volume_score',       rootFallbacks: ['volume_score'],       label: 'Volume',    format: 'score' },
+        { key: 'trend_score',        computedKey: 'trend_score',        rootFallbacks: ['trend_score'],        label: 'Trend',     format: 'score' },
+        { key: 'base_quality_score', computedKey: 'base_quality_score', rootFallbacks: ['base_quality_score'], label: 'Base',      format: 'score' },
+      ],
+      detailFields: [
+        { key: 'rsi14',                  computedKey: 'rsi14',                  rootFallbacks: ['rsi14'],                  label: 'RSI 14',            format: 'num' },
+        { key: 'breakout_proximity_55',  computedKey: 'breakout_proximity_55',  rootFallbacks: ['breakout_proximity_55'],  label: '55D High Prox',     format: 'pct' },
+        { key: 'vol_spike_ratio',        computedKey: 'vol_spike_ratio',        rootFallbacks: ['vol_spike_ratio'],        label: 'Vol Spike',         format: 'num' },
+        { key: 'compression_score',      computedKey: 'compression_score',      rootFallbacks: ['compression_score'],      label: 'Compression',       format: 'pct' },
+        { key: 'dist_sma20',             computedKey: 'dist_sma20',             rootFallbacks: ['dist_sma20'],             label: 'Dist SMA-20',       format: 'pct' },
+      ],
+      requiredKeys: [],
+    },
+
+    /* ── Stock Mean Reversion (oversold bounce scanner) ──────────── */
+    stock_mean_reversion: {
+      strategyLabel: 'Mean Reversion',
+      headerFields: ['symbol', 'strategy_label'],
+      coreMetrics: [
+        SHARED.rank_score,
+        { key: 'oversold_score',       computedKey: 'oversold_score',       rootFallbacks: ['oversold_score'],       label: 'Oversold',       format: 'score' },
+        { key: 'stabilization_score',  computedKey: 'stabilization_score',  rootFallbacks: ['stabilization_score'],  label: 'Stabilize',      format: 'score' },
+        { key: 'room_score',           computedKey: 'room_score',           rootFallbacks: ['room_score'],           label: 'Room',           format: 'score' },
+        SHARED.liquidity_score,
+      ],
+      detailFields: [
+        { key: 'rsi14',       computedKey: 'rsi14',       rootFallbacks: ['rsi14'],       label: 'RSI 14',         format: 'num' },
+        { key: 'rsi2',        computedKey: 'rsi2',        rootFallbacks: ['rsi2'],        label: 'RSI 2',          format: 'num' },
+        { key: 'zscore_20',   computedKey: 'zscore_20',   rootFallbacks: ['zscore_20'],   label: 'Z-Score 20D',    format: 'num' },
+        { key: 'dist_sma20',  computedKey: 'dist_sma20',  rootFallbacks: ['dist_sma20'],  label: 'Dist SMA-20',    format: 'pct' },
+        { key: 'drawdown_20', computedKey: 'drawdown_20', rootFallbacks: ['drawdown_20'], label: 'DD from 20D Hi', format: 'pct' },
+      ],
+      requiredKeys: [],
+    },
+
+    /* ── Stock Volatility Expansion (compression→expansion scanner) ── */
+    stock_volatility_expansion: {
+      strategyLabel: 'Volatility Expansion',
+      headerFields: ['symbol', 'strategy_label'],
+      coreMetrics: [
+        SHARED.rank_score,
+        { key: 'expansion_score',    computedKey: 'expansion_score',    rootFallbacks: ['expansion_score'],    label: 'Expansion',    format: 'score' },
+        { key: 'compression_score',  computedKey: 'compression_score',  rootFallbacks: ['compression_score'],  label: 'Compress',     format: 'score' },
+        { key: 'confirmation_score', computedKey: 'confirmation_score', rootFallbacks: ['confirmation_score'], label: 'Confirm',      format: 'score' },
+        { key: 'risk_score',         computedKey: 'risk_score',         rootFallbacks: ['risk_score'],         label: 'Risk',         format: 'score' },
+      ],
+      detailFields: [
+        { key: 'atr_ratio_10',             computedKey: 'atr_ratio_10',             rootFallbacks: ['atr_ratio_10'],             label: 'ATR Ratio',       format: 'num' },
+        { key: 'rv_ratio',                 computedKey: 'rv_ratio',                 rootFallbacks: ['rv_ratio'],                 label: 'RV Ratio',        format: 'num' },
+        { key: 'bb_width_percentile_180',  computedKey: 'bb_width_percentile_180',  rootFallbacks: ['bb_width_percentile_180'],  label: 'BB Width %ile',   format: 'num' },
+        { key: 'vol_spike_ratio',          computedKey: 'vol_spike_ratio',          rootFallbacks: ['vol_spike_ratio'],          label: 'Vol Spike',       format: 'num' },
+        { key: 'atr_pct',                  computedKey: 'atr_pct',                  rootFallbacks: ['atr_pct'],                  label: 'ATR %',           format: 'pct' },
+      ],
+      requiredKeys: [],
+    },
+
     /* ── Stock Buy (stock scanner candidates — no options legs) ── */
     stock_buy: {
       strategyLabel: 'Stock Buy',

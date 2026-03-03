@@ -63,11 +63,13 @@ async def get_stock_scan(
     request: Request,
     universe: str = Query("default", description="Scanner universe key"),
 ) -> dict:
+    """DEPRECATED: Legacy scan endpoint. Use /api/stocks/<strategy> endpoints instead."""
     return await request.app.state.stock_analysis_service.scan_universe(universe=universe)
 
 
 @router.get("/scanner")
 async def get_stock_scanner(request: Request) -> dict:
+    """DEPRECATED: Generic scanner endpoint. Use /api/stocks/<strategy> endpoints instead."""
     return await request.app.state.stock_analysis_service.stock_scanner()
 
 
