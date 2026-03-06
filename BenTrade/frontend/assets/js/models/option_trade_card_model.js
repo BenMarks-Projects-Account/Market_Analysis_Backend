@@ -378,7 +378,7 @@ window.BenTradeOptionTradeCardModel = (function () {
       console.warn(
         '[DEBUG_TRADES:MODEL_MAPPER] ' + header.symbol + ' ' + effectiveStrategy +
         ' missing ' + allMissing.length + ' keys: ' + allMissing.join(', ') +
-        (missingRequired.length ? '  ⚠ REQUIRED missing: ' + missingRequired.join(', ') : '')
+        (missingRequired.length ? '  ⚠︎ REQUIRED missing: ' + missingRequired.join(', ') : '')
       );
     }
 

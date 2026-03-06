@@ -40,10 +40,22 @@ window.BenTradeUI.Tooltip = (function(){
     'break even': 'break_even',
     'max profit': 'max_profit',
     'max loss': 'max_loss',
+    'credit': 'credit',
+    'credit received': 'credit',
+    'net credit': 'credit',
+    'spread width': 'spread_width',
+    'width': 'spread_width',
+    'open interest': 'open_interest',
+    'oi': 'open_interest',
+    'volume': 'volume',
+    'vol': 'volume',
     'delta': 'delta',
     'gamma': 'gamma',
     'theta': 'theta',
     'vega': 'vega',
+    'net delta': 'delta',
+    'net theta': 'theta',
+    'net vega': 'vega',
     'dte': 'dte',
     'days to expiration': 'dte',
     'mark': 'mark',
@@ -56,7 +68,9 @@ window.BenTradeUI.Tooltip = (function(){
     'iv rank': 'iv_rank',
     'short strike z': 'short_strike_z',
     'bid-ask %': 'bid_ask_spread_pct',
+    'bid/ask spread %': 'bid_ask_spread_pct',
     'strike dist %': 'strike_distance_pct',
+    'strike distance %': 'strike_distance_pct',
     'risk remaining': 'risk_remaining',
     'estimated risk': 'estimated_risk',
     'win rate': 'win_rate',
@@ -74,7 +88,132 @@ window.BenTradeUI.Tooltip = (function(){
     'volatility': 'volatility_score',
     'volatility score': 'volatility_score',
     'ema-20': 'ema_20',
-    'sma-50': 'sma_50'
+    'sma-50': 'sma_50',
+    // ── Home dashboard / Macro KPI labels ──
+    'spy': 'spy_price',
+    'spy price': 'spy_price',
+    'vix': 'vix_level',
+    'vix level': 'vix_level',
+    '10y yield': 'ten_year_yield',
+    '10y': 'ten_year_yield',
+    'ten year yield': 'ten_year_yield',
+    'fed funds': 'fed_funds',
+    'cpi yoy': 'cpi_yoy',
+    'cpi': 'cpi_yoy',
+    'capital at risk': 'capital_at_risk',
+    'risk utilization': 'risk_utilization',
+    'total risk used': 'total_risk_used',
+    'max trade %': 'max_trade_pct',
+    'max symbol %': 'max_symbol_pct',
+    'open trades': 'open_trades',
+    'avg open': 'avg_open',
+    'average open': 'avg_open',
+    // ── Scanner KPIs ──
+    'candidates': 'candidates',
+    'universe': 'universe',
+    'last scan': 'lastScan',
+    'lastscan': 'lastScan',
+    'data status': 'dataStatus',
+    'datastatus': 'dataStatus',
+    // ── Data Health / Admin ──
+    'provider status': 'data_provider_status',
+    'data staleness': 'data_staleness',
+    'api latency': 'api_latency',
+    // ── Active Trades ──
+    'source': 'trade_source',
+    'mode': 'trade_mode',
+    // ── Stock Analysis ──
+    'change': 'price_change',
+    'change %': 'price_change_pct',
+    'range high': 'range_high',
+    'range low': 'range_low',
+    // ── Trade Lifecycle ──
+    'days held': 'days_held',
+    'profit target %': 'profit_target_pct',
+    'stop loss %': 'stop_loss_pct',
+    // ── Strategy-specific labels (Iron Condor) ──
+    'theta capture': 'theta_capture',
+    'symmetry': 'symmetry_score',
+    'em ratio': 'expected_move_ratio',
+    'tail risk': 'tail_risk_score',
+    // ── Strategy-specific labels (Butterfly) ──
+    'peak profit': 'peak_profit_at_center',
+    'prob touch center': 'probability_of_touch_center',
+    'cost efficiency': 'cost_efficiency',
+    'payoff slope': 'payoff_slope',
+    'gamma peak': 'gamma_peak_score',
+    // ── Strategy-specific labels (Calendar) ──
+    'iv term structure': 'iv_term_structure_score',
+    'vega exposure': 'vega_exposure',
+    'theta structure': 'theta_structure',
+    'move risk': 'move_risk_score',
+    // ── Strategy-specific labels (Income / CSP) ──
+    'annualised yield': 'annualized_yield_on_collateral',
+    'annualized yield': 'annualized_yield_on_collateral',
+    'premium / day': 'premium_per_day',
+    'premium/day': 'premium_per_day',
+    'downside buffer': 'downside_buffer',
+    'assignment risk': 'assignment_risk_score',
+    // ── Strategy-specific labels (Debit Spread) ──
+    'conviction': 'conviction_score',
+    // ── SHARED metrics ──
+    'liquidity': 'liquidity_score',
+    'iv / rv ratio': 'iv_rv_ratio',
+    'ev / risk': 'ev_to_risk',
+    // ── Stock scanner labels (pullback swing) ──
+    'reset': 'reset_score',
+    'pb from 20d high': 'pullback_from_20d_high',
+    'dist to sma-20': 'distance_to_sma20',
+    // ── Stock scanner labels (momentum breakout) ──
+    'breakout': 'breakout_score',
+    'base': 'base_quality_score',
+    '55d high prox': 'breakout_proximity_55',
+    'vol spike': 'vol_spike_ratio',
+    'compression': 'compression_score',
+    'dist sma-20': 'dist_sma20',
+    // ── Stock scanner labels (mean reversion) ──
+    'oversold': 'oversold_score',
+    'stabilize': 'stabilization_score',
+    'room': 'room_score',
+    'rsi 2': 'rsi2',
+    'z-score 20d': 'zscore_20',
+    'dd from 20d hi': 'drawdown_20',
+    // ── Stock scanner labels (volatility expansion) ──
+    'expansion': 'expansion_score',
+    'compress': 'compression_score',
+    'confirm': 'confirmation_score',
+    'risk': 'risk_score',
+    'atr ratio': 'atr_ratio_10',
+    'rv ratio': 'rv_ratio',
+    'bb width %ile': 'bb_width_percentile_180',
+    'atr %': 'atr_pct',
+    // ── Contextual / Page labels ──
+    'regime': 'regime',
+    'total': 'total_active_trades',
+    'expiration': 'expiration',
+    'symbol': 'symbol',
+    'composite': 'composite_score',
+    'net credit / debit': 'net_credit',
+    'thesis': 'thesis',
+    // ── Session Stats ──
+    'total candidates': 'total_candidates',
+    'accepted trades/ideas': 'accepted_trades',
+    'rejected': 'rejected_count',
+    'acceptance rate': 'acceptance_rate',
+    'best score': 'best_score',
+    'avg quality score': 'avg_quality_score',
+    'avg return on risk': 'avg_return_on_risk',
+    'session runs': 'session_runs',
+    // ── Dashboard table headers ──
+    'strategy': 'strategy_name',
+    'trades': 'trade_count',
+    // ── Index ticker aliases ──
+    'qqq': 'index_price',
+    'iwm': 'index_price',
+    'dia': 'index_price',
+    'xsp': 'index_price',
+    'rut': 'index_price',
+    'ndx': 'index_price',
   };
 
   function ensureTooltipEl(){
@@ -151,6 +290,10 @@ window.BenTradeUI.Tooltip = (function(){
     if(!state.el) return;
     state.el.classList.remove('is-open');
     state.el.setAttribute('aria-hidden', 'true');
+    // Move off-screen so hidden tooltip cannot block pointer events
+    state.el.style.left = '-9999px';
+    state.el.style.top = '-9999px';
+    state.el.innerHTML = '';
     if(state.activeTarget){
       state.activeTarget.removeAttribute('aria-describedby');
     }
@@ -213,6 +356,36 @@ window.BenTradeUI.Tooltip = (function(){
     el.appendChild(btn);
   }
 
+  /* ── Dev-only missing-tooltip instrumentation ─────────────────── */
+  // Enabled when ?debug or ?debugTooltips is in the URL.
+  // Tracks every label element that the tooltip system skips
+  // and logs the gap so developers can add the missing entry.
+  var _debugTooltips = /[?&](debug|debugTooltips)\b/.test(location.search);
+  var _missingSet = new Set();
+  if(_debugTooltips){
+    window.__BEN_TIPS_MISSING = _missingSet;
+  }
+
+  function _logMissing(el, reason){
+    if(!_debugTooltips) return;
+    var text = normalizeText(el?.textContent || '');
+    if(!text || text.length > 60) return; // skip long content / not a label
+    var metric = String(el.getAttribute('data-metric') || '').trim();
+    var key = metric || text;
+    if(_missingSet.has(key)) return;
+    _missingSet.add(key);
+    var route = location.hash || '/';
+    var container = el.closest('[class]')?.className?.split(' ')[0] || '(root)';
+    var suggested = (metric || text).replace(/[\s/]+/g, '_').replace(/[^a-z0-9_]/gi, '').toLowerCase();
+    console.warn(
+      '[BenTrade:tooltip] MISSING tooltip — label: "' + text + '"'
+      + (metric ? ', data-metric: "' + metric + '"' : '')
+      + ', route: ' + route
+      + ', container: .' + container
+      + ', suggested key: "' + suggested + '"'
+    );
+  }
+
   function bindTarget(el){
     if(!el || isBound(el)) return;
 
@@ -222,7 +395,10 @@ window.BenTradeUI.Tooltip = (function(){
     }
 
     const metricId = String(el.getAttribute('data-metric') || '').trim();
-    if(!metricId || !getGlossary()[metricId]) return;
+    if(!metricId || !getGlossary()[metricId]){
+      _logMissing(el, metricId ? 'no glossary entry for "' + metricId + '"' : 'no metric id resolved');
+      return;
+    }
 
     makeFocusable(el);
     el.dataset.metricBound = '1';

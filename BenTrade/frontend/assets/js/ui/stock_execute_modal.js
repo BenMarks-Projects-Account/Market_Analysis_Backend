@@ -69,10 +69,20 @@ window.BenTradeStockExecuteModal = (function () {
 
     _ensureEl();
 
-    /* Fetch execution status (non-blocking) */
+    /* Fetch execution status + trading status (for dev-mode flag) */
     if (api && api.getStockExecutionStatus) {
       api.getStockExecutionStatus()
         .then(function (s) { _execStatus = s; _render(); })
+        .catch(function () {});
+    }
+    if (api && api.getTradingStatus) {
+      api.getTradingStatus()
+        .then(function (ts) {
+          _execStatus = _execStatus || {};
+          _execStatus.development_mode = ts.development_mode;
+          _execStatus.live_blocked = ts.live_blocked;
+          _render();
+        })
         .catch(function () {});
     }
 
@@ -166,14 +176,18 @@ window.BenTradeStockExecuteModal = (function () {
   function _renderReviewStep(sym, price, score, estCost) {
     var h = '';
 
-    /* Mode badge */
+    /* Mode badge + destination */
     var modeColor = _mode === 'live' ? '#ff5a5a' : '#00eaff';
     var modeLabel = _mode === 'live' ? 'LIVE' : 'PAPER';
+    var destLabel = _mode === 'paper' ? 'Tradier PAPER (sandbox)' : 'Tradier LIVE';
+    var isDevMode = _execStatus && _execStatus.development_mode;
     h += '<div style="text-align:center;margin-bottom:12px;">';
     h += '<span style="display:inline-block;padding:3px 12px;border-radius:20px;font-size:10px;'
        + 'font-weight:700;letter-spacing:0.1em;text-transform:uppercase;'
        + 'border:1px solid ' + modeColor + '44;color:' + modeColor + ';background:' + modeColor + '11;">'
        + modeLabel + ' MODE</span>';
+    h += '<div style="font-size:10px;color:' + modeColor + '99;margin-top:4px;font-weight:500;">'
+       + '\u25B8 ' + destLabel + '</div>';
     h += '</div>';
 
     /* Order details grid */
@@ -240,10 +254,19 @@ window.BenTradeStockExecuteModal = (function () {
     h += '</div>';
 
     /* Live mode warning */
-    if (_mode === 'live') {
+    if (_mode === 'live' && isDevMode) {
+      h += '<div style="margin-top:10px;padding:8px 12px;border-radius:6px;border:1px solid rgba(255,200,60,0.3);background:rgba(255,200,60,0.06);">';
+      h += '<div style="font-size:11px;color:rgba(255,200,60,0.9);font-weight:600;">\u25B3 DEVELOPMENT MODE</div>';
+      h += '<div style="font-size:10px;color:rgba(255,200,60,0.7);margin-top:2px;">This environment only allows PAPER trading. Live orders are blocked.</div>';
+      h += '</div>';
+    } else if (_mode === 'live') {
       h += '<div style="margin-top:10px;padding:8px 12px;border-radius:6px;border:1px solid rgba(255,90,90,0.3);background:rgba(255,90,90,0.06);">';
-      h += '<div style="font-size:11px;color:#ff5a5a;font-weight:600;">⚠ LIVE ORDER</div>';
-      h += '<div style="font-size:10px;color:rgba(255,120,120,0.8);margin-top:2px;">This will route a real order to your Tradier brokerage account. Confirm carefully.</div>';
+      h += '<div style="font-size:11px;color:#ff5a5a;font-weight:600;">\u26A0\uFE0E LIVE ORDER</div>';
+      h += '<div style="font-size:10px;color:rgba(255,120,120,0.8);margin-top:2px;">This will submit a LIVE order to Tradier using real capital. Confirm carefully.</div>';
+      h += '</div>';
+    } else {
+      h += '<div style="margin-top:10px;padding:8px 12px;border-radius:6px;border:1px solid rgba(0,234,255,0.15);background:rgba(0,234,255,0.03);">';
+      h += '<div style="font-size:10px;color:rgba(0,234,255,0.6);">This order will be submitted to Tradier PAPER (sandbox). No real capital is involved.</div>';
       h += '</div>';
     }
 
@@ -287,7 +310,7 @@ window.BenTradeStockExecuteModal = (function () {
     /* Simulator warning */
     if (r.broker === 'paper-simulator') {
       h += '<div style="margin-bottom:12px;padding:6px 10px;border-radius:6px;border:1px solid rgba(255,200,60,0.25);background:rgba(255,200,60,0.06);">'
-         + '<div style="font-size:10px;color:rgba(255,200,60,0.9);">⚠ Local simulation — no Tradier paper credentials configured. Order was NOT sent to Tradier.</div>'
+         + '<div style="font-size:10px;color:rgba(255,200,60,0.9);">⚠︎ Local simulation — no Tradier paper credentials configured. Order was NOT sent to Tradier.</div>'
          + '</div>';
     }
 
@@ -307,7 +330,7 @@ window.BenTradeStockExecuteModal = (function () {
     if (r.warnings && r.warnings.length) {
       h += '<div style="margin-top:10px;">';
       for (var i = 0; i < r.warnings.length; i++) {
-        h += '<div style="font-size:10px;color:rgba(255,200,60,0.8);padding:2px 0;">⚠ ' + esc(r.warnings[i]) + '</div>';
+        h += '<div style="font-size:10px;color:rgba(255,200,60,0.8);padding:2px 0;">⚠︎ ' + esc(r.warnings[i]) + '</div>';
       }
       h += '</div>';
     }
@@ -359,13 +382,28 @@ window.BenTradeStockExecuteModal = (function () {
        + 'style="padding:8px 18px;border-radius:8px;border:1px solid rgba(190,236,244,0.15);'
        + 'background:none;color:rgba(190,236,244,0.6);font-size:12px;cursor:pointer;">Cancel</button>';
 
-    var confirmLabel = _mode === 'live' ? '◆ Confirm LIVE Order' : '◈ Confirm Paper Order';
-    var confirmStyle = _mode === 'live'
-      ? 'background:rgba(255,90,90,0.15);border:1px solid rgba(255,90,90,0.4);color:#ff5a5a;'
-      : 'background:rgba(0,234,255,0.12);border:1px solid rgba(0,234,255,0.35);color:rgba(0,234,255,0.95);';
+    var isDevModeFtr = _execStatus && _execStatus.development_mode;
+    var confirmLabel;
+    var confirmDisabled = false;
+    var confirmStyle;
+
+    if (isDevModeFtr && _mode === 'live') {
+      confirmLabel = 'Live Disabled (Dev Mode)';
+      confirmDisabled = true;
+      confirmStyle = 'background:rgba(120,120,120,0.15);border:1px solid rgba(120,120,120,0.3);color:rgba(120,120,120,0.6);cursor:not-allowed;';
+    } else if (_mode === 'live') {
+      confirmLabel = '\u25C6 Submit LIVE Order';
+      confirmStyle = 'background:rgba(255,90,90,0.15);border:1px solid rgba(255,90,90,0.4);color:#ff5a5a;';
+    } else {
+      confirmLabel = '\u25C8 Submit to Paper (Sandbox)';
+      confirmStyle = 'background:rgba(0,234,255,0.12);border:1px solid rgba(0,234,255,0.35);color:rgba(0,234,255,0.95);';
+    }
 
     h += '<button id="seConfirmBtn" class="btn" '
-       + 'style="padding:8px 22px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;' + confirmStyle + '">'
+       + (confirmDisabled ? 'disabled ' : '')
+       + 'style="padding:8px 22px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;' + confirmStyle + '"'
+       + (confirmDisabled ? ' title="Live trading disabled in development."' : '')
+       + '>'
        + confirmLabel + '</button>';
     h += '</div>';
     return h;

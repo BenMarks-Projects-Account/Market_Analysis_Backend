@@ -90,8 +90,7 @@ class StockExecutionService:
         creds = self._resolve_creds(req.account_mode)
         log_execution_context(
             creds,
-            trade_capability_enabled=self.settings.LIVE_TRADING_RUNTIME_ENABLED,
-            trading_live_enabled=self.settings.TRADING_LIVE_ENABLED,
+            tradier_execution_enabled=self.settings.TRADIER_EXECUTION_ENABLED,
         )
 
         # ── 4. Fetch last quote (best effort) ─────────────────────
@@ -181,15 +180,10 @@ class StockExecutionService:
 
         # Live safety gates
         if req.account_mode == "live":
-            if not self.settings.ENABLE_LIVE_TRADING:
+            if not self.settings.TRADIER_EXECUTION_ENABLED:
                 raise ValueError(
-                    "Live trading is disabled (ENABLE_LIVE_TRADING=false). "
-                    "Use paper mode or enable live trading in environment."
-                )
-            if not self.settings.LIVE_TRADING_RUNTIME_ENABLED:
-                raise ValueError(
-                    "Live trading runtime toggle is off. "
-                    "Enable via Admin → Kill Switch before placing live orders."
+                    "Tradier execution is disabled (TRADIER_EXECUTION_ENABLED=false). "
+                    "Enable via the Trade Ticket toggle or set TRADIER_EXECUTION_ENABLED=true."
                 )
             if not req.confirm_live:
                 raise ValueError(
@@ -217,7 +211,6 @@ class StockExecutionService:
             paper_api_key=self.settings.TRADIER_API_KEY_PAPER,
             paper_account_id=self.settings.TRADIER_ACCOUNT_ID_PAPER,
             paper_env=self.settings.TRADIER_ENV_PAPER,
-            trading_live_enabled=self.settings.TRADING_LIVE_ENABLED,
         )
 
     # ── Tradier equity payload builder ────────────────────────────
@@ -306,8 +299,8 @@ class StockExecutionService:
             "Accept": "application/json",
         }
 
-        # Dry-run gate — ONLY for live mode, never block paper sandbox
-        if creds.mode_label == "LIVE-EXEC" and self.settings.TRADIER_DRY_RUN_LIVE:
+        # Dry-run gate — when execution is disabled, log payload only
+        if creds.mode_label == "LIVE-EXEC" and not self.settings.TRADIER_EXECUTION_ENABLED:
             logger.warning(
                 "[STOCK_EXEC] DRY_RUN trace=%s mode=%s payload=%s",
                 trace_id, creds.mode_label, payload,
@@ -421,7 +414,6 @@ class StockExecutionService:
                 paper_api_key=self.settings.TRADIER_API_KEY_PAPER,
                 paper_account_id=self.settings.TRADIER_ACCOUNT_ID_PAPER,
                 paper_env=self.settings.TRADIER_ENV_PAPER,
-                trading_live_enabled=self.settings.TRADING_LIVE_ENABLED,
             )
             url = f"{data_creds.base_url}/markets/quotes"
             headers = {

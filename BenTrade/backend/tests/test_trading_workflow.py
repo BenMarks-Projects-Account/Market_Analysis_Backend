@@ -60,8 +60,7 @@ class _FakeBaseDataService:
 def _make_service() -> TradingService:
     settings = Settings(
         TRADING_CONFIRMATION_SECRET="test-secret",
-        ENABLE_LIVE_TRADING=False,
-        LIVE_TRADING_RUNTIME_ENABLED=False,
+        TRADIER_EXECUTION_ENABLED=False,
         MAX_WIDTH_DEFAULT=10,
         MAX_LOSS_PER_SPREAD_DEFAULT=500,
         MIN_CREDIT_DEFAULT=0.2,
@@ -109,8 +108,7 @@ class TradingWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         settings = Settings(
             TRADING_CONFIRMATION_SECRET="test-secret",
-            ENABLE_LIVE_TRADING=False,
-            LIVE_TRADING_RUNTIME_ENABLED=False,
+            TRADIER_EXECUTION_ENABLED=False,
         )
         service = TradingService(
             settings=settings,

@@ -1,0 +1,289 @@
+<!--
+  BenTrade — Tooltip Regression Test Sandbox
+
+  Dev-only page for verifying tooltip behavior.
+  Access via: #/admin/tooltip-test  (or open this file directly)
+
+  Tests:
+    1. Overlapping metrics — hovering one should not block the other
+    2. Buttons behind tooltip — clicking should work even while tooltip is visible
+    3. pointer-events: none — tooltip content never intercepts clicks
+    4. Keyboard focus — Tab + focus shows tooltip, Escape dismisses
+    5. Route change cleanup — navigating away dismisses tooltips
+    6. BenTooltip (rich) — strategy chips / regime components
+-->
+<div id="tooltipTestRoot" style="padding:24px; max-width:600px;">
+  <h2 style="color:var(--accent-cyan); margin-bottom:16px; font-family:'Orbitron',sans-serif;">
+    Tooltip Regression Sandbox
+  </h2>
+
+  <!-- Test 1: Overlapping metrics -->
+  <div class="section" style="margin-bottom:24px;">
+    <div class="section-title">Test 1 — Overlapping Metrics</div>
+    <p class="stock-note">Hover each metric. The tooltip of one should NOT block hovering the next, even if they overlap.</p>
+    <div class="metric-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:4px;">
+      <div class="metric">
+        <div class="metric-label" data-metric="pop">POP</div>
+        <div class="metric-value positive">78%</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label" data-metric="ev">EV</div>
+        <div class="metric-value positive">$12.50</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label" data-metric="max_loss">Max Loss</div>
+        <div class="metric-value negative">−$237.50</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label" data-metric="return_on_risk">RoR</div>
+        <div class="metric-value positive">5.3%</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label" data-metric="delta">Delta</div>
+        <div class="metric-value neutral">−0.12</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label" data-metric="theta">Theta</div>
+        <div class="metric-value positive">$4.80</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label" data-metric="dte">DTE</div>
+        <div class="metric-value neutral">21</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label" data-metric="iv_rank">IV Rank</div>
+        <div class="metric-value positive">72%</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Test 2: Button behind tooltip -->
+  <div class="section" style="margin-bottom:24px;">
+    <div class="section-title">Test 2 — Button Behind Tooltip</div>
+    <p class="stock-note">Hover "Max Profit" to show its tooltip, then try clicking the button. The button should fire even if the tooltip visually overlaps it.</p>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <div class="metric" style="min-width:100px;">
+        <div class="metric-label" data-metric="max_profit">Max Profit</div>
+        <div class="metric-value positive">$62.50</div>
+      </div>
+      <button id="ttTestClickBtn"
+              class="btn-scan"
+              style="padding:8px 16px; font-size:12px;"
+              onclick="document.getElementById('ttTestOutput').textContent='Button clicked at ' + new Date().toLocaleTimeString()">
+        Click Me
+      </button>
+      <span id="ttTestOutput" class="stock-note" style="min-width:160px;">Not clicked yet</span>
+    </div>
+  </div>
+
+  <!-- Test 3: KPI stat labels (auto-inferred) -->
+  <div class="section" style="margin-bottom:24px;">
+    <div class="section-title">Test 3 — Auto-Inferred Stat Labels</div>
+    <p class="stock-note">These use .statLabel without explicit data-metric. Tooltips should appear via label fallback inference.</p>
+    <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px;">
+      <div class="statTile">
+        <div class="statLabel">SPY</div>
+        <div class="statValue">$580.42</div>
+      </div>
+      <div class="statTile">
+        <div class="statLabel">VIX</div>
+        <div class="statValue">16.8</div>
+      </div>
+      <div class="statTile">
+        <div class="statLabel">10Y Yield</div>
+        <div class="statValue">4.22%</div>
+      </div>
+      <div class="statTile">
+        <div class="statLabel">Capital at Risk</div>
+        <div class="statValue">$4,200</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Test 4: BenTooltip (rich / regime / strategy chips) -->
+  <div class="section" style="margin-bottom:24px;">
+    <div class="section-title">Test 4 — Rich Tooltips (Regime & Strategy)</div>
+    <p class="stock-note">Hover the chips. Rich tooltips should appear with title, body, conditions, etc.</p>
+    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;">
+      <span class="qtPill" data-ben-tip="regime_trend">Trend</span>
+      <span class="qtPill" data-ben-tip="regime_volatility">Volatility</span>
+      <span class="qtPill" data-ben-tip="regime_breadth">Breadth</span>
+      <span class="qtPill" data-ben-tip="put_credit_spread">Put Credit Spread</span>
+      <span class="qtPill" data-ben-tip="iron_condor">Iron Condor</span>
+      <span class="qtPill qtPill-warn" data-ben-tip="short_gamma">Short Gamma</span>
+    </div>
+  </div>
+
+  <!-- Test 5: Keyboard accessibility -->
+  <div class="section" style="margin-bottom:24px;">
+    <div class="section-title">Test 5 — Keyboard Accessibility</div>
+    <p class="stock-note">Tab into the metrics below. Focus should reveal tooltip; Escape should dismiss it. Check aria-describedby attribute.</p>
+    <div style="display:flex; gap:16px;">
+      <div class="metric" style="min-width:80px;">
+        <div class="metric-label" data-metric="vega">Vega</div>
+        <div class="metric-value neutral">$0.15</div>
+      </div>
+      <div class="metric" style="min-width:80px;">
+        <div class="metric-label" data-metric="gamma">Gamma</div>
+        <div class="metric-value neutral">0.003</div>
+      </div>
+      <div class="metric" style="min-width:120px;">
+        <div class="metric-label" data-metric="bid_ask_spread_pct">Bid/Ask Spread %</div>
+        <div class="metric-value neutral">4.2%</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Instructions -->
+  <div class="section" style="margin-bottom:24px; border-top:1px solid rgba(0,234,255,0.15); padding-top:16px;">
+    <div class="section-title">Acceptance Checklist</div>
+    <ul style="color:#ccc; font-size:12px; line-height:1.8; padding-left:18px;">
+      <li>✅ Hovering a metric shows tooltip immediately</li>
+      <li>✅ Moving mouse away closes and unmounts tooltip (no invisible overlay)</li>
+      <li>✅ Clicking buttons behind visible tooltip works</li>
+      <li>✅ Hovering another metric works even if first tooltip overlaps it</li>
+      <li>✅ No flicker; no layout shift; tooltip stays anchored</li>
+      <li>✅ Tab → focus shows tooltip; Escape dismisses</li>
+      <li>✅ Works in fullscreen and normal window</li>
+      <li>✅ aria-describedby set on active trigger</li>
+    </ul>
+  </div>
+
+  <!-- Test 6: Trade Card Metrics (all strategy-specific) -->
+  <div class="section" style="margin-bottom:24px; border-top:1px solid rgba(0,234,255,0.15); padding-top:16px;">
+    <div class="section-title">Test 6 — Trade Card Metrics (Strategy-Specific)</div>
+    <p class="stock-note">Every strategy-specific metric from strategy_card_config.js. ALL should show tooltips.</p>
+
+    <div style="margin-bottom:12px; color:var(--accent-cyan); font-size:11px; text-transform:uppercase;">Shared / Core</div>
+    <div class="metric-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin-bottom:16px;">
+      <div class="metric"><div class="metric-label" data-metric="pop">POP</div><div class="metric-value">78%</div></div>
+      <div class="metric"><div class="metric-label" data-metric="expected_value">Expected Value</div><div class="metric-value">$12.50</div></div>
+      <div class="metric"><div class="metric-label" data-metric="return_on_risk">Return on Risk</div><div class="metric-value">5.3%</div></div>
+      <div class="metric"><div class="metric-label" data-metric="max_profit">Max Profit</div><div class="metric-value">$62.50</div></div>
+      <div class="metric"><div class="metric-label" data-metric="max_loss">Max Loss</div><div class="metric-value">$237.50</div></div>
+      <div class="metric"><div class="metric-label" data-metric="kelly_fraction">Kelly Fraction</div><div class="metric-value">4.2%</div></div>
+      <div class="metric"><div class="metric-label" data-metric="ev_to_risk">EV / Risk</div><div class="metric-value">0.08</div></div>
+      <div class="metric"><div class="metric-label" data-metric="liquidity_score">Liquidity</div><div class="metric-value">72.0</div></div>
+      <div class="metric"><div class="metric-label" data-metric="rank_score">Rank Score</div><div class="metric-value">84.1</div></div>
+      <div class="metric"><div class="metric-label" data-metric="break_even">Break Even</div><div class="metric-value">$575.50</div></div>
+      <div class="metric"><div class="metric-label" data-metric="iv_rv_ratio">IV/RV Ratio</div><div class="metric-value">1.18</div></div>
+      <div class="metric"><div class="metric-label" data-metric="expected_move">Expected Move</div><div class="metric-value">$8.20</div></div>
+    </div>
+
+    <div style="margin-bottom:12px; color:var(--accent-cyan); font-size:11px; text-transform:uppercase;">Iron Condor</div>
+    <div class="metric-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin-bottom:16px;">
+      <div class="metric"><div class="metric-label" data-metric="theta_capture">Theta Capture</div><div class="metric-value">0.85</div></div>
+      <div class="metric"><div class="metric-label" data-metric="symmetry_score">Symmetry</div><div class="metric-value">91.2</div></div>
+      <div class="metric"><div class="metric-label" data-metric="expected_move_ratio">EM Ratio</div><div class="metric-value">1.35</div></div>
+      <div class="metric"><div class="metric-label" data-metric="tail_risk_score">Tail Risk</div><div class="metric-value">28.0</div></div>
+    </div>
+
+    <div style="margin-bottom:12px; color:var(--accent-cyan); font-size:11px; text-transform:uppercase;">Butterfly</div>
+    <div class="metric-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin-bottom:16px;">
+      <div class="metric"><div class="metric-label" data-metric="peak_profit_at_center">Peak Profit</div><div class="metric-value">$450.00</div></div>
+      <div class="metric"><div class="metric-label" data-metric="probability_of_touch_center">Prob Touch Center</div><div class="metric-value">42%</div></div>
+      <div class="metric"><div class="metric-label" data-metric="cost_efficiency">Cost Efficiency</div><div class="metric-value">4.5</div></div>
+      <div class="metric"><div class="metric-label" data-metric="payoff_slope">Payoff Slope</div><div class="metric-value">2.1</div></div>
+      <div class="metric"><div class="metric-label" data-metric="gamma_peak_score">Gamma Peak</div><div class="metric-value">67.0</div></div>
+    </div>
+
+    <div style="margin-bottom:12px; color:var(--accent-cyan); font-size:11px; text-transform:uppercase;">Calendar Spread</div>
+    <div class="metric-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin-bottom:16px;">
+      <div class="metric"><div class="metric-label" data-metric="iv_term_structure_score">IV Term Structure</div><div class="metric-value">78.5</div></div>
+      <div class="metric"><div class="metric-label" data-metric="vega_exposure">Vega Exposure</div><div class="metric-value">3.2</div></div>
+      <div class="metric"><div class="metric-label" data-metric="theta_structure">Theta Structure</div><div class="metric-value">1.8</div></div>
+      <div class="metric"><div class="metric-label" data-metric="move_risk_score">Move Risk</div><div class="metric-value">45.0</div></div>
+    </div>
+
+    <div style="margin-bottom:12px; color:var(--accent-cyan); font-size:11px; text-transform:uppercase;">Income (CSP / Covered Call)</div>
+    <div class="metric-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin-bottom:16px;">
+      <div class="metric"><div class="metric-label" data-metric="annualized_yield_on_collateral">Annualised Yield</div><div class="metric-value">18.2%</div></div>
+      <div class="metric"><div class="metric-label" data-metric="premium_per_day">Premium / Day</div><div class="metric-value">$4.50</div></div>
+      <div class="metric"><div class="metric-label" data-metric="downside_buffer">Downside Buffer</div><div class="metric-value">6.8%</div></div>
+      <div class="metric"><div class="metric-label" data-metric="assignment_risk_score">Assignment Risk</div><div class="metric-value">22.0</div></div>
+    </div>
+
+    <div style="margin-bottom:12px; color:var(--accent-cyan); font-size:11px; text-transform:uppercase;">Debit Spread</div>
+    <div class="metric-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin-bottom:16px;">
+      <div class="metric"><div class="metric-label" data-metric="conviction_score">Conviction</div><div class="metric-value">81.0</div></div>
+    </div>
+
+    <div style="margin-bottom:12px; color:var(--accent-cyan); font-size:11px; text-transform:uppercase;">Stock Scanner — Pullback Swing</div>
+    <div class="metric-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin-bottom:16px;">
+      <div class="metric"><div class="metric-label" data-metric="trend_score">Trend</div><div class="metric-value">82.0</div></div>
+      <div class="metric"><div class="metric-label" data-metric="pullback_score">Pullback</div><div class="metric-value">71.0</div></div>
+      <div class="metric"><div class="metric-label" data-metric="reset_score">Reset</div><div class="metric-value">65.0</div></div>
+      <div class="metric"><div class="metric-label" data-metric="pullback_from_20d_high">PB from 20D High</div><div class="metric-value">−4.2%</div></div>
+      <div class="metric"><div class="metric-label" data-metric="distance_to_sma20">Dist to SMA-20</div><div class="metric-value">−1.8%</div></div>
+    </div>
+
+    <div style="margin-bottom:12px; color:var(--accent-cyan); font-size:11px; text-transform:uppercase;">Stock Scanner — Momentum Breakout</div>
+    <div class="metric-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin-bottom:16px;">
+      <div class="metric"><div class="metric-label" data-metric="breakout_score">Breakout</div><div class="metric-value">88.0</div></div>
+      <div class="metric"><div class="metric-label" data-metric="volume_score">Volume</div><div class="metric-value">76.0</div></div>
+      <div class="metric"><div class="metric-label" data-metric="base_quality_score">Base</div><div class="metric-value">69.0</div></div>
+      <div class="metric"><div class="metric-label" data-metric="breakout_proximity_55">55D High Prox</div><div class="metric-value">97.2%</div></div>
+      <div class="metric"><div class="metric-label" data-metric="vol_spike_ratio">Vol Spike</div><div class="metric-value">2.4</div></div>
+      <div class="metric"><div class="metric-label" data-metric="compression_score">Compression</div><div class="metric-value">85%</div></div>
+    </div>
+
+    <div style="margin-bottom:12px; color:var(--accent-cyan); font-size:11px; text-transform:uppercase;">Stock Scanner — Mean Reversion</div>
+    <div class="metric-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin-bottom:16px;">
+      <div class="metric"><div class="metric-label" data-metric="oversold_score">Oversold</div><div class="metric-value">79.0</div></div>
+      <div class="metric"><div class="metric-label" data-metric="stabilization_score">Stabilize</div><div class="metric-value">62.0</div></div>
+      <div class="metric"><div class="metric-label" data-metric="room_score">Room</div><div class="metric-value">74.0</div></div>
+      <div class="metric"><div class="metric-label" data-metric="rsi2">RSI 2</div><div class="metric-value">8.5</div></div>
+      <div class="metric"><div class="metric-label" data-metric="zscore_20">Z-Score 20D</div><div class="metric-value">−2.3</div></div>
+      <div class="metric"><div class="metric-label" data-metric="drawdown_20">DD from 20D Hi</div><div class="metric-value">−7.1%</div></div>
+    </div>
+
+    <div style="margin-bottom:12px; color:var(--accent-cyan); font-size:11px; text-transform:uppercase;">Stock Scanner — Volatility Expansion</div>
+    <div class="metric-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin-bottom:16px;">
+      <div class="metric"><div class="metric-label" data-metric="expansion_score">Expansion</div><div class="metric-value">83.0</div></div>
+      <div class="metric"><div class="metric-label" data-metric="confirmation_score">Confirm</div><div class="metric-value">71.0</div></div>
+      <div class="metric"><div class="metric-label" data-metric="risk_score">Risk</div><div class="metric-value">35.0</div></div>
+      <div class="metric"><div class="metric-label" data-metric="atr_ratio_10">ATR Ratio</div><div class="metric-value">1.42</div></div>
+      <div class="metric"><div class="metric-label" data-metric="rv_ratio">RV Ratio</div><div class="metric-value">1.15</div></div>
+      <div class="metric"><div class="metric-label" data-metric="bb_width_percentile_180">BB Width %ile</div><div class="metric-value">12.0</div></div>
+      <div class="metric"><div class="metric-label" data-metric="atr_pct">ATR %</div><div class="metric-value">2.8%</div></div>
+    </div>
+  </div>
+
+  <!-- Test 7: Session Stats & Contextual Labels -->
+  <div class="section" style="margin-bottom:24px; border-top:1px solid rgba(0,234,255,0.15); padding-top:16px;">
+    <div class="section-title">Test 7 — Session Stats & Contextual Labels</div>
+    <p class="stock-note">Session stats and page-level contextual labels. All should show tooltips.</p>
+    <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px;">
+      <div class="statTile"><div class="statLabel" data-metric="total_candidates">Total candidates</div><div class="statValue">142</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="accepted_trades">Accepted trades/ideas</div><div class="statValue">8</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="rejected_count">Rejected</div><div class="statValue">134</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="acceptance_rate">Acceptance rate</div><div class="statValue">5.6%</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="best_score">Best score</div><div class="statValue">91.2</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="avg_quality_score">Avg quality score</div><div class="statValue">74.8</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="session_runs">Session runs</div><div class="statValue">3</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="regime">Regime</div><div class="statValue">Risk-On</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="total_active_trades">Total</div><div class="statValue">12</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="expiration">Expiration</div><div class="statValue">2025-07-18</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="index_price">QQQ</div><div class="statValue">$510.22</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="trade_count">Trades</div><div class="statValue">24</div></div>
+    </div>
+  </div>
+
+  <!-- Updated Checklist -->
+  <div class="section" style="margin-bottom:24px; border-top:1px solid rgba(0,234,255,0.15); padding-top:16px;">
+    <div class="section-title">Acceptance Checklist</div>
+    <ul style="color:#ccc; font-size:12px; line-height:1.8; padding-left:18px;">
+      <li>✅ Hovering a metric shows tooltip immediately</li>
+      <li>✅ Moving mouse away closes and unmounts tooltip (no invisible overlay)</li>
+      <li>✅ Clicking buttons behind visible tooltip works</li>
+      <li>✅ Hovering another metric works even if first tooltip overlaps it</li>
+      <li>✅ No flicker; no layout shift; tooltip stays anchored</li>
+      <li>✅ Tab → focus shows tooltip; Escape dismisses</li>
+      <li>✅ Works in fullscreen and normal window</li>
+      <li>✅ aria-describedby set on active trigger</li>
+      <li>✅ All strategy-specific metrics (Test 6) display tooltips</li>
+      <li>✅ All session stats / contextual labels (Test 7) display tooltips</li>
+      <li>✅ Dev mode (?debugTooltips) logs any uncovered labels to console</li>
+    </ul>
+  </div>
+</div>

@@ -153,11 +153,22 @@ async def get_platform_data_source(request: Request) -> dict:
     # Include snapshot availability info
     snapshot_dir = getattr(request.app.state, "snapshot_dir", None)
     has_snapshots = False
+    available_snapshots: list[dict] = []
     if snapshot_dir:
         snapshot_path = Path(snapshot_dir)
         if snapshot_path.is_dir():
             has_snapshots = any(snapshot_path.rglob("chain_*.json"))
+            # List manifest-based snapshots
+            try:
+                from app.services.snapshot_capture_service import SnapshotCaptureService
+                available_snapshots = SnapshotCaptureService.list_snapshots(snapshot_path)
+            except Exception:
+                pass
     state["has_snapshots"] = has_snapshots
+    state["available_snapshots"] = available_snapshots
+    # Include default scanner symbols so the frontend capture button knows what to request
+    from app.services.strategy_service import DEFAULT_SCANNER_SYMBOLS
+    state["scanner_symbols"] = list(DEFAULT_SCANNER_SYMBOLS)
     return state
 
 
@@ -214,3 +225,63 @@ async def trigger_snapshot_cleanup(request: Request) -> dict:
             status_code=500,
             content={"error": {"code": "CLEANUP_ERROR", "message": str(exc)}},
         )
+
+
+# ── Model Source ──────────────────────────────────────────────────────────
+
+
+@router.get("/platform/model-source")
+async def get_model_source_endpoint(request: Request) -> dict:
+    """Return current model source and all available options."""
+    from app.model_sources import MODEL_SOURCES
+    from app.services.model_state import get_model_source
+
+    active = get_model_source()
+    cfg = MODEL_SOURCES.get(active, {})
+    return {
+        "active_source": active,
+        "active_name": cfg.get("name", active),
+        "active_endpoint": cfg.get("endpoint"),
+        "sources": {
+            key: {"name": src["name"], "enabled": src["enabled"], "endpoint": src.get("endpoint")}
+            for key, src in MODEL_SOURCES.items()
+        },
+    }
+
+
+@router.post("/platform/model-source")
+async def set_model_source_endpoint(request: Request) -> dict:
+    """Switch the active model source.
+
+    Body: ``{"source": "local" | "model_machine" | "premium_online"}``
+    """
+    from app.services.model_state import set_model_source
+    from app.model_sources import MODEL_SOURCES
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"code": "INVALID_JSON", "message": "Request body must be valid JSON"}},
+        )
+    source = body.get("source") if isinstance(body, dict) else None
+    if not source:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"code": "MISSING_FIELD", "message": "source is required"}},
+        )
+    try:
+        active = set_model_source(source)
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"code": "INVALID_VALUE", "message": str(exc)}},
+        )
+    cfg = MODEL_SOURCES.get(active, {})
+    return {
+        "success": True,
+        "active_source": active,
+        "active_name": cfg.get("name", active),
+        "active_endpoint": cfg.get("endpoint"),
+    }

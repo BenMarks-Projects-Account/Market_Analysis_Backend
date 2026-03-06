@@ -8,6 +8,9 @@
  * Mount: Uses BenTradeOverlayRoot.get() so it stays visible in
  *        browser fullscreen mode.
  *
+ * Content source: BenTradeTooltipDictionary.allRich() (tooltip_dictionary.js).
+ * Runtime entries can still be added via BenTradeBenTooltip.register().
+ *
  * Usage:
  *   // Attach via data attributes:
  *   <span data-ben-tip="trend">Trend</span>
@@ -18,142 +21,23 @@
  *   // Auto-bind all [data-ben-tip] under a root:
  *   BenTradeBenTooltip.bindAll(containerEl);
  *
- * Depends on: BenTradeOverlayRoot (overlayRoot.js)
+ * Depends on: BenTradeOverlayRoot (overlayRoot.js), BenTradeTooltipDictionary (tooltip_dictionary.js)
  */
 window.BenTradeBenTooltip = (function () {
   'use strict';
 
   /* ── Tooltip content registry ────────────────────────────────── */
+  /* Seeded from centralized dictionary; runtime additions via register() */
 
-  var TIPS = {};
+  var TIPS = (window.BenTradeTooltipDictionary)
+    ? Object.assign({}, window.BenTradeTooltipDictionary.allRich())
+    : {};
 
-  /* ── Market Regime components ── */
-
-  TIPS['regime_trend'] = {
-    title: 'Trend Strength',
-    body: 'Measures directional market bias using moving-average alignment (EMA20, EMA50, SMA200). Strong upward alignment signals bullish regime support, while weak or inverted structure increases downside and mean-reversion risk.',
-    impact: 'Higher trend strength favors premium-selling strategies and directional trades with the trend.',
-  };
-
-  TIPS['regime_volatility'] = {
-    title: 'Volatility Environment',
-    body: 'Evaluates implied volatility level relative to normal conditions (primarily via VIX). Elevated volatility increases option premiums and risk, while low volatility compresses pricing but often supports trend persistence.',
-    impact: 'Higher volatility favors premium selling; very low volatility may favor debit structures or directional plays.',
-  };
-
-  TIPS['regime_breadth'] = {
-    title: 'Market Breadth',
-    body: 'Tracks how many sectors or components participate in the market move. Broad participation signals healthy institutional support, while narrow leadership increases fragility and reversal risk.',
-    impact: 'Strong breadth improves confidence in trend continuation and premium strategies.',
-  };
-
-  TIPS['regime_rates'] = {
-    title: 'Interest Rate Pressure',
-    body: 'Monitors the 10-year Treasury yield as a proxy for financial conditions. Rising yields can pressure equities (especially growth), while stable or falling rates generally support risk assets.',
-    impact: 'Stable or falling rates support bullish structures; rapidly rising rates increase regime risk.',
-  };
-
-  TIPS['regime_momentum'] = {
-    title: 'Momentum Quality',
-    body: 'Uses RSI positioning to evaluate whether price movement is sustainably trending or becoming stretched. Mid-range RSI typically indicates healthy continuation, while extremes increase reversal probability.',
-    impact: 'Healthy momentum supports trend trades; overbought/oversold conditions increase mean-reversion risk.',
-  };
-
-  /* ── Strategy chips ── */
-
-  TIPS['put_credit_spread'] = {
-    title: 'Put Credit Spread',
-    body: 'A bullish defined-risk premium strategy that sells an out-of-the-money put while buying a further OTM put for protection. Profits when price stays above the short strike and volatility contracts.',
-    conditions: [
-      'Bullish to neutral trend',
-      'Elevated implied volatility',
-      'Stable or rising market',
-    ],
-  };
-
-  TIPS['covered_call'] = {
-    title: 'Covered Call',
-    body: 'Owns shares while selling an out-of-the-money call to generate income. Caps upside but provides partial downside cushion through collected premium.',
-    conditions: [
-      'Neutral to moderately bullish market',
-      'Elevated implied volatility',
-      'Low expectation of explosive upside',
-    ],
-  };
-
-  TIPS['call_debit'] = {
-    title: 'Call Debit Spread',
-    body: 'A defined-risk bullish strategy that buys a call and sells a higher-strike call. Requires upward price movement to profit and benefits from directional momentum.',
-    conditions: [
-      'Strong bullish trend',
-      'Lower or rising volatility',
-      'Momentum expansion phases',
-    ],
-  };
-
-  TIPS['short_gamma'] = {
-    title: 'Short Gamma Exposure',
-    body: 'Represents strategies that benefit from price stability but are harmed by large directional moves. Short gamma positions collect premium but carry tail risk during volatility expansion.',
-    conditions: [
-      'Range-bound markets',
-      'Declining volatility',
-      'High liquidity environments',
-    ],
-    risk: 'Vulnerable to sharp breakouts and volatility spikes.',
-  };
-
-  TIPS['debit_butterfly'] = {
-    title: 'Debit Butterfly',
-    body: 'A low-cost, defined-risk neutral strategy that profits if price pins near a target level at expiration. Requires precise price location and typically underperforms in strong trends.',
-    conditions: [
-      'Low volatility',
-      'Range-bound markets',
-      'Event pinning scenarios',
-    ],
-    risk: 'Low probability of max profit; sensitive to directional drift.',
-  };
-
-  /* Additional strategy chips that may appear dynamically */
-
-  TIPS['iron_condor'] = {
-    title: 'Iron Condor',
-    body: 'A neutral premium-selling strategy combining a put credit spread and a call credit spread. Profits when the underlying stays within a defined range through expiration.',
-    conditions: [
-      'Range-bound markets',
-      'Elevated implied volatility',
-      'Low momentum / mean-reverting conditions',
-    ],
-  };
-
-  TIPS['calendar_spread'] = {
-    title: 'Calendar Spread',
-    body: 'Sells a near-term option and buys a longer-dated option at the same strike. Profits from time decay and potential IV expansion in the back month.',
-    conditions: [
-      'Low near-term volatility',
-      'Stable underlying price',
-      'Positive term structure',
-    ],
-  };
-
-  TIPS['call_credit_spread'] = {
-    title: 'Call Credit Spread',
-    body: 'A bearish defined-risk premium strategy that sells an OTM call while buying a further OTM call. Profits when price stays below the short strike.',
-    conditions: [
-      'Bearish to neutral trend',
-      'Elevated implied volatility',
-      'Resistance overhead or negative momentum',
-    ],
-  };
-
-  TIPS['put_debit'] = {
-    title: 'Put Debit Spread',
-    body: 'A defined-risk bearish strategy that buys a put and sells a lower-strike put. Requires downward price movement to profit.',
-    conditions: [
-      'Bearish trend or breakdown',
-      'Lower or rising volatility',
-      'Negative momentum',
-    ],
-  };
+  /* ── Inline TIPS definitions removed ─────────────────────────
+   * All content now lives in tooltip_dictionary.js and is seeded
+   * into TIPS above via BenTradeTooltipDictionary.allRich().
+   * Runtime additions still work via register(key, tip).
+   * ──────────────────────────────────────────────────────────── */
 
   /* ── State ─────────────────────────────────────────────────── */
 
@@ -300,6 +184,10 @@ window.BenTradeBenTooltip = (function () {
       if (!_el) return;
       _el.classList.remove('is-open');
       _el.setAttribute('aria-hidden', 'true');
+      // Move off-screen so hidden tooltip cannot block pointer events
+      _el.style.left = '-9999px';
+      _el.style.top = '-9999px';
+      _el.innerHTML = '';
       if (_active) {
         _active.removeAttribute('aria-describedby');
       }
@@ -313,6 +201,10 @@ window.BenTradeBenTooltip = (function () {
     if (!_el) return;
     _el.classList.remove('is-open');
     _el.setAttribute('aria-hidden', 'true');
+    // Move off-screen so hidden tooltip cannot block pointer events
+    _el.style.left = '-9999px';
+    _el.style.top = '-9999px';
+    _el.innerHTML = '';
     if (_active) {
       _active.removeAttribute('aria-describedby');
     }

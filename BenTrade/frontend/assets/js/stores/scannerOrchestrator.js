@@ -148,7 +148,7 @@ window.BenTradeScannerOrchestrator = (function(){
         lastErr = err;
         if(attempt < MAX_RETRIES && isRetryable(err)){
           const delay = RETRY_BASE_MS * Math.pow(2, attempt);
-          logLine(logFn, `⚠ ${label} failed (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying in ${delay}ms — ${err?.message || err}`);
+          logLine(logFn, `⚠︎ ${label} failed (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying in ${delay}ms — ${err?.message || err}`);
           await new Promise(r => setTimeout(r, delay));
         }else{
           throw err;

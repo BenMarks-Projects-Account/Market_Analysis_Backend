@@ -26,6 +26,7 @@ from app.utils.expected_fill import build_fill_trace
 from app.utils.normalize import normalize_trade
 from app.utils.report_conformance import validate_report_file
 from app.utils.snapshot import SnapshotChainSource
+from app.utils.snapshot_offline import ManifestSnapshotSource, OfflineLiveCallGuard
 from app.utils.strategy_id_resolver import resolve_strategy_id_or_none
 from app.utils.trade_key import canonicalize_strategy_id, canonicalize_trade_key, trade_key
 
@@ -788,9 +789,7 @@ class StrategyService:
 
     # ── Safety ceiling for raw candidate generation ───────────────────
     # Prevents runaway combinatorial explosions in build_candidates().
-    # This is NOT the quality-based cap — that is resolved_thresholds.max_candidates,
-    # applied centrally by select_top_n AFTER generation completes.
-    # The generation cap is strategy-agnostic and must be >> any preset max_candidates.
+    # The generation cap is strategy-agnostic.
     DEFAULT_MAX_GENERATED_CANDIDATES: int = 20_000
 
     @classmethod
@@ -1005,7 +1004,7 @@ class StrategyService:
 
         # ── Snapshot mode: derive expirations from saved files ─────
         _chain_source = self.base_data_service.chain_source
-        if isinstance(_chain_source, SnapshotChainSource):
+        if isinstance(_chain_source, (SnapshotChainSource, ManifestSnapshotSource)):
             expirations = _chain_source.get_available_expirations(symbol)
             if not expirations:
                 raise ValueError(f"No snapshot expirations for {symbol}")
@@ -1789,6 +1788,7 @@ class StrategyService:
         # "stock" scanner is excluded — always uses live.
         _data_source_mode = "live"
         _snapshot_chain_source: SnapshotChainSource | None = None
+        _manifest_source: ManifestSnapshotSource | None = None
         _snapshot_staleness_info: list[dict[str, Any]] = []
 
         if self.platform_settings is not None:
@@ -1801,26 +1801,61 @@ class StrategyService:
             _data_source_mode = "live"
 
         if _data_source_mode == "snapshot" and self._snapshot_dir:
-            from app.config import get_settings as _get_settings
-            _snap_settings = _get_settings()
-            _max_age = int(getattr(_snap_settings, "SNAPSHOT_MAX_AGE_HOURS", 48))
-            _snapshot_chain_source = SnapshotChainSource(
-                self._snapshot_dir,
-                provider="tradier",
-                max_age_hours=_max_age,
-            )
+            # Try manifest-based snapshot first (new system)
+            _snapshot_id = str(payload.get("snapshot_id") or "").strip()
+            try:
+                if _snapshot_id:
+                    _manifest_source = ManifestSnapshotSource.from_trace_id(
+                        self._snapshot_dir, _snapshot_id,
+                    )
+                    logger.info(
+                        "event=manifest_snapshot_loaded trace_id=%s strategy=%s",
+                        _snapshot_id, strategy_id,
+                    )
+                else:
+                    _manifest_source = ManifestSnapshotSource.from_latest(
+                        self._snapshot_dir, strategy_id=strategy_id,
+                    )
+                    logger.info(
+                        "event=manifest_snapshot_loaded_latest trace_id=%s strategy=%s",
+                        _manifest_source.trace_id, strategy_id,
+                    )
+            except FileNotFoundError:
+                logger.info(
+                    "event=no_manifest_snapshot_found strategy=%s — falling back to legacy",
+                    strategy_id,
+                )
+                _manifest_source = None
+
+            # Fallback to legacy SnapshotChainSource
+            if _manifest_source is None:
+                from app.config import get_settings as _get_settings
+                _snap_settings = _get_settings()
+                _max_age = int(getattr(_snap_settings, "SNAPSHOT_MAX_AGE_HOURS", 48))
+                _snapshot_chain_source = SnapshotChainSource(
+                    self._snapshot_dir,
+                    provider="tradier",
+                    max_age_hours=_max_age,
+                )
 
         logger.info(
-            "event=generate_data_source_mode strategy=%s mode=%s",
+            "event=generate_data_source_mode strategy=%s mode=%s manifest=%s",
             strategy_id, _data_source_mode,
+            _manifest_source.trace_id if _manifest_source else "none",
         )
 
         # ── Temporarily swap chain source for this run if snapshot mode ──
         _original_chain_source = self.base_data_service.chain_source
-        if _snapshot_chain_source is not None:
-            self.base_data_service.chain_source = _snapshot_chain_source
+        _effective_source = _manifest_source or _snapshot_chain_source
+        if _effective_source is not None:
+            self.base_data_service.chain_source = _effective_source
+
+        # ── Fail-closed guard: block live calls in manifest mode ─────
+        _guard = OfflineLiveCallGuard(self.base_data_service) if _manifest_source else None
 
         try:
+            if _guard:
+                _guard.__enter__()
             return await self._generate_inner(
                 strategy_id=strategy_id,
                 plugin=plugin,
@@ -1828,10 +1863,12 @@ class StrategyService:
                 notes=notes,
                 progress_callback=progress_callback,
                 data_source_mode=_data_source_mode,
-                snapshot_chain_source=_snapshot_chain_source,
+                snapshot_chain_source=_effective_source,
                 snapshot_staleness_info=_snapshot_staleness_info,
             )
         finally:
+            if _guard:
+                _guard.__exit__(None, None, None)
             # Always restore original chain source
             self.base_data_service.chain_source = _original_chain_source
 
@@ -1844,7 +1881,7 @@ class StrategyService:
         notes: list[str],
         progress_callback: Any | None,
         data_source_mode: str,
-        snapshot_chain_source: SnapshotChainSource | None,
+        snapshot_chain_source: SnapshotChainSource | ManifestSnapshotSource | None,
         snapshot_staleness_info: list[dict[str, Any]],
     ) -> dict[str, Any]:
 
@@ -2033,7 +2070,7 @@ class StrategyService:
         enriched: list[dict[str, Any]] = []
         accepted: list[dict[str, Any]] = []
         rejection_breakdown: dict[str, int] = {}
-        _cap_summary: dict[str, Any] | None = None
+        _generated_total = 0
         _capture_examples = bool(payload.get("_capture_trace_examples"))
         _rejected_examples: list[dict[str, Any]] = []
         _MAX_EXAMPLES = 3
@@ -2063,10 +2100,7 @@ class StrategyService:
         }
         inputs["request"] = payload
 
-        # ── Initialize experiment/diagnostic vars (used in filter_trace) ──
-        _bypass_soft_cap = False
-        _bypass_reason: str | None = None
-        _enrichment_cap = 0
+        # ── Initialize diagnostic vars (used in filter_trace) ──
         _enrich_elapsed = 0.0
         _gate_pass_counts: dict[str, int] = {}
 
@@ -2087,44 +2121,15 @@ class StrategyService:
                 notes.append(f"build_candidates failed: {exc}")
                 raise
 
-            # ── Track how many the builder produced before any capping ──
+            # ── Track how many the builder produced ──
             _generated_total = len(candidates)
             _generation_cap_reached = _generated_total >= _generation_cap
 
-            # ── Soft cap: quality-based candidate selection ────────────
-            # resolved_thresholds.max_candidates is the ONLY cap that
-            # determines how many candidates reach enrichment.
-            # Uses heap-based top-N by pre_score (chain-level data, no API calls).
-            from app.utils.candidate_sampler import select_top_n
-
-            _enrichment_cap = int(payload.get("max_candidates") or 400)
-
-            # ── Experiment: bypass soft-cap for credit_spread + wide ──
-            # Hard rule: credit_spread with preset "wide" bypasses the
-            # enrichment cap so ALL candidates reach enrichment + gates.
-            # Also activatable via payload flag or env var as fallback.
-            _resolved_preset_for_bypass = str(payload.get("_preset_name") or "").lower()
-            _bypass_soft_cap = False
-            _bypass_reason: str | None = None
-            if strategy_id == "credit_spread":
-                if _resolved_preset_for_bypass == "wide":
-                    _bypass_soft_cap = True
-                    _bypass_reason = "credit_spread_wide_experiment"
-                elif payload.get("bypass_soft_cap_for_enrichment"):
-                    _bypass_soft_cap = True
-                    _bypass_reason = "payload_flag"
-                else:
-                    from app.config import get_settings as _get_settings
-                    if _get_settings().CREDIT_SPREAD_BYPASS_SOFT_CAP:
-                        _bypass_soft_cap = True
-                        _bypass_reason = "env_var"
-
-            candidates, _cap_summary = select_top_n(
-                candidates,
-                _enrichment_cap,
-                generation_cap=_generation_cap,
-                bypass_enrichment_cap=_bypass_soft_cap,
-                bypass_reason=_bypass_reason,
+            logger.info(
+                "event=pipeline_candidates_generated strategy=%s count=%d "
+                "generation_cap=%d cap_reached=%s",
+                strategy_id, _generated_total, _generation_cap,
+                _generation_cap_reached,
             )
 
             # ── Enrichment timing ─────────────────────────────────────
@@ -2138,6 +2143,12 @@ class StrategyService:
                 raise
 
             _enrich_elapsed = time.monotonic() - _enrich_start
+
+            logger.info(
+                "event=pipeline_candidates_enriched strategy=%s count=%d "
+                "elapsed_ms=%.1f",
+                strategy_id, len(enriched), _enrich_elapsed * 1000,
+            )
 
             await self._emit_progress(progress_callback, "evaluate", "Evaluating and scoring candidates", {"count": len(enriched)})
             _MAX_REJECTION_LOGS = 20
@@ -2302,6 +2313,11 @@ class StrategyService:
 
         accepted_pre_dedup = len(accepted)
 
+        logger.info(
+            "event=pipeline_safety_gates_passed strategy=%s count=%d",
+            strategy_id, accepted_pre_dedup,
+        )
+
         deduped: dict[str, dict[str, Any]] = {}
         for trade in accepted:
             key = str(trade.get("trade_key") or "").strip()
@@ -2320,6 +2336,11 @@ class StrategyService:
                 float((tr.get("tie_breaks") or {}).get("liq") or (tr.get("tie_breaks") or {}).get("conviction") or 0.0),
             ),
             reverse=True,
+        )
+
+        logger.info(
+            "event=pipeline_final_ranked strategy=%s count=%d",
+            strategy_id, len(accepted),
         )
 
         self._attach_input_snapshots_to_trades(
@@ -2746,25 +2767,9 @@ class StrategyService:
                     "name": "candidate_construction",
                     "label": "Candidate Construction",
                     "input_count": total_contracts,
-                    "output_count": (_cap_summary or {}).get("generated_total", len(candidates)),
-                    "detail": f"{total_contracts} contracts \u2192 {(_cap_summary or {}).get('generated_total', len(candidates))} spread candidates",
+                    "output_count": _generated_total,
+                    "detail": f"{total_contracts} contracts \u2192 {_generated_total} spread candidates",
                     "sub_stages": inputs.get("_build_sub_stages"),
-                },
-                {
-                    "name": "soft_cap",
-                    "label": "Soft Cap (top-N by pre_score)",
-                    "input_count": (_cap_summary or {}).get("generated_total", len(candidates)),
-                    "output_count": len(candidates),
-                    "detail": (
-                        f"{(_cap_summary or {}).get('generated_total', len(candidates))} candidates "
-                        f"\u2192 {len(candidates)} after soft cap"
-                        + (" (BYPASSED)" if _bypass_soft_cap else "")
-                    ),
-                    "bypassed": _bypass_soft_cap,
-                    "bypass_reason": _bypass_reason if _bypass_soft_cap else None,
-                    "original_enrichment_cap": (_cap_summary or {}).get("original_enrichment_cap", _enrichment_cap),
-                    "effective_enrichment_cap": (_cap_summary or {}).get("effective_enrichment_cap", len(candidates)),
-                    "cap_summary": _cap_summary,
                 },
                 {
                     "name": "enrichment",
@@ -2807,8 +2812,8 @@ class StrategyService:
             "enrichment_counters": enrichment_counters,
             "dq_summary": dq_summary,
             "experiment_flags": {
-                "credit_spread_wide_bypass_soft_cap": _bypass_soft_cap,
-                "bypass_reason": _bypass_reason,
+                "soft_cap_removed": True,
+                "candidate_sampling": "none",
             },
         }
 

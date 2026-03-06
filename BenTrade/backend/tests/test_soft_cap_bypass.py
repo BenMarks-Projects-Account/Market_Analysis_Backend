@@ -1,17 +1,16 @@
-"""Tests for soft-cap bypass experiment (credit_spread + wide).
+"""Tests for select_top_n bypass mode and high-water safety guard.
+
+Note: The pipeline no longer calls select_top_n (soft cap removed).
+These tests verify the candidate_sampler module's internal logic.
 
 Covers:
   - select_top_n bypass mode: all candidates pass, cap_summary reports bypass metadata
   - High-water safety guard: clamps at BYPASS_HIGH_WATER_MARK (20k)
-  - Bypass flag resolution: preset=wide auto-triggers, env var, payload flag, default off
-  - Other strategies/presets unaffected
   - Cap summary schema with bypassed/bypass_reason/original/effective fields
-  - Trace detail string includes "(BYPASSED)" suffix
 """
 
 from __future__ import annotations
 
-import os
 import sys
 import types
 from pathlib import Path
@@ -240,39 +239,4 @@ class TestBypassHighWaterGuard:
         assert summary["high_water_clamped"] is False
 
 
-# ===========================================================================
-# Tests: Config / env var bypass flag
-# ===========================================================================
 
-
-class TestBypassConfigFlag:
-    """Verify env var BENTRADE_CREDIT_SPREAD_BYPASS_SOFT_CAP controls the flag."""
-
-    def test_env_var_off_by_default(self):
-        """Default CREDIT_SPREAD_BYPASS_SOFT_CAP is False."""
-        # The Settings class evaluates os.getenv at class-definition time,
-        # so we verify the default by constructing with no override.
-        from app.config import Settings
-        s = Settings()
-        assert s.CREDIT_SPREAD_BYPASS_SOFT_CAP is False
-
-    def test_field_can_be_set_true(self):
-        """CREDIT_SPREAD_BYPASS_SOFT_CAP can be set to True via constructor."""
-        from app.config import Settings
-        s = Settings(CREDIT_SPREAD_BYPASS_SOFT_CAP=True)
-        assert s.CREDIT_SPREAD_BYPASS_SOFT_CAP is True
-
-    def test_field_can_be_set_false(self):
-        """CREDIT_SPREAD_BYPASS_SOFT_CAP can be explicitly set False."""
-        from app.config import Settings
-        s = Settings(CREDIT_SPREAD_BYPASS_SOFT_CAP=False)
-        assert s.CREDIT_SPREAD_BYPASS_SOFT_CAP is False
-
-    def test_env_var_format(self):
-        """The env var name is BENTRADE_CREDIT_SPREAD_BYPASS_SOFT_CAP."""
-        # Verify the env var name is what we expect by reading the default expression
-        # (class-level evaluation of os.getenv("BENTRADE_CREDIT_SPREAD_BYPASS_SOFT_CAP", "0"))
-        val = os.getenv("BENTRADE_CREDIT_SPREAD_BYPASS_SOFT_CAP", "0")
-        assert val in ("0", "1"), (
-            f"Unexpected env var value: {val!r}"
-        )

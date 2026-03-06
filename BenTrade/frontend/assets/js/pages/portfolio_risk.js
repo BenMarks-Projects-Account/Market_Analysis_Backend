@@ -48,7 +48,7 @@ window.BenTradePages.initPortfolioRisk = function initPortfolioRisk(rootEl){
     const p = payload?.portfolio || {};
     totalsEl.innerHTML = `
       <div class="statTile"><div class="statLabel">As Of</div><div class="statValue">${payload?.as_of || 'N/A'}</div></div>
-      <div class="statTile"><div class="statLabel">Source</div><div class="statValue">${payload?.source || 'none'}</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="trade_source">Source</div><div class="statValue">${payload?.source || 'none'}</div></div>
       <div class="statTile"><div class="statLabel" data-metric="delta">Delta</div><div class="statValue">${fmt(p.delta,3)}</div></div>
       <div class="statTile"><div class="statLabel" data-metric="gamma">Gamma</div><div class="statValue">${fmt(p.gamma,3)}</div></div>
       <div class="statTile"><div class="statLabel" data-metric="theta">Theta</div><div class="statValue">${fmt(p.theta,3)}</div></div>

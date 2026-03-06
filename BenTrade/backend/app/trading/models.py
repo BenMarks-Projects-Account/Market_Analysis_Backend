@@ -6,6 +6,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+STRATEGY_LITERAL = Literal[
+    "put_credit", "call_credit", "put_debit", "call_debit",
+    "iron_condor", "butterfly_debit",
+]
+
+
 class OrderLeg(BaseModel):
     option_type: Literal["put", "call"]
     expiration: str
@@ -26,7 +32,7 @@ class ProfitLossEstimate(BaseModel):
 class OrderTicket(BaseModel):
     id: str
     mode: Literal["paper", "live"]
-    strategy: Literal["put_credit", "call_credit", "put_debit", "call_debit"]
+    strategy: STRATEGY_LITERAL
     underlying: str
     expiration: str
     quantity: int
@@ -34,7 +40,8 @@ class OrderTicket(BaseModel):
     limit_price: float
     price_effect: Literal["CREDIT", "DEBIT"]
     time_in_force: Literal["DAY", "GTC"]
-    legs: list[OrderLeg] = Field(min_length=2, max_length=2)
+    # Supports 2-leg spreads AND 4-leg condors/butterflies
+    legs: list[OrderLeg] = Field(min_length=2, max_length=4)
     estimated_max_profit: ProfitLossEstimate
     estimated_max_loss: ProfitLossEstimate
     created_at: datetime
@@ -42,16 +49,31 @@ class OrderTicket(BaseModel):
     asof_chain_ts: datetime
 
 
+class PreviewLeg(BaseModel):
+    """Lightweight leg input for multi-leg preview requests."""
+    strike: float
+    side: Literal["BUY_TO_OPEN", "SELL_TO_OPEN", "buy_to_open", "sell_to_open",
+                   "buy", "sell"]
+    option_type: Literal["put", "call"]
+    quantity: int = 1
+    # Exact OCC symbol from option chain; preferred over reconstructed symbol
+    option_symbol: str | None = None
+
+
 class TradingPreviewRequest(BaseModel):
     symbol: str
-    strategy: Literal["put_credit", "call_credit", "put_debit", "call_debit"]
+    strategy: STRATEGY_LITERAL
     expiration: str
-    short_strike: float
-    long_strike: float
+    # 2-leg spreads: short_strike/long_strike (required)
+    # Multi-leg (iron_condor, butterfly): legs array (short/long optional)
+    short_strike: float | None = None
+    long_strike: float | None = None
+    legs: list[PreviewLeg] | None = None
     quantity: int = Field(ge=1)
     limit_price: float = Field(gt=0)
     time_in_force: Literal["DAY", "GTC"] = "DAY"
     mode: Literal["paper", "live"] = "paper"
+    trace_id: str | None = None
 
 
 class OrderPreviewResponse(BaseModel):
@@ -60,6 +82,11 @@ class OrderPreviewResponse(BaseModel):
     warnings: list[str]
     confirmation_token: str
     expires_at: datetime
+    trace_id: str | None = None
+    # Tradier preview response (from POST /orders with preview=true)
+    tradier_preview: dict[str, Any] | None = None
+    tradier_preview_error: str | None = None
+    payload_sent: dict[str, Any] | None = None
 
 
 class TradingSubmitRequest(BaseModel):
@@ -67,20 +94,28 @@ class TradingSubmitRequest(BaseModel):
     confirmation_token: str
     idempotency_key: str = Field(min_length=6)
     mode: Literal["paper", "live"] = "paper"
+    trace_id: str | None = None
 
 
 class OrderSubmitResponse(BaseModel):
     broker: Literal["paper", "tradier"]
-    status: Literal["ACCEPTED", "REJECTED", "WORKING", "FILLED"]
+    status: Literal["ACCEPTED", "REJECTED", "WORKING", "FILLED", "DRY_RUN"]
     broker_order_id: str
     message: str
     created_at: datetime
     account_mode_used: Literal["paper", "live"] | None = None
+    trace_id: str | None = None
+    tradier_raw_status: str | None = None
+    dry_run: bool = False
+    # ── Destination metadata (NEW) ─────────────────────────────
+    destination: Literal["paper", "live"] | None = None
+    destination_label: str | None = None
+    dev_mode_forced_paper: bool = False
 
 
 class BrokerResult(BaseModel):
     broker: Literal["paper", "tradier"]
-    status: Literal["ACCEPTED", "REJECTED", "WORKING", "FILLED"]
+    status: Literal["ACCEPTED", "REJECTED", "WORKING", "FILLED", "DRY_RUN"]
     broker_order_id: str
     message: str
     raw: dict[str, Any] | None = None

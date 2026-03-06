@@ -36,7 +36,10 @@ window.BenTradeTradeTicket = (function () {
   var _preview   = null;   // preview response from backend
   var _mode      = 'paper'; // paper | live
   var _loading   = false;
-  var _step      = 'review'; // review | previewing | confirmed | submitting | done | error
+  var _step      = 'review'; // review | previewing | confirmed | submitting | submitted | reconciling | done | error
+  var _traceId   = null;   // end-to-end trace ID for this session
+  var _submitResp = null;  // last submit response (for order ID display)
+  var _lastError = null;   // last error object { message, status, detail, endpoint, bodySnippet }
 
   /* ── Helpers ───────────────────────────────────────────────── */
 
@@ -103,10 +106,10 @@ window.BenTradeTradeTicket = (function () {
   function _render() {
     if (!_ticket || !_el) return;
     var t = _ticket;
-    var tradeCapOn = _status && _status.trade_capability_enabled;
-    var dryRun     = _status ? _status.dry_run : true;
-    var env        = _status ? _status.environment : 'unknown';
-    var val        = validate(t);
+    var execEnabled = _status && _status.tradier_execution_enabled;
+    var dryRun      = _status ? _status.dry_run : true;
+    var env         = _status ? _status.environment : 'unknown';
+    var val         = validate(t);
 
     _el.innerHTML = '<div class="tt-card" onclick="event.stopPropagation()">' +
       _renderHeader(t) +
@@ -115,10 +118,11 @@ window.BenTradeTradeTicket = (function () {
         _renderLegs(t) +
         _renderRiskReward(t) +
         _renderPricing(t) +
-        _renderSafetyPanel(tradeCapOn, dryRun, env) +
+        _renderPayloadPreview(t) +
+        _renderSafetyPanel(execEnabled, dryRun, env) +
         _renderStatus() +
       '</div>' +
-      _renderFooter(t, tradeCapOn, val) +
+      _renderFooter(t, execEnabled, val) +
     '</div>';
 
     _bindEvents();
@@ -249,43 +253,74 @@ window.BenTradeTradeTicket = (function () {
     '</div>';
   }
 
+  /* ── Render: payload preview (dev-only accordion) ───────────── */
+
+  function _renderPayloadPreview(t) {
+    // Build the same payload the backend will receive
+    var previewReq = toPreview(t, _mode);
+    if (_traceId) previewReq.trace_id = _traceId;
+
+    // Redact any sensitive fields (none in preview, but safe pattern)
+    var display = JSON.stringify(previewReq, null, 2);
+
+    var sections = '<pre class="tt-payload-json">' + display + '</pre>';
+
+    // Show Tradier payload sent (after preview succeeds)
+    if (_preview && _preview.payload_sent) {
+      sections += '<div class="tt-payload-section-title">\u25B6 Tradier Payload Sent</div>' +
+        '<pre class="tt-payload-json">' + JSON.stringify(_preview.payload_sent, null, 2) + '</pre>';
+    }
+
+    // Show Tradier preview response
+    if (_preview && _preview.tradier_preview) {
+      sections += '<div class="tt-payload-section-title">\u25B6 Tradier Preview Response</div>' +
+        '<pre class="tt-payload-json tt-payload-success">' + JSON.stringify(_preview.tradier_preview, null, 2) + '</pre>';
+    }
+
+    // Show Tradier preview error
+    if (_preview && _preview.tradier_preview_error) {
+      sections += '<div class="tt-payload-section-title">\u25B6 Tradier Preview Error</div>' +
+        '<pre class="tt-payload-json tt-payload-error">' + _preview.tradier_preview_error + '</pre>';
+    }
+
+    // Show last error payload for debugging
+    if (_lastError && _lastError.bodySnippet) {
+      sections += '<div class="tt-payload-section-title">\u25B6 Last Error Response</div>' +
+        '<pre class="tt-payload-json tt-payload-error">' + _lastError.bodySnippet + '</pre>';
+    }
+
+    return '<details class="tt-payload-preview"' + (_step === 'error' ? ' open' : '') + '>' +
+      '<summary class="tt-section-title" style="cursor:pointer;user-select:none;">' +
+        '\u25C7 Payload Preview (Dev)' +
+      '</summary>' +
+      sections +
+      ((_traceId) ? '<div class="tt-trace-id">Trace ID: ' + _traceId + '</div>' : '') +
+    '</details>';
+  }
+
   /* ── Render: safety panel ──────────────────────────────────── */
 
-  function _renderSafetyPanel(tradeCapOn, dryRun, env) {
-    var tradingLiveEnabled = _status ? _status.trading_live_enabled : false;
-    var enableLiveTrading  = _status ? _status.enable_live_trading : false;
-    var paperConfigured    = _status ? _status.paper_configured    : false;
+  function _renderSafetyPanel(execEnabled, dryRun, env) {
+    var paperConfigured = _status ? _status.paper_configured : false;
 
-    // Trade capability toggle
-    var toggleCls = tradeCapOn ? 'tt-toggle on' : 'tt-toggle off';
-    var toggleLabel = tradeCapOn ? 'ON' : 'OFF';
+    // Execution toggle (single flag: TRADIER_EXECUTION_ENABLED)
+    var toggleCls = execEnabled ? 'tt-toggle on' : 'tt-toggle off';
+    var toggleLabel = execEnabled ? 'ON' : 'OFF';
     var toggleHtml = '<button class="' + toggleCls + '" data-action="toggle-trade-cap" ' +
-      'title="' + (tradeCapOn ? 'Disable' : 'Enable') + ' trade capability">' +
+      'title="' + (execEnabled ? 'Disable' : 'Enable') + ' Tradier execution">' +
       '<span class="tt-toggle-track"><span class="tt-toggle-thumb"></span></span>' +
       '<span class="tt-toggle-label">' + toggleLabel + '</span>' +
     '</button>';
 
-    // Warning message based on state
-    var warn;
-    if (tradeCapOn && !dryRun) {
-      warn  = '<div class="tt-safety-msg tt-safety-live">This will send a live order to Tradier (' + env + ').</div>';
-    } else if (tradeCapOn && dryRun) {
-      warn  = '<div class="tt-safety-msg tt-safety-dry">Trade capability ON but dry-run mode — order will be logged, not submitted.</div>';
-    } else {
-      warn  = '<div class="tt-safety-msg tt-safety-off">Trade capability is disabled. This is a dry run preview only.</div>';
-    }
+    // Destination label
+    var destLabel = _mode === 'live' ? 'Tradier LIVE' : 'Tradier PAPER (sandbox)';
 
-    // Live execution gate warning
-    var liveGateHtml = '';
-    if (_mode === 'live' && !tradingLiveEnabled) {
-      liveGateHtml = '<div class="tt-safety-msg tt-safety-live">' +
-        '\u26A0 TRADING_LIVE_ENABLED is OFF — live execution will be blocked by the backend.' +
-      '</div>';
-    }
-    if (_mode === 'live' && tradeCapOn && !enableLiveTrading) {
-      liveGateHtml += '<div class="tt-safety-msg tt-safety-live">' +
-        '\u26A0 ENABLE_LIVE_TRADING env var is OFF — live orders will be rejected at submission.' +
-      '</div>';
+    // Warning message — simple and honest
+    var warn;
+    if (execEnabled) {
+      warn = '<div class="tt-safety-msg tt-safety-live">Execution ENABLED \u2014 orders will be sent to ' + destLabel + '.</div>';
+    } else {
+      warn = '<div class="tt-safety-msg tt-safety-off">Execution DISABLED \u2014 dry run only (payload logged, not submitted).</div>';
     }
 
     var modeSelect = '<select class="tt-select tt-mode-select" data-field="mode">' +
@@ -297,20 +332,23 @@ window.BenTradeTradeTicket = (function () {
     var paperHint = '';
     if (_mode === 'paper' && !paperConfigured) {
       paperHint = '<div class="tt-safety-msg tt-safety-dry">' +
-        'Paper credentials not configured — will use PaperBroker (simulated fills).' +
+        'Paper credentials not configured \u2014 will use PaperBroker (simulated fills).' +
       '</div>';
     }
 
     return '<div class="tt-section tt-safety">' +
       '<div class="tt-section-title">Execution Safety</div>' +
       '<div class="tt-safety-row">' +
-        '<span class="tt-safety-label">Trade Capability</span>' + toggleHtml +
+        '<span class="tt-safety-label">Tradier Execution</span>' + toggleHtml +
       '</div>' +
       '<div class="tt-safety-row">' +
-        '<span class="tt-safety-label">Account Mode</span>' + modeSelect +
+        '<span class="tt-safety-label">Destination</span>' + modeSelect +
+      '</div>' +
+      '<div class="tt-safety-row">' +
+        '<span class="tt-safety-label">Route</span>' +
+        '<span class="tt-safety-value">' + destLabel + '</span>' +
       '</div>' +
       warn +
-      liveGateHtml +
       paperHint +
     '</div>';
   }
@@ -322,7 +360,32 @@ window.BenTradeTradeTicket = (function () {
       return '<div class="tt-status tt-status-loading"><span class="tt-spinner"></span> Previewing order\u2026</div>';
     }
     if (_step === 'submitting') {
-      return '<div class="tt-status tt-status-loading"><span class="tt-spinner"></span> Submitting order\u2026</div>';
+      return '<div class="tt-status tt-status-loading"><span class="tt-spinner"></span> Submitting order to Tradier\u2026</div>';
+    }
+    if (_step === 'submitted' || _step === 'reconciling') {
+      var reconMsg = _step === 'reconciling'
+        ? '<span class="tt-spinner"></span> Reconciling with Tradier\u2026'
+        : 'Order submitted \u2014 awaiting broker confirmation';
+      var orderIdLine = '';
+      if (_submitResp && _submitResp.broker_order_id) {
+        var oid = _submitResp.broker_order_id;
+        var isDryRun = _submitResp.dry_run === true || _submitResp.status === 'DRY_RUN' || oid.indexOf('dryrun-') === 0;
+        var isPaperSim = oid.indexOf('paper-') === 0;
+        orderIdLine = '<div class=\"tt-preview-detail\">Order ID: <strong>' + oid + '</strong>' +
+          (isDryRun ? ' <span class=\"tt-badge tt-badge-dry\">[DRY RUN]</span>' : '') +
+          (isPaperSim ? ' <span class=\"tt-badge tt-badge-sim\">[SIMULATOR]</span>' : '') +
+        '</div>';
+      }
+      if (_submitResp && _submitResp.trace_id) {
+        orderIdLine += '<div class="tt-preview-detail">Trace: ' + _submitResp.trace_id + '</div>';
+      }
+      return '<div class="tt-status tt-status-pending">' +
+        '<div class="tt-preview-label">' + reconMsg + '</div>' +
+        orderIdLine +
+        (_submitResp && _submitResp.tradier_raw_status
+          ? '<div class="tt-preview-detail">Tradier status: <strong>' + _submitResp.tradier_raw_status + '</strong></div>'
+          : '') +
+      '</div>';
     }
     if (_step === 'confirmed' && _preview) {
       var warns = _preview.warnings || [];
@@ -332,47 +395,180 @@ window.BenTradeTradeTicket = (function () {
           warns.map(function (w) { return '<li>' + w + '</li>'; }).join('') +
         '</ul>';
       }
+
+      // Tradier preview result
+      var tradierInfo = '';
+      if (_preview.tradier_preview) {
+        var tp = _preview.tradier_preview;
+        var tpOrder = tp.order || {};
+        tradierInfo = '<div class="tt-preview-detail" style="color:#4fc3f7;">\u2714 Tradier preview confirmed</div>';
+        if (tpOrder.status) {
+          tradierInfo += '<div class="tt-preview-detail">Tradier status: <strong>' + tpOrder.status + '</strong></div>';
+        }
+        if (tpOrder.commission != null) {
+          tradierInfo += '<div class="tt-preview-detail">Commission: $' + Number(tpOrder.commission).toFixed(2) + '</div>';
+        }
+        if (tpOrder.cost != null) {
+          tradierInfo += '<div class="tt-preview-detail">Buying power effect: $' + Number(tpOrder.cost).toFixed(2) + '</div>';
+        }
+      } else if (_preview.tradier_preview_error) {
+        tradierInfo = '<div class="tt-preview-detail" style="color:#ffa726;">\u26A0 Tradier preview: ' +
+          _preview.tradier_preview_error + '</div>';
+      }
+
       return '<div class="tt-status tt-status-preview">' +
         '<div class="tt-preview-label">Preview confirmed \u2714</div>' +
         '<div class="tt-preview-detail">Ticket: ' + _preview.ticket.id.slice(0, 8) + '\u2026</div>' +
         '<div class="tt-preview-detail">Expires: ' + new Date(_preview.expires_at).toLocaleTimeString() + '</div>' +
+        (_preview.trace_id ? '<div class="tt-preview-detail">Trace: ' + _preview.trace_id + '</div>' : '') +
+        tradierInfo +
         warnHtml +
       '</div>';
     }
     if (_step === 'done') {
-      return '<div class="tt-status tt-status-success">Order submitted successfully! \u2714</div>';
+      var doneHtml = '<div class="tt-status tt-status-success">';
+      if (_submitResp) {
+        var statusLabel = _submitResp.status || 'SUBMITTED';
+        var isDone_DryRun = _submitResp.dry_run === true || statusLabel === 'DRY_RUN';
+        var statusClass;
+        if (isDone_DryRun) {
+          statusClass = 'tt-tone-neutral';
+          statusLabel = 'DRY RUN \u2014 NOT SUBMITTED';
+        } else if (statusLabel === 'FILLED') {
+          statusClass = 'tt-tone-positive';
+        } else if (statusLabel === 'REJECTED') {
+          statusClass = 'tt-tone-negative';
+        } else {
+          statusClass = '';
+        }
+        doneHtml += '<div class="tt-preview-label ' + statusClass + '">' + statusLabel + '</div>';
+        // Destination label from backend response
+        if (_submitResp.destination_label) {
+          doneHtml += '<div class="tt-preview-detail">Destination: <strong>' + _submitResp.destination_label + '</strong></div>';
+        }
+        if (_submitResp.dev_mode_forced_paper) {
+          doneHtml += '<div class="tt-preview-detail" style="color:rgba(255,200,60,0.85);">\u25B3 Development mode forced PAPER routing</div>';
+        }
+        if (isDone_DryRun) {
+          doneHtml += '<div class="tt-preview-detail">Payload logged, no broker order placed.</div>';
+        }
+        if (_submitResp.broker_order_id) {
+          var idLabel = isDone_DryRun ? 'Local ID' : 'Order ID';
+          doneHtml += '<div class="tt-preview-detail">' + idLabel + ': <strong>' + _submitResp.broker_order_id + '</strong>';
+          if (isDone_DryRun) doneHtml += ' <span class="tt-badge tt-badge-dry">[DRY RUN]</span>';
+          doneHtml += '</div>';
+        }
+        if (_submitResp.tradier_raw_status) {
+          doneHtml += '<div class="tt-preview-detail">Tradier: ' + _submitResp.tradier_raw_status + '</div>';
+        }
+        if (_submitResp.message) {
+          doneHtml += '<div class="tt-preview-detail">' + _submitResp.message + '</div>';
+        }
+        if (_submitResp.trace_id) {
+          doneHtml += '<div class="tt-preview-detail">Trace: ' + _submitResp.trace_id + '</div>';
+        }
+      } else {
+        doneHtml += 'Order submitted \u2714';
+      }
+      doneHtml += '</div>';
+      return doneHtml;
     }
     if (_step === 'error') {
-      return ''; // error is shown via toast
+      var errBox = '<div class="tt-status tt-status-error">';
+      errBox += '<div class="tt-preview-label tt-tone-negative">\u274C Preview Failed</div>';
+      if (_lastError) {
+        errBox += '<div class="tt-error-message">' + (_lastError.message || 'Unknown error') + '</div>';
+        if (_lastError.status) {
+          errBox += '<div class="tt-error-detail">HTTP ' + _lastError.status + ' — ' + (_lastError.endpoint || '') + '</div>';
+        }
+        if (_lastError.detail && typeof _lastError.detail === 'object') {
+          // Handle both object and array formats
+          if (Array.isArray(_lastError.detail)) {
+            // Pydantic 422 array format
+            var items = _lastError.detail.map(function(e) {
+              var loc = (e.loc || []).join(' \u2192 ');
+              return '<li>' + (loc ? '<strong>' + loc + '</strong>: ' : '') + (e.msg || JSON.stringify(e)) + '</li>';
+            }).join('');
+            errBox += '<div class="tt-error-detail"><ul style="margin:4px 0;padding-left:16px;">' + items + '</ul></div>';
+          } else {
+            var detailMsg = _lastError.detail.message || '';
+            errBox += '<div class="tt-error-detail">' + detailMsg + '</div>';
+            if (_lastError.detail.failed_checks) {
+              errBox += '<div class="tt-error-detail">Failed checks: ' + _lastError.detail.failed_checks.join(', ') + '</div>';
+            }
+            if (_lastError.detail.upstream_status) {
+              errBox += '<div class="tt-error-detail">Tradier HTTP ' + _lastError.detail.upstream_status + '</div>';
+            }
+            if (_lastError.detail.upstream_body) {
+              errBox += '<details class="tt-error-raw"><summary>Tradier response body</summary><pre>' +
+                String(_lastError.detail.upstream_body).slice(0, 2000) + '</pre></details>';
+            }
+            if (_lastError.detail.trace_id) {
+              errBox += '<div class="tt-error-detail">Trace: ' + _lastError.detail.trace_id + '</div>';
+            }
+          }
+        } else if (_lastError.detail && _lastError.detail !== _lastError.message) {
+          errBox += '<div class="tt-error-detail">' + _lastError.detail + '</div>';
+        }
+        if (_lastError.bodySnippet && _lastError.bodySnippet.length > 0) {
+          errBox += '<details class="tt-error-raw"><summary>Raw response</summary><pre>' + _lastError.bodySnippet + '</pre></details>';
+        }
+      } else {
+        errBox += '<div class="tt-error-message">No error details available \u2014 check browser console for stack trace.</div>';
+      }
+      errBox += '</div>';
+      return errBox;
     }
     return '';
   }
 
   /* ── Render: footer ────────────────────────────────────────── */
 
-  function _renderFooter(t, tradeCapOn, val) {
+  function _renderFooter(t, execEnabled, val) {
     var confirmLabel, confirmDisabled, confirmTitle;
 
-    // Even if trade capability is ON, block execution if validation fails
+    // Even if execution is ON, block if validation fails
     var actuallyValid = val.valid;
+
+    // Diagnostic breadcrumb for footer rendering
+    console.debug('[TradeTicket] _renderFooter — step=%s mode=%s execEnabled=%s valid=%s errors=%s',
+      _step, _mode, execEnabled, actuallyValid, val.errors.join('; '));
 
     if (_step === 'review') {
       confirmLabel    = 'Preview Order';
       confirmDisabled = !actuallyValid;
       confirmTitle    = !actuallyValid ? val.errors.join(' ') : '';
-    } else if (_step === 'confirmed' || _step === 'error') {
-      confirmLabel    = 'Confirm Trade';
-      confirmDisabled = !tradeCapOn || !actuallyValid;
-      confirmTitle    = !actuallyValid
-        ? val.errors.join(' ')
-        : (!tradeCapOn ? 'Live trading is disabled.' : '');
+    } else if (_step === 'error') {
+      // Preview failed — offer retry, never offer submit
+      confirmLabel    = 'Retry Preview';
+      confirmDisabled = !actuallyValid;
+      confirmTitle    = !actuallyValid ? val.errors.join(' ') : 'Click to retry the preview.';
+    } else if (_step === 'confirmed') {
+      // Mode-specific submit button labels
+      var isDevMode = _status && _status.development_mode;
+      if (isDevMode && _mode === 'live') {
+        confirmLabel    = 'Live Disabled (Dev Mode)';
+        confirmDisabled = true;
+        confirmTitle    = 'Live trading is disabled in development mode.';
+      } else if (_mode === 'paper') {
+        // Paper submit is ALWAYS enabled — backend controls DRY_RUN vs real.
+        confirmLabel    = execEnabled ? 'Submit to Paper (Sandbox)' : 'Submit to Paper (Dry Run)';
+        confirmDisabled = !actuallyValid;
+        confirmTitle    = !actuallyValid ? val.errors.join(' ') : '';
+      } else {
+        confirmLabel    = 'Submit LIVE Order';
+        confirmDisabled = !execEnabled || !actuallyValid;
+        confirmTitle    = !actuallyValid
+          ? val.errors.join(' ')
+          : (!execEnabled ? 'Enable Tradier Execution toggle to submit.' : '');
+      }
     } else {
       confirmLabel    = 'Processing\u2026';
       confirmDisabled = true;
       confirmTitle    = '';
     }
 
-    if (_step === 'done') {
+    if (_step === 'done' || _step === 'submitted' || _step === 'reconciling') {
       return '<div class="tt-footer">' +
         '<button class="tt-btn tt-btn-cancel" data-action="close">Close</button>' +
       '</div>';
@@ -431,8 +627,8 @@ window.BenTradeTradeTicket = (function () {
     var confirmBtn = _el.querySelector('[data-action="confirm"]');
     if (confirmBtn) {
       confirmBtn.addEventListener('click', function () {
-        if (_step === 'review') _doPreview();
-        else if (_step === 'confirmed' || _step === 'error') _doSubmit();
+        if (_step === 'review' || _step === 'error') _doPreview();
+        else if (_step === 'confirmed') _doSubmit();
       });
     }
 
@@ -485,9 +681,10 @@ window.BenTradeTradeTicket = (function () {
 
   async function _toggleTradeCap() {
     if (_loading) return;
-    var isOn = _status && _status.trade_capability_enabled;
+    var isOn = _status && _status.tradier_execution_enabled;
+    console.info('[TradeTicket] _toggleTradeCap — currently %s, toggling to %s', isOn ? 'ON' : 'OFF', isOn ? 'OFF' : 'ON');
     try {
-      // kill-switch/on  → enables runtime, kill-switch/off → disables runtime
+      // PATCH runtime-config to toggle the single execution flag
       if (isOn) {
         await api.tradingKillSwitchOff();
       } else {
@@ -495,6 +692,8 @@ window.BenTradeTradeTicket = (function () {
       }
       // Refresh status from backend
       _status = await api.getTradingStatus();
+      console.info('[TradeTicket] Toggle result — tradier_execution_enabled=%s dry_run=%s',
+        _status && _status.tradier_execution_enabled, _status && _status.dry_run);
     } catch (err) {
       _showToast('Toggle failed: ' + (err.message || 'Unknown error'), 'error');
       console.error('[TradeTicket] Toggle trade cap error:', err);
@@ -508,17 +707,47 @@ window.BenTradeTradeTicket = (function () {
     if (_loading) return;
     _step = 'previewing';
     _loading = true;
+    _lastError = null;
     _render();
 
     try {
       var req = toPreview(_ticket, _mode);
+      if (_traceId) req.trace_id = _traceId;
+
+      // ── Pre-request diagnostic ──────────────────────────────
+      console.log('[TRADE_TICKET] preview_click', {
+        trace_id: _traceId,
+        destination: _mode,
+        execution_enabled: _status && _status.tradier_execution_enabled,
+        endpoint: 'POST /api/trading/preview',
+        payload: JSON.parse(JSON.stringify(req)),
+      });
+
       var resp = await api.tradingPreview(req);
       _preview = resp;
+      if (resp.trace_id) _traceId = resp.trace_id;
       _step = 'confirmed';
+      console.info('[TRADE_TICKET] preview_ok', {
+        ticket_id: resp.ticket && resp.ticket.id,
+        trace_id: resp.trace_id,
+        checks: resp.checks,
+        warnings: resp.warnings,
+        tradier_preview: resp.tradier_preview || null,
+        tradier_preview_error: resp.tradier_preview_error || null,
+        payload_sent: resp.payload_sent || null,
+      });
     } catch (err) {
       _step = 'error';
-      _showToast('Preview failed: ' + (err.message || 'Unknown error'), 'error');
-      console.error('[TradeTicket] Preview error:', err);
+      _lastError = {
+        message: err.message || 'Unknown error',
+        status: err.status || null,
+        detail: err.detail || null,
+        endpoint: err.endpoint || 'POST /api/trading/preview',
+        bodySnippet: err.bodySnippet || '',
+        payload: err.payload || null,
+      };
+      console.error('[TRADE_TICKET] preview_error', _lastError);
+      _showToast('Preview failed: ' + _lastError.message, 'error');
     } finally {
       _loading = false;
       _render();
@@ -528,9 +757,17 @@ window.BenTradeTradeTicket = (function () {
   /* ── Submit flow ───────────────────────────────────────────── */
 
   async function _doSubmit() {
-    if (_loading || !_preview) return;
+    if (_loading) return;
+    if (!_preview) {
+      console.error('[TradeTicket] _doSubmit called but _preview is null — cannot submit without a valid preview.');
+      _showToast('No preview available — please preview the order first.', 'error');
+      _step = 'review';
+      _render();
+      return;
+    }
     _step = 'submitting';
     _loading = true;
+    _submitResp = null;
     _render();
 
     try {
@@ -539,11 +776,49 @@ window.BenTradeTradeTicket = (function () {
         confirmation_token: _preview.confirmation_token,
         idempotency_key:    _uuid(),
         mode:               _mode,
+        trace_id:           _traceId,
       };
+
+      console.info('[TradeTicket] Submit payload:', {
+        ticket_id: payload.ticket_id,
+        mode: payload.mode,
+        trace_id: payload.trace_id,
+      });
+
       var resp = await api.tradingSubmit(payload);
-      _step = 'done';
+      _submitResp = resp;
       var modeUsed = resp.account_mode_used ? resp.account_mode_used.toUpperCase() : _mode.toUpperCase();
-      _showToast('[' + modeUsed + '] Order ' + (resp.status || 'ACCEPTED') + ' — ID: ' + (resp.broker_order_id || '').slice(0, 12), 'success');
+
+      // Use backend's authoritative dry_run flag — single source of truth.
+      // Fall back to order ID prefix detection for backwards compat.
+      var oid = resp.broker_order_id || '';
+      var isDryRun = resp.dry_run === true || resp.status === 'DRY_RUN' || oid.indexOf('dryrun-') === 0;
+      var isPaperSim = oid.indexOf('paper-') === 0;
+      var isTradierReal = !isDryRun && !isPaperSim;
+
+      if (isDryRun) {
+        // Dry-run: payload was logged, no broker order placed
+        _step = 'done';
+        _showToast('[' + modeUsed + '] DRY RUN — payload logged, not submitted', 'info');
+      } else if (resp.status === 'FILLED' && isTradierReal) {
+        _step = 'done';
+        _showToast('[' + modeUsed + '] Order FILLED — ID: ' + oid.slice(0, 15), 'success');
+      } else if (resp.status === 'REJECTED') {
+        _step = 'done';
+        _showToast('[' + modeUsed + '] Order REJECTED — ' + (resp.message || ''), 'error');
+      } else if (isPaperSim) {
+        _step = 'done';
+        _showToast('[' + modeUsed + '] Paper simulated — ' + (resp.status || 'OK'), 'info');
+      } else {
+        // Real Tradier order: show as submitted, not yet confirmed
+        _step = 'submitted';
+        _showToast('[' + modeUsed + '] Order submitted — ID: ' + oid.slice(0, 15) + ' — awaiting broker update', 'info');
+        _loading = false;
+        _render();
+        // Start reconciliation polling in background
+        _doReconcile(oid);
+        return;
+      }
     } catch (err) {
       _step = 'error';
       _showToast('Submit failed: ' + (err.message || 'Unknown error'), 'error');
@@ -552,6 +827,62 @@ window.BenTradeTradeTicket = (function () {
       _loading = false;
       _render();
     }
+  }
+
+  /* ── Reconciliation: poll Tradier for real order status ───── */
+
+  async function _doReconcile(orderId) {
+    if (!orderId || !api.getTradierOrderStatus) return;
+
+    _step = 'reconciling';
+    _render();
+
+    var maxAttempts = 4;
+    var delays = [2000, 3000, 5000, 8000];
+
+    for (var i = 0; i < maxAttempts; i++) {
+      await new Promise(function (resolve) { setTimeout(resolve, delays[i] || 5000); });
+
+      try {
+        var result = await api.getTradierOrderStatus(orderId);
+        if (!result || !result.ok) continue;
+
+        var order = result.order || {};
+        var tradierStatus = String(order.status || '').toLowerCase();
+        console.info('[TradeTicket] Reconcile attempt', i + 1, 'status:', tradierStatus);
+
+        // Update the submit response with real Tradier status
+        if (_submitResp) {
+          _submitResp.tradier_raw_status = order.status || tradierStatus;
+        }
+
+        if (tradierStatus === 'filled') {
+          if (_submitResp) _submitResp.status = 'FILLED';
+          _step = 'done';
+          _showToast('Order FILLED — confirmed by Tradier', 'success');
+          _render();
+          return;
+        }
+        if (tradierStatus === 'rejected' || tradierStatus === 'canceled' || tradierStatus === 'expired') {
+          if (_submitResp) _submitResp.status = 'REJECTED';
+          _step = 'done';
+          _showToast('Order ' + tradierStatus.toUpperCase() + ' by Tradier', 'error');
+          _render();
+          return;
+        }
+        // pending/open/partially_filled — keep polling
+        _render();
+      } catch (err) {
+        console.warn('[TradeTicket] Reconcile error:', err);
+      }
+    }
+
+    // Exhausted retries — show final state
+    _step = 'done';
+    if (_submitResp && !_submitResp.tradier_raw_status) {
+      _submitResp.message = 'Submitted — awaiting broker update (reconciliation timed out)';
+    }
+    _render();
   }
 
   /* ── Toast helper ──────────────────────────────────────────── */
@@ -600,6 +931,10 @@ window.BenTradeTradeTicket = (function () {
     _step    = 'review';
     _loading = false;
     _mode    = 'paper';
+    _submitResp = null;
+    _lastError = null;
+    // Generate trace_id on frontend when opening modal
+    _traceId = 'ttk-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
 
     // ── Diagnostic breadcrumb: log missing OCC / pricing at open ──
     if (typeof console !== 'undefined' && console.debug) {
@@ -627,9 +962,17 @@ window.BenTradeTradeTicket = (function () {
     _status = null;
     try {
       _status = await api.getTradingStatus();
+      console.info('[TradeTicket] Status fetched — exec_enabled=%s, dry_run=%s, dev_mode=%s, paper_configured=%s',
+        _status.tradier_execution_enabled, _status.dry_run, _status.development_mode, _status.paper_configured);
+      if (_status.credentials) {
+        console.info('[TradeTicket] Credentials — paper_key_last4=%s, paper_acct_last4=%s, paper_base_url=%s',
+          _status.credentials.paper_key_last4 || 'MISSING',
+          _status.credentials.paper_acct_last4 || 'MISSING',
+          _status.credentials.paper_base_url || 'MISSING');
+      }
     } catch (err) {
       console.warn('[TradeTicket] Could not fetch trading status:', err);
-      _status = { trade_capability_enabled: false, dry_run: true, environment: 'unknown' };
+      _status = { tradier_execution_enabled: false, dry_run: true, environment: 'unknown' };
     }
 
     _render();
@@ -656,6 +999,9 @@ window.BenTradeTradeTicket = (function () {
     _preview = null;
     _step    = 'review';
     _loading = false;
+    _traceId = null;
+    _submitResp = null;
+    _lastError = null;
 
     // Restore background app shell
     var shell = document.querySelector('.shell');

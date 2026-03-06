@@ -98,10 +98,14 @@ def _build_client() -> TestClient:
     app.state.base_data_service = _DummyBaseDataService()
     app.state.risk_policy_service = _DummyRiskPolicyService()
     
-    async def _dummy_active_payload(_request) -> dict:
+    _original = routes_active_trades._build_active_payload
+
+    async def _dummy_active_payload(_request, account_mode="live") -> dict:
         return {
+            "ok": True,
             "as_of": "2026-02-15T00:00:00Z",
             "source": "stub",
+            "account_mode": account_mode,
             "positions": [],
             "orders": [],
             "active_trades": [],
@@ -109,63 +113,74 @@ def _build_client() -> TestClient:
         }
 
     routes_active_trades._build_active_payload = _dummy_active_payload
-    return TestClient(app)
+
+    client = TestClient(app)
+    # Store original so it can be restored; attach to client for cleanup
+    client._restore_active_payload = lambda: setattr(
+        routes_active_trades, "_build_active_payload", _original
+    )
+    return client
 
 
 def test_stock_scan_route_returns_200_and_results() -> None:
     client = _build_client()
-    response = client.get("/api/stock/scan?universe=default")
-    assert response.status_code == 200
-    payload = response.json()
-    assert "results" in payload
-    assert isinstance(payload["results"], list)
-    assert payload["results"]
+    try:
+        response = client.get("/api/stock/scan?universe=default")
+        assert response.status_code == 200
+        payload = response.json()
+        assert "results" in payload
+        assert isinstance(payload["results"], list)
+        assert payload["results"]
+    finally:
+        client._restore_active_payload()
 
 
 def test_route_presence_and_top_level_shapes() -> None:
     client = _build_client()
+    try:
+        r_active = client.get("/api/trading/active")
+        assert r_active.status_code == 200
+        assert "active_trades" in r_active.json()
 
-    r_active = client.get("/api/trading/active")
-    assert r_active.status_code == 200
-    assert "active_trades" in r_active.json()
+        r_workbench_analyze = client.post(
+            "/api/workbench/analyze",
+            json={
+                "symbol": "SPY",
+                "expiration": "2026-03-20",
+                "strategy": "credit_put_spread",
+                "short_strike": 580,
+                "long_strike": 575,
+                "contractsMultiplier": 1,
+            },
+        )
+        assert r_workbench_analyze.status_code == 200
+        assert "trade" in r_workbench_analyze.json()
 
-    r_workbench_analyze = client.post(
-        "/api/workbench/analyze",
-        json={
-            "symbol": "SPY",
-            "expiration": "2026-03-20",
-            "strategy": "credit_put_spread",
-            "short_strike": 580,
-            "long_strike": 575,
-            "contractsMultiplier": 1,
-        },
-    )
-    assert r_workbench_analyze.status_code == 200
-    assert "trade" in r_workbench_analyze.json()
+        r_workbench_scenarios = client.get("/api/workbench/scenarios")
+        assert r_workbench_scenarios.status_code == 200
+        assert "scenarios" in r_workbench_scenarios.json()
 
-    r_workbench_scenarios = client.get("/api/workbench/scenarios")
-    assert r_workbench_scenarios.status_code == 200
-    assert "scenarios" in r_workbench_scenarios.json()
+        r_summary = client.get("/api/stock/summary?symbol=SPY&range=6mo")
+        assert r_summary.status_code == 200
+        assert "price" in r_summary.json()
 
-    r_summary = client.get("/api/stock/summary?symbol=SPY&range=6mo")
-    assert r_summary.status_code == 200
-    assert "price" in r_summary.json()
+        r_scan = client.get("/api/stock/scan?universe=default")
+        assert r_scan.status_code == 200
+        assert "results" in r_scan.json()
 
-    r_scan = client.get("/api/stock/scan?universe=default")
-    assert r_scan.status_code == 200
-    assert "results" in r_scan.json()
+        r_policy = client.get("/api/risk/policy")
+        assert r_policy.status_code == 200
+        assert "policy" in r_policy.json()
 
-    r_policy = client.get("/api/risk/policy")
-    assert r_policy.status_code == 200
-    assert "policy" in r_policy.json()
+        r_snapshot = client.get("/api/risk/snapshot")
+        assert r_snapshot.status_code == 200
+        assert "exposure" in r_snapshot.json()
 
-    r_snapshot = client.get("/api/risk/snapshot")
-    assert r_snapshot.status_code == 200
-    assert "exposure" in r_snapshot.json()
-
-    r_data_health = client.get("/api/admin/data-health")
-    assert r_data_health.status_code == 200
-    payload = r_data_health.json()
-    assert "source_health" in payload
-    assert "validation_events" in payload
-    assert "rollups" in payload
+        r_data_health = client.get("/api/admin/data-health")
+        assert r_data_health.status_code == 200
+        payload = r_data_health.json()
+        assert "source_health" in payload
+        assert "validation_events" in payload
+        assert "rollups" in payload
+    finally:
+        client._restore_active_payload()

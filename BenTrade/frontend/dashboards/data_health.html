@@ -11,19 +11,35 @@
   <!-- Platform Data Source Toggle -->
   <div class="stock-card" id="dhPlatformDataSourceCard">
     <div class="stock-card-title">Platform Data Source</div>
-    <div id="dhDataSourcePanel" style="padding: 8px 0;">
-      <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
-        <div id="dhDataSourceToggle" class="ds-toggle-group" role="radiogroup" aria-label="Platform Data Source">
-          <button type="button" class="ds-toggle-btn" data-mode="live" aria-pressed="false">
-            <span class="ds-toggle-icon">&#9679;</span> Live Market Data
+    <div id="dhDataSourcePanel" class="dh-ds-panel">
+      <div class="dh-ds-row">
+        <div id="dhDataSourceToggle" class="dh-ds-toggle" role="radiogroup" aria-label="Platform Data Source">
+          <button type="button" class="dh-ds-btn" data-mode="live" aria-pressed="false">
+            <span class="dh-ds-dot dh-ds-dot--live"></span> Live
           </button>
-          <button type="button" class="ds-toggle-btn" data-mode="snapshot" aria-pressed="false">
-            <span class="ds-toggle-icon">&#9673;</span> Offline Market Data (Snapshots)
+          <button type="button" class="dh-ds-btn" data-mode="snapshot" aria-pressed="false">
+            <span class="dh-ds-dot dh-ds-dot--snap"></span> Offline
           </button>
         </div>
-        <div id="dhDataSourceMeta" class="stock-note" style="font-size: 0.85em; color: var(--text-muted, #888);"></div>
+        <button type="button" id="dhCaptureBtn" class="dh-capture-btn" title="Capture a balanced snapshot for all scanner symbols">
+          <span class="dh-capture-icon">&#9207;</span> Capture Snapshot
+        </button>
       </div>
+      <div id="dhDataSourceMeta" class="dh-ds-meta"></div>
+      <div id="dhCaptureStatus" class="dh-capture-status" style="display:none;"></div>
       <div id="dhDataSourceWarning" class="active-error" style="display:none; margin-top:8px; font-size:0.9em;"></div>
+    </div>
+  </div>
+
+  <!-- Model Source Toggle -->
+  <div class="stock-card" id="dhModelSourceCard">
+    <div class="stock-card-title">Model Source</div>
+    <div id="dhModelSourcePanel" class="dh-ds-panel">
+      <div class="dh-ds-row">
+        <div id="dhModelSourceToggle" class="dh-ds-toggle" role="radiogroup" aria-label="Model Source">
+        </div>
+      </div>
+      <div id="dhModelSourceMeta" class="dh-ds-meta"></div>
     </div>
   </div>
 

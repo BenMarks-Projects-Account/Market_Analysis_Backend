@@ -11,6 +11,7 @@ from app.api.routes_frontend import router as frontend_router
 from app.api.routes_admin import router as admin_router
 from app.api.routes_dev import router as dev_router
 from app.api.routes_health import router as health_router
+from app.api.routes_snapshots import router as snapshots_router
 from app.api.routes_options import router as options_router
 from app.api.routes_active_trades import router as active_trades_router
 from app.api.routes_decisions import router as decisions_router
@@ -49,6 +50,7 @@ from app.services.pullback_swing_service import PullbackSwingService
 from app.services.momentum_breakout_service import MomentumBreakoutService
 from app.services.mean_reversion_service import MeanReversionService
 from app.services.volatility_expansion_service import VolatilityExpansionService
+from app.services.stock_engine_service import StockEngineService
 from app.services.spread_service import SpreadService
 from app.services.strategy_service import StrategyService
 from app.services.trade_lifecycle_service import TradeLifecycleService
@@ -61,6 +63,7 @@ from app.utils.cache import TTLCache
 from app.utils.http import UpstreamError
 from app.utils.snapshot import SnapshotChainSource, SnapshotRecorder, TradierChainSource, run_snapshot_cleanup
 from app.services.platform_settings import PlatformSettings
+from app.services.active_trade_monitor_service import ActiveTradeMonitorService
 
 
 def _setup_logging() -> None:
@@ -158,9 +161,21 @@ def create_app() -> FastAPI:
     momentum_breakout_service = MomentumBreakoutService(base_data_service=base_data_service)
     mean_reversion_service = MeanReversionService(base_data_service=base_data_service)
     volatility_expansion_service = VolatilityExpansionService(base_data_service=base_data_service)
+    stock_engine_service = StockEngineService(
+        pullback_swing_service=pullback_swing_service,
+        momentum_breakout_service=momentum_breakout_service,
+        mean_reversion_service=mean_reversion_service,
+        volatility_expansion_service=volatility_expansion_service,
+    )
     trade_lifecycle_service = TradeLifecycleService(results_dir=results_dir)
     risk_policy_service = RiskPolicyService(results_dir=results_dir)
     regime_service = RegimeService(base_data_service=base_data_service, cache=cache, ttl_seconds=45)
+    active_trade_monitor_service = ActiveTradeMonitorService(
+        base_data_service=base_data_service,
+        regime_service=regime_service,
+        cache=cache,
+        ttl_seconds=45,
+    )
     strategy_service = StrategyService(
         base_data_service=base_data_service,
         results_dir=results_dir,
@@ -184,7 +199,7 @@ def create_app() -> FastAPI:
     tradier_broker = TradierBroker(
         settings=settings,
         http_client=http_client,
-        dry_run=settings.TRADIER_DRY_RUN_LIVE,
+        dry_run=True,  # default safe: service.py overrides per-call via TRADIER_EXECUTION_ENABLED
     )
     trading_service = TradingService(
         settings=settings,
@@ -224,6 +239,8 @@ def create_app() -> FastAPI:
     app.state.trading_repository = trading_repository
     app.state.trading_service = trading_service
     app.state.stock_execution_service = stock_execution_service
+    app.state.stock_engine_service = stock_engine_service
+    app.state.active_trade_monitor_service = active_trade_monitor_service
     app.state.settings = settings
     app.state.backend_dir = backend_dir
     app.state.frontend_dir = frontend_dir
@@ -252,6 +269,7 @@ def create_app() -> FastAPI:
     app.include_router(reports_router)
     app.include_router(decisions_router)
     app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
+    app.include_router(snapshots_router)
     app.include_router(dev_router)
     app.include_router(frontend_router)
 
@@ -270,13 +288,20 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(HTTPException)
     async def http_error_handler(_: Request, exc: HTTPException) -> JSONResponse:
+        # Preserve structured detail (dicts) for trading error responses
+        if isinstance(exc.detail, dict):
+            message = exc.detail.get("message", str(exc.detail))
+            details = {k: v for k, v in exc.detail.items() if k != "message"}
+        else:
+            message = str(exc.detail)
+            details = {}
         return JSONResponse(
             status_code=exc.status_code,
             content={
                 "error": {
                     "code": "HTTP_ERROR",
-                    "message": str(exc.detail),
-                    "details": {},
+                    "message": message,
+                    "details": details,
                 }
             },
         )

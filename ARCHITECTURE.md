@@ -1,6 +1,6 @@
 # BenTrade Architecture Snapshot
 
-> Last updated: 2026-02-19
+> Last updated: 2026-03-03
 
 ## High-Level Pipeline
 
@@ -148,6 +148,11 @@ Calendar trades add `dte_front`, `dte_back`, `dte_label` (e.g. `"DTE 31/59"`).
 | Evaluation types | `app/services/evaluation/types.py` |
 | Strategy plugins | `app/services/strategies/` |
 | Trade normalization | `app/utils/normalize.py` |
+| Snapshot manifest schema | `app/models/snapshot_manifest.py` |
+| Snapshot capture | `app/services/snapshot_capture_service.py` |
+| Offline replay + guard | `app/utils/snapshot_offline.py` |
+| Snapshot API routes | `app/api/routes_snapshots.py` |
+| Snapshot CLI | `app/tools/capture_snapshot.py` |
 | Trade key / canonicalization | `app/utils/trade_key.py` |
 | Strategy ID resolution | `app/utils/strategy_id_resolver.py` |
 | Computed metrics contract | `app/utils/computed_metrics.py` |
@@ -275,6 +280,88 @@ Filter presets (strict / conservative / balanced / wide) are the single source o
 `min_pop`, `min_ev_to_risk`, `min_ror`, `max_bid_ask_spread_pct`, `min_open_interest`, `min_volume`
 
 **Ordering invariant (tested):** strict ≥ conservative ≥ balanced ≥ wide on all "higher-is-tighter" keys (min_pop, min_ror, etc.), and strict ≤ … ≤ wide on max_bid_ask_spread_pct.
+
+## Snapshot Capture & Offline Replay
+
+The **manifest-based snapshot system** allows capturing complete market datasets during market hours and replaying them offline with zero live API calls. This replaces the legacy `SnapshotRecorder`/`SnapshotChainSource` system (which remains available as a fallback).
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Capture (live market)                                      │
+│  SnapshotCaptureService.capture()                           │
+│    ├── Tradier: chains + quotes per symbol                  │
+│    ├── Polygon: daily bars + closes per symbol              │
+│    ├── FRED: VIX level                                      │
+│    └── RegimeService: regime classification                 │
+│                                                             │
+│  Output: {snapshot_dir}/{provider}/{YYYYMMDD}/{strategy}/   │
+│          {trace_id}/snapshot_manifest.json + data files     │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Replay (offline)                                           │
+│  ManifestSnapshotSource.from_trace_id() or .from_latest()   │
+│    ├── get_chain(symbol, exp)  → chain JSON from disk       │
+│    ├── get_underlying_price()  → quote JSON from disk       │
+│    ├── get_prices_history()    → bars/closes from disk      │
+│    └── get_vix()               → VIX from disk              │
+│                                                             │
+│  OfflineLiveCallGuard (context manager)                     │
+│    └── Monkey-patches 14 live provider methods to raise     │
+│        OfflineLiveCallError — fail-closed enforcement        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Key Components
+
+| Component | File | Purpose |
+|---|---|---|
+| Manifest schema | `app/models/snapshot_manifest.py` | Pydantic model: `SnapshotManifest`, `SymbolArtifacts`, `ScanConfig`, `MarketContext`, `CompletenessInfo` |
+| Capture service | `app/services/snapshot_capture_service.py` | `SnapshotCaptureService.capture()` — fetches all data from live providers, writes files + manifest |
+| Offline replay | `app/utils/snapshot_offline.py` | `ManifestSnapshotSource` — reads manifest, serves data from disk; `OfflineLiveCallGuard` — fail-closed enforcement |
+| API routes | `app/api/routes_snapshots.py` | `POST /api/admin/snapshots/capture`, `GET /api/admin/snapshots`, `GET /api/admin/snapshots/{trace_id}` |
+| CLI tool | `app/tools/capture_snapshot.py` | `python -m app.tools.capture_snapshot --strategy credit_spread --symbols SPY,QQQ` |
+
+### Manifest Format
+
+Each snapshot dataset produces a `snapshot_manifest.json` at its root:
+
+```json
+{
+  "schema_version": 1,
+  "trace_id": "snap_20260303_143727_a1b2c3d4",
+  "captured_at": "2026-03-03T14:37:27Z",
+  "strategy_id": "credit_spread",
+  "symbols": ["SPY", "QQQ"],
+  "scan_config": { "preset": "balanced", "dte_min": 3, "dte_max": 45 },
+  "market_context": { "vix_level": 18.5, "regime": "neutral", "vix_file": "vix.json" },
+  "artifacts": {
+    "SPY": {
+      "underlying_quote": "SPY/underlying_quote.json",
+      "prices_history": "SPY/prices_history.json",
+      "option_chains": { "2026-03-21": "SPY/option_chain_2026-03-21.json" }
+    }
+  },
+  "completeness": { "complete": true, "missing": [] }
+}
+```
+
+### Fail-Closed Guard
+
+`OfflineLiveCallGuard` patches 14 methods across 4 providers (Tradier, Polygon, FRED, Finnhub) to raise `OfflineLiveCallError` during offline replay. This guarantees zero live API calls — any code path that accidentally tries to call a live provider will fail loudly rather than silently fetching live data.
+
+### Integration with Scanner Pipeline
+
+`StrategyService.generate()` detects manifest snapshots automatically:
+1. If `snapshot_id` is in the request payload → loads that specific manifest via `ManifestSnapshotSource.from_trace_id()`
+2. Otherwise, if in snapshot mode → tries `ManifestSnapshotSource.from_latest()` for the strategy
+3. Falls back to legacy `SnapshotChainSource` if no manifest found
+4. When a manifest source is active, `OfflineLiveCallGuard` wraps the entire scan
+
+`BaseDataService.get_analysis_inputs()` has a dedicated manifest branch that loads chains, quotes, VIX, and price history entirely from disk.
 
 ## Data Sources
 

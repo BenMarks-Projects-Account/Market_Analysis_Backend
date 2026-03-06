@@ -11,13 +11,38 @@ window.BenTradeApi = (function(){
       }
     }
     if(!response.ok){
-      const message = payload?.error?.message || payload?.detail || `Request failed (${response.status})`;
+      const rawDetail = payload?.detail;
+      const errObj = payload?.error;
+
+      // Extract message — handle Pydantic 422 array format, string detail,
+      // structured detail object, and error envelope
+      var message;
+      if (errObj?.message) {
+        message = errObj.message;
+      } else if (typeof rawDetail === 'string') {
+        message = rawDetail;
+      } else if (Array.isArray(rawDetail)) {
+        // Pydantic 422 validation errors — extract all messages
+        message = rawDetail.map(function(e) {
+          var loc = (e.loc || []).join(' → ');
+          return (loc ? loc + ': ' : '') + (e.msg || 'validation error');
+        }).join('; ') || 'Validation error (' + response.status + ')';
+      } else if (rawDetail?.message) {
+        message = rawDetail.message;
+      } else {
+        message = 'Request failed (' + response.status + ')';
+      }
+
       const err = new Error(message);
       err.status = response.status;
-      err.detail = payload?.detail || payload?.error?.message || null;
+      // Merge structured details from error envelope with raw detail
+      const structured = errObj?.details && Object.keys(errObj.details).length > 0
+        ? Object.assign({message: errObj.message}, errObj.details)
+        : null;
+      err.detail = structured || rawDetail || errObj?.message || null;
       err.payload = payload;
       err.endpoint = String(url || '');
-      err.bodySnippet = responseText ? String(responseText).slice(0, 200) : '';
+      err.bodySnippet = responseText ? String(responseText).slice(0, 2000) : '';
       throw err;
     }
 
@@ -136,20 +161,52 @@ window.BenTradeApi = (function(){
     return jsonFetch(`/api/decisions/${encodeURIComponent(reportFile)}`);
   }
 
-  function getActiveTrades(){
-    return jsonFetch('/api/trading/active');
+  function getActiveTrades(accountMode){
+    const mode = accountMode || 'live';
+    return jsonFetch(`/api/trading/active?account_mode=${encodeURIComponent(mode)}`);
   }
 
-  function refreshActiveTrades(){
-    return jsonFetch('/api/trading/active/refresh', {
+  function refreshActiveTrades(accountMode){
+    const mode = accountMode || 'live';
+    return jsonFetch(`/api/trading/active/refresh?account_mode=${encodeURIComponent(mode)}`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({}),
     });
   }
 
-  function getTradingPositions(){
-    return jsonFetch('/api/trading/positions');
+  function closePosition(payload){
+    return jsonFetch('/api/trading/close-position', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+  }
+
+  function getMonitorResults(accountMode){
+    const mode = accountMode || 'live';
+    return jsonFetch(`/api/trading/monitor?account_mode=${encodeURIComponent(mode)}`);
+  }
+
+  function getMonitorNarrative(symbol, position, monitorResult){
+    return jsonFetch('/api/trading/monitor/narrative', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ symbol: symbol, position: position, monitor_result: monitorResult }),
+    });
+  }
+
+  function analyzeActiveTrade(symbol, position, accountMode){
+    return jsonFetch('/api/model/active-trade-analysis', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ symbol: symbol, position: position, account_mode: accountMode || 'live' }),
+    });
+  }
+
+  function getTradingPositions(accountMode){
+    const mode = accountMode || 'live';
+    return jsonFetch(`/api/trading/positions?account_mode=${encodeURIComponent(mode)}`);
   }
 
   function getTradingOpenOrders(){
@@ -313,7 +370,10 @@ window.BenTradeApi = (function(){
   }
 
   function tradingPreview(payload){
-    return jsonFetch('/api/trading/preview', {
+    var endpoint = '/api/trading/preview';
+    console.log('Tradier preview endpoint:', endpoint);
+    console.log('Tradier preview payload:', payload);
+    return jsonFetch(endpoint, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload || {}),
@@ -329,11 +389,19 @@ window.BenTradeApi = (function(){
   }
 
   function tradingKillSwitchOn(){
-    return jsonFetch('/api/trading/kill-switch/on', { method: 'POST' });
+    return jsonFetch('/api/trading/runtime-config', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ tradier_execution_enabled: true }),
+    });
   }
 
   function tradingKillSwitchOff(){
-    return jsonFetch('/api/trading/kill-switch/off', { method: 'POST' });
+    return jsonFetch('/api/trading/runtime-config', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ tradier_execution_enabled: false }),
+    });
   }
 
   /* ── Stock execution ───────────────────────────────────── */
@@ -348,6 +416,16 @@ window.BenTradeApi = (function(){
     return jsonFetch('/api/stocks/execute/status');
   }
 
+  /* ── Stock Engine — run all stock scanners, return top 9 ── */
+  function getStockEngine(){
+    return jsonFetch('/api/stocks/engine');
+  }
+
+  /* ── Order reconciliation — check Tradier status ─────── */
+  function getTradierOrderStatus(orderId){
+    return jsonFetch('/api/trading/orders/' + encodeURIComponent(orderId) + '/tradier-status');
+  }
+
   return {
     listReports,
     getReport,
@@ -359,6 +437,7 @@ window.BenTradeApi = (function(){
     getRejectDecisions,
     getActiveTrades,
     refreshActiveTrades,
+    closePosition,
     getTradingPositions,
     getTradingOpenOrders,
     getTradingAccount,
@@ -394,7 +473,12 @@ window.BenTradeApi = (function(){
     tradingSubmit,
     tradingKillSwitchOn,
     tradingKillSwitchOff,
+    getTradierOrderStatus,
     stockExecute,
     getStockExecutionStatus,
+    getStockEngine,
+    getMonitorResults,
+    getMonitorNarrative,
+    analyzeActiveTrade,
   };
 })();

@@ -214,19 +214,19 @@ window.BenTradeSessionStatsStore = (function(){
     }
 
     const stats = [
-      ['Total candidates', String(snapshot.total_candidates)],
-      ['Accepted trades/ideas', String(snapshot.accepted_trades)],
-      ['Rejected', String(snapshot.rejected_trades)],
-      ['Acceptance rate', fmtPercent(snapshot.acceptance_rate, 1)],
-      ['Best score', snapshot.best_score === null ? 'N/A' : fmtScore(snapshot.best_score)],
-      ['Avg quality score', snapshot.avg_quality_score === null ? 'N/A' : fmtScore(snapshot.avg_quality_score)],
-      ['Avg return on risk', snapshot.avg_return_on_risk === null ? 'N/A' : fmtPercent(snapshot.avg_return_on_risk, 1)],
-      ['Session runs', String(snapshot.runs)],
+      ['Total candidates', String(snapshot.total_candidates), 'total_candidates'],
+      ['Accepted trades/ideas', String(snapshot.accepted_trades), 'accepted_trades'],
+      ['Rejected', String(snapshot.rejected_trades), 'rejected_count'],
+      ['Acceptance rate', fmtPercent(snapshot.acceptance_rate, 1), 'acceptance_rate'],
+      ['Best score', snapshot.best_score === null ? 'N/A' : fmtScore(snapshot.best_score), 'best_score'],
+      ['Avg quality score', snapshot.avg_quality_score === null ? 'N/A' : fmtScore(snapshot.avg_quality_score), 'avg_quality_score'],
+      ['Avg return on risk', snapshot.avg_return_on_risk === null ? 'N/A' : fmtPercent(snapshot.avg_return_on_risk, 1), 'avg_return_on_risk'],
+      ['Session runs', String(snapshot.runs), 'session_runs'],
     ];
 
-    grid.innerHTML = stats.map(([label, value]) => `
+    grid.innerHTML = stats.map(([label, value, metric]) => `
       <div class="statTile">
-        <div class="statLabel">${label}</div>
+        <div class="statLabel" data-metric="${metric}">${label}</div>
         <div class="statValue">${value}</div>
       </div>
     `).join('');

@@ -158,16 +158,16 @@ def build_multileg_order(
     if effective_limit is not None:
         effective_limit = round(abs(effective_limit), 2)
 
-    # Build legs array in Tradier form-encoded format
-    # Tradier expects: option_symbol[i], side[i], quantity[i]
-    payload: dict[str, str] = {
+    # Build Tradier form-encoded payload with bracket-indexed legs.
+    # Tradier multileg orders use type="credit"/"debit"/"even", NOT "limit".
+    payload: dict[str, Any] = {
         "class": "multileg",
         "symbol": underlying,
-        "type": "limit" if effective_limit is not None else "market",
         "duration": time_in_force.lower(),
     }
     if effective_limit is not None:
-        payload["price"] = f"{effective_limit:.2f}"
+        payload["type"] = price_effect.lower()
+        payload["price"] = str(round(effective_limit, 2))
     if tag:
         payload["tag"] = tag
 
@@ -185,8 +185,8 @@ def build_multileg_order(
 
         leg_qty = int(leg.get("qty") or leg.get("quantity") or 1) * quantity
 
-        payload[f"option_symbol[{i}]"] = occ
         payload[f"side[{i}]"] = tradier_side
+        payload[f"option_symbol[{i}]"] = occ
         payload[f"quantity[{i}]"] = str(leg_qty)
 
         legs_used.append({
@@ -219,6 +219,7 @@ def build_multileg_order(
         effective_limit or 0.0,
         account_mode,
     )
+    _log.debug("[TradierOrderBuilder] multileg payload=%s", payload)
 
     return {
         "payload": payload,

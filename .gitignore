@@ -62,3 +62,5 @@ BenTrade/backend/results/*.jsonl
 /docs/scanners/*.md
 
 BenTrade/backend/tests/_test_results_smoke/*.json
+
+BenTrade/backend/data/snapshots/*

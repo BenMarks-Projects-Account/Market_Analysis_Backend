@@ -191,7 +191,7 @@ window.BenTradePages.initStockVolatilityExpansion = function initStockVolatility
   async function runScan() {
     if (!runBtn) return;
     runBtn.disabled = true;
-    runBtn.textContent = '⏳ Scanning…';
+    runBtn.textContent = '⟳ Scanning…';
     if (candidatesEl) candidatesEl.innerHTML = '<div style="text-align:center;padding:32px;color:rgba(190,236,244,0.5);font-size:13px;grid-column:1/-1;">Scanning universe\u2026 this may take 30-60 seconds.</div>';
 
     try {

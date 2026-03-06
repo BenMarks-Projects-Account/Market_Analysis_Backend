@@ -254,7 +254,7 @@ window.BenTradePages.initStockScanner = function initStockScanner(rootEl){
 
     let html = card.section('SCANNER DETAILS', card.detailRows(detailItems)
       + (thesis.length
-        ? '<div class="detail-row" style="display:block;"><span class="detail-label">Thesis</span><ul class="key-factors">' + thesis.map(v => '<li>' + esc(v) + '</li>').join('') + '</ul></div>'
+        ? '<div class="detail-row" style="display:block;"><span class="detail-label" data-metric="thesis">Thesis</span><ul class="key-factors">' + thesis.map(v => '<li>' + esc(v) + '</li>').join('') + '</ul></div>'
         : '')
       + (sparklineText
         ? '<div class="detail-row" style="display:block;"><span class="detail-label">Sparkline</span><div class="stock-note" style="margin-top:4px;">' + esc(sparklineText) + '</div></div>'

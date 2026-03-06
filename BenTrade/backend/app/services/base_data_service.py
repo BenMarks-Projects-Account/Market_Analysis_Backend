@@ -19,6 +19,7 @@ from app.utils.snapshot import (
     SnapshotRecorder,
     TradierChainSource,
 )
+from app.utils.snapshot_offline import ManifestSnapshotSource
 from app.utils.validation import clamp, parse_expiration, validate_bid_ask, validate_symbol
 
 if TYPE_CHECKING:
@@ -616,7 +617,7 @@ class BaseDataService:
             return []
 
     async def _get_chain_with_health(self, symbol: str, expiration: str, greeks: bool = True) -> list[dict[str, Any]]:
-        _is_snapshot = isinstance(self.chain_source, SnapshotChainSource)
+        _is_snapshot = isinstance(self.chain_source, (SnapshotChainSource, ManifestSnapshotSource))
         try:
             chain = await self.chain_source.get_chain(symbol, expiration=expiration, greeks=greeks)
             if not _is_snapshot:
@@ -666,8 +667,24 @@ class BaseDataService:
             raise ValueError("invalid expiration")
 
         _is_snapshot = isinstance(self.chain_source, SnapshotChainSource)
+        _is_manifest = isinstance(self.chain_source, ManifestSnapshotSource)
 
-        if _is_snapshot:
+        if _is_manifest:
+            # ── Manifest snapshot mode: ALL data from captured files ────
+            _src: ManifestSnapshotSource = self.chain_source  # type: ignore[assignment]
+            chain_raw = await _src.get_chain(
+                normalized_symbol, expiration=normalized_expiration, greeks=True,
+            )
+            underlying_price = _src.get_underlying_price(normalized_symbol)
+            if underlying_price is None:
+                logger.warning(
+                    "event=manifest_snapshot_no_underlying_price symbol=%s",
+                    normalized_symbol,
+                )
+            vix: float | None = _src.get_vix()
+            closes = _src.get_prices_history(normalized_symbol)
+
+        elif _is_snapshot:
             # ── Snapshot mode: zero Tradier calls ──────────────────────
             chain_raw = await self._get_chain_with_health(
                 normalized_symbol, expiration=normalized_expiration, greeks=True,

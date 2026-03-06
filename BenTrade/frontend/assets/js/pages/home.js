@@ -46,6 +46,14 @@ window.BenTradePages.initHome = function initHome(rootEl){
   const clearScanResultsBtnEl = scope.querySelector('#homeClearScanResultsBtn');
   const scanLastRunEl = scope.querySelector('#homeScanLastRun');
 
+  /* ── Stock Engine DOM references ── */
+  const stockEngineRunBtnEl = scope.querySelector('#homeStockEngineRunBtn');
+  const stockEngineLastUpdatedEl = scope.querySelector('#homeStockEngineLastUpdated');
+  const stockEngineWarningEl = scope.querySelector('#homeStockEngineWarning');
+  const stockEngineLoadingEl = scope.querySelector('#homeStockEngineLoading');
+  const stockEngineErrorEl = scope.querySelector('#homeStockEngineError');
+  const stockEngineCandidatesEl = scope.querySelector('#homeStockEngineCandidates');
+
   if(!regimeStripEl || !regimeComponentsEl || !playbookChipsEl || !scanPresetEl || !runQueueBtnEl || !queueProgressEl || !queueCurrentEl || !queueCountEl || !queueSpinnerEl || !queueLogEl || !scanStatusEl || !scanErrorEl || !signalHubEl || !indexTilesEl || !spyChartEl || !sectorBarsEl || !scannerOpportunitiesEl || !riskTilesEl || !macroTilesEl || !strategyPlaybookEl || !fullRefreshBtnEl || !refreshBtnEl || !refreshingBadgeEl || !lastUpdatedEl || !vixChartEl || !errorEl){
     return;
   }
@@ -94,6 +102,226 @@ window.BenTradePages.initHome = function initHome(rootEl){
     setScanStatus('');
     setScanError('');
     console.debug('Home: cleared scan results cache');
+  }
+
+  /* ═════════════════════════════════════════════════════════════
+     Stock Engine — runs all stock scanners via /api/stocks/engine,
+     displays the top 9 candidates (server-side ranked).
+     ═════════════════════════════════════════════════════════════ */
+  const STOCK_ENGINE_CACHE_ID = 'stockEngine';
+  let _stockEngineRunning = false;
+  let _stockEngineExpandState = {};
+  let _stockEngineRenderedRows = [];
+
+  /**
+   * Render a single stock candidate as a stock trade card.
+   * Delegates to BenTradeStockTradeCardMapper.renderStockCard
+   * (same card used on individual stock strategy pages).
+   */
+  function renderStockEngineCards(candidates){
+    if(!stockEngineCandidatesEl) return;
+    const mapper = window.BenTradeStockTradeCardMapper;
+    if(!mapper){
+      stockEngineCandidatesEl.innerHTML = '<div class="home-opp-empty"><div class="home-opp-empty-text">Stock card mapper unavailable.</div></div>';
+      return;
+    }
+
+    if(!candidates || !candidates.length){
+      stockEngineCandidatesEl.innerHTML = `
+        <div class="home-opp-empty">
+          <div class="home-opp-empty-icon" aria-hidden="true">◈</div>
+          <div class="home-opp-empty-text">No stock opportunities yet — run a stock scan.</div>
+          <button type="button" class="btn qtButton home-run-scan-btn" data-action="trigger-stock-scan">Run Stock Scan</button>
+        </div>
+      `;
+      const triggerBtn = stockEngineCandidatesEl.querySelector('[data-action="trigger-stock-scan"]');
+      if(triggerBtn) triggerBtn.addEventListener('click', () => runStockEngineScan());
+      return;
+    }
+
+    _stockEngineRenderedRows = candidates;
+    let html = `<div class="home-opp-count stock-note">${candidates.length} Stock Pick${candidates.length !== 1 ? 's' : ''}</div>`;
+    const renderErrors = [];
+
+    candidates.forEach(function(row, idx){
+      try{
+        const strategyId = String(row.strategy_id || 'stock_idea');
+        html += mapper.renderStockCard(row, idx, strategyId, _stockEngineExpandState);
+      }catch(cardErr){
+        renderErrors.push({ idx, symbol: row?.symbol, error: cardErr.message });
+        const esc = window.BenTradeUtils?.format?.escapeHtml || ((s) => String(s || ''));
+        html += '<div class="trade-card" style="margin-bottom:12px;padding:10px;border:1px solid rgba(255,120,100,0.3);border-radius:10px;background:rgba(8,18,26,0.9);color:rgba(255,180,160,0.8);font-size:12px;">\u26A0 Render error for ' + esc(row?.symbol || '#' + idx) + '</div>';
+      }
+    });
+
+    if(renderErrors.length){
+      console.warn('[StockEngine] Card render errors:', renderErrors);
+    }
+
+    stockEngineCandidatesEl.innerHTML = html;
+
+    /* Wire expand state persistence */
+    stockEngineCandidatesEl.querySelectorAll('details.trade-card-collapse').forEach(function(details){
+      details.addEventListener('toggle', function(){
+        var tk = details.dataset.tradeKey || '';
+        if(tk) _stockEngineExpandState[tk] = details.open;
+      });
+    });
+
+    /* Wire action delegation */
+    stockEngineCandidatesEl.addEventListener('click', function(e){
+      var btn = e.target.closest('[data-action]');
+      if(!btn) return;
+      var action   = btn.dataset.action;
+      var tradeKey = btn.dataset.tradeKey || '';
+      var symbol   = btn.dataset.symbol || '';
+      var row      = _findStockEngineRow(tradeKey);
+
+      if(action === 'stock-analysis'){
+        if(mapper.openStockAnalysis) mapper.openStockAnalysis(symbol || (row && row.symbol));
+      } else if(action === 'data-workbench' && row){
+        if(mapper.openDataWorkbenchForStock) mapper.openDataWorkbenchForStock(row, row.strategy_id || 'stock_idea');
+      } else if(action === 'execute' && row){
+        if(mapper.executeStockTrade) mapper.executeStockTrade(btn, tradeKey, row, row.strategy_id || 'stock_idea');
+      } else if(action === 'model-analysis' && row){
+        if(mapper.runModelAnalysisForStock) mapper.runModelAnalysisForStock(btn, tradeKey, row, row.strategy_id || 'stock_idea');
+      }
+    });
+
+    /* Tooltips and model hydration */
+    if(window.attachMetricTooltips) window.attachMetricTooltips(stockEngineCandidatesEl);
+    if(window.BenTradeModelAnalysisStore?.hydrateContainer) window.BenTradeModelAnalysisStore.hydrateContainer(stockEngineCandidatesEl);
+  }
+
+  function _findStockEngineRow(tradeKey){
+    if(!tradeKey) return null;
+    const mapper = window.BenTradeStockTradeCardMapper;
+    for(var i = 0; i < _stockEngineRenderedRows.length; i++){
+      var row = _stockEngineRenderedRows[i];
+      var rk = row.trade_key || (mapper ? mapper.buildStockTradeKey(row.symbol, row.strategy_id || 'stock_idea') : '');
+      if(rk === tradeKey) return row;
+    }
+    return null;
+  }
+
+  function setStockEngineError(msg){
+    if(!stockEngineErrorEl) return;
+    stockEngineErrorEl.textContent = String(msg || '');
+    stockEngineErrorEl.style.display = msg ? 'block' : 'none';
+  }
+
+  function setStockEngineWarning(msg){
+    if(!stockEngineWarningEl) return;
+    stockEngineWarningEl.textContent = String(msg || '');
+    stockEngineWarningEl.style.display = msg ? 'inline' : 'none';
+  }
+
+  function setStockEngineLastUpdated(iso){
+    if(!stockEngineLastUpdatedEl) return;
+    const parsed = iso ? new Date(iso) : null;
+    const text = parsed && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleTimeString() : '--';
+    stockEngineLastUpdatedEl.textContent = 'Last updated: ' + text;
+  }
+
+  function saveStockEngineCache(payload){
+    if(_scanCache) _scanCache.save(STOCK_ENGINE_CACHE_ID, payload, { endpoint: '/api/stocks/engine' });
+  }
+
+  function loadStockEngineCache(){
+    if(!_scanCache) return null;
+    var entry = _scanCache.load(STOCK_ENGINE_CACHE_ID);
+    return entry ? entry.payload : null;
+  }
+
+  /**
+   * Run the Stock Engine scan — calls backend /api/stocks/engine.
+   * The backend runs all 4 stock scanners concurrently and returns
+   * the top 9 candidates pre-ranked server-side.
+   */
+  async function runStockEngineScan(){
+    if(_stockEngineRunning) return;
+    if(!api?.getStockEngine){
+      setStockEngineError('Stock Engine API not available');
+      return;
+    }
+
+    _stockEngineRunning = true;
+    if(stockEngineRunBtnEl){
+      stockEngineRunBtnEl.disabled = true;
+      stockEngineRunBtnEl.textContent = '⟳ Scanning…';
+    }
+    if(stockEngineLoadingEl) stockEngineLoadingEl.style.display = 'flex';
+    setStockEngineError('');
+    setStockEngineWarning('');
+
+    try{
+      const payload = await api.getStockEngine();
+      const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
+      const warnings = Array.isArray(payload?.warnings) ? payload.warnings : [];
+      const scanners = Array.isArray(payload?.scanners) ? payload.scanners : [];
+
+      /* ── Console diagnostic: per-scanner breakdown ── */
+      const scannerSummary = scanners.map(s =>
+        `${s.strategy_id}: ${s.candidates_count}c, max=${s.max_composite_score ?? '?'}, status=${s.status}`
+      ).join(' | ');
+      const topScores = candidates.slice(0, 15).map(c =>
+        `${c.symbol}@${(c.composite_score ?? 0).toFixed?.(1) ?? c.composite_score}(${c.strategy_id})`
+      ).join(', ');
+      console.info(
+        '[StockEngine] Aggregation: total=' + (payload?.total_candidates ?? '?')
+        + ' top_n=' + candidates.length
+        + ' | Scanners: ' + scannerSummary
+        + ' | Top: ' + topScores
+      );
+
+      renderStockEngineCards(candidates);
+      setStockEngineLastUpdated(payload?.as_of || new Date().toISOString());
+      saveStockEngineCache(payload);
+
+      /* ── Scanner breakdown warning if any scanner failed/skipped ── */
+      const failedScanners = scanners.filter(s => s.status !== 'ok');
+      if(failedScanners.length > 0){
+        const failMsg = failedScanners.map(s => s.strategy_id.replace('stock_','') + '(' + s.status + ')').join(', ');
+        setStockEngineWarning('Scanner issues: ' + failMsg);
+        console.warn('[StockEngine] Failed/skipped scanners:', failedScanners);
+      } else if(warnings.length){
+        setStockEngineWarning(warnings.length + ' scanner warning' + (warnings.length !== 1 ? 's' : '') + ': ' + warnings[0]);
+        console.warn('[StockEngine] Warnings:', warnings);
+      }
+    }catch(err){
+      console.error('[StockEngine] Scan error:', err);
+      setStockEngineError('Stock scan failed: ' + String(err?.message || err || 'unknown error'));
+    }finally{
+      _stockEngineRunning = false;
+      if(stockEngineRunBtnEl){
+        stockEngineRunBtnEl.disabled = false;
+        stockEngineRunBtnEl.textContent = 'Run Stock Scan';
+      }
+      if(stockEngineLoadingEl) stockEngineLoadingEl.style.display = 'none';
+    }
+  }
+
+  /* Boot: restore stock engine from session cache if available */
+  (function bootStockEngine(){
+    const cached = loadStockEngineCache();
+    if(cached && Array.isArray(cached.candidates) && cached.candidates.length > 0){
+      renderStockEngineCards(cached.candidates);
+      setStockEngineLastUpdated(cached.as_of || null);
+      if(Array.isArray(cached.warnings) && cached.warnings.length){
+        setStockEngineWarning(cached.warnings.length + ' scanner warning(s)');
+      }
+    } else {
+      renderStockEngineCards([]);  // show empty state
+    }
+  })();
+
+  /* Wire Stock Engine run button */
+  if(stockEngineRunBtnEl){
+    stockEngineRunBtnEl.addEventListener('click', function(){
+      runStockEngineScan().catch(function(err){
+        setStockEngineError(String(err?.message || err || 'Stock scan failed'));
+      });
+    });
   }
 
   /* ── OE card state (mirrors scanner shell's _expandState + currentTrades) ── */
@@ -1219,10 +1447,10 @@ window.BenTradePages.initHome = function initHome(rootEl){
     const tone = regimeLabelRaw === 'RISK_ON' ? 'bullish' : (regimeLabelRaw === 'RISK_OFF' ? 'riskoff' : 'neutral');
 
     regimeStripEl.innerHTML = `
-      <div class="statTile"><div class="statLabel">SPY</div><div class="statValue">${fmt(spyLast)}</div><div class="stock-note">${fmtPct(spySummary?.price?.change_pct)}</div></div>
-      <div class="statTile"><div class="statLabel">VIX</div><div class="statValue">${fmt(vix)}</div></div>
-      <div class="statTile"><div class="statLabel">10Y Yield</div><div class="statValue">${fmt(tenYear, 2)}%</div></div>
-      <div class="statTile home-regime-pill ${tone}" data-ben-tip="regime_summary"><div class="statLabel">Regime</div><div class="statValue">${regimeLabelText}</div><div class="stock-note">Score ${fmt(regimeScore, 1)}/100</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="spy_price">SPY</div><div class="statValue">${fmt(spyLast)}</div><div class="stock-note">${fmtPct(spySummary?.price?.change_pct)}</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="vix_level">VIX</div><div class="statValue">${fmt(vix)}</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="ten_year_yield">10Y Yield</div><div class="statValue">${fmt(tenYear, 2)}%</div></div>
+      <div class="statTile home-regime-pill ${tone}" data-ben-tip="regime_summary"><div class="statLabel" data-metric="regime">Regime</div><div class="statValue">${regimeLabelText}</div><div class="stock-note">Score ${fmt(regimeScore, 1)}/100</div></div>
     `;
 
     /* ── Register dynamic regime-summary tooltip ── */
@@ -1298,7 +1526,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
         : 'N/A';
       return `
         <div class="statTile home-index-tile">
-          <div class="statLabel">${symbol}</div>
+          <div class="statLabel" data-metric="index_price">${symbol}</div>
           <div class="statValue">${fmt(last)}</div>
           <div class="stock-note">${fmtPct(pct)} • RSI ${fmt(rsi, 1)}</div>
           <div class="stock-note">${trend}</div>
@@ -1378,7 +1606,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     if(!top.length){
       scannerOpportunitiesEl.innerHTML = `
         <div class="home-opp-empty">
-          <div class="home-opp-empty-icon" aria-hidden="true">📡</div>
+          <div class="home-opp-empty-icon" aria-hidden="true">◇</div>
           <div class="home-opp-empty-text">No opportunities yet — run a scan to generate picks.</div>
           <button type="button" class="btn qtButton home-run-scan-btn" data-action="trigger-scan">Run Scan</button>
         </div>
@@ -1462,7 +1690,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     if(!cardsHtml.length){
       scannerOpportunitiesEl.innerHTML = `
         <div class="home-opp-empty">
-          <div class="home-opp-empty-icon" aria-hidden="true">📡</div>
+          <div class="home-opp-empty-icon" aria-hidden="true">◇</div>
           <div class="home-opp-empty-text">No valid opportunities (all missing trade keys).</div>
         </div>`;
       return;
@@ -1668,11 +1896,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
     }
 
     riskTilesEl.innerHTML = `
-      <div class="statTile"><div class="statLabel">Net Delta</div><div class="statValue">${fmt(portfolio?.delta, 3)}</div></div>
-      <div class="statTile"><div class="statLabel">Net Theta</div><div class="statValue">${fmt(portfolio?.theta, 3)}</div></div>
-      <div class="statTile"><div class="statLabel">Net Vega</div><div class="statValue">${fmt(portfolio?.vega, 3)}</div></div>
-      <div class="statTile"><div class="statLabel">Capital at Risk</div><div class="statValue">$${fmt(capitalAtRisk, 0)}</div></div>
-      <div class="statTile"><div class="statLabel">Risk Utilization</div><div class="statValue">${utilization === null ? '0.00%' : `${(utilization * 100).toFixed(2)}%`}</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="delta">Net Delta</div><div class="statValue">${fmt(portfolio?.delta, 3)}</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="theta">Net Theta</div><div class="statValue">${fmt(portfolio?.theta, 3)}</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="vega">Net Vega</div><div class="statValue">${fmt(portfolio?.vega, 3)}</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="capital_at_risk">Capital at Risk</div><div class="statValue">$${fmt(capitalAtRisk, 0)}</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="risk_utilization">Risk Utilization</div><div class="statValue">${utilization === null ? '0.00%' : `${(utilization * 100).toFixed(2)}%`}</div></div>
     `;
   }
 
@@ -1696,9 +1924,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
       income: 'Income', stock_scanner: 'Stocks',
     };
     const total = trades.length;
-    activeTradesCountEl.innerHTML = `<div class="statTile"><div class="statLabel">Total</div><div class="statValue">${total}</div></div>`
+    activeTradesCountEl.innerHTML = `<div class="statTile"><div class="statLabel" data-metric="total_active_trades">Total</div><div class="statValue">${total}</div></div>`
       + Object.keys(buckets).map(k =>
-        `<div class="statTile"><div class="statLabel">${labels[k]}</div><div class="statValue">${buckets[k]}</div></div>`
+        `<div class="statTile"><div class="statLabel" data-metric="strategy_bucket">${labels[k]}</div><div class="statValue">${buckets[k]}</div></div>`
       ).join('');
   }
 
@@ -1743,10 +1971,10 @@ window.BenTradePages.initHome = function initHome(rootEl){
   function renderMacro(macro, spySummary){
     const vix = toNumber(macro?.vix ?? spySummary?.options_context?.vix);
     macroTilesEl.innerHTML = `
-      <div class="statTile"><div class="statLabel">10Y Yield</div><div class="statValue">${fmt(macro?.ten_year_yield, 2)}%</div></div>
-      <div class="statTile"><div class="statLabel">Fed Funds</div><div class="statValue">${fmt(macro?.fed_funds_rate, 2)}%</div></div>
-      <div class="statTile"><div class="statLabel">CPI YoY</div><div class="statValue">${fmt(macro?.cpi_yoy, 2)}%</div></div>
-      <div class="statTile"><div class="statLabel">VIX</div><div class="statValue">${fmt(vix, 2)}</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="ten_year_yield">10Y Yield</div><div class="statValue">${fmt(macro?.ten_year_yield, 2)}%</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="fed_funds">Fed Funds</div><div class="statValue">${fmt(macro?.fed_funds_rate, 2)}%</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="cpi_yoy">CPI YoY</div><div class="statValue">${fmt(macro?.cpi_yoy, 2)}%</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="vix_level">VIX</div><div class="statValue">${fmt(vix, 2)}</div></div>
     `;
   }
 

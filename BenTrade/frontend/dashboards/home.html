@@ -18,6 +18,9 @@
       Those are GLOBAL-ONLY panels rendered in the global right info bar (index.html).
     -->
 
+    <!-- General error banner (used by setError in home.js) -->
+    <div id="homeError" class="active-error" style="display:none;margin-bottom:6px;"></div>
+
     <!-- ═══ Market Regime + Playbook ═══ -->
     <section class="stock-card home-regime-panel">
       <div class="stock-card-title bt-panel-title">Market Regime</div>
@@ -105,34 +108,52 @@
     <section class="stock-card home-opportunity-engine-card">
       <div class="stock-card-title bt-panel-title">Opportunity Engine</div>
 
-      <!-- Controls subpanel -->
-      <div class="home-opp-controls">
-        <div class="home-opp-controls-row">
-          <label for="homeScanPreset" class="stock-note home-queue-label">Filter Level</label>
-          <select id="homeScanPreset" class="home-queue-select" aria-label="Scan Queue filter level">
-            <option value="strict">Strict</option>
-            <option value="conservative">Conservative</option>
-            <option value="balanced" selected>Balanced</option>
-            <option value="wide">Wide</option>
-          </select>
-          <button id="homeRunQueueBtn" class="btn qtButton" type="button">Run Scan</button>
-          <button id="homeClearScanResultsBtn" class="btn" type="button" style="padding:6px 10px;font-size:11px;opacity:0.75;display:none;">Clear Results</button>
-          <span id="homeScanLastRun" class="stock-note" style="font-size:11px;color:rgba(190,236,244,0.6);"></span>
+      <!-- ─── Options Engine ─── -->
+      <div class="home-engine-section">
+        <div class="home-engine-section-header">Options Engine</div>
+
+        <!-- Controls subpanel -->
+        <div class="home-opp-controls">
+          <div class="home-opp-controls-row">
+            <label for="homeScanPreset" class="stock-note home-queue-label">Filter Level</label>
+            <select id="homeScanPreset" class="home-queue-select" aria-label="Scan Queue filter level">
+              <option value="strict">Strict</option>
+              <option value="conservative">Conservative</option>
+              <option value="balanced" selected>Balanced</option>
+              <option value="wide">Wide</option>
+            </select>
+            <button id="homeRunQueueBtn" class="btn qtButton" type="button">Run Scan</button>
+            <button id="homeClearScanResultsBtn" class="btn" type="button" style="padding:6px 10px;font-size:11px;opacity:0.75;display:none;">Clear Results</button>
+            <span id="homeScanLastRun" class="stock-note" style="font-size:11px;color:rgba(190,236,244,0.6);"></span>
+          </div>
+          <div id="homeSymbolUniverse" style="margin-top:8px;"></div>
         </div>
-        <div id="homeSymbolUniverse" style="margin-top:8px;"></div>
+
+        <div id="homeQueueProgress" class="home-queue-progress" style="display:none;">
+          <span id="homeQueueSpinner" class="home-scan-spinner" style="display:none;" aria-hidden="true"></span>
+          <span id="homeQueueCurrent" class="stock-note">Idle</span>
+          <span id="homeQueueCount" class="stock-note">0/0</span>
+        </div>
+        <div id="homeQueueLog" class="home-queue-log" style="display:none;"></div>
+        <div id="homeScanStatus" class="stock-note" style="margin-bottom:6px;display:none;"></div>
+        <div id="homeScanError" class="active-error" style="display:none;margin-bottom:6px;"></div>
+        <div id="homeScannerOpportunities" class="home-scanner-opportunities"></div>
       </div>
 
-      <div id="homeQueueProgress" class="home-queue-progress" style="display:none;">
-        <span id="homeQueueSpinner" class="home-scan-spinner" style="display:none;" aria-hidden="true"></span>
-        <span id="homeQueueCurrent" class="stock-note">Idle</span>
-        <span id="homeQueueCount" class="stock-note">0/0</span>
-      </div>
-      <div id="homeQueueLog" class="home-queue-log" style="display:none;"></div>
-      <div id="homeScanStatus" class="stock-note" style="margin-bottom:6px;display:none;"></div>
-      <div id="homeScanError" class="active-error" style="display:none;margin-bottom:6px;"></div>
-      <div id="homeScannerOpportunities" class="home-scanner-opportunities"></div>
-    </section>
+      <!-- ─── Stock Engine ─── -->
+      <div class="home-engine-section home-stock-engine-section">
+        <div class="home-engine-section-header">Stock Engine</div>
 
-    <div id="homeError" class="active-error" style="display:none;"></div>
-  </div>
-</div>
+        <div class="home-stock-engine-controls">
+          <button id="homeStockEngineRunBtn" class="btn qtButton" type="button">Run Stock Scan</button>
+          <span id="homeStockEngineLastUpdated" class="stock-note" style="font-size:11px;color:rgba(190,236,244,0.6);">Last updated: --</span>
+          <span id="homeStockEngineWarning" class="stock-note" style="font-size:11px;color:rgba(255,180,60,0.85);display:none;"></span>
+        </div>
+
+        <div id="homeStockEngineLoading" class="home-stock-engine-loading" style="display:none;">
+          <span class="home-scan-spinner" aria-hidden="true"></span>
+          <span class="stock-note">Running all stock scanners… this may take 1-2 minutes.</span>
+        </div>
+        <div id="homeStockEngineError" class="active-error" style="display:none;margin-bottom:6px;"></div>
+        <div id="homeStockEngineCandidates" class="home-scanner-opportunities"></div>
+      </div>

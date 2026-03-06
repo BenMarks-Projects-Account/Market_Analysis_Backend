@@ -88,3 +88,30 @@ Tradier chains ──▸ Plugin.build_candidates()
 | Trade Key | `app/utils/trade_key.py` | `canonicalize_strategy_id()` — resolves aliases |
 | Computed Metrics | `app/utils/computed_metrics.py` | Stable `computed_metrics` + `metrics_status` |
 | Scanner Orchestrator | `frontend/assets/js/stores/scannerOrchestrator.js` | Runs scanners from the frontend with retry/backoff |
+| Snapshot Capture | `app/services/snapshot_capture_service.py` | Captures complete market datasets for offline replay |
+| Offline Replay | `app/utils/snapshot_offline.py` | `ManifestSnapshotSource` + `OfflineLiveCallGuard` |
+| Snapshot Manifest | `app/models/snapshot_manifest.py` | Pydantic schema for snapshot datasets |
+| Snapshot API | `app/api/routes_snapshots.py` | Admin endpoints: capture, list, inspect snapshots |
+
+---
+
+## Snapshot Capture & Offline Replay
+
+The manifest-based snapshot system captures complete market datasets (chains, quotes, history, VIX, regime) and replays them offline with zero live API calls.
+
+```
+Capture (live market)                    Replay (offline)
+  SnapshotCaptureService.capture()         ManifestSnapshotSource.from_trace_id()
+    ├── Tradier chains + quotes              ├── get_chain()       → disk
+    ├── Polygon bars + closes                ├── get_underlying_price() → disk
+    ├── FRED VIX                             ├── get_prices_history()   → disk
+    └── Regime classification                └── get_vix()              → disk
+         │                                        │
+         ▼                                   OfflineLiveCallGuard
+    snapshot_manifest.json                     └── 14 live methods → raise error
+    + per-symbol data files
+```
+
+- `StrategyService.generate()` auto-detects manifest snapshots (by `snapshot_id` or latest for strategy)
+- `BaseDataService.get_analysis_inputs()` has a dedicated manifest branch — all data from disk
+- See [ARCHITECTURE.md](../../ARCHITECTURE.md) for full details

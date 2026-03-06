@@ -1,12 +1,13 @@
 # BenTrade Backend
 
-> Last updated: 2026-02-18
+> Last updated: 2026-03-03
 
 FastAPI backend for multi-strategy options analysis, report generation, trade lifecycle management, and trading execution.
 
 ## Features
 
 - **Multi-Strategy Scanner**: Credit spreads, debit spreads, iron condors, butterflies, calendars, income strategies
+- **Snapshot Capture & Offline Replay**: Capture complete market datasets during trading hours; replay offline with zero live API calls via manifest-based `ManifestSnapshotSource` and fail-closed `OfflineLiveCallGuard`
 - **Quantitative Analysis**: Full CreditSpread-derived metrics (max profit/loss, break-even, POP, EV, RoR, kelly) plus market context (IV/RV, regime, expected move)
 - **Computed Metrics Contract**: Stable `computed_metrics` + `metrics_status` shape across all endpoints
 - **Canonical Strategy Naming**: Single source of truth for strategy IDs (e.g. `put_credit_spread`) with automatic legacy alias mapping
@@ -73,6 +74,52 @@ curl http://127.0.0.1:5000/api/reports/credit_spread_analysis_20260216_052504.js
 ```bash
 curl http://127.0.0.1:5000/api/strategies/credit_spread/generate
 ```
+
+## Snapshot Capture & Offline Replay
+
+The manifest-based snapshot system captures complete market datasets and replays them offline with zero live API calls.
+
+### Capture a Snapshot
+
+**Via API:**
+```bash
+curl -X POST http://127.0.0.1:5000/api/admin/snapshots/capture \
+  -H "Content-Type: application/json" \
+  -d '{"strategy_id": "credit_spread", "symbols": ["SPY", "QQQ"], "preset": "balanced", "dte_min": 3, "dte_max": 45}'
+```
+
+**Via CLI:**
+```bash
+python -m app.tools.capture_snapshot --strategy credit_spread --symbols SPY,QQQ --dte-min 3 --dte-max 45
+```
+
+### List / Inspect Snapshots
+```bash
+# List all snapshots
+curl http://127.0.0.1:5000/api/admin/snapshots
+
+# Get a specific manifest
+curl http://127.0.0.1:5000/api/admin/snapshots/{trace_id}
+```
+
+### Offline Replay
+
+Scanner runs automatically detect manifest snapshots:
+1. If `snapshot_id` is in the request → loads that specific manifest
+2. Otherwise → tries latest manifest for the strategy
+3. Falls back to legacy `SnapshotChainSource` if no manifest found
+
+When replaying, `OfflineLiveCallGuard` patches 14 live provider methods to raise `OfflineLiveCallError`, guaranteeing zero live API calls.
+
+### Key Files
+
+| File | Purpose |
+|---|---|
+| `app/models/snapshot_manifest.py` | Manifest schema (`SnapshotManifest`, `SymbolArtifacts`, `ScanConfig`, `MarketContext`) |
+| `app/services/snapshot_capture_service.py` | Capture service — fetches from live providers, writes files + manifest |
+| `app/utils/snapshot_offline.py` | `ManifestSnapshotSource` (replay) + `OfflineLiveCallGuard` (fail-closed) |
+| `app/api/routes_snapshots.py` | Admin API endpoints for capture/list/inspect |
+| `app/tools/capture_snapshot.py` | CLI capture tool |
 
 ## Strategy Plugins
 
@@ -189,10 +236,12 @@ backend/
 │   │   └── finnhub_client.py       # Company data (fallback quotes)
 │   ├── models/                 # Pydantic schemas + trade contract
 │   │   ├── schemas.py
-│   │   └── trade_contract.py
+│   │   ├── trade_contract.py
+│   │   └── snapshot_manifest.py    # Manifest schema for offline snapshots
 │   ├── services/
 │   │   ├── strategy_service.py     # Orchestrator: generate → normalize → persist
 │   │   ├── base_data_service.py    # Upstream data aggregation
+│   │   ├── snapshot_capture_service.py # Snapshot capture from live providers
 │   │   ├── report_service.py       # Report listing, normalization, serving
 │   │   ├── data_workbench_service.py
 │   │   ├── recommendation_service.py  # Homepage opportunity engine
@@ -229,6 +278,8 @@ backend/
 │       ├── trade_key.py            # Canonical strategy IDs + trade key builder
 │       ├── strategy_id_resolver.py # Single-entry strategy string validator
 │       ├── computed_metrics.py     # Metrics contract (computed_metrics + metrics_status)
+│       ├── snapshot.py             # Legacy snapshot recorder + chain source
+│       ├── snapshot_offline.py     # Manifest-based offline replay + fail-closed guard
 │       ├── report_conformance.py   # Report file validation
 │       ├── validation.py           # Input validation helpers
 │       ├── http.py                 # UpstreamError + request_json
@@ -294,6 +345,9 @@ logging.getLogger("bentrade.enrich_trade").setLevel(logging.DEBUG)
 
 ### Admin & Diagnostics
 - `GET /api/admin/data-health` — Source health + validation events
+- `POST /api/admin/snapshots/capture` — Capture offline snapshot dataset (strategy, symbols, preset, DTE range)
+- `GET /api/admin/snapshots` — List available snapshot datasets (optional strategy_id filter)
+- `GET /api/admin/snapshots/{trace_id}` — Get full snapshot manifest JSON
 - `POST /api/workbench/analyze` — Analyze single trade (workbench)
 - `GET /api/workbench/scenarios` — Workbench scenarios
 - `GET /api/risk/policy` — Risk policy configuration

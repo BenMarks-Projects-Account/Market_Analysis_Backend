@@ -97,12 +97,12 @@ window.BenTradePages.initAdminDataWorkbench = function initAdminDataWorkbench(ro
       { label: 'Probability', value: fmt.pct(metricNumber(trade, 'pop'), 1), cssClass: 'neutral', dataMetric: 'pop' },
       { label: 'Return on Risk', value: fmt.pct(metricNumber(trade, 'return_on_risk'), 1), cssClass: 'neutral', dataMetric: 'return_on_risk' },
       { label: 'Expected Value', value: fmt.dollars(metricNumber(trade, 'expected_value', 'ev')), cssClass: 'neutral', dataMetric: 'ev' },
-      { label: 'Composite', value: fmt.formatScore(metricNumber(trade, 'trade_quality_score', 'composite_score'), 1), cssClass: 'neutral' },
+      { label: 'Composite', value: fmt.formatScore(metricNumber(trade, 'trade_quality_score', 'composite_score'), 1), cssClass: 'neutral', dataMetric: 'composite_score' },
     ]);
 
     const details = card.detailRows([
-      { label: 'Expiration', value: escapeHtml(String(trade.expiration || 'N/A')) },
-      { label: 'DTE', value: escapeHtml(String(trade.dte ?? 'N/A')) },
+      { label: 'Expiration', value: escapeHtml(String(trade.expiration || 'N/A')), dataMetric: 'expiration' },
+      { label: 'DTE', value: escapeHtml(String(trade.dte ?? 'N/A')), dataMetric: 'dte' },
       { label: 'Break Even', value: fmt.dollars(metricNumber(trade, 'break_even', 'break_even')), dataMetric: 'break_even' },
       { label: 'Net Credit / Debit', value: fmt.dollars(metricNumber(trade, 'net_credit', 'net_credit')) + ' / ' + fmt.dollars(metricNumber(trade, 'net_debit', 'net_debit')), dataMetric: 'net_credit' },
       { label: 'IV/RV Ratio', value: fmt.num(metricNumber(trade, 'iv_rv_ratio', 'iv_rv_ratio')), dataMetric: 'iv_rv_ratio' },

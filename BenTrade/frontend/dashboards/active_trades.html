@@ -1,9 +1,47 @@
-<!-- Active Trades Dashboard (basic functionality) -->
+<!-- Active Trades Dashboard — Institutional Position Management -->
 <div class="view-wrap">
   <div class="dashboard-layout">
-    <main class="main">
-      <div class="active-toolbar">
-        <div class="active-toolbar-left">
+    <main class="main at-main">
+
+      <!-- ═══ SECTION 1 — Portfolio Risk Bar ═══ -->
+      <div id="atRiskBar" class="at-risk-bar">
+        <div class="at-risk-metric" id="atRiskPositions">
+          <div class="at-risk-label">POSITIONS</div>
+          <div class="at-risk-value">—</div>
+        </div>
+        <div class="at-risk-metric" id="atRiskExposure">
+          <div class="at-risk-label">EXPOSURE</div>
+          <div class="at-risk-value">—</div>
+        </div>
+        <div class="at-risk-metric" id="atRiskUnrealizedPnl">
+          <div class="at-risk-label">UNREALIZED P&L</div>
+          <div class="at-risk-value">—</div>
+        </div>
+        <div class="at-risk-metric" id="atRiskDailyPnl">
+          <div class="at-risk-label">DAILY P&L</div>
+          <div class="at-risk-value">—</div>
+        </div>
+        <div class="at-risk-metric" id="atRiskWinner">
+          <div class="at-risk-label">BEST POSITION</div>
+          <div class="at-risk-value">—</div>
+        </div>
+        <div class="at-risk-metric" id="atRiskLoser">
+          <div class="at-risk-label">WORST POSITION</div>
+          <div class="at-risk-value">—</div>
+        </div>
+        <div class="at-risk-metric" id="atRiskCapitalAtRisk">
+          <div class="at-risk-label">CAPITAL AT RISK</div>
+          <div class="at-risk-value">—</div>
+        </div>
+      </div>
+
+      <!-- ═══ SECTION 2 — Position Control Bar ═══ -->
+      <div class="at-control-bar">
+        <div class="at-control-left">
+          <div class="active-account-toggle" id="activeAccountToggle">
+            <button class="active-account-btn is-active" data-mode="live">LIVE</button>
+            <button class="active-account-btn" data-mode="paper">PAPER</button>
+          </div>
           <button id="activeRefreshBtn" class="btn">Refresh</button>
           <label class="active-auto-toggle">
             <input id="activeAutoRefresh" type="checkbox" />
@@ -11,32 +49,65 @@
           </label>
           <span id="activeLiveBadge" class="active-live-badge">STALE</span>
         </div>
-        <div class="active-toolbar-right">
-          <select id="activeUnderlyingFilter">
-            <option value="ALL">All underlyings</option>
+        <div class="at-control-center">
+          <label class="at-sort-label">Sort</label>
+          <select id="atSortSelect" class="at-select">
+            <option value="pnl_asc">Largest Loss</option>
+            <option value="pnl_desc">Largest Gain</option>
+            <option value="exposure_desc">Exposure ↓</option>
+            <option value="symbol_asc" selected>Symbol A→Z</option>
+            <option value="strategy_asc">Strategy</option>
           </select>
-          <select id="activeStatusFilter">
+        </div>
+        <div class="at-control-right">
+          <input id="activeSearch" class="active-search" type="text" placeholder="Search symbol…" />
+          <select id="activeUnderlyingFilter" class="at-select">
+            <option value="ALL">All symbols</option>
+          </select>
+          <select id="activeStatusFilter" class="at-select">
             <option value="ALL">All status</option>
             <option value="OPEN">OPEN</option>
             <option value="CLOSING">CLOSING</option>
             <option value="CLOSED">CLOSED</option>
           </select>
-          <input id="activeSearch" class="active-search" type="text" placeholder="Search symbol/strategy" />
+          <div class="at-view-toggle" id="atViewToggle">
+            <button class="at-view-btn is-active" data-view="expanded" title="Expanded Cards">▦</button>
+            <button class="at-view-btn" data-view="compact" title="Compact Cards">☰</button>
+          </div>
+          <button class="at-expand-all-btn" id="atExpandAllBtn" title="Expand / Collapse All">▼ Expand All</button>
         </div>
       </div>
 
+      <!-- ═══ Error banner ═══ -->
       <div id="activeError" class="active-error" style="display:none;"></div>
-      <div id="activeList" class="active-list"></div>
+
+      <!-- ═══ SECTION 3–8 — Position Cards Grid ═══ -->
+      <div id="activeList" class="at-card-grid"></div>
     </main>
   </div>
 
+  <!-- Simulate Close modal -->
   <div id="activeCloseModal" class="active-modal" style="display:none;">
     <div class="active-modal-card">
       <div class="active-modal-header">
-        <span class="active-modal-title">Simulate Close (Paper-Only)</span>
+        <span class="active-modal-title">Simulate Close</span>
         <button id="activeCloseModalBtn" class="btn">Close</button>
       </div>
       <div id="activeModalBody" class="active-modal-body"></div>
     </div>
   </div>
+
+  <!-- Close Position confirmation modal -->
+  <div id="activeCloseConfirmModal" class="active-modal" style="display:none;">
+    <div class="active-modal-card">
+      <div class="active-modal-header">
+        <span class="active-modal-title">Confirm Close Position</span>
+        <button id="activeCloseConfirmDismiss" class="btn">Cancel</button>
+      </div>
+      <div id="activeCloseConfirmBody" class="active-modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="activeToast" class="active-toast" style="display:none;"></div>
 </div>

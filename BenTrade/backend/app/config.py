@@ -1,8 +1,13 @@
+import json
+import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import dotenv_values, load_dotenv
 from pydantic import BaseModel
+
+_cfg_log = logging.getLogger(__name__)
 
 
 _DOTENV_PATH = Path(__file__).resolve().parents[1] / ".env"
@@ -24,9 +29,17 @@ def _cfg(primary: str, *aliases: str, default: str = "") -> str:
 
 
 class Settings(BaseModel):
-    ENABLE_LIVE_TRADING: bool = os.getenv("ENABLE_LIVE_TRADING", "false").lower() == "true"
-    LIVE_TRADING_RUNTIME_ENABLED: bool = os.getenv("LIVE_TRADING_RUNTIME_ENABLED", "false").lower() == "true"
-    TRADING_LIVE_ENABLED: bool = os.getenv("TRADING_LIVE_ENABLED", "false").lower() == "true"
+    # ── Environment mode ────────────────────────────────────────
+    # "development" (default) → forces PAPER routing for all orders.
+    # "production"            → respects account_mode from frontend.
+    ENVIRONMENT: str = os.getenv("BENTRADE_ENVIRONMENT", "development").lower()
+
+    # ── Single execution gate ───────────────────────────────────
+    # ONE boolean: "is BenTrade allowed to send orders to Tradier?"
+    # Env sets the default; UI toggle updates at runtime; persisted
+    # in runtime_config.json so it survives restarts.
+    # When False → every order becomes a DRY RUN (payload logged only).
+    TRADIER_EXECUTION_ENABLED: bool = os.getenv("TRADIER_EXECUTION_ENABLED", "false").lower() == "true"
 
     # ── Dual credential sets (LIVE + PAPER) ─────────────────────
     TRADIER_API_KEY_LIVE: str = _cfg("TRADIER_API_KEY_LIVE", default="")
@@ -66,7 +79,6 @@ class Settings(BaseModel):
     TRADING_CONFIRMATION_SECRET: str = os.getenv("TRADING_CONFIRMATION_SECRET", "")
     TRADING_CONTRACT_MULTIPLIER: int = int(os.getenv("TRADING_CONTRACT_MULTIPLIER", "100"))
     LIVE_DATA_MAX_AGE_SECONDS: int = int(os.getenv("LIVE_DATA_MAX_AGE_SECONDS", "30"))
-    TRADIER_DRY_RUN_LIVE: bool = os.getenv("TRADIER_DRY_RUN_LIVE", "true").lower() == "true"
 
     MAX_WIDTH_DEFAULT: float = float(os.getenv("MAX_WIDTH_DEFAULT", "10"))
     MAX_LOSS_PER_SPREAD_DEFAULT: float = float(os.getenv("MAX_LOSS_PER_SPREAD_DEFAULT", "500"))
@@ -87,13 +99,8 @@ class Settings(BaseModel):
     SNAPSHOT_RETENTION_DAYS: int = int(os.getenv("SNAPSHOT_RETENTION_DAYS", "7"))
 
     # ── Experiment flags ───────────────────────────────────────────
-    # Bypass the enrichment soft-cap for credit_spread so ALL
-    # generated candidates reach enrichment + quality-gate evaluation.
-    # Set env BENTRADE_CREDIT_SPREAD_BYPASS_SOFT_CAP=1 to enable.
-    # Default OFF.  High-water safety guard: 50 000 candidates max.
-    CREDIT_SPREAD_BYPASS_SOFT_CAP: bool = (
-        os.getenv("BENTRADE_CREDIT_SPREAD_BYPASS_SOFT_CAP", "0") == "1"
-    )
+    # (Soft-cap and candidate sampling removed — all candidates
+    #  proceed directly to enrichment with no truncation.)
 
     def model_post_init(self, __context) -> None:
         from app.trading.tradier_credentials import get_tradier_base_url
@@ -118,13 +125,55 @@ class Settings(BaseModel):
         self.TRADIER_BASE_URL = get_tradier_base_url(self.TRADIER_ENV)
 
 
+# ── Runtime config persistence ─────────────────────────────────
+_RUNTIME_CONFIG_PATH = Path(__file__).resolve().parents[1] / "data" / "runtime_config.json"
+
+
+def _load_runtime_config() -> dict:
+    """Load persisted runtime config from JSON file."""
+    try:
+        if _RUNTIME_CONFIG_PATH.exists():
+            return json.loads(_RUNTIME_CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        _cfg_log.warning("Failed to load runtime_config.json: %s", exc)
+    return {}
+
+
+def _save_runtime_config(data: dict) -> None:
+    """Persist runtime config to JSON file."""
+    try:
+        _RUNTIME_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _RUNTIME_CONFIG_PATH.write_text(
+            json.dumps(data, indent=2, default=str),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        _cfg_log.warning("Failed to save runtime_config.json: %s", exc)
+
+
 _settings = Settings()
+
+# Restore persisted execution flag on startup
+_persisted = _load_runtime_config()
+if "tradier_execution_enabled" in _persisted:
+    _settings.TRADIER_EXECUTION_ENABLED = bool(_persisted["tradier_execution_enabled"])
+    _cfg_log.info(
+        "Restored tradier_execution_enabled=%s from runtime_config.json",
+        _settings.TRADIER_EXECUTION_ENABLED,
+    )
 
 
 def get_settings() -> Settings:
     return _settings
 
 
-def set_live_runtime_enabled(enabled: bool) -> Settings:
-    _settings.LIVE_TRADING_RUNTIME_ENABLED = enabled
+def set_tradier_execution_enabled(enabled: bool) -> Settings:
+    """Set the runtime execution toggle and persist to disk."""
+    _settings.TRADIER_EXECUTION_ENABLED = enabled
+    rc = _load_runtime_config()
+    rc["tradier_execution_enabled"] = enabled
+    rc["updated_at"] = datetime.now(timezone.utc).isoformat()
+    rc["updated_by"] = "ui-toggle"
+    _save_runtime_config(rc)
+    _cfg_log.info("tradier_execution_toggled enabled=%s", enabled)
     return _settings

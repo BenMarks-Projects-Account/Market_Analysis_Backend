@@ -41,6 +41,7 @@ if not _acquire_single_instance():
 # ── Process-wide browser-launch guard ────────────────────────────────────────
 _browser_launched = False
 _browser_lock = threading.Lock()
+_monitor_gen = 0
 
 
 def base_dir() -> Path:
@@ -328,7 +329,7 @@ BRAND_BAR_BG  = "#0d1020"
 GREEN_LIVE    = "#00ff88"
 RED_DEAD      = "#ff4444"
 
-W, H = 560, 280
+W, H = 560, 310
 
 root = tk.Tk()
 root.title("BenTrade Launcher")
@@ -432,8 +433,9 @@ def _open_logs():
         _log(f"Failed to open log: {e}")
 
 
-# ── Stop function ────────────────────────────────────────────────────────────
-def stop_backend():
+# ── Kill / Stop / Restart ────────────────────────────────────────────────────
+def _kill_backend_processes():
+    """Kill the backend process tree without closing the launcher UI."""
     if proc.poll() is None:
         try:
             proc.terminate()
@@ -467,18 +469,68 @@ def stop_backend():
     except Exception:
         pass
 
+
+def stop_backend():
+    _kill_backend_processes()
     canvas.itemconfig(_backend_sid, text="Backend: Stopped", fill=RED_DEAD)
     if log_fh:
         log_fh.close()
     root.destroy()
 
 
-# Place buttons via canvas windows
-_stop_btn = _make_btn("Stop BenTrade", stop_backend, bg=ACCENT_CYAN)
-_logs_btn = _make_btn("Open Logs", _open_logs, bg="#1a2a3a",
-                      fg=TEXT_PRIMARY, w=12)
-canvas.create_window(W // 2 - 74, 210, window=_stop_btn, anchor="center")
-canvas.create_window(W // 2 + 74, 210, window=_logs_btn, anchor="center")
+def restart_backend():
+    """Kill and restart the backend process."""
+    global proc, _browser_launched, _monitor_gen
+    _monitor_gen += 1
+    canvas.itemconfig(_backend_sid, text="Backend: Restarting\u2026", fill=TEXT_PRIMARY)
+    canvas.itemconfig(_ui_sid, text="UI: Waiting\u2026", fill=TEXT_PRIMARY)
+
+    def _do():
+        global proc, _browser_launched
+        _kill_backend_processes()
+        time.sleep(2)
+        try:
+            _log(f"Restarting backend using script: {script_path} (cwd={cwd})")
+            proc = subprocess.Popen([
+                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-File", str(script_path)
+            ], stdout=log_fh or subprocess.DEVNULL, stderr=subprocess.STDOUT,
+               creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | _CREATE_NO_WINDOW,
+               startupinfo=_si, cwd=cwd)
+            with _browser_lock:
+                _browser_launched = False
+            threading.Thread(target=open_chrome_when_ready,
+                             kwargs={"url": "http://127.0.0.1:5000/", "timeout": 25.0},
+                             daemon=True).start()
+            threading.Thread(target=monitor_proc, daemon=True).start()
+        except Exception as e:
+            _log(f"Restart failed: {e}")
+            root.after(0, lambda: canvas.itemconfig(
+                _backend_sid, text="Backend: Restart Failed", fill=RED_DEAD))
+
+    threading.Thread(target=_do, daemon=True).start()
+
+
+def restart_ui():
+    """Re-open the browser window."""
+    global _browser_launched
+    with _browser_lock:
+        _browser_launched = False
+    canvas.itemconfig(_ui_sid, text="UI: Launching\u2026", fill=TEXT_PRIMARY)
+    threading.Thread(target=open_chrome_when_ready,
+                     kwargs={"url": "http://127.0.0.1:5000/", "timeout": 5.0},
+                     daemon=True).start()
+
+
+# Place buttons via canvas windows — row 1: restart, row 2: stop / logs
+_restart_be_btn = _make_btn("Restart Backend", restart_backend, bg=ACCENT_CYAN, w=14)
+_restart_ui_btn = _make_btn("Restart UI", restart_ui, bg=ACCENT_CYAN, w=14)
+_stop_btn = _make_btn("Stop BenTrade", stop_backend, bg="#1a2a3a", fg=TEXT_PRIMARY, w=14)
+_logs_btn = _make_btn("Open Logs", _open_logs, bg="#1a2a3a", fg=TEXT_PRIMARY, w=14)
+canvas.create_window(W // 2 - 82, 196, window=_restart_be_btn, anchor="center")
+canvas.create_window(W // 2 + 82, 196, window=_restart_ui_btn, anchor="center")
+canvas.create_window(W // 2 - 82, 240, window=_stop_btn, anchor="center")
+canvas.create_window(W // 2 + 82, 240, window=_logs_btn, anchor="center")
 
 # ── Bottom accent line ───────────────────────────────────────────────────────
 canvas.create_line(0, H - 3, W, H - 3, fill=ACCENT_CYAN, width=1)
@@ -525,9 +577,14 @@ root.after(800, _poll_status)
 
 # ── Process monitor ──────────────────────────────────────────────────────────
 def monitor_proc():
+    my_gen = _monitor_gen
     while True:
+        if _monitor_gen != my_gen:
+            return
         rc = proc.poll()
         if rc is not None:
+            if _monitor_gen != my_gen:
+                return
             _log(f"Backend process exited with code {rc}")
             root.after(0, lambda: canvas.itemconfig(
                 _backend_sid, text=f"Backend: Stopped ({rc})", fill=RED_DEAD))

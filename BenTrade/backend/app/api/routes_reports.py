@@ -255,6 +255,18 @@ async def generate_report_stream(request: Request):
     return StreamingResponse(_stream(), media_type="text/event-stream")
 
 
+# ═══════════════════════════════════════════════════════════════
+# Active-trade model analysis (forwarding route)
+# Canonical path: POST /api/model/active-trade-analysis
+# Implementation lives in routes_active_trades.active_trade_model_analysis
+# ═══════════════════════════════════════════════════════════════
+
+@router.post("/api/model/active-trade-analysis")
+async def active_trade_analysis_proxy(request: Request):
+    from app.api.routes_active_trades import active_trade_model_analysis
+    return await active_trade_model_analysis(request)
+
+
 @router.post("/api/model/analyze")
 async def model_analyze(payload: dict):
     import logging as _logging

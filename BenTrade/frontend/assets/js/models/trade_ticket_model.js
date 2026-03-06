@@ -199,6 +199,26 @@ window.BenTradeTradeTicketModel = (function () {
     var dte           = toNum(input.dte || raw.dte);
     var shortStrike   = toNum(input.shortStrike != null ? input.shortStrike : raw.short_strike);
     var longStrike    = toNum(input.longStrike != null ? input.longStrike : raw.long_strike);
+
+    // Derive strikes from legs when header strikes are missing
+    // Input fields: legs[].strike, legs[].side
+    if (shortStrike == null || longStrike == null) {
+      var srcLegs = input.legs || raw.legs;
+      if (Array.isArray(srcLegs) && srcLegs.length >= 2) {
+        for (var li = 0; li < srcLegs.length; li++) {
+          var leg = srcLegs[li];
+          var side = String(leg.side || '').toLowerCase();
+          var st = toNum(leg.strike);
+          if (st != null && st > 0) {
+            if (side === 'sell_to_open' || side === 'sell') {
+              if (shortStrike == null) shortStrike = st;
+            } else if (side === 'buy_to_open' || side === 'buy') {
+              if (longStrike == null) longStrike = st;
+            }
+          }
+        }
+      }
+    }
     var width         = toNum(input.width || raw.width) || (shortStrike != null && longStrike != null ? Math.abs(shortStrike - longStrike) : null);
     var underlyingPrice = toNum(input.underlyingPrice != null ? input.underlyingPrice : raw.underlying_price);
 
@@ -358,7 +378,10 @@ window.BenTradeTradeTicketModel = (function () {
     if (occMissing > 0) {
       errors.push(occMissing + ' leg(s) missing OCC symbol — cannot execute.');
     }
-
+    // Legs validation — all strategies require a legs array
+    if (!Array.isArray(ticket.legs) || ticket.legs.length < 2) {
+      errors.push('Trade requires at least 2 legs (got ' + (Array.isArray(ticket.legs) ? ticket.legs.length : 0) + ').');
+    }
     if (ticket.maxLoss == null || ticket.maxLoss === 0) {
       warnings.push('Max loss is unavailable — proceed with caution.');
     }
@@ -409,20 +432,64 @@ window.BenTradeTradeTicketModel = (function () {
       put_debit:         'put_debit',
       call_debit_spread: 'call_debit',
       call_debit:        'call_debit',
+      iron_condor:       'iron_condor',
+      butterfly_debit:   'butterfly_debit',
+      butterflies:       'butterfly_debit',
     };
     var strategy = strategyMap[ticket.strategyId] || 'put_credit';
 
-    return {
+    // Build legs array from ticket.legs for ALL strategies
+    var legsPayload = [];
+    if (Array.isArray(ticket.legs) && ticket.legs.length >= 2) {
+      for (var i = 0; i < ticket.legs.length; i++) {
+        var leg = ticket.legs[i];
+        var side = String(leg.side || '').toUpperCase().replace(/ /g, '_');
+        if (side === 'SELL') side = 'SELL_TO_OPEN';
+        if (side === 'BUY')  side = 'BUY_TO_OPEN';
+        var legObj = {
+          strike:      leg.strike,
+          side:        side,
+          option_type: String(leg.right || leg.optionType || leg.callput || 'put').toLowerCase(),
+          quantity:    leg.quantity || 1,
+        };
+        // Pass through exact OCC symbol from option chain when available
+        if (leg.optionSymbol) legObj.option_symbol = leg.optionSymbol;
+        legsPayload.push(legObj);
+      }
+    }
+
+    // Guard: every strategy must have a legs array
+    if (legsPayload.length < 2) {
+      throw new Error(
+        'Trade requires at least 2 legs (got ' + legsPayload.length +
+        ', strategy=' + strategy + ')'
+      );
+    }
+
+    var payload = {
       symbol:        ticket.underlying,
       strategy:      strategy,
       expiration:    ticket.expiration,
-      short_strike:  ticket.shortStrike || 0,
-      long_strike:   ticket.longStrike || 0,
+      legs:          legsPayload,
       quantity:      ticket.quantity,
       limit_price:   ticket.limitPrice || 0,
       time_in_force: ticket.tif.toUpperCase(),
       mode:          mode || 'paper',
     };
+
+    // Also send short_strike/long_strike for 2-leg strategies (backward compat)
+    if (legsPayload.length === 2 && ticket.shortStrike && ticket.longStrike) {
+      payload.short_strike = ticket.shortStrike;
+      payload.long_strike  = ticket.longStrike;
+    }
+
+    if (typeof console !== 'undefined' && console.log) {
+      var optionSymbols = legsPayload.map(function(l) { return l.option_symbol || '(none)'; });
+      console.log('Order option symbols:', optionSymbols);
+      console.log('[TradeTicket] preview payload:', JSON.stringify(payload));
+    }
+
+    return payload;
   }
 
   return {

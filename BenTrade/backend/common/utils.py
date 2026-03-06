@@ -711,12 +711,15 @@ def generate_mock_report() -> str:
     # to append a `model_evaluation` object to each trade. By default this is disabled
     # to avoid automatic model calls on report generation. Set environment variable
     # AUTO_CALL_MODEL=1 to enable automatic calling (useful for batch runs).
-    def _call_model_and_append(trades, target_path, model_url='http://localhost:1234/v1/chat/completions', retries=2, timeout=30, batch_size=1):
+    def _call_model_and_append(trades, target_path, model_url=None, retries=2, timeout=30, batch_size=1):
         """
         Send trades to the model in batches of `batch_size`, merge returned
         `model_evaluation` into each trade, and write combined output to a new
         file prefixed with 'mode_'. Returns True on success.
         """
+        if model_url is None:
+            from app.services.model_router import get_model_endpoint
+            model_url = get_model_endpoint()
         # Prompt/instructions for the model: return only the JSON array of trades
         PROMPT = (
             "You are an options trading risk advisor.\n\n"
@@ -924,7 +927,7 @@ def generate_mock_report() -> str:
     return filename
 
 
-def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http://localhost:1234/v1/chat/completions', retries=2, timeout=120):
+def analyze_trade_with_model(trade: dict, source_filename: str, model_url=None, retries=2, timeout=120):
     """Send a single trade to the local model and append the evaluated trade
     to ``results/model_<source_filename>``.  Returns the evaluated trade dict
     (including ``model_evaluation`` and ``engine_calculations``) on success.
@@ -941,6 +944,9 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http:
     On model-call failure a provisional NEUTRAL evaluation is persisted and
     returned so the UI receives a deterministic response (no 500).
     """
+    if model_url is None:
+        from app.services.model_router import get_model_endpoint
+        model_url = get_model_endpoint()
     from common.trade_analysis_engine import (
         build_analysis_facts,
         compute_trade_metrics,
@@ -1308,10 +1314,14 @@ def hard_gate_override(trade: dict, me: dict) -> dict:
 _analyze_trade_with_model_legacy = analyze_trade_with_model
 
 
-def analyze_trade_with_model(trade: dict, source_filename: str, model_url='http://localhost:1234/v1/chat/completions', retries=2, timeout=30):
+def analyze_trade_with_model(trade: dict, source_filename: str, model_url=None, retries=2, timeout=30):
     # TODO(architecture): remove this compatibility shim once all imports use common.model_analysis directly.
     from app.models.trade_contract import TradeContract
     from common.model_analysis import analyze_trade
+
+    if model_url is None:
+        from app.services.model_router import get_model_endpoint
+        model_url = get_model_endpoint()
 
     return analyze_trade(
         TradeContract.from_dict(trade),

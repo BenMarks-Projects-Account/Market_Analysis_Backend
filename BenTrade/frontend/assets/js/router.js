@@ -195,6 +195,7 @@
     "strategy-analytics": { title: "Strategy Analytics", group: "Lifecycle", subgroup: "Process & journaling", description: "Performance + attribution" },
     "admin-data-health": { title: "Data Health", group: "Admin", subgroup: "Operations", description: "Provider + validation health" },
     "admin/data-workbench": { title: "Data Workbench", group: "Admin", subgroup: "Operations", description: "Trade JSON + card inspection" },
+    "admin/tooltip-test": { title: "Tooltip Test", group: "Admin", subgroup: "Dev", description: "Tooltip regression sandbox" },
   };
 
   const routes = {
@@ -307,6 +308,11 @@
       view: "dashboards/admin_data_workbench.html",
       init: () => window.BenTradePages?.initAdminDataWorkbench?.(document.getElementById('view')),
       title: routeMeta["admin/data-workbench"].title
+    },
+    "admin/tooltip-test": {
+      view: "dashboards/tooltip_test.html",
+      init: () => {},
+      title: routeMeta["admin/tooltip-test"].title
     }
   };
 
@@ -341,6 +347,10 @@
     const viewEl = document.getElementById("view");
     if(!viewEl) return;
 
+    // Dismiss any open tooltips before tearing down the old view
+    try{ window.BenTradeUI?.Tooltip?.hideTooltip?.(); } catch(_){}
+    try{ window.BenTradeBenTooltip?.hide?.(); } catch(_){}
+
     try{
       if(typeof window.BenTradeActiveViewCleanup === 'function'){
         window.BenTradeActiveViewCleanup();
@@ -370,6 +380,7 @@
       console.error(e);
     }
     try{ window.attachMetricTooltips && window.attachMetricTooltips(viewEl); } catch(e){ console.error(e); }
+    try{ window.BenTradeBenTooltip && window.BenTradeBenTooltip.bindAll(viewEl); } catch(e){ console.error(e); }
     setActive(routeKey in routes ? routeKey : "home");
   }
 

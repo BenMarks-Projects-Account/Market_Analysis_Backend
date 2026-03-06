@@ -367,7 +367,7 @@ def analyze_regime(
     *,
     regime_data: dict[str, Any],
     playbook_data: dict[str, Any] | None = None,
-    model_url: str = "http://localhost:1234/v1/chat/completions",
+    model_url: str | None = None,
     retries: int = 1,
     timeout: int = 60,
 ) -> dict[str, Any]:
@@ -378,6 +378,10 @@ def analyze_regime(
     playbook recommendations are deliberately excluded to prevent anchoring.
     """
     import logging
+
+    if model_url is None:
+        from app.services.model_router import get_model_endpoint
+        model_url = get_model_endpoint()
     import requests as _requests
 
     _log = logging.getLogger("bentrade.model_analysis")
@@ -537,13 +541,17 @@ def analyze_regime(
 def analyze_trade(
     trade: TradeContract,
     source: str,
-    model_url: str = "http://localhost:1234/v1/chat/completions",
+    model_url: str | None = None,
     retries: int = 2,
     timeout: int = 120,
 ) -> dict[str, Any] | None:
     # Keep the legacy JSON contract exactly the same by delegating to the legacy implementation.
     # TODO(architecture): migrate implementation from common.utils into this module and delete legacy shim.
     from common import utils as legacy_utils
+
+    if model_url is None:
+        from app.services.model_router import get_model_endpoint
+        model_url = get_model_endpoint()
 
     return legacy_utils._analyze_trade_with_model_legacy(
         trade.to_dict(),
@@ -559,11 +567,15 @@ def analyze_stock_idea(
     symbol: str,
     idea: dict[str, Any],
     source: str,
-    model_url: str = "http://localhost:1234/v1/chat/completions",
+    model_url: str | None = None,
     retries: int = 1,
     timeout: int = 30,
 ) -> dict[str, Any]:
     from common import utils as legacy_utils
+
+    if model_url is None:
+        from app.services.model_router import get_model_endpoint
+        model_url = get_model_endpoint()
 
     prompt = (
         "You are a stock swing-trade analysis assistant.\n"
@@ -818,7 +830,7 @@ def analyze_stock_strategy(
     *,
     strategy_id: str,
     candidate: dict[str, Any],
-    model_url: str = "http://localhost:1234/v1/chat/completions",
+    model_url: str | None = None,
     retries: int = 1,
     timeout: int = 60,
 ) -> dict[str, Any]:
@@ -845,6 +857,10 @@ def analyze_stock_strategy(
     """
     import logging
     import requests as _requests
+
+    if model_url is None:
+        from app.services.model_router import get_model_endpoint
+        model_url = get_model_endpoint()
 
     from common.json_repair import REPAIR_METRICS, extract_and_repair_json
     from common.stock_strategy_prompts import (

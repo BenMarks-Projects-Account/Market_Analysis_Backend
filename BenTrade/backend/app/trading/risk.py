@@ -54,7 +54,7 @@ def evaluate_preview_risk(
         and long_leg.ask is not None
     )
 
-    is_credit = strategy in ("put_credit", "call_credit")
+    is_credit = strategy in ("put_credit", "call_credit", "iron_condor")
     checks["credit_floor_ok"] = (not is_credit) or (net_credit_or_debit >= settings.MIN_CREDIT_DEFAULT)
 
     short_spread_pct = _spread_pct(short_leg)

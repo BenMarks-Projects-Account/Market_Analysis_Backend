@@ -65,7 +65,7 @@ window.BenTradePages.initStrategyAnalytics = function initStrategyAnalytics(root
     kpisEl.innerHTML = `
       <div class="statTile"><div class="statLabel" data-metric="total_pnl">Total P&L</div><div class="statValue">${fmt(totalPnl)}</div></div>
       <div class="statTile"><div class="statLabel" data-metric="win_rate">Win Rate</div><div class="statValue">${winRate === null ? 'N/A' : (Number(winRate) * 100).toFixed(1) + '%'}</div></div>
-      <div class="statTile"><div class="statLabel">Trades</div><div class="statValue">${totalTrades}</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="trade_count">Trades</div><div class="statValue">${totalTrades}</div></div>
       <div class="statTile"><div class="statLabel" data-metric="avg_pnl">Avg P&L</div><div class="statValue">${fmt(avgPnl)}</div></div>
       <div class="statTile"><div class="statLabel" data-metric="max_drawdown">Max Drawdown</div><div class="statValue">${fmt(maxDrawdown)}</div></div>
     `;

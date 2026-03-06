@@ -306,7 +306,7 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
     const p = payload?.price || {};
     const summarySymbol = String(payload?.symbol || 'N/A').toUpperCase();
     summaryGridEl.innerHTML = `
-      <div class="statTile"><div class="statLabel">Symbol</div><div class="statValue"><span class="qtPill">${summarySymbol}</span></div></div>
+      <div class="statTile"><div class="statLabel" data-metric="symbol">Symbol</div><div class="statValue"><span class="qtPill">${summarySymbol}</span></div></div>
       <div class="statTile"><div class="statLabel" data-metric="mark">Last</div><div class="statValue">$${fmt(p.last)}</div></div>
       <div class="statTile"><div class="statLabel">Change</div><div class="statValue">$${fmt(p.change)}</div></div>
       <div class="statTile"><div class="statLabel">Change %</div><div class="statValue">${fmtPct(p.change_pct)}</div></div>
@@ -562,7 +562,7 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
   function renderOptionsContext(ctx){
     const c = ctx || {};
     optionsContextEl.innerHTML = `
-      <div class="statTile"><div class="statLabel">Expiration</div><div class="statValue">${c.expiration || 'N/A'}</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="expiration">Expiration</div><div class="statValue">${c.expiration || 'N/A'}</div></div>
       <div class="statTile"><div class="statLabel" data-metric="dte">DTE</div><div class="statValue">${c.dte ?? 'N/A'}</div></div>
       <div class="statTile"><div class="statLabel" data-metric="iv">ATM IV</div><div class="statValue">${fmtPct(c.iv)}</div></div>
       <div class="statTile"><div class="statLabel" data-metric="expected_move_1w">Expected Move</div><div class="statValue">$${fmt(c.expected_move)}</div></div>
