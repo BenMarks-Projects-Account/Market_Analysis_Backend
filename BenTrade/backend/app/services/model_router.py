@@ -47,20 +47,35 @@ def get_model_endpoint() -> str:
     return endpoint
 
 
-def model_request(payload: dict[str, Any], *, timeout: int = 120, retries: int = 0) -> dict[str, Any]:
+def model_request(payload: dict[str, Any], *, timeout: int = 300, retries: int = 0) -> dict[str, Any]:
     """Synchronous model call (for common/model_analysis.py and common/utils.py).
 
     Replaces direct ``requests.post(model_url, ...)`` calls.
+    Always forces ``stream: false`` to prevent LM Studio from returning
+    an SSE event-stream that the requests library cannot consume.
     """
     endpoint = get_model_endpoint()
+    # Force non-streaming so LM Studio returns a single JSON response
+    payload = {**payload, "stream": False}
     last_exc: Exception | None = None
 
     for attempt in range(1 + retries):
         try:
-            logger.info("[model_router] POST %s (attempt %d/%d)", endpoint, attempt + 1, 1 + retries)
+            logger.info("[model_router] POST %s (attempt %d/%d, timeout=%ds)", endpoint, attempt + 1, 1 + retries, timeout)
             response = _requests.post(endpoint, json=payload, timeout=timeout)
+            logger.info(
+                "[model_router] response HTTP %d (%d bytes, %.1fs)",
+                response.status_code, len(response.content), response.elapsed.total_seconds(),
+            )
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            # Log completion status from OpenAI-compatible response
+            finish = None
+            choices = data.get("choices") or []
+            if choices and isinstance(choices[0], dict):
+                finish = choices[0].get("finish_reason")
+            logger.info("[model_router] response OK — finish_reason=%s", finish)
+            return data
         except _requests.RequestException as exc:
             last_exc = exc
             logger.warning("[model_router] attempt %d failed: %s", attempt + 1, exc)
@@ -72,12 +87,20 @@ async def async_model_request(
     http_client: Any,
     payload: dict[str, Any],
     *,
-    timeout: float = 120.0,
+    timeout: float = 300.0,
 ) -> Any:
     """Async model call (for route handlers using httpx.AsyncClient).
 
     Returns the raw httpx.Response so callers can check status_code.
+    Always forces ``stream: false`` to prevent LM Studio streaming.
     """
     endpoint = get_model_endpoint()
-    logger.info("[model_router] async POST %s", endpoint)
-    return await http_client.post(endpoint, json=payload, timeout=timeout)
+    # Force non-streaming
+    payload = {**payload, "stream": False}
+    logger.info("[model_router] async POST %s (timeout=%.0fs)", endpoint, timeout)
+    resp = await http_client.post(endpoint, json=payload, timeout=timeout)
+    logger.info(
+        "[model_router] async response HTTP %d (%d bytes)",
+        resp.status_code, len(resp.content),
+    )
+    return resp

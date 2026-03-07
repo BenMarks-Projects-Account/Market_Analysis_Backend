@@ -174,6 +174,7 @@
 
   const routeMeta = {
     "home": { title: "Home Dashboard", group: "Home", subgroup: "Market Overview", description: "Command center" },
+    "news-sentiment": { title: "News & Sentiment", group: "Home", subgroup: "Market Intelligence", description: "Macro & headline intelligence" },
     "credit-spread": { title: "Credit Spread Analysis", group: "Analysis", subgroup: "Options", description: "Credit Spreads" },
     "strategy-iron-condor": { title: "Strategy Dashboard • Iron Condor", group: "Analysis", subgroup: "Options → Premium Selling", description: "Iron Condor" },
     "iron-condor": { title: "Iron Condor Analysis", group: "Analysis", subgroup: "Options → Premium Selling", description: "Iron Condor" },
@@ -203,6 +204,11 @@
       view: "dashboards/home.html",
       init: () => window.BenTradePages?.initHome?.(document.getElementById('view')),
       title: routeMeta["home"].title
+    },
+    "news-sentiment": {
+      view: "dashboards/news_sentiment.html",
+      init: () => window.BenTradePages?.initNewsSentiment?.(document.getElementById('view')),
+      title: routeMeta["news-sentiment"].title
     },
     "credit-spread": {
       view: "dashboards/credit-spread.view.html",

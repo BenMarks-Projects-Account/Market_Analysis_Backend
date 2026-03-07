@@ -1,0 +1,1473 @@
+<div class="view-wrap">
+
+  <!-- ── Top Row: Engine + Model + Macro ─────────────────────────── -->
+  <div class="ns-top-row">
+
+    <!-- 1. Internal Engine Score -->
+    <section class="stock-card ns-card ns-engine-card">
+      <div class="ns-card-header">
+        <span class="ns-card-title">Internal Engine</span>
+        <span class="ns-track-badge engine">Deterministic</span>
+      </div>
+      <div class="ns-card-body">
+        <div class="ns-regime-label" id="nsEngineLabel">—</div>
+        <div class="ns-score-row">
+          <span class="ns-score-label">Composite Score</span>
+          <span class="ns-score-value" id="nsEngineScore">—</span>
+        </div>
+        <div class="ns-component-list" id="nsEngineComponents"></div>
+      </div>
+    </section>
+
+    <!-- 2. Model Analysis (manual trigger) -->
+    <section class="stock-card ns-card ns-model-card">
+      <div class="ns-card-header">
+        <span class="ns-card-title">AI Model Analysis</span>
+        <span class="ns-track-badge model">LLM</span>
+      </div>
+      <div class="ns-card-body">
+        <div class="ns-regime-label" id="nsModelLabel">—</div>
+        <div class="ns-score-row">
+          <span class="ns-score-label">Model Score</span>
+          <span class="ns-score-value" id="nsModelScore">—</span>
+        </div>
+        <div class="ns-model-summary" id="nsModelSummary">
+          <div class="ns-model-cta" id="nsModelCta">
+            <p class="ns-model-cta-text">Model analysis has not been run yet.</p>
+            <button class="btn ns-model-run-btn" id="nsRunModelBtn" type="button">Analyze with Model</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Macro Stress Context -->
+    <section class="stock-card ns-card ns-macro-card">
+      <div class="ns-card-header">
+        <span class="ns-card-title">Macro Stress Context</span>
+        <span class="ns-last-updated" id="nsLastUpdated" style="font-size:10px;color:var(--muted);margin-right:8px;"></span>
+        <button class="btn ns-refresh-btn" id="nsRefreshBtn" type="button">↻ Refresh</button>
+      </div>
+      <div class="ns-card-body">
+        <div class="ns-macro-grid" id="nsMacroGrid">
+          <div class="ns-macro-item"><span class="ns-macro-key">VIX<span class="ns-macro-freshness" id="nsFreshVix"></span></span><span class="ns-macro-val" id="nsMacroVix">—</span></div>
+          <div class="ns-macro-item"><span class="ns-macro-key">10Y Yield<span class="ns-macro-freshness" id="nsFresh10y"></span></span><span class="ns-macro-val" id="nsMacro10y">—</span></div>
+          <div class="ns-macro-item"><span class="ns-macro-key">2Y Yield<span class="ns-macro-freshness" id="nsFresh2y"></span></span><span class="ns-macro-val" id="nsMacro2y">—</span></div>
+          <div class="ns-macro-item"><span class="ns-macro-key">Curve Spread</span><span class="ns-macro-val" id="nsMacroSpread">—</span></div>
+          <div class="ns-macro-item"><span class="ns-macro-key">Oil (WTI)<span class="ns-macro-freshness" id="nsFreshOil"></span></span><span class="ns-macro-val" id="nsMacroOil">—</span></div>
+          <div class="ns-macro-item"><span class="ns-macro-key">Fed Funds<span class="ns-macro-freshness" id="nsFreshFed"></span></span><span class="ns-macro-val" id="nsMacroFed">—</span></div>
+        </div>
+        <div class="ns-stress-badge" id="nsMacroStress">—</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── Source Health + Summary Stats Row ────────────────────────── -->
+  <div class="ns-stats-row">
+
+    <!-- Summary Metrics -->
+    <section class="stock-card ns-card ns-summary-card">
+      <div class="ns-card-header">
+        <span class="ns-card-title">Summary Metrics</span>
+      </div>
+      <div class="ns-card-body">
+        <div class="ns-metric-grid" id="nsSummaryMetrics">
+          <div class="ns-metric"><span class="ns-metric-val" id="nsMetricTotal">—</span><span class="ns-metric-key">Headlines</span></div>
+          <div class="ns-metric"><span class="ns-metric-val ns-bullish" id="nsMetricBullish">—</span><span class="ns-metric-key">Bullish</span></div>
+          <div class="ns-metric"><span class="ns-metric-val ns-bearish" id="nsMetricBearish">—</span><span class="ns-metric-key">Bearish</span></div>
+          <div class="ns-metric"><span class="ns-metric-val ns-neutral" id="nsMetricNeutral">—</span><span class="ns-metric-key">Neutral</span></div>
+          <div class="ns-metric"><span class="ns-metric-val ns-mixed" id="nsMetricMixed">—</span><span class="ns-metric-key">Mixed</span></div>
+          <div class="ns-metric"><span class="ns-metric-val" id="nsMetricRecent">—</span><span class="ns-metric-key">Last 24h</span></div>
+        </div>
+        <div class="ns-category-bar" id="nsCategoryBar"></div>
+      </div>
+    </section>
+
+    <!-- Source Health -->
+    <section class="stock-card ns-card ns-source-card">
+      <div class="ns-card-header">
+        <span class="ns-card-title">Source Health</span>
+      </div>
+      <div class="ns-card-body" id="nsSourceHealth">
+        <div class="ns-loading">Loading sources…</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── Model Insights Row (visible when model analysis available) ── -->
+  <div class="ns-insights-row" id="nsInsightsRow" style="display:none;">
+    <section class="stock-card ns-card ns-narratives-model-card">
+      <div class="ns-card-header">
+        <span class="ns-card-title">Model — Dominant Narratives</span>
+      </div>
+      <div class="ns-card-body" id="nsModelNarratives"></div>
+    </section>
+    <section class="stock-card ns-card ns-risks-card">
+      <div class="ns-card-header">
+        <span class="ns-card-title">Model — Underpriced Risks</span>
+      </div>
+      <div class="ns-card-body" id="nsModelRisks"></div>
+    </section>
+    <section class="stock-card ns-card ns-triggers-card">
+      <div class="ns-card-header">
+        <span class="ns-card-title">Model — Change Triggers</span>
+      </div>
+      <div class="ns-card-body" id="nsModelTriggers"></div>
+    </section>
+  </div>
+
+  <!-- ── Main Content: 2-column layout ───────────────────────────── -->
+  <div class="ns-main-grid">
+
+    <!-- Left: Headline Feed -->
+    <section class="stock-card ns-card ns-feed-card">
+      <div class="ns-card-header">
+        <span class="ns-card-title">Live Headline Feed</span>
+        <span class="ns-item-count" id="nsItemCount"></span>
+      </div>
+      <div class="ns-card-body ns-feed-scroll" id="nsHeadlineFeed">
+        <div class="ns-loading">Loading headlines…</div>
+      </div>
+    </section>
+
+    <!-- Right: Engine Component Breakdown -->
+    <section class="stock-card ns-card ns-breakdown-card">
+      <div class="ns-card-header">
+        <span class="ns-card-title">Engine Component Breakdown</span>
+      </div>
+      <div class="ns-card-body" id="nsComponentBreakdown">
+        <div class="ns-loading">Computing components…</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Error display -->
+  <div id="nsError" class="ns-error" style="display:none;"></div>
+</div>
+
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   News & Sentiment Dashboard — Institutional Desk-Grade Theme
+   BenTrade dark gunmetal + cyan quantum aesthetic
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Grid Layouts ────────────────────────────────────────────────── */
+.ns-top-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.ns-stats-row {
+  display: grid;
+  grid-template-columns: 1.3fr 0.7fr;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.ns-insights-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.ns-main-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 0.7fr;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+/* ── Card Treatment — Layered panel construction ─────────────────── */
+.ns-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid rgba(0,234,255,0.14);
+  border-top: 1px solid rgba(206,231,255,0.12);
+  background: var(--surface-gunmetal);
+  box-shadow:
+    0 1px 0 0 rgba(206,231,255,0.04) inset,
+    var(--surface-shadow-tight),
+    0 0 1px rgba(0,234,255,0.08);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ns-card:hover {
+  border-color: rgba(0,234,255,0.22);
+  box-shadow:
+    0 1px 0 0 rgba(206,231,255,0.06) inset,
+    0 16px 32px rgba(0,0,0,0.5),
+    0 4px 12px rgba(2,8,16,0.38),
+    0 0 12px rgba(0,234,255,0.04);
+}
+
+.ns-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  background: var(--surface-top-sheen);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Subtle inner scanline texture */
+.ns-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(228,243,255,0.008) 2px,
+    rgba(228,243,255,0.008) 4px
+  );
+  pointer-events: none;
+  z-index: 1;
+  opacity: var(--metal-scanline-opacity);
+}
+
+/* ── Card Header — Institutional bar ─────────────────────────────── */
+.ns-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px 9px;
+  border-bottom: 1px solid rgba(0,234,255,0.06);
+  background: linear-gradient(180deg, rgba(0,234,255,0.025) 0%, transparent 100%);
+  position: relative;
+  z-index: 2;
+}
+
+/* Cyan accent line beneath header */
+.ns-card-header::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 18px;
+  right: 18px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(0,234,255,0.12) 20%, rgba(0,234,255,0.12) 80%, transparent 100%);
+}
+
+.ns-card-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  opacity: 0.88;
+}
+
+.ns-card-body {
+  padding: 14px 18px 18px;
+  position: relative;
+  z-index: 2;
+}
+
+.ns-loading {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+  padding: 24px 0;
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+
+.ns-error {
+  background: rgba(255,79,102,0.06);
+  border: 1px solid rgba(255,79,102,0.22);
+  border-radius: 8px;
+  padding: 14px 18px;
+  color: var(--danger);
+  font-size: 12px;
+  margin-top: 12px;
+  letter-spacing: 0.02em;
+}
+
+/* ── Track Badges — Refined pill indicators ──────────────────────── */
+.ns-track-badge {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 3px;
+}
+
+.ns-track-badge.engine {
+  background: rgba(0,234,255,0.06);
+  color: var(--cyan);
+  border: 1px solid rgba(0,234,255,0.18);
+  box-shadow: 0 0 6px rgba(0,234,255,0.06);
+}
+
+.ns-track-badge.model {
+  background: rgba(156,39,176,0.08);
+  color: #ce93d8;
+  border: 1px solid rgba(156,39,176,0.22);
+  box-shadow: 0 0 6px rgba(156,39,176,0.06);
+}
+
+/* ── Regime Label — Hero readout ─────────────────────────────────── */
+.ns-regime-label {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  margin-bottom: 12px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.ns-regime-label.risk-on {
+  color: #00e676;
+  text-shadow: 0 0 16px rgba(0,230,118,0.25), 0 0 4px rgba(0,230,118,0.1);
+}
+.ns-regime-label.neutral {
+  color: var(--cyan);
+  text-shadow: 0 0 16px rgba(0,234,255,0.2), 0 0 4px rgba(0,234,255,0.08);
+}
+.ns-regime-label.mixed {
+  color: var(--warn);
+  text-shadow: 0 0 16px rgba(244,200,95,0.2), 0 0 4px rgba(244,200,95,0.08);
+}
+.ns-regime-label.risk-off {
+  color: #ff8a65;
+  text-shadow: 0 0 16px rgba(255,138,101,0.2), 0 0 4px rgba(255,138,101,0.08);
+}
+.ns-regime-label.high-stress {
+  color: var(--danger);
+  text-shadow: 0 0 16px rgba(255,79,102,0.25), 0 0 4px rgba(255,79,102,0.1);
+}
+.ns-regime-label.unavailable { color: var(--muted); }
+
+/* ── Score Row — Composite readout ───────────────────────────────── */
+.ns-score-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid rgba(0,234,255,0.06);
+}
+
+.ns-score-label {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+}
+
+.ns-score-value {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+/* ── Engine Component Bars — Instrument gauge strips ─────────────── */
+.ns-component-list {
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(0,234,255,0.04);
+}
+
+.ns-comp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 11px;
+}
+
+.ns-comp-name {
+  color: var(--muted);
+  width: 100px;
+  flex-shrink: 0;
+  text-transform: capitalize;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+
+.ns-comp-bar-track {
+  flex: 1;
+  height: 7px;
+  background: rgba(0,234,255,0.03);
+  border-radius: 3.5px;
+  overflow: hidden;
+  border: 1px solid rgba(0,234,255,0.06);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2) inset;
+}
+
+.ns-comp-bar-fill {
+  height: 100%;
+  border-radius: 3.5px;
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 6px rgba(0,234,255,0.12);
+}
+
+.ns-comp-val {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text);
+  width: 30px;
+  text-align: right;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+/* ── Model Summary ───────────────────────────────────────────────── */
+.ns-model-summary {
+  margin-top: 10px;
+  font-size: 12px;
+  color: rgba(170,210,224,0.85);
+  line-height: 1.5;
+}
+
+.ns-model-unavailable {
+  text-align: center;
+  color: var(--muted);
+  font-style: italic;
+  padding: 12px 0;
+  font-size: 11px;
+}
+
+/* ── Model Insights Lists — Briefing items ───────────────────────── */
+.ns-insight-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.ns-insight-list li {
+  font-size: 12px;
+  color: rgba(170,210,224,0.85);
+  padding: 7px 0 7px 16px;
+  position: relative;
+  line-height: 1.45;
+  border-bottom: 1px solid rgba(0,234,255,0.04);
+  transition: background 0.15s ease;
+}
+
+.ns-insight-list li:last-child {
+  border-bottom: none;
+}
+
+.ns-insight-list li:hover {
+  background: rgba(0,234,255,0.02);
+}
+
+.ns-insight-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--cyan-dim);
+  opacity: 0.5;
+}
+
+/* ── Macro Card — Instrument cluster ─────────────────────────────── */
+.ns-macro-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.ns-macro-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 5px;
+  background: rgba(0,234,255,0.02);
+  border: 1px solid rgba(0,234,255,0.06);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.ns-macro-item:hover {
+  border-color: rgba(0,234,255,0.12);
+  background: rgba(0,234,255,0.035);
+}
+
+.ns-macro-key {
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+}
+
+.ns-macro-val {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+
+/* ── Stress Badge — Status indicator ─────────────────────────────── */
+.ns-stress-badge {
+  margin-top: 10px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 5px 14px;
+  border-radius: 4px;
+  display: inline-block;
+  width: 100%;
+}
+
+.ns-stress-badge.low {
+  background: rgba(0,230,118,0.08);
+  color: #00e676;
+  border: 1px solid rgba(0,230,118,0.18);
+  box-shadow: 0 0 8px rgba(0,230,118,0.06);
+}
+
+.ns-stress-badge.moderate {
+  background: rgba(0,234,255,0.05);
+  color: var(--cyan);
+  border: 1px solid rgba(0,234,255,0.14);
+  box-shadow: 0 0 8px rgba(0,234,255,0.04);
+}
+
+.ns-stress-badge.elevated {
+  background: rgba(244,200,95,0.08);
+  color: var(--warn);
+  border: 1px solid rgba(244,200,95,0.18);
+  box-shadow: 0 0 8px rgba(244,200,95,0.06);
+}
+
+.ns-stress-badge.high {
+  background: rgba(255,79,102,0.08);
+  color: var(--danger);
+  border: 1px solid rgba(255,79,102,0.22);
+  box-shadow: 0 0 8px rgba(255,79,102,0.06);
+}
+
+.ns-stress-badge.unknown {
+  background: rgba(147,167,182,0.05);
+  color: var(--muted);
+  border: 1px solid rgba(147,167,182,0.12);
+}
+
+.ns-refresh-btn {
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.1;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+}
+
+.ns-item-count {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+/* ── Headline Feed — Terminal-style news wire ────────────────────── */
+.ns-feed-scroll {
+  max-height: 540px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.ns-feed-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.ns-feed-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ns-feed-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0,234,255,0.12);
+  border-radius: 2px;
+}
+
+.ns-feed-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0,234,255,0.22);
+}
+
+.ns-headline-item {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(0,234,255,0.04);
+  transition: background 0.15s, border-left-color 0.15s;
+  border-left: 2px solid transparent;
+}
+
+.ns-headline-item:hover {
+  background: rgba(0,234,255,0.025);
+  border-left-color: rgba(0,234,255,0.3);
+}
+
+.ns-headline-item:last-child {
+  border-bottom: none;
+}
+
+.ns-headline-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.ns-headline-text {
+  font-size: 12.5px;
+  color: var(--text);
+  line-height: 1.4;
+  flex: 1;
+}
+
+.ns-headline-text a {
+  color: var(--text);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.ns-headline-text a:hover {
+  color: var(--cyan);
+}
+
+.ns-headline-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 5px;
+}
+
+/* ── Badges — Refined micro-labels ───────────────────────────────── */
+.ns-badge {
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ns-badge-source {
+  background: rgba(0,234,255,0.05);
+  color: var(--cyan-dim);
+  border: 1px solid rgba(0,234,255,0.1);
+}
+
+.ns-badge-category {
+  background: rgba(147,167,182,0.06);
+  color: var(--muted);
+  border: 1px solid rgba(147,167,182,0.1);
+}
+
+.ns-badge-sentiment {
+  font-weight: 700;
+}
+
+.ns-badge-sentiment.bullish {
+  background: rgba(0,230,118,0.07);
+  color: #00e676;
+  border: 1px solid rgba(0,230,118,0.16);
+}
+
+.ns-badge-sentiment.bearish {
+  background: rgba(255,79,102,0.07);
+  color: #ff4f66;
+  border: 1px solid rgba(255,79,102,0.16);
+}
+
+.ns-badge-sentiment.neutral {
+  background: rgba(0,234,255,0.04);
+  color: var(--cyan-dim);
+  border: 1px solid rgba(0,234,255,0.1);
+}
+
+.ns-badge-sentiment.mixed {
+  background: rgba(244,200,95,0.05);
+  color: var(--warn);
+  border: 1px solid rgba(244,200,95,0.1);
+}
+
+.ns-headline-time {
+  font-size: 9px;
+  color: rgba(147,167,182,0.6);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.ns-headline-symbols {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ns-symbol-tag {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--cyan);
+  background: rgba(0,234,255,0.05);
+  border: 1px solid rgba(0,234,255,0.1);
+  letter-spacing: 0.04em;
+}
+
+/* ── Component Breakdown — Detailed instrument panel ─────────────── */
+.ns-breakdown-section {
+  margin-bottom: 14px;
+}
+
+.ns-breakdown-section:last-child {
+  margin-bottom: 0;
+}
+
+.ns-breakdown-comp {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(0,234,255,0.04);
+  transition: background 0.15s;
+}
+
+.ns-breakdown-comp:hover {
+  background: rgba(0,234,255,0.015);
+}
+
+.ns-breakdown-comp:last-child {
+  border-bottom: none;
+}
+
+.ns-breakdown-comp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.ns-breakdown-comp-name {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+}
+
+.ns-breakdown-comp-score {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.ns-breakdown-comp-bar {
+  height: 7px;
+  background: rgba(0,234,255,0.03);
+  border-radius: 3.5px;
+  overflow: hidden;
+  border: 1px solid rgba(0,234,255,0.06);
+  margin-bottom: 5px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2) inset;
+}
+
+.ns-breakdown-comp-fill {
+  height: 100%;
+  border-radius: 3.5px;
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 6px rgba(0,234,255,0.12);
+}
+
+.ns-breakdown-signals {
+  font-size: 11px;
+  color: rgba(170,210,224,0.65);
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+}
+
+/* ── Model CTA — Manual trigger ──────────────────────────────────── */
+.ns-model-cta {
+  text-align: center;
+  padding: 10px 0;
+}
+
+.ns-model-cta-text {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+  margin-bottom: 12px;
+  letter-spacing: 0.02em;
+}
+
+.ns-model-run-btn {
+  padding: 7px 20px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 5px;
+  background: rgba(156,39,176,0.1);
+  color: #ce93d8;
+  border: 1px solid rgba(156,39,176,0.28);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+.ns-model-run-btn:hover {
+  background: rgba(156,39,176,0.18);
+  border-color: rgba(156,39,176,0.45);
+  box-shadow: 0 0 12px rgba(156,39,176,0.1);
+}
+
+.ns-model-run-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ── Summary Metrics — Desk widget readouts ──────────────────────── */
+.ns-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ns-metric {
+  text-align: center;
+  padding: 10px 4px 8px;
+  border-radius: 5px;
+  background: rgba(0,234,255,0.02);
+  border: 1px solid rgba(0,234,255,0.06);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.ns-metric:hover {
+  border-color: rgba(0,234,255,0.12);
+  background: rgba(0,234,255,0.03);
+}
+
+.ns-metric-val {
+  display: block;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 3px;
+  letter-spacing: 0.02em;
+}
+
+.ns-metric-val.ns-bullish {
+  color: #00e676;
+  text-shadow: 0 0 8px rgba(0,230,118,0.15);
+}
+.ns-metric-val.ns-bearish {
+  color: #ff4f66;
+  text-shadow: 0 0 8px rgba(255,79,102,0.15);
+}
+.ns-metric-val.ns-neutral {
+  color: var(--cyan);
+  text-shadow: 0 0 8px rgba(0,234,255,0.1);
+}
+.ns-metric-val.ns-mixed {
+  color: var(--warn);
+  text-shadow: 0 0 8px rgba(244,200,95,0.12);
+}
+
+.ns-metric-key {
+  display: block;
+  font-size: 8.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+}
+
+/* ── Category Bar — Tag cloud ────────────────────────────────────── */
+.ns-category-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.ns-cat-pill {
+  padding: 3px 9px;
+  border-radius: 3px;
+  font-size: 9.5px;
+  font-weight: 600;
+  background: rgba(147,167,182,0.06);
+  color: var(--muted);
+  border: 1px solid rgba(147,167,182,0.1);
+  letter-spacing: 0.02em;
+  transition: border-color 0.15s;
+}
+
+.ns-cat-pill:hover {
+  border-color: rgba(147,167,182,0.2);
+}
+
+.ns-cat-pill .ns-cat-count {
+  color: var(--text);
+  margin-left: 4px;
+  font-weight: 700;
+}
+
+/* ── Source Health — Control panel table ──────────────────────────── */
+.ns-source-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ns-source-table th {
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  text-align: left;
+  padding: 5px 10px 7px;
+  border-bottom: 1px solid rgba(0,234,255,0.08);
+  font-weight: 600;
+}
+
+.ns-source-table td {
+  font-size: 11.5px;
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(0,234,255,0.035);
+  color: var(--text);
+  transition: background 0.1s;
+}
+
+.ns-source-table tr:hover td {
+  background: rgba(0,234,255,0.015);
+}
+
+.ns-source-table tr:last-child td {
+  border-bottom: none;
+}
+
+.ns-src-status {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+}
+
+.ns-src-status.ok {
+  background: rgba(0,230,118,0.08);
+  color: #00e676;
+  box-shadow: 0 0 4px rgba(0,230,118,0.06);
+}
+
+.ns-src-status.error {
+  background: rgba(255,79,102,0.07);
+  color: #ff4f66;
+  box-shadow: 0 0 4px rgba(255,79,102,0.06);
+}
+
+.ns-src-status.unavailable {
+  background: rgba(147,167,182,0.05);
+  color: var(--muted);
+}
+
+/* ── BenTrade Quantum Uplift (visual-only overrides) ────────────── */
+.view-wrap {
+  position: relative;
+  padding: 4px;
+  border-radius: 12px;
+  background:
+    radial-gradient(120% 90% at 10% 0%, rgba(0, 234, 255, 0.1) 0%, rgba(0, 234, 255, 0.02) 38%, transparent 70%),
+    radial-gradient(120% 100% at 90% 0%, rgba(64, 170, 255, 0.1) 0%, rgba(64, 170, 255, 0.015) 40%, transparent 72%),
+    linear-gradient(180deg, rgba(5, 10, 16, 0.95) 0%, rgba(3, 7, 12, 0.98) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(220, 240, 255, 0.05),
+    inset 0 0 0 1px rgba(0, 234, 255, 0.07),
+    0 26px 58px rgba(0, 0, 0, 0.62);
+}
+
+.view-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(176, 226, 255, 0.011) 3px,
+    rgba(176, 226, 255, 0.011) 6px
+  );
+  opacity: 0.55;
+}
+
+.ns-card {
+  border-color: rgba(0, 234, 255, 0.2);
+  border-top-color: rgba(202, 230, 255, 0.2);
+  background:
+    linear-gradient(168deg, rgba(10, 17, 26, 0.97) 0%, rgba(6, 11, 18, 0.98) 44%, rgba(4, 8, 13, 0.99) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(223, 242, 255, 0.08),
+    inset 0 0 0 1px rgba(86, 140, 184, 0.13),
+    0 18px 34px rgba(0, 0, 0, 0.58),
+    0 7px 18px rgba(2, 8, 16, 0.52),
+    0 0 0 1px rgba(0, 234, 255, 0.04),
+    0 0 20px rgba(0, 234, 255, 0.07);
+}
+
+.ns-card::before {
+  background:
+    linear-gradient(180deg, rgba(211, 237, 255, 0.08) 0%, rgba(211, 237, 255, 0.01) 21%, transparent 55%),
+    linear-gradient(130deg, rgba(0, 234, 255, 0.06) 0%, rgba(0, 234, 255, 0.008) 34%, transparent 74%);
+}
+
+.ns-card:hover {
+  border-color: rgba(0, 234, 255, 0.34);
+  box-shadow:
+    inset 0 1px 0 rgba(223, 242, 255, 0.12),
+    inset 0 0 0 1px rgba(0, 234, 255, 0.1),
+    0 22px 42px rgba(0, 0, 0, 0.64),
+    0 9px 22px rgba(2, 8, 16, 0.56),
+    0 0 22px rgba(0, 234, 255, 0.11);
+}
+
+.ns-engine-card,
+.ns-model-card,
+.ns-macro-card {
+  border-color: rgba(0, 234, 255, 0.28);
+  box-shadow:
+    inset 0 1px 0 rgba(228, 245, 255, 0.1),
+    inset 0 0 0 1px rgba(0, 234, 255, 0.08),
+    0 22px 40px rgba(0, 0, 0, 0.6),
+    0 0 28px rgba(0, 234, 255, 0.1);
+}
+
+.ns-engine-card::after,
+.ns-model-card::after,
+.ns-macro-card::after {
+  opacity: 0.72;
+}
+
+.ns-engine-card .ns-card-header,
+.ns-model-card .ns-card-header,
+.ns-macro-card .ns-card-header {
+  background:
+    linear-gradient(180deg, rgba(0, 234, 255, 0.12) 0%, rgba(0, 234, 255, 0.03) 46%, rgba(0, 0, 0, 0) 100%);
+  border-bottom-color: rgba(0, 234, 255, 0.17);
+}
+
+.ns-card-header {
+  padding: 11px 18px 10px;
+}
+
+.ns-card-title {
+  color: #8ff2ff;
+  text-shadow:
+    0 0 8px rgba(0, 234, 255, 0.34),
+    0 0 16px rgba(0, 234, 255, 0.22),
+    0 0 28px rgba(0, 234, 255, 0.14);
+}
+
+.ns-card-header::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(180deg, rgba(0, 234, 255, 0.85) 0%, rgba(0, 234, 255, 0.2) 100%);
+  box-shadow: 0 0 14px rgba(0, 234, 255, 0.42);
+}
+
+.ns-card-header::after {
+  background: linear-gradient(
+    90deg,
+    rgba(0, 234, 255, 0) 0%,
+    rgba(0, 234, 255, 0.26) 16%,
+    rgba(118, 225, 255, 0.38) 50%,
+    rgba(0, 234, 255, 0.26) 84%,
+    rgba(0, 234, 255, 0) 100%
+  );
+  box-shadow: 0 0 10px rgba(0, 234, 255, 0.24);
+}
+
+.ns-card-body {
+  background:
+    linear-gradient(180deg, rgba(4, 10, 17, 0.44) 0%, rgba(0, 0, 0, 0) 32%),
+    linear-gradient(120deg, rgba(0, 234, 255, 0.026) 0%, transparent 36%);
+}
+
+.ns-track-badge {
+  border-radius: 4px;
+  padding: 3px 10px;
+  box-shadow: inset 0 1px 0 rgba(230, 248, 255, 0.2), 0 0 10px rgba(0, 0, 0, 0.28);
+}
+
+.ns-track-badge.engine,
+.ns-track-badge.model {
+  background: linear-gradient(180deg, rgba(0, 234, 255, 0.16) 0%, rgba(0, 234, 255, 0.04) 100%);
+  color: rgba(169, 244, 255, 0.96);
+  border-color: rgba(0, 234, 255, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(230, 247, 255, 0.28),
+    0 0 11px rgba(0, 234, 255, 0.16);
+}
+
+.ns-regime-label {
+  letter-spacing: 0.13em;
+  font-size: 23px;
+  text-shadow:
+    0 0 24px rgba(0, 234, 255, 0.18),
+    0 0 5px rgba(0, 234, 255, 0.14);
+}
+
+.ns-score-row {
+  margin-top: 4px;
+  border-top-color: rgba(0, 234, 255, 0.14);
+  border-bottom: 1px solid rgba(0, 234, 255, 0.08);
+  padding: 10px 0;
+}
+
+.ns-score-value {
+  font-size: 20px;
+  color: rgba(196, 247, 255, 0.96);
+  text-shadow: 0 0 16px rgba(0, 234, 255, 0.24);
+}
+
+.ns-last-updated {
+  color: rgba(151, 207, 226, 0.8) !important;
+  letter-spacing: 0.03em;
+}
+
+.ns-refresh-btn,
+.ns-model-run-btn {
+  border-radius: 4px;
+  text-transform: uppercase;
+  font-family: 'Orbitron', sans-serif;
+  letter-spacing: 0.09em;
+  border: 1px solid rgba(0, 234, 255, 0.44);
+  color: rgba(172, 244, 255, 0.98);
+  background:
+    linear-gradient(180deg, rgba(21, 44, 66, 0.94) 0%, rgba(8, 20, 33, 0.96) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(216, 239, 255, 0.23),
+    0 0 14px rgba(0, 234, 255, 0.14);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.ns-refresh-btn:hover,
+.ns-model-run-btn:hover {
+  border-color: rgba(106, 220, 255, 0.86);
+  box-shadow:
+    inset 0 1px 0 rgba(229, 246, 255, 0.34),
+    0 0 18px rgba(0, 234, 255, 0.22);
+  transform: translateY(-1px);
+}
+
+.ns-refresh-btn:active,
+.ns-model-run-btn:active {
+  transform: translateY(0);
+}
+
+.ns-model-run-btn:disabled {
+  background: rgba(25, 35, 43, 0.7);
+  border-color: rgba(106, 132, 148, 0.3);
+  color: rgba(136, 161, 173, 0.65);
+}
+
+.ns-macro-grid {
+  gap: 8px;
+}
+
+.ns-macro-item {
+  padding: 8px 10px;
+  background:
+    linear-gradient(180deg, rgba(12, 22, 33, 0.85) 0%, rgba(7, 13, 22, 0.9) 100%);
+  border-color: rgba(0, 234, 255, 0.18);
+  box-shadow: inset 0 1px 0 rgba(216, 240, 255, 0.05), 0 0 0 1px rgba(0, 234, 255, 0.03);
+}
+
+.ns-macro-item:hover {
+  border-color: rgba(0, 234, 255, 0.34);
+  background:
+    linear-gradient(180deg, rgba(16, 29, 42, 0.88) 0%, rgba(8, 16, 27, 0.92) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(222, 243, 255, 0.08),
+    0 0 13px rgba(0, 234, 255, 0.1);
+}
+
+.ns-macro-key {
+  color: rgba(143, 187, 204, 0.95);
+}
+
+.ns-macro-val {
+  color: rgba(202, 247, 255, 0.98);
+  text-shadow: 0 0 10px rgba(0, 234, 255, 0.15);
+}
+
+.ns-macro-freshness .mc-freshness-tag {
+  margin-left: 6px;
+  transform: translateY(-1px);
+}
+
+.ns-stress-badge {
+  margin-top: 12px;
+  border-radius: 4px;
+  box-shadow: inset 0 1px 0 rgba(239, 246, 255, 0.12), 0 0 12px rgba(0, 234, 255, 0.08);
+}
+
+.ns-metric-grid {
+  gap: 9px;
+}
+
+.ns-metric {
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, rgba(12, 23, 36, 0.88) 0%, rgba(7, 13, 22, 0.94) 100%);
+  border-color: rgba(0, 234, 255, 0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(224, 243, 255, 0.07),
+    0 8px 16px rgba(0, 0, 0, 0.24),
+    0 0 0 1px rgba(0, 234, 255, 0.04);
+}
+
+.ns-metric:hover {
+  border-color: rgba(0, 234, 255, 0.36);
+  background:
+    linear-gradient(180deg, rgba(16, 30, 45, 0.92) 0%, rgba(9, 18, 29, 0.96) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(232, 247, 255, 0.11),
+    0 10px 20px rgba(0, 0, 0, 0.29),
+    0 0 14px rgba(0, 234, 255, 0.12);
+}
+
+.ns-metric-val {
+  font-size: 19px;
+  text-shadow: 0 0 12px rgba(0, 234, 255, 0.14);
+}
+
+.ns-metric-key {
+  color: rgba(146, 188, 204, 0.96);
+}
+
+.ns-category-bar {
+  padding-top: 2px;
+}
+
+.ns-cat-pill {
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(25, 39, 52, 0.86) 0%, rgba(14, 25, 37, 0.94) 100%);
+  border-color: rgba(0, 234, 255, 0.14);
+  color: rgba(157, 208, 226, 0.96);
+}
+
+.ns-cat-pill:hover {
+  border-color: rgba(0, 234, 255, 0.34);
+  box-shadow: 0 0 10px rgba(0, 234, 255, 0.11);
+}
+
+.ns-cat-pill .ns-cat-count {
+  color: rgba(196, 247, 255, 0.98);
+}
+
+.ns-feed-scroll {
+  padding-right: 6px;
+  box-shadow: inset 0 0 0 1px rgba(0, 234, 255, 0.08), inset 0 0 24px rgba(0, 234, 255, 0.025);
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, rgba(4, 11, 19, 0.72) 0%, rgba(2, 7, 14, 0.84) 100%);
+}
+
+.ns-headline-item {
+  padding: 11px 14px;
+  border-bottom-color: rgba(0, 234, 255, 0.1);
+  background: linear-gradient(90deg, rgba(0, 234, 255, 0.014) 0%, rgba(0, 0, 0, 0) 38%);
+  border-left: 2px solid rgba(0, 234, 255, 0.08);
+}
+
+.ns-headline-item:hover {
+  background:
+    linear-gradient(90deg, rgba(0, 234, 255, 0.095) 0%, rgba(0, 234, 255, 0.03) 38%, rgba(0, 0, 0, 0) 74%);
+  border-left-color: rgba(106, 220, 255, 0.8);
+  box-shadow: inset 0 1px 0 rgba(228, 246, 255, 0.06), 0 0 16px rgba(0, 234, 255, 0.08);
+}
+
+.ns-headline-text {
+  color: rgba(221, 240, 252, 0.95);
+}
+
+.ns-headline-text a {
+  color: rgba(221, 240, 252, 0.95);
+}
+
+.ns-headline-text a:hover {
+  color: rgba(145, 240, 255, 0.98);
+}
+
+.ns-badge {
+  border-radius: 4px;
+  font-size: 8.5px;
+  padding: 2px 7px;
+  box-shadow: inset 0 1px 0 rgba(237, 249, 255, 0.12);
+}
+
+.ns-badge-source {
+  background: linear-gradient(180deg, rgba(23, 49, 66, 0.86) 0%, rgba(12, 26, 39, 0.94) 100%);
+  color: rgba(165, 236, 249, 0.96);
+  border-color: rgba(0, 234, 255, 0.28);
+}
+
+.ns-badge-category {
+  background: linear-gradient(180deg, rgba(41, 50, 58, 0.74) 0%, rgba(26, 34, 44, 0.84) 100%);
+  color: rgba(167, 191, 205, 0.95);
+  border-color: rgba(126, 152, 170, 0.28);
+}
+
+.ns-badge-sentiment.bullish {
+  box-shadow: 0 0 10px rgba(0, 230, 118, 0.15);
+}
+
+.ns-badge-sentiment.bearish {
+  box-shadow: 0 0 10px rgba(255, 79, 102, 0.15);
+}
+
+.ns-badge-sentiment.neutral {
+  box-shadow: 0 0 10px rgba(0, 234, 255, 0.15);
+}
+
+.ns-badge-sentiment.mixed {
+  box-shadow: 0 0 10px rgba(244, 200, 95, 0.15);
+}
+
+.ns-symbol-tag {
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(19, 45, 61, 0.86) 0%, rgba(10, 24, 36, 0.94) 100%);
+  border-color: rgba(0, 234, 255, 0.28);
+  color: rgba(167, 242, 255, 0.98);
+  box-shadow: 0 0 8px rgba(0, 234, 255, 0.12);
+}
+
+.ns-breakdown-comp {
+  border-bottom-color: rgba(0, 234, 255, 0.1);
+  padding: 10px 14px 11px;
+  background: linear-gradient(90deg, rgba(0, 234, 255, 0.015) 0%, rgba(0, 0, 0, 0) 42%);
+}
+
+.ns-breakdown-comp:hover {
+  background:
+    linear-gradient(90deg, rgba(0, 234, 255, 0.08) 0%, rgba(0, 234, 255, 0.028) 36%, rgba(0, 0, 0, 0) 72%);
+}
+
+.ns-breakdown-comp-name {
+  color: rgba(203, 241, 255, 0.95);
+}
+
+.ns-breakdown-comp-score {
+  font-size: 12.5px;
+  color: rgba(188, 245, 255, 0.96);
+  text-shadow: 0 0 11px rgba(0, 234, 255, 0.18);
+}
+
+.ns-breakdown-comp-bar,
+.ns-comp-bar-track {
+  background: linear-gradient(180deg, rgba(5, 16, 24, 0.88) 0%, rgba(4, 10, 17, 0.95) 100%);
+  border-color: rgba(0, 234, 255, 0.18);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.42),
+    inset 0 0 0 1px rgba(0, 234, 255, 0.05);
+}
+
+.ns-breakdown-comp-fill,
+.ns-comp-bar-fill {
+  box-shadow:
+    0 0 15px rgba(0, 234, 255, 0.34),
+    inset 0 1px 0 rgba(220, 245, 255, 0.34);
+}
+
+.ns-comp-name,
+.ns-breakdown-signals {
+  color: rgba(145, 188, 204, 0.9);
+}
+
+.ns-comp-val {
+  color: rgba(191, 245, 255, 0.95);
+  text-shadow: 0 0 9px rgba(0, 234, 255, 0.14);
+}
+
+.ns-source-table {
+  border: 1px solid rgba(0, 234, 255, 0.09);
+  border-radius: 6px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(10, 19, 29, 0.55) 0%, rgba(5, 11, 19, 0.62) 100%);
+}
+
+.ns-source-table th {
+  color: rgba(154, 208, 225, 0.95);
+  border-bottom-color: rgba(0, 234, 255, 0.16);
+  background: linear-gradient(180deg, rgba(0, 234, 255, 0.065) 0%, rgba(0, 0, 0, 0) 100%);
+}
+
+.ns-source-table td {
+  border-bottom-color: rgba(0, 234, 255, 0.08);
+}
+
+.ns-source-table tr:hover td {
+  background: rgba(0, 234, 255, 0.052);
+}
+
+.ns-src-status {
+  border: 1px solid transparent;
+}
+
+.ns-src-status.ok {
+  border-color: rgba(0, 230, 118, 0.28);
+}
+
+.ns-src-status.error {
+  border-color: rgba(255, 79, 102, 0.28);
+}
+
+.ns-src-status.unavailable {
+  border-color: rgba(147, 167, 182, 0.24);
+}
+
+/* ── Responsive ──────────────────────────────────────────────────── */
+@media (max-width: 1200px) {
+  .ns-top-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ns-stats-row {
+    grid-template-columns: 1fr;
+  }
+  .ns-insights-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ns-main-grid {
+    grid-template-columns: 1fr;
+  }
+  .ns-metric-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .ns-top-row {
+    grid-template-columns: 1fr;
+  }
+  .ns-insights-row {
+    grid-template-columns: 1fr;
+  }
+  .ns-metric-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+</style>

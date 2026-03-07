@@ -320,17 +320,19 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
       }
 
       /* ═════════════════════════════════════════════════════════════
-       * Card structure — 3-layer institutional layout
-       *   .trade-card (flex column)
-       *     ├── HEADER  (.at-card-header) — symbol, direction, status
-       *     ├── CORE METRICS (.at-core-metrics) — large tiles, always visible
-       *     ├── AI PANEL (.at-ai-panel) — analysis result (if available)
-       *     ├── BODY    (.at-card-body / .at-collapsed) — expanded panels
-       *     └── ACTIONS (.trade-actions) — pinned bottom
+       * Card structure (matches standard trade card hierarchy)
+       *   .trade-card.at-v2 (flex column)
+       *     ├── 1. HEADER  (.at-card-header)
+       *     ├── 2. WIN/LOSS BAR (.at-heat-bar-outer)
+       *     ├── 3. METRIC GRID (.trade-body > .metric-grid)
+       *     ├── 4. PRIMARY ACTION (Run Model Analysis)
+       *     ├── 5. TRADE ACTIONS (Execute / Close)
+       *     ├── 6. SECONDARY ACTIONS (Legs / Sim / Monitor)
+       *     └── 7. COLLAPSIBLE PANELS (.at-card-body) — analytics
        * ═════════════════════════════════════════════════════════════ */
       var html = '<div class="trade-card at-v2' + (isOpen ? ' at-expanded' : '') + '" data-trade-key="' + key + '">';
 
-      /* ── LAYER 1: Header (minimal, clean) ── */
+      /* ── 1. HEADER ── */
       html += '<div class="at-card-header trade-header-click" data-toggle-key="' + key + '">';
       html += '<div class="at-hdr-left">';
       html += '<span class="at-symbol-badge">' + (trade.symbol || 'N/A') + '</span>';
@@ -341,7 +343,6 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
       html += '<span class="active-account-badge ' + badgeClass + '">' + badgeLabel + '</span>';
       if (monChip) html += monChip;
       if (riskFlags) html += '<span class="at-hdr-flags">' + riskFlags + '</span>';
-      /* AI status indicator */
       var aiStatus = '';
       if (window.BenTradeModelAnalysisStore?.get) {
         var cached = window.BenTradeModelAnalysisStore.get(key);
@@ -356,61 +357,46 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
       html += '</div>';
       html += '</div>'; /* .at-card-header */
 
-      /* ── LAYER 2: Core Position Metrics (large tiles, always visible) ── */
-      html += '<div class="at-core-metrics">';
-      /* Row 1: Price, Unrealized P&L, Position Value, Cost Basis */
-      html += '<div class="at-core-row">';
-      html += '<div class="at-core-tile">';
-      html += '<div class="at-core-val">' + fmtDollars(trade.mark_price) + '</div>';
-      html += '<div class="at-core-label">Current Price</div>';
-      html += '</div>';
-      html += '<div class="at-core-tile">';
-      html += '<div class="at-core-val ' + pnlCl + '">' + fmtSignedTotal(trade.unrealized_pnl) + '</div>';
-      html += '<div class="at-core-label">Unrealized P&L</div>';
-      html += '</div>';
-      html += '<div class="at-core-tile">';
-      html += '<div class="at-core-val">' + fmtTotal(marketValue) + '</div>';
-      html += '<div class="at-core-label">Position Value</div>';
-      html += '</div>';
-      html += '<div class="at-core-tile">';
-      html += '<div class="at-core-val">' + fmtTotal(costBasis) + '</div>';
-      html += '<div class="at-core-label">Cost Basis</div>';
-      html += '</div>';
-      html += '</div>'; /* .at-core-row */
-      /* Row 2: Avg Entry, Day Change, Exposure, Last Update */
-      html += '<div class="at-core-row">';
-      html += '<div class="at-core-tile">';
-      html += '<div class="at-core-val">' + fmtDollars(trade.avg_open_price) + '</div>';
-      html += '<div class="at-core-label">Avg Entry</div>';
-      html += '</div>';
-      html += '<div class="at-core-tile">';
-      html += '<div class="at-core-val ' + pnlClass(dayChange) + '">' + dayChangeStr + (dayChangePctStr ? ' <small>' + dayChangePctStr + '</small>' : '') + '</div>';
-      html += '<div class="at-core-label">Day Change</div>';
-      html += '</div>';
-      html += '<div class="at-core-tile">';
-      html += '<div class="at-core-val">' + fmtTotal(exposure) + '</div>';
-      html += '<div class="at-core-label">Exposure</div>';
-      html += '</div>';
-      html += '<div class="at-core-tile">';
-      html += '<div class="at-core-val at-core-val-small">' + asOf + '</div>';
-      html += '<div class="at-core-label">Last Update</div>';
-      html += '</div>';
-      html += '</div>'; /* .at-core-row */
-      html += '</div>'; /* .at-core-metrics */
-
-      /* ── PnL Heat Bar ── */
+      /* ── 2. WIN / LOSS BAR ── */
       html += '<div class="at-heat-bar-outer">' + heatBar + '</div>';
 
-      /* ── AI Recommendation Panel (rendered by model analysis, initially hidden) ── */
-      html += '<div class="at-ai-panel" data-ai-panel data-trade-key="' + key + '" style="display:none;"></div>';
+      /* ── 3. METRIC GRID (inside .trade-body, below heat bar) ── */
+      var _tc = window.BenTradeTradeCard;
+      var coreMetrics = [
+        { label: 'Current Price',  value: fmtDollars(trade.mark_price),         cssClass: 'neutral',           dataMetric: 'current_price' },
+        { label: 'Unrealized P&L', value: fmtSignedTotal(trade.unrealized_pnl), cssClass: pnlCl || 'neutral',  dataMetric: 'unrealized_pnl' },
+        { label: 'Position Value', value: fmtTotal(marketValue),                cssClass: 'neutral',           dataMetric: 'position_value' },
+        { label: 'Cost Basis',     value: fmtTotal(costBasis),                  cssClass: 'neutral',           dataMetric: 'cost_basis' },
+        { label: 'Avg Entry',      value: fmtDollars(trade.avg_open_price),     cssClass: 'neutral',           dataMetric: 'avg_entry' },
+        { label: 'Day Change',     value: dayChangeStr + (dayChangePctStr ? ' <small>' + dayChangePctStr + '</small>' : ''), cssClass: pnlClass(dayChange) || 'neutral', dataMetric: 'day_change' },
+        { label: 'Exposure',       value: fmtTotal(exposure),                   cssClass: 'neutral',           dataMetric: 'exposure' },
+        { label: 'Last Update',    value: asOf,                                 cssClass: 'neutral',           dataMetric: 'last_update' },
+      ];
+      html += '<div class="trade-body">' + _tc.metricGrid(coreMetrics) + '</div>';
 
-      /* ── Model output container (legacy compat + store hydration) ── */
-      html += '<div class="trade-model-output" data-model-output data-trade-key="' + key + '" style="display:none;"></div>';
+      /* ── 4–6. ACTION BUTTONS ── */
+      html += '<div class="trade-actions at-actions-v2">';
+      /* 4. Primary */
+      html += '<div class="at-actions-primary">';
+      html += '<button class="btn btn-run btn-action" data-action="model-analysis" data-trade-key="' + key + '">Run Model Analysis</button>';
+      html += '</div>';
+      /* 5. Trade actions */
+      html += '<div class="at-actions-main">';
+      html += '<button class="btn btn-exec btn-action" data-action="execute-trade" data-trade-key="' + key + '">Execute Trade</button>';
+      html += '<button class="btn btn-reject btn-action" data-action="close-position" data-trade-key="' + key + '">Close Position</button>';
+      html += '</div>';
+      /* 6. Secondary actions */
+      html += '<div class="at-actions-secondary">';
+      html += '<button class="btn at-btn-secondary" data-action="show-legs" data-trade-key="' + key + '">Show Legs</button>';
+      html += '<button class="btn at-btn-secondary" data-action="simulate-close" data-trade-key="' + key + '">Simulate Close</button>';
+      html += '<button class="btn at-btn-secondary" data-action="show-monitor" data-trade-key="' + key + '">Monitor</button>';
+      html += '</div>';
+      html += '</div>'; /* .trade-actions */
 
-      /* ── Collapsible Body (expanded panels) ── */
+      /* ── 7. COLLAPSIBLE PANELS (analytics, AI, model output — toggled by secondary buttons) ── */
       html += '<div class="at-card-body' + (isOpen ? '' : ' at-collapsed') + '" data-body-key="' + key + '">';
-
-      /* Analytics Panels */
+      html += '<div class="at-ai-panel" data-ai-panel data-trade-key="' + key + '" style="display:none;"></div>';
+      html += '<div class="trade-model-output" data-model-output data-trade-key="' + key + '" style="display:none;"></div>';
       html += '<div class="at-analytics" data-analytics-key="' + key + '">';
       html += '<div class="at-panel at-panel-legs" data-panel="legs-' + key + '" style="display:none;"><div class="at-panel-title">Position Breakdown</div><div class="at-panel-content">' + buildLegsTable(trade) + '</div></div>';
       html += '<div class="at-panel at-panel-sim" data-panel="sim-' + key + '" style="display:none;"><div class="at-panel-title">PnL Simulation</div><div class="at-panel-content" data-sim-content="' + key + '"></div></div>';
@@ -418,24 +404,7 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
       html += '<div class="at-panel at-panel-monitor" data-panel="monitor-' + key + '" style="display:none;"><div class="at-panel-title">Position Monitor</div><div class="at-panel-content" data-monitor-content="' + key + '">' + buildMonitorPanel(trade) + '</div></div>';
       html += '<div class="at-panel at-panel-notes" data-panel="notes-' + key + '" style="display:none;"><div class="at-panel-title">Trade Notes</div><div class="at-panel-content"><textarea class="at-notes-input" placeholder="Add notes about this position…" rows="3"></textarea></div></div>';
       html += '</div>'; /* .at-analytics */
-
       html += '</div>'; /* .at-card-body */
-
-      /* ── LAYER 3: Action Buttons (pinned bottom) ── */
-      html += '<div class="trade-actions at-actions-v2">';
-      html += '<div class="at-actions-primary">';
-      html += '<button class="btn btn-run btn-action" data-action="model-analysis" data-trade-key="' + key + '">Run Model Analysis</button>';
-      html += '</div>';
-      html += '<div class="at-actions-main">';
-      html += '<button class="btn btn-exec btn-action" data-action="execute-trade" data-trade-key="' + key + '">Execute Trade</button>';
-      html += '<button class="btn btn-reject btn-action" data-action="close-position" data-trade-key="' + key + '">Close Position</button>';
-      html += '</div>';
-      html += '<div class="at-actions-secondary">';
-      html += '<button class="btn at-btn-secondary" data-action="show-legs" data-trade-key="' + key + '">Show Legs</button>';
-      html += '<button class="btn at-btn-secondary" data-action="simulate-close" data-trade-key="' + key + '">Simulate Close</button>';
-      html += '<button class="btn at-btn-secondary" data-action="show-monitor" data-trade-key="' + key + '">Monitor</button>';
-      html += '</div>';
-      html += '</div>'; /* .trade-actions */
 
       html += '</div>'; /* .trade-card */
 
@@ -1031,11 +1000,25 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
   /* ═══════════════════════════════════════════════════════════════
    * Refresh
    * ═══════════════════════════════════════════════════════════════ */
+  var _cache = window.BenTradeDashboardCache;
+  var CACHE_KEY = 'activeTrades';
+
+  function setRefreshState(refreshing) {
+    if (refreshing) {
+      refreshBtn.disabled = true;
+      refreshBtn.classList.add('btn-refreshing');
+      refreshBtn.innerHTML = '<span class="btn-spinner"></span>Refreshing\u2026';
+    } else {
+      refreshBtn.disabled = false;
+      refreshBtn.classList.remove('btn-refreshing');
+      refreshBtn.innerHTML = 'Refresh';
+    }
+  }
+
   async function refresh() {
     try {
       setError('');
-      refreshBtn.disabled = true;
-      refreshBtn.textContent = 'Refreshing...';
+      setRefreshState(true);
       payload = await api.getActiveTrades(accountMode);
 
       if (payload?.error) {
@@ -1051,6 +1034,8 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
       renderSourceHealth(payload?.source_health || {});
       setLiveBadge(payload?.as_of);
       renderCards();
+
+      if (_cache) _cache.set(CACHE_KEY, payload);
 
       /* Kick off monitor evaluation in background (non-blocking) */
       if (trades.length > 0) {
@@ -1074,8 +1059,7 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
       trades = [];
       renderCards();
     } finally {
-      refreshBtn.disabled = false;
-      refreshBtn.textContent = 'Refresh';
+      setRefreshState(false);
     }
   }
 
@@ -1171,5 +1155,16 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
   }
 
   /* ── Boot ── */
+  // Render cached data immediately if available
+  var _cached = _cache && _cache.get(CACHE_KEY);
+  if (_cached && _cached.isLoaded && _cached.data) {
+    payload = _cached.data;
+    trades = Array.isArray(payload?.active_trades) ? payload.active_trades : [];
+    hydrateUnderlyingFilter(trades);
+    renderSourceHealth(payload?.source_health || {});
+    setLiveBadge(payload?.as_of);
+    renderCards();
+  }
+  // Always fetch fresh data in background
   refresh();
 };

@@ -31,6 +31,7 @@ from app.api.routes_trade_lifecycle import router as trade_lifecycle_router
 from app.api.routes_trading import router as trading_router
 from app.api.routes_underlying import router as underlying_router
 from app.api.routes_workbench import router as workbench_router
+from app.api.routes_news_sentiment import router as news_sentiment_router
 from app.clients.finnhub_client import FinnhubClient
 from app.clients.fred_client import FredClient
 from app.clients.polygon_client import PolygonClient
@@ -64,6 +65,8 @@ from app.utils.http import UpstreamError
 from app.utils.snapshot import SnapshotChainSource, SnapshotRecorder, TradierChainSource, run_snapshot_cleanup
 from app.services.platform_settings import PlatformSettings
 from app.services.active_trade_monitor_service import ActiveTradeMonitorService
+from app.services.news_sentiment_service import NewsSentimentService
+from app.services.market_context_service import MarketContextService
 
 
 def _setup_logging() -> None:
@@ -241,6 +244,22 @@ def create_app() -> FastAPI:
     app.state.stock_execution_service = stock_execution_service
     app.state.stock_engine_service = stock_engine_service
     app.state.active_trade_monitor_service = active_trade_monitor_service
+    market_context_service = MarketContextService(
+        fred_client=fred_client,
+        finnhub_client=finnhub_client,
+        cache=cache,
+        tradier_client=tradier_client,
+    )
+    app.state.market_context_service = market_context_service
+    news_sentiment_service = NewsSentimentService(
+        settings=settings,
+        http_client=http_client,
+        cache=cache,
+        fred_client=fred_client,
+        market_context_service=market_context_service,
+    )
+    app.state.news_sentiment_service = news_sentiment_service
+
     app.state.settings = settings
     app.state.backend_dir = backend_dir
     app.state.frontend_dir = frontend_dir
@@ -269,6 +288,7 @@ def create_app() -> FastAPI:
     app.include_router(reports_router)
     app.include_router(decisions_router)
     app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
+    app.include_router(news_sentiment_router)
     app.include_router(snapshots_router)
     app.include_router(dev_router)
     app.include_router(frontend_router)

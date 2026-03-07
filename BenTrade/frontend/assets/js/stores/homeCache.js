@@ -1,7 +1,9 @@
 window.BenTradeHomeCacheStore = (function(){
+  'use strict';
+
   const STORAGE_KEY = 'bentrade_home_cache_v1';
-  const FRESH_TTL_MS = 60 * 1000;
-  const MAX_STALE_MS = 15 * 60 * 1000;
+  const FRESH_TTL_MS = 60 * 1000;        // 60 s — triggers silent background refresh
+  const MAX_STALE_MS = 60 * 60 * 1000;   // 60 min — hard localStorage expiry only
 
   const INDEX_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA'];
   const SECTOR_SYMBOLS = ['XLF', 'XLK', 'XLE', 'XLY', 'XLP', 'XLV', 'XLI', 'XLB', 'XLRE', 'XLU', 'XLC'];
@@ -9,6 +11,24 @@ window.BenTradeHomeCacheStore = (function(){
   let renderer = null;
   let inMemory = null;
   let inFlight = null;
+  let version = 0;              // monotonic — bumps on every setSnapshot
+
+  /* ── Debug instrumentation ── */
+  function _log(event, detail){
+    const snap = inMemory;
+    const keys = snap && snap.data ? Object.keys(snap.data) : [];
+    console.log(
+      '[HOME_CACHE] ' + event,
+      Object.assign({
+        version: version,
+        cached_at: snap ? snap.cached_at : null,
+        isLoaded: snap ? !!snap.isLoaded : false,
+        isRefreshing: snap ? !!snap.isRefreshing : false,
+        dataKeys: keys.length,
+        hasRenderer: typeof renderer === 'function',
+      }, detail || {})
+    );
+  }
 
   function nowIso(){
     return new Date().toISOString();
@@ -24,8 +44,16 @@ window.BenTradeHomeCacheStore = (function(){
 
   function loadFromStorage(){
     const parsed = safeParse(localStorage.getItem(STORAGE_KEY) || '');
-    if(parsed && typeof parsed === 'object') return parsed;
-    return null;
+    if(!parsed || typeof parsed !== 'object') return null;
+    // Hard staleness — don't hydrate truly ancient data from storage
+    if(parsed.cached_at){
+      var age = Date.now() - new Date(parsed.cached_at).getTime();
+      if(age > MAX_STALE_MS){
+        _log('storage_expired', { age_min: Math.round(age / 60000) });
+        return null;
+      }
+    }
+    return parsed;
   }
 
   function persist(snapshot){
@@ -64,6 +92,13 @@ window.BenTradeHomeCacheStore = (function(){
     const previous = getSnapshot();
     const previousData = (previous && typeof previous.data === 'object') ? previous.data : {};
     const skipScanners = !!homeOnly;
+
+    _log('refresh_start', { force: !!force, homeOnly: !!homeOnly });
+
+    // Mark refreshing in-memory (preserve existing data for UI)
+    if(inMemory){
+      inMemory = Object.assign({}, inMemory, { isRefreshing: true, lastError: null });
+    }
 
     const doRefresh = (async () => {
       const errors = [];
@@ -240,10 +275,30 @@ window.BenTradeHomeCacheStore = (function(){
       const mergedData = mergeData(previousData, updates);
       const ts = nowIso();
       const fullFailure = successfulStages <= 0;
+
+      // Complete failure with existing good data — preserve last good cache
+      if(fullFailure && previous && (previous.isLoaded || (previous.data && previous.cached_at))){
+        _log('refresh_failure', { errors: errors, preserved: true });
+        var preserved = Object.assign({}, previous, {
+          isRefreshing: false,
+          lastError: errors.join('; ') || 'All stages failed',
+          meta: Object.assign({}, previous.meta || {}, {
+            errors: errors,
+            last_refresh_attempt: ts,
+          }),
+        });
+        setSnapshot(preserved);
+        return preserved;
+      }
+
       const nextSnapshot = {
         cached_at: ts,
         expires_at: new Date(Date.now() + FRESH_TTL_MS).toISOString(),
         data: mergedData,
+        isLoaded: true,
+        isRefreshing: false,
+        lastError: null,
+        version: version + 1,
         meta: {
           errors,
           partial: errors.length > 0,
@@ -252,8 +307,20 @@ window.BenTradeHomeCacheStore = (function(){
       };
 
       setSnapshot(nextSnapshot);
+      _log('refresh_success', { stages: successfulStages, errors: errors.length });
       return nextSnapshot;
-    })().finally(() => {
+    })().catch(function(err){
+      // Unhandled error — preserve last good cache
+      _log('refresh_failure', { error: String(err?.message || err) });
+      if(inMemory){
+        inMemory = Object.assign({}, inMemory, {
+          isRefreshing: false,
+          lastError: String(err?.message || err),
+        });
+        persist(inMemory);
+      }
+      throw err;
+    }).finally(() => {
       inFlight = null;
     });
 
@@ -264,15 +331,25 @@ window.BenTradeHomeCacheStore = (function(){
   function getSnapshot(){
     if(!inMemory){
       inMemory = loadFromStorage();
+      if(inMemory){
+        _log('hydrate_from_storage');
+      }
     }
     return inMemory;
   }
 
   function setSnapshot(snapshot){
+    version = (snapshot && snapshot.version ? snapshot.version : version) + 1;
+    snapshot.version = version;
     inMemory = snapshot;
     persist(snapshot);
+    _log('cache_replace', { version: version });
     if(typeof renderer === 'function'){
-      renderer(snapshot);
+      try{
+        renderer(snapshot);
+      }catch(err){
+        console.error('[HOME_CACHE] renderer error:', err);
+      }
     }
   }
 
@@ -283,23 +360,45 @@ window.BenTradeHomeCacheStore = (function(){
     return ageMs > Number(ttlMs || FRESH_TTL_MS);
   }
 
+  /**
+   * Returns true if the snapshot has usable data.
+   * Key fix: no longer enforces MAX_STALE_MS age gate for rendering.
+   * Stale data is better than blank metrics.
+   */
   function isUsable(snapshot){
     const snap = snapshot || getSnapshot();
-    if(!snap || !snap.cached_at) return false;
-    const ageMs = Date.now() - new Date(snap.cached_at).getTime();
-    return ageMs <= MAX_STALE_MS;
+    if(!snap) return false;
+    // If isLoaded was explicitly set by a successful refresh, trust it
+    if(snap.isLoaded === true) return true;
+    // Legacy snapshots (before isLoaded): check for data + cached_at
+    if(snap.cached_at && snap.data && typeof snap.data === 'object'){
+      return Object.keys(snap.data).length > 0;
+    }
+    return false;
   }
 
   function setRenderer(nextRenderer){
     renderer = (typeof nextRenderer === 'function') ? nextRenderer : null;
   }
 
+  /**
+   * Render from cache immediately on route mount.
+   * Returns true if cached data was rendered.
+   * Key fix: no MAX_STALE_MS gate — any loaded data renders.
+   */
   function renderCachedImmediately(){
     const snap = getSnapshot();
     if(snap && isUsable(snap) && typeof renderer === 'function'){
-      renderer(snap);
+      _log('hydrate_from_cache', { version: snap.version, cached_at: snap.cached_at });
+      try{
+        renderer(snap);
+      }catch(err){
+        console.error('[HOME_CACHE] renderer error during hydrate:', err);
+        return false;
+      }
       return true;
     }
+    _log('hydrate_from_cache_miss', { hasSnap: !!snap, isUsable: snap ? isUsable(snap) : false });
     return false;
   }
 
@@ -329,6 +428,7 @@ window.BenTradeHomeCacheStore = (function(){
     getSnapshot,
     setSnapshot,
     isStale,
+    isUsable,
     renderCachedImmediately,
     refreshSilent: refreshSilentWithLog,
     refreshNow,

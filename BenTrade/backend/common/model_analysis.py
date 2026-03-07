@@ -368,8 +368,8 @@ def analyze_regime(
     regime_data: dict[str, Any],
     playbook_data: dict[str, Any] | None = None,
     model_url: str | None = None,
-    retries: int = 1,
-    timeout: int = 60,
+    retries: int = 0,
+    timeout: int = 300,
 ) -> dict[str, Any]:
     """Call the local LLM with raw regime inputs only (no derived scores/labels).
 
@@ -477,6 +477,7 @@ def analyze_regime(
         ],
         "max_tokens": 2400,
         "temperature": 0.0,
+        "stream": False,
     }
 
     # ── 5. Call the model ───────────────────────────────────────────
@@ -485,7 +486,12 @@ def analyze_regime(
     while attempt <= int(max(retries, 0)):
         attempt += 1
         try:
+            _log.info("[MODEL_REGIME] POST %s (attempt %d, timeout=%ds)", model_url, attempt, timeout)
             response = _requests.post(model_url, json=payload, timeout=timeout)
+            _log.info(
+                "[MODEL_REGIME] response HTTP %d (%d bytes, %.1fs)",
+                response.status_code, len(response.content), response.elapsed.total_seconds(),
+            )
             response.raise_for_status()
 
             response_json = None
@@ -542,7 +548,7 @@ def analyze_trade(
     trade: TradeContract,
     source: str,
     model_url: str | None = None,
-    retries: int = 2,
+    retries: int = 1,
     timeout: int = 120,
 ) -> dict[str, Any] | None:
     # Keep the legacy JSON contract exactly the same by delegating to the legacy implementation.
@@ -568,10 +574,13 @@ def analyze_stock_idea(
     idea: dict[str, Any],
     source: str,
     model_url: str | None = None,
-    retries: int = 1,
-    timeout: int = 30,
+    retries: int = 0,
+    timeout: int = 120,
 ) -> dict[str, Any]:
+    import logging
     from common import utils as legacy_utils
+
+    _log = logging.getLogger("bentrade.model_analysis")
 
     if model_url is None:
         from app.services.model_router import get_model_endpoint
@@ -606,6 +615,7 @@ def analyze_stock_idea(
         ],
         "max_tokens": 1800,
         "temperature": 0.0,
+        "stream": False,
     }
 
     last_error: Exception | None = None
@@ -614,6 +624,10 @@ def analyze_stock_idea(
         attempt += 1
         try:
             response = legacy_utils.requests.post(model_url, json=payload, timeout=timeout)
+            _log.info(
+                "[MODEL_STOCK_IDEA] response HTTP %d (%d bytes, %.1fs)",
+                response.status_code, len(response.content), response.elapsed.total_seconds(),
+            )
             response.raise_for_status()
 
             response_json = None
@@ -831,8 +845,8 @@ def analyze_stock_strategy(
     strategy_id: str,
     candidate: dict[str, Any],
     model_url: str | None = None,
-    retries: int = 1,
-    timeout: int = 60,
+    retries: int = 0,
+    timeout: int = 300,
 ) -> dict[str, Any]:
     """Run LLM model analysis on a stock strategy scanner candidate.
 
@@ -893,10 +907,15 @@ def analyze_stock_strategy(
     def _call_llm(messages: list[dict], label: str) -> str | None:
         """POST to LLM and extract assistant text. Returns None on network error."""
         try:
+            _log.info("[MODEL_STOCK_STRATEGY] POST %s (%s, timeout=%ds)", model_url, label, timeout)
             resp = _requests.post(
                 model_url,
-                json={"messages": messages, "max_tokens": 2048, "temperature": 0.0},
+                json={"messages": messages, "max_tokens": 2048, "temperature": 0.0, "stream": False},
                 timeout=timeout,
+            )
+            _log.info(
+                "[MODEL_STOCK_STRATEGY] response HTTP %d (%d bytes, %.1fs) [%s]",
+                resp.status_code, len(resp.content), resp.elapsed.total_seconds(), label,
             )
             resp.raise_for_status()
         except RequestException as exc:
@@ -1027,3 +1046,261 @@ def analyze_stock_strategy(
     )
 
     return normalized
+
+
+# ── News & Sentiment Model Analysis ─────────────────────────────────────
+
+
+def _coerce_news_sentiment_model_output(candidate: Any) -> dict[str, Any] | None:
+    """Normalise the LLM response for news/sentiment analysis into a consistent dict."""
+    if isinstance(candidate, list) and candidate:
+        first = candidate[0]
+        if isinstance(first, dict):
+            candidate = first
+    if not isinstance(candidate, dict):
+        return None
+
+    out: dict[str, Any] = {}
+
+    # ── Regime label ────────────────────────────────────────────
+    label = str(candidate.get("regime_label") or "Neutral").strip()
+    valid_labels = {"Risk-On", "Neutral", "Mixed", "Risk-Off", "High Stress"}
+    out["regime_label"] = label if label in valid_labels else "Neutral"
+
+    # ── Score 0-100 ─────────────────────────────────────────────
+    score_raw = candidate.get("score")
+    try:
+        out["score"] = max(0.0, min(float(score_raw), 100.0))
+    except (TypeError, ValueError):
+        out["score"] = None
+
+    # ── Confidence 0-1 ──────────────────────────────────────────
+    conf_raw = candidate.get("confidence")
+    try:
+        out["confidence"] = round(max(0.0, min(float(conf_raw), 1.0)), 2)
+    except (TypeError, ValueError):
+        out["confidence"] = None
+
+    # ── String sections ─────────────────────────────────────────
+    for key in ("executive_summary", "sentiment_outlook", "risk_assessment"):
+        val = candidate.get(key)
+        out[key] = str(val).strip() if isinstance(val, str) and val.strip() else None
+
+    # ── List sections ───────────────────────────────────────────
+    for key in ("dominant_narratives", "underpriced_risks", "key_drivers", "change_triggers"):
+        val = candidate.get(key)
+        if isinstance(val, list):
+            out[key] = [str(item).strip() for item in val if str(item or "").strip()][:8]
+        elif isinstance(val, str) and val.strip():
+            out[key] = [val.strip()]
+        else:
+            out[key] = None
+
+    # ── Headline tone label ─────────────────────────────────────
+    tone = candidate.get("headline_tone")
+    if isinstance(tone, str) and tone.strip():
+        out["headline_tone"] = tone.strip()
+    else:
+        out["headline_tone"] = None
+
+    return out
+
+
+def _extract_news_raw_evidence(
+    items: list[dict[str, Any]],
+    macro_context: dict[str, Any],
+) -> dict[str, Any]:
+    """Build raw evidence packet for the model — NO pre-computed scores/labels.
+
+    Includes:
+      - headlines: source, headline, category, published_at, symbols (max 40)
+      - macro_snapshot: VIX, yields, oil, fed funds, spread
+    Explicitly excluded:
+      - sentiment_score, sentiment_label (engine-computed)
+      - regime_label, overall_score (engine-derived)
+      - aggregation data (pressure counts, narratives)
+    """
+    headlines = []
+    for item in (items or [])[:40]:
+        headlines.append({
+            "source": item.get("source"),
+            "headline": item.get("headline"),
+            "category": item.get("category"),
+            "published_at": item.get("published_at"),
+            "symbols": (item.get("symbols") or [])[:5],
+        })
+
+    macro_raw = {}
+    for key in ("vix", "us_10y_yield", "us_2y_yield", "fed_funds_rate",
+                "oil_wti", "usd_index", "yield_curve_spread"):
+        macro_raw[key] = macro_context.get(key)
+
+    return {
+        "headlines": headlines,
+        "headline_count": len(headlines),
+        "macro_snapshot": macro_raw,
+    }
+
+
+# Fields explicitly excluded from model input to prevent anchoring
+_NEWS_SENTIMENT_EXCLUDED_FIELDS = [
+    "sentiment_score",
+    "sentiment_label",
+    "regime_label",
+    "overall_score",
+    "headline_pressure_24h",
+    "headline_pressure_72h",
+    "top_narratives",
+    "divergence",
+    "stress_level",
+]
+
+
+def analyze_news_sentiment(
+    *,
+    items: list[dict[str, Any]],
+    macro_context: dict[str, Any],
+    model_url: str | None = None,
+    retries: int = 0,
+    timeout: int = 300,
+) -> dict[str, Any]:
+    """Call the local LLM with raw news/macro evidence only (no derived scores).
+
+    The model independently assesses market sentiment from raw headlines and
+    macro data.  Engine-computed sentiment scores, labels, and aggregation
+    are deliberately excluded to prevent anchoring.
+    """
+    import logging
+
+    if model_url is None:
+        from app.services.model_router import get_model_endpoint
+        model_url = get_model_endpoint()
+    import requests as _requests
+
+    _log = logging.getLogger("bentrade.model_analysis")
+
+    # ── 1. Extract raw evidence ─────────────────────────────────
+    raw_evidence = _extract_news_raw_evidence(items, macro_context)
+
+    included_headlines = raw_evidence["headline_count"]
+    macro_fields = raw_evidence["macro_snapshot"]
+    missing_macro = [k for k, v in macro_fields.items() if v is None]
+
+    # ── 2. Trace logging ────────────────────────────────────────
+    _log.info(
+        "[MODEL_NEWS_TRACE] input_mode=raw_only headlines=%d "
+        "excluded_derived=%s missing_macro=%s",
+        included_headlines,
+        _NEWS_SENTIMENT_EXCLUDED_FIELDS,
+        missing_macro,
+    )
+
+    # ── 3. Build prompt ─────────────────────────────────────────
+    prompt = (
+        "You are an independent market news and sentiment analyst for options trading.\n"
+        "You will receive a JSON object with:\n"
+        "  - headlines: array of recent market news items (source, headline, category, time, symbols)\n"
+        "  - headline_count: total number of headlines provided\n"
+        "  - macro_snapshot: current macro data (VIX, yields, oil, fed funds, yield curve spread)\n\n"
+        "IMPORTANT RULES:\n"
+        "  1. You must form your OWN sentiment assessment from the raw headlines and macro data.\n"
+        "  2. Do NOT assume any pre-computed sentiment scores or labels exist.\n"
+        "  3. If macro data fields are null/missing, note them and adjust confidence.\n"
+        "  4. Focus on what matters for options traders: volatility outlook, directional bias,\n"
+        "     and tail risks that could affect short-term premium selling strategies.\n\n"
+        "Return valid JSON only (no markdown, no code fences) with exactly these keys:\n"
+        "  regime_label       – string, one of: 'Risk-On', 'Neutral', 'Mixed', 'Risk-Off', 'High Stress'\n"
+        "  score              – float 0-100 (100 = most bullish/calm, 0 = extreme fear/stress)\n"
+        "  confidence         – float 0-1 representing your overall confidence\n"
+        "  headline_tone      – string, one of: 'Bullish', 'Neutral', 'Mixed', 'Bearish'\n"
+        "  executive_summary  – string, 2-4 sentence overview of current market sentiment\n"
+        "  sentiment_outlook  – string, 1-2 sentence forward-looking sentiment assessment\n"
+        "  dominant_narratives – string array of 3-5 major narrative themes you identify\n"
+        "  underpriced_risks  – string array of 2-3 risks the market may be underpricing\n"
+        "  key_drivers        – string array of 3-5 top factors driving your assessment\n"
+        "  risk_assessment    – string, 2-3 sentences on tail risk and volatility outlook\n"
+        "  change_triggers    – string array of 3-5 conditions that would shift sentiment\n"
+        "Do not include any keys beyond this schema."
+    )
+
+    # ── 4. Build user data (raw evidence only) ──────────────────
+    user_data_str = json.dumps(raw_evidence, ensure_ascii=False, indent=None)
+
+    # Verify no derived fields leaked
+    for forbidden in _NEWS_SENTIMENT_EXCLUDED_FIELDS:
+        if f'"{forbidden}"' in user_data_str:
+            _log.error(
+                "[MODEL_NEWS_TRACE] LEAK DETECTED: derived field '%s' in user_data",
+                forbidden,
+            )
+
+    _log.debug("[MODEL_NEWS_TRACE] user_data_snapshot=%s", user_data_str[:2000])
+
+    payload = {
+        "messages": [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_data_str},
+        ],
+        "max_tokens": 2000,
+        "temperature": 0.0,
+        "stream": False,
+    }
+
+    # ── 5. Call the model ───────────────────────────────────────
+    last_error: Exception | None = None
+    attempt = 0
+    while attempt <= int(max(retries, 0)):
+        attempt += 1
+        try:
+            _log.info("[MODEL_NEWS] POST %s (attempt %d, timeout=%ds)", model_url, attempt, timeout)
+            response = _requests.post(model_url, json=payload, timeout=timeout)
+            _log.info(
+                "[MODEL_NEWS] response HTTP %d (%d bytes, %.1fs)",
+                response.status_code, len(response.content), response.elapsed.total_seconds(),
+            )
+            response.raise_for_status()
+
+            response_json = None
+            try:
+                response_json = response.json()
+            except Exception:
+                response_json = None
+
+            assistant_text = None
+            if isinstance(response_json, dict):
+                choices = response_json.get("choices") or []
+                if choices and isinstance(choices, list) and isinstance(choices[0], dict):
+                    first = choices[0]
+                    message = first.get("message")
+                    if isinstance(message, dict) and "content" in message:
+                        assistant_text = message.get("content")
+                    elif "text" in first:
+                        assistant_text = first.get("text")
+            if assistant_text is None:
+                assistant_text = getattr(response, "text", "")
+
+            parsed = _extract_json_payload(assistant_text)
+            normalized = _coerce_news_sentiment_model_output(parsed)
+            if normalized is None:
+                raise ValueError("Model returned invalid news sentiment payload")
+
+            # ── 6. Attach trace metadata ────────────────────────
+            normalized["_trace"] = {
+                "input_mode": "raw_only",
+                "headlines_provided": included_headlines,
+                "excluded_derived_fields": _NEWS_SENTIMENT_EXCLUDED_FIELDS,
+                "missing_macro_fields": missing_macro,
+            }
+
+            return normalized
+        except RequestException as exc:
+            last_error = exc
+        except Exception as exc:
+            last_error = exc
+            break
+
+    if isinstance(last_error, RequestException):
+        raise LocalModelUnavailableError(
+            f"Local model endpoint unavailable at {model_url}: {last_error}"
+        ) from last_error
+    raise RuntimeError(f"News sentiment model analysis failed: {last_error}")

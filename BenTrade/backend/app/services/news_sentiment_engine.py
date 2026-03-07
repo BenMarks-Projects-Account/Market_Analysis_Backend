@@ -1,0 +1,444 @@
+"""Deterministic News & Sentiment Engine.
+
+Produces a composite 0-100 score from six weighted components, each computed
+from raw provider data (headlines, macro context).  No LLM calls — purely
+rule-based so results are reproducible and explainable.
+
+Components and weights (total = 100):
+  headline_sentiment  30  – aggregate keyword sentiment across headlines
+  negative_pressure   20  – ratio of bearish headlines in recent window
+  narrative_severity  15  – weighted severity of detected narrative themes
+  source_agreement    10  – cross-source sentiment alignment
+  macro_stress        15  – FRED-derived macro stress (VIX, yield curve, etc.)
+  recency_pressure    10  – time-decay weighted sentiment of most recent items
+
+Composite formula:
+  score = sum(component_score * weight) / sum(weights)
+  Each component_score is normalized to 0-100 (higher = more bullish/calm).
+
+Regime label mapping (from composite score):
+  >= 65  →  Risk-On
+  40-64  →  Neutral
+  25-39  →  Mixed
+  < 25   →  Risk-Off / High Stress (if macro stress is "high")
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timezone, timedelta
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# ── Component weights ───────────────────────────────────────────────
+_WEIGHTS: dict[str, float] = {
+    "headline_sentiment": 30.0,
+    "negative_pressure": 20.0,
+    "narrative_severity": 15.0,
+    "source_agreement": 10.0,
+    "macro_stress": 15.0,
+    "recency_pressure": 10.0,
+}
+
+# ── Sentiment keywords (mirrors news_sentiment_service) ────────────
+_BULLISH_WORDS = frozenset([
+    "surge", "rally", "gain", "soar", "bull", "upbeat", "optimism", "optimistic",
+    "growth", "strong", "boost", "recovery", "positive", "beat", "outperform",
+    "upgrade", "record high", "breakout", "rebound", "expansion",
+])
+_BEARISH_WORDS = frozenset([
+    "crash", "plunge", "drop", "fall", "bear", "fear", "recession", "downturn",
+    "decline", "loss", "risk", "warning", "downgrade", "sell-off", "selloff",
+    "weak", "cut", "layoff", "default", "crisis", "contraction", "slump",
+    "tumble", "collapse", "concern", "uncertainty", "volatile",
+])
+
+# Categories considered high-severity for narrative scoring
+_HIGH_SEVERITY_CATEGORIES = frozenset(["geopolitical", "fed", "macro"])
+_MEDIUM_SEVERITY_CATEGORIES = frozenset(["commodities", "shipping"])
+
+
+def _bounded(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def _score_text_sentiment(text: str) -> float:
+    """Keyword sentiment: -1.0 (bearish) to +1.0 (bullish)."""
+    text_lower = text.lower()
+    words = set(text_lower.split())
+    bull = len(words & _BULLISH_WORDS)
+    bear = len(words & _BEARISH_WORDS)
+    for phrase in _BULLISH_WORDS:
+        if " " in phrase and phrase in text_lower:
+            bull += 1
+    for phrase in _BEARISH_WORDS:
+        if " " in phrase and phrase in text_lower:
+            bear += 1
+    total = bull + bear
+    if total == 0:
+        return 0.0
+    return (bull - bear) / total
+
+
+def compute_engine_scores(
+    items: list[dict[str, Any]],
+    macro_context: dict[str, Any],
+) -> dict[str, Any]:
+    """Compute the deterministic engine result from raw provider data.
+
+    Parameters
+    ----------
+    items : list[dict]
+        Normalized news items (dicts with headline, summary, source,
+        published_at, category, sentiment_score, sentiment_label, etc.).
+    macro_context : dict
+        FRED macro context with vix, us_10y_yield, us_2y_yield,
+        yield_curve_spread, stress_level, etc.
+
+    Returns
+    -------
+    dict with:
+      - score (float 0-100, composite)
+      - regime_label (str)
+      - components (dict of component name → {score, signals, inputs})
+      - weights (dict)
+      - as_of (ISO timestamp)
+    """
+    components: dict[str, dict[str, Any]] = {}
+
+    # ── 1. Headline Sentiment (0-100, 50 = neutral) ─────────────
+    components["headline_sentiment"] = _compute_headline_sentiment(items)
+
+    # ── 2. Negative Pressure (0-100, 100 = no bearish pressure) ─
+    components["negative_pressure"] = _compute_negative_pressure(items)
+
+    # ── 3. Narrative Severity (0-100, 100 = benign narratives) ──
+    components["narrative_severity"] = _compute_narrative_severity(items)
+
+    # ── 4. Source Agreement (0-100, 100 = all sources agree) ────
+    components["source_agreement"] = _compute_source_agreement(items)
+
+    # ── 5. Macro Stress (0-100, 100 = low stress) ──────────────
+    components["macro_stress"] = _compute_macro_stress(macro_context)
+
+    # ── 6. Recency Pressure (0-100, 50 = neutral recent flow) ──
+    components["recency_pressure"] = _compute_recency_pressure(items)
+
+    # ── Weighted composite ──────────────────────────────────────
+    total_weight = 0.0
+    weighted_sum = 0.0
+    for name, weight in _WEIGHTS.items():
+        comp = components.get(name)
+        if comp and comp.get("score") is not None:
+            weighted_sum += comp["score"] * weight
+            total_weight += weight
+
+    composite = _bounded(weighted_sum / total_weight, 0.0, 100.0) if total_weight > 0 else 50.0
+
+    # ── Regime label ────────────────────────────────────────────
+    stress_level = (macro_context.get("stress_level") or "unknown").lower()
+    regime_label = _regime_from_score(composite, stress_level)
+
+    result = {
+        "score": round(composite, 2),
+        "regime_label": regime_label,
+        "components": components,
+        "weights": _WEIGHTS,
+        "as_of": datetime.now(timezone.utc).isoformat(),
+    }
+
+    logger.info(
+        "event=news_engine_computed score=%.2f regime=%s components=%s",
+        composite,
+        regime_label,
+        {k: round(v.get("score", 0), 1) for k, v in components.items()},
+    )
+
+    return result
+
+
+def _regime_from_score(score: float, stress_level: str) -> str:
+    """Map composite score to regime label.
+
+    Input fields:
+      score: composite 0-100
+      stress_level: from macro context (low/moderate/elevated/high)
+    """
+    if score < 25:
+        return "High Stress" if stress_level == "high" else "Risk-Off"
+    if score < 40:
+        return "Mixed"
+    if score < 65:
+        return "Neutral"
+    return "Risk-On"
+
+
+# ── Component implementations ──────────────────────────────────────
+
+def _compute_headline_sentiment(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate keyword sentiment across all headlines.
+
+    Converts mean sentiment (-1..1) to 0-100 scale: -1 → 0, 0 → 50, +1 → 100.
+    """
+    if not items:
+        return {"score": 50.0, "signals": ["No headlines available"], "inputs": {"count": 0}}
+
+    scores = []
+    for item in items:
+        s = item.get("sentiment_score")
+        if s is not None:
+            scores.append(float(s))
+        else:
+            text = f"{item.get('headline', '')} {item.get('summary', '')}"
+            scores.append(_score_text_sentiment(text))
+
+    mean_sent = sum(scores) / len(scores)
+    # Map -1..1 → 0..100
+    component_score = _bounded((mean_sent + 1.0) * 50.0, 0.0, 100.0)
+
+    signals = []
+    if mean_sent > 0.15:
+        signals.append(f"Headline tone is bullish (avg {mean_sent:.3f})")
+    elif mean_sent < -0.15:
+        signals.append(f"Headline tone is bearish (avg {mean_sent:.3f})")
+    else:
+        signals.append(f"Headline tone is neutral (avg {mean_sent:.3f})")
+    signals.append(f"Based on {len(scores)} headlines")
+
+    return {
+        "score": round(component_score, 2),
+        "signals": signals,
+        "inputs": {"count": len(scores), "mean_sentiment": round(mean_sent, 4)},
+    }
+
+
+def _compute_negative_pressure(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Proportion of bearish headlines in last 24h. Lower bearish ratio = higher score.
+
+    Score: (1 - bear_ratio) * 100.
+    """
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(hours=24)).isoformat()
+
+    recent = [i for i in items if (i.get("published_at") or "") >= cutoff]
+    if not recent:
+        return {"score": 50.0, "signals": ["No 24h headlines available"], "inputs": {"count_24h": 0}}
+
+    bearish_count = sum(1 for i in recent if i.get("sentiment_label") == "bearish")
+    bear_ratio = bearish_count / len(recent)
+    component_score = _bounded((1.0 - bear_ratio) * 100.0, 0.0, 100.0)
+
+    signals = [f"{bearish_count}/{len(recent)} bearish headlines in 24h ({bear_ratio:.0%})"]
+    if bear_ratio > 0.5:
+        signals.append("Heavy bearish pressure")
+    elif bear_ratio < 0.15:
+        signals.append("Minimal bearish pressure")
+
+    return {
+        "score": round(component_score, 2),
+        "signals": signals,
+        "inputs": {
+            "count_24h": len(recent),
+            "bearish_count": bearish_count,
+            "bear_ratio": round(bear_ratio, 4),
+        },
+    }
+
+
+def _compute_narrative_severity(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Score based on how many headlines fall into high-severity categories.
+
+    High-severity (geopolitical, fed, macro) = penalized if bearish.
+    Score: 100 - severity_penalty.
+    """
+    if not items:
+        return {"score": 75.0, "signals": ["No items for narrative scoring"], "inputs": {}}
+
+    severity_penalty = 0.0
+    high_count = 0
+    medium_count = 0
+
+    for item in items:
+        cat = (item.get("category") or "").lower()
+        label = (item.get("sentiment_label") or "").lower()
+
+        if cat in _HIGH_SEVERITY_CATEGORIES:
+            high_count += 1
+            if label == "bearish":
+                severity_penalty += 2.0
+            elif label == "mixed":
+                severity_penalty += 0.5
+        elif cat in _MEDIUM_SEVERITY_CATEGORIES:
+            medium_count += 1
+            if label == "bearish":
+                severity_penalty += 1.0
+
+    # Normalize: cap penalty at 50 points
+    severity_penalty = min(severity_penalty, 50.0)
+    component_score = _bounded(100.0 - severity_penalty, 0.0, 100.0)
+
+    signals = [f"{high_count} high-severity, {medium_count} medium-severity narratives"]
+    if severity_penalty > 20:
+        signals.append("Significant bearish activity in critical categories")
+    elif severity_penalty < 5:
+        signals.append("Critical categories mostly calm")
+
+    return {
+        "score": round(component_score, 2),
+        "signals": signals,
+        "inputs": {
+            "high_severity_count": high_count,
+            "medium_severity_count": medium_count,
+            "penalty": round(severity_penalty, 2),
+        },
+    }
+
+
+def _compute_source_agreement(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Measure inter-source sentiment alignment.
+
+    If Finnhub and Polygon agree on direction, score is high.
+    Score: 100 if perfectly aligned, 50 if independent, lower if divergent.
+    """
+    source_sentiments: dict[str, list[float]] = {}
+    for item in items:
+        src = item.get("source", "unknown")
+        s = item.get("sentiment_score")
+        if s is not None:
+            source_sentiments.setdefault(src, []).append(float(s))
+
+    sources = list(source_sentiments.keys())
+    if len(sources) < 2:
+        return {
+            "score": 50.0,
+            "signals": ["Single source — cannot assess agreement"],
+            "inputs": {"sources": sources},
+        }
+
+    means = {src: sum(vals) / len(vals) for src, vals in source_sentiments.items()}
+    mean_values = list(means.values())
+
+    # Check if all sources have the same sign
+    all_positive = all(m > 0.05 for m in mean_values)
+    all_negative = all(m < -0.05 for m in mean_values)
+    spread = max(mean_values) - min(mean_values)
+
+    if all_positive or all_negative:
+        # Sources agree on direction — score based on spread tightness
+        component_score = _bounded(100.0 - spread * 50.0, 60.0, 100.0)
+        direction = "bullish" if all_positive else "bearish"
+        signals = [f"Sources agree on {direction} direction (spread {spread:.3f})"]
+    else:
+        # Sources disagree
+        component_score = _bounded(50.0 - spread * 30.0, 10.0, 50.0)
+        signals = [f"Sources disagree on direction (spread {spread:.3f})"]
+
+    return {
+        "score": round(component_score, 2),
+        "signals": signals,
+        "inputs": {
+            "source_means": {k: round(v, 4) for k, v in means.items()},
+            "spread": round(spread, 4),
+        },
+    }
+
+
+def _compute_macro_stress(macro_context: dict[str, Any]) -> dict[str, Any]:
+    """Convert FRED macro stress into a 0-100 score.
+
+    Input fields:
+      macro_context.stress_level: low/moderate/elevated/high
+      macro_context.vix: VIX level
+      macro_context.yield_curve_spread: 10y - 2y
+
+    Score mapping: low → 90, moderate → 65, elevated → 35, high → 10.
+    VIX and yield curve adjustments applied.
+    """
+    stress = (macro_context.get("stress_level") or "unknown").lower()
+    vix = macro_context.get("vix")
+    spread = macro_context.get("yield_curve_spread")
+
+    base_scores = {"low": 90.0, "moderate": 65.0, "elevated": 35.0, "high": 10.0}
+    base = base_scores.get(stress, 50.0)
+
+    signals = [f"Macro stress: {stress}"]
+    adjustments = 0.0
+
+    if vix is not None:
+        signals.append(f"VIX at {vix:.1f}")
+        if vix < 16:
+            adjustments += 5.0
+        elif vix > 30:
+            adjustments -= 10.0
+        elif vix > 25:
+            adjustments -= 5.0
+
+    if spread is not None:
+        signals.append(f"Yield curve spread: {spread:.3f}")
+        if spread < 0:
+            adjustments -= 8.0
+            signals.append("Inverted yield curve — elevated recession risk")
+
+    component_score = _bounded(base + adjustments, 0.0, 100.0)
+
+    return {
+        "score": round(component_score, 2),
+        "signals": signals,
+        "inputs": {
+            "stress_level": stress,
+            "vix": vix,
+            "yield_curve_spread": spread,
+        },
+    }
+
+
+def _compute_recency_pressure(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Time-decay weighted sentiment of most recent headlines.
+
+    More recent items get exponentially higher weight. Captures the
+    "what's happening right now" signal.
+    Score: maps decayed average from -1..1 to 0..100.
+    """
+    now = datetime.now(timezone.utc)
+
+    weighted_sum = 0.0
+    weight_sum = 0.0
+
+    for item in items:
+        published = item.get("published_at", "")
+        score_val = item.get("sentiment_score", 0.0)
+        if score_val is None:
+            score_val = 0.0
+
+        try:
+            pub_dt = datetime.fromisoformat(published.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            pub_dt = now - timedelta(hours=48)  # old default
+
+        age_hours = max((now - pub_dt).total_seconds() / 3600.0, 0.1)
+        # Exponential decay: half-life = 6 hours
+        decay_weight = 2.0 ** (-age_hours / 6.0)
+
+        weighted_sum += float(score_val) * decay_weight
+        weight_sum += decay_weight
+
+    if weight_sum == 0:
+        return {"score": 50.0, "signals": ["No items for recency scoring"], "inputs": {}}
+
+    decayed_avg = weighted_sum / weight_sum
+    component_score = _bounded((decayed_avg + 1.0) * 50.0, 0.0, 100.0)
+
+    signals = [f"Recency-weighted sentiment: {decayed_avg:.3f}"]
+    if decayed_avg > 0.15:
+        signals.append("Recent flow is bullish-leaning")
+    elif decayed_avg < -0.15:
+        signals.append("Recent flow is bearish-leaning")
+    else:
+        signals.append("Recent flow is neutral")
+
+    return {
+        "score": round(component_score, 2),
+        "signals": signals,
+        "inputs": {"decayed_avg": round(decayed_avg, 4), "item_count": len(items)},
+    }

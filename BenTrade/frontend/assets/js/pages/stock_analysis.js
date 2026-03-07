@@ -590,11 +590,11 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
   }
 
   async function refresh(){
-    const previousText = refreshBtn.textContent;
     try{
       setError('');
       refreshBtn.disabled = true;
-      refreshBtn.textContent = 'Refreshing...';
+      refreshBtn.classList.add('btn-refreshing');
+      refreshBtn.innerHTML = '<span class="btn-spinner"></span>Refreshing\u2026';
       const symbol = String(symbolEl.value || '').trim().toUpperCase() || 'SPY';
       const range = String(rangeEl.value || '6mo');
       symbolEl.value = symbol;
@@ -634,7 +634,8 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
       renderDebug(currentPayload || {}, message);
     }finally{
       refreshBtn.disabled = false;
-      refreshBtn.textContent = previousText || 'Refresh';
+      refreshBtn.classList.remove('btn-refreshing');
+      refreshBtn.innerHTML = 'Refresh';
     }
   }
 

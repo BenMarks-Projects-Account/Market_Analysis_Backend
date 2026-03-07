@@ -305,16 +305,32 @@ window.BenTradePages.initRiskCapital = function initRiskCapital(rootEl){
     renderPolicy(starterPackPolicy());
   }
 
+  var _cache = window.BenTradeDashboardCache;
+  var CACHE_KEY = 'riskCapital';
+
+  function setRefreshState(refreshing){
+    if(refreshing){
+      refreshBtn.disabled = true;
+      refreshBtn.classList.add('btn-refreshing');
+      refreshBtn.innerHTML = '<span class="btn-spinner"></span>Refreshing\u2026';
+    } else {
+      refreshBtn.disabled = false;
+      refreshBtn.classList.remove('btn-refreshing');
+      refreshBtn.innerHTML = 'Refresh';
+    }
+  }
+
   async function refreshAll(){
     try{
       setError('');
-      refreshBtn.disabled = true;
+      setRefreshState(true);
       await loadPolicy();
       await loadSnapshot();
+      if(_cache) _cache.set(CACHE_KEY, { policy: true, snapshot: true });
     }catch(err){
       setError(String(err?.message || err || 'Failed to refresh risk dashboard'));
     }finally{
-      refreshBtn.disabled = false;
+      setRefreshState(false);
     }
   }
 

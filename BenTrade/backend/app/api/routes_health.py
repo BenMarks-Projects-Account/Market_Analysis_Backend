@@ -14,11 +14,15 @@ async def health(request: Request) -> HealthResponse:
     polygon_ok = await request.app.state.polygon_client.health()
     fred_ok = await request.app.state.fred_client.health()
 
+    from app.services.model_health_service import check_model_health
+    model_health = check_model_health()
+
     upstream = {
         "tradier": "ok" if tradier_ok else "down",
         "finnhub": "ok" if finnhub_ok else "down",
         "polygon": "ok" if polygon_ok else "down",
         "fred": "ok" if fred_ok else "down",
+        "model_endpoint": "ok" if model_health["status"] == "healthy" else "down",
     }
     return HealthResponse(ok=all(x == "ok" for x in upstream.values()), upstream=upstream)
 
@@ -68,6 +72,28 @@ async def sources_health(request: Request) -> dict:
                 "notes": notes,
             }
         )
+
+    # ── Model Endpoint health ──────────────────────────────────────
+    from app.services.model_health_service import check_model_health
+
+    model_health = check_model_health()
+    model_notes: list[str] = []
+    model_models = model_health.get("models_loaded") or []
+    if model_models:
+        model_notes.append(model_models[0])
+    if model_health.get("error"):
+        model_notes.append(str(model_health["error"]))
+    model_notes.append(f"{model_health.get('latency_ms', 0)} ms")
+
+    sources.append(
+        {
+            "name": "AI Model",
+            "status": "ok" if model_health["status"] == "healthy" else "down",
+            "latency_ms": model_health.get("latency_ms"),
+            "last_ok": now_iso if model_health["status"] == "healthy" else None,
+            "notes": model_notes,
+        }
+    )
 
     return {
         "as_of": now_iso,

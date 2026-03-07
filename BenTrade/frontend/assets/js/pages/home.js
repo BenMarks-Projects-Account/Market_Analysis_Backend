@@ -1439,7 +1439,18 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
   function renderRegime(regimePayload, spySummary, macro){
     const spyLast = toNumber(spySummary?.price?.last);
-    const vix = toNumber(spySummary?.options_context?.vix ?? macro?.vix);
+    const vix = toNumber(macro?.vix ?? spySummary?.options_context?.vix);
+    const vixFreshness = macro?._freshness?.vix;
+    var vixTag = '';
+    var mc = window.BenTradeMarketContext;
+    if(mc && vixFreshness){
+      var norm = mc.normalizeFromFlatMacro({ vix: vix, _freshness: { vix: vixFreshness } });
+      if(norm && norm.vix) vixTag = mc.freshnessTag(norm.vix);
+    } else if(vixFreshness){
+      vixTag = vixFreshness.is_intraday
+        ? '<span class="home-freshness-tag home-freshness-live" title="Intraday">live</span>'
+        : '<span class="home-freshness-tag home-freshness-eod" title="EOD close">eod</span>';
+    }
     const tenYear = toNumber(macro?.ten_year_yield);
     const regimeScore = toNumber(regimePayload?.regime_score) ?? 50;
     const regimeLabelRaw = String(regimePayload?.regime_label || 'NEUTRAL').toUpperCase();
@@ -1448,7 +1459,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
     regimeStripEl.innerHTML = `
       <div class="statTile"><div class="statLabel" data-metric="spy_price">SPY</div><div class="statValue">${fmt(spyLast)}</div><div class="stock-note">${fmtPct(spySummary?.price?.change_pct)}</div></div>
-      <div class="statTile"><div class="statLabel" data-metric="vix_level">VIX</div><div class="statValue">${fmt(vix)}</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="vix_level">VIX ${vixTag}</div><div class="statValue">${fmt(vix)}</div></div>
       <div class="statTile"><div class="statLabel" data-metric="ten_year_yield">10Y Yield</div><div class="statValue">${fmt(tenYear, 2)}%</div></div>
       <div class="statTile home-regime-pill ${tone}" data-ben-tip="regime_summary"><div class="statLabel" data-metric="regime">Regime</div><div class="statValue">${regimeLabelText}</div><div class="stock-note">Score ${fmt(regimeScore, 1)}/100</div></div>
     `;
@@ -1968,14 +1979,36 @@ window.BenTradePages.initHome = function initHome(rootEl){
     }
   }
 
+  function _freshnessTag(freshness, key){
+    if(!freshness || !freshness[key]) return '';
+    var mc = window.BenTradeMarketContext;
+    if(mc){
+      var norm = mc.normalizeFromFlatMacro({ [key]: null, _freshness: freshness });
+      if(norm && norm[key]) return mc.freshnessTag(norm[key]);
+    }
+    // Fallback to inline rendering
+    const f = freshness[key];
+    if(f.is_intraday) return '<span class="home-freshness-tag home-freshness-live" title="Intraday">live</span>';
+    const obsDate = f.observation_date || '';
+    const title = obsDate ? `EOD close (${obsDate})` : 'End-of-day close';
+    return `<span class="home-freshness-tag home-freshness-eod" title="${title}">eod</span>`;
+  }
+
   function renderMacro(macro, spySummary){
     const vix = toNumber(macro?.vix ?? spySummary?.options_context?.vix);
+    const freshness = macro?._freshness || {};
     macroTilesEl.innerHTML = `
-      <div class="statTile"><div class="statLabel" data-metric="ten_year_yield">10Y Yield</div><div class="statValue">${fmt(macro?.ten_year_yield, 2)}%</div></div>
-      <div class="statTile"><div class="statLabel" data-metric="fed_funds">Fed Funds</div><div class="statValue">${fmt(macro?.fed_funds_rate, 2)}%</div></div>
-      <div class="statTile"><div class="statLabel" data-metric="cpi_yoy">CPI YoY</div><div class="statValue">${fmt(macro?.cpi_yoy, 2)}%</div></div>
-      <div class="statTile"><div class="statLabel" data-metric="vix_level">VIX</div><div class="statValue">${fmt(vix, 2)}</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="ten_year_yield">10Y Yield ${_freshnessTag(freshness, 'ten_year_yield')}</div><div class="statValue">${fmt(macro?.ten_year_yield, 2)}%</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="fed_funds">Fed Funds ${_freshnessTag(freshness, 'fed_funds_rate')}</div><div class="statValue">${fmt(macro?.fed_funds_rate, 2)}%</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="cpi_yoy">CPI YoY ${_freshnessTag(freshness, 'cpi_yoy')}</div><div class="statValue">${fmt(macro?.cpi_yoy, 2)}%</div></div>
+      <div class="statTile"><div class="statLabel" data-metric="vix_level">VIX ${_freshnessTag(freshness, 'vix')}</div><div class="statValue">${fmt(vix, 2)}</div></div>
     `;
+    // Update shared market context store
+    var mc = window.BenTradeMarketContext;
+    if(mc){
+      var norm = mc.normalizeFromFlatMacro(macro);
+      if(norm) mc.setContext(norm);
+    }
   }
 
   function renderStrategyPlaybook(payload){
@@ -2104,6 +2137,14 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
     renderChart(spyChartEl, spySummary?.history || [], { stroke: 'rgba(0,234,255,0.95)' });
     renderChart(vixChartEl, vixSummary?.history || [], { stroke: 'rgba(255,199,88,0.95)' });
+
+    // VIX canary: compare chart last price (VIXY ETF) with macro card VIX value
+    var mc = window.BenTradeMarketContext;
+    if(mc){
+      var chartLast = vixSummary?.price?.last;
+      var cardVix = macro?.vix;
+      mc.vixCanaryCheck(chartLast, cardVix);
+    }
 
     updateLastUpdated(meta.last_success_at);
     if(Array.isArray(meta.errors) && meta.errors.length){
@@ -2419,7 +2460,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
     setScanStatus('');
     pushLog('Full App Refresh started');
 
-    if(overlay){
+    // Only show overlay on first session load when no cached data exists.
+    // After initial load, refresh runs in background with inline indicator.
+    const shouldOverlay = !cacheStore.isUsable?.() && overlay;
+
+    if(shouldOverlay){
       overlay.open({
         status: `Full App Refresh • 0/${total}`,
         logs: logHistory,
@@ -2432,6 +2477,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
         },
         onRetry: null,
       });
+    } else {
+      // Background mode: inline spinner + refreshing badge
+      fullRefreshBtnEl.classList.add('btn-refreshing');
+      fullRefreshBtnEl.innerHTML = '<span class="btn-spinner"></span>Full Refresh\u2026';
+      setRefreshingBadge(true);
     }
 
     try{
@@ -2529,6 +2579,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
         fullAppRefreshState.isRunning = false;
         fullAppRefreshState.stopRequested = false;
         fullRefreshBtnEl.disabled = false;
+        fullRefreshBtnEl.classList.remove('btn-refreshing');
+        fullRefreshBtnEl.textContent = 'Full App Refresh';
+        setRefreshingBadge(false);
       }
       if(overlay?.isOpen?.()){
         overlay.setStatus('Full App Refresh finished');
@@ -2773,11 +2826,19 @@ window.BenTradePages.initHome = function initHome(rootEl){
       }
     });
   } else {
-    /* Already chose this session (SPA re-mount) — render cached data only.
-       No automatic refresh or overlay. User must click Refresh manually. */
-    console.log('[HOME_REFRESH] SPA re-mount — rendering cached data only (no auto-refresh)');
+    /* Already chose this session (SPA re-mount) — render cached data,
+       then kick off a silent background refresh if the cache is stale.
+       This ensures the dashboard is never blank after navigate-away/back. */
+    console.log('[HOME_REFRESH] SPA re-mount — cache rendered: ' + hadCached);
     if(!hadCached){
       bindRetry();
+    }
+    // Background refresh if stale (non-blocking, preserves current UI)
+    if(cacheStore.isStale(null, cacheStore.FRESH_TTL_MS)){
+      console.log('[HOME_REFRESH] SPA re-mount — cache stale, starting silent background refresh');
+      runLoadSequence({ force: false, showOverlay: false, homeOnly: true, reason: 'remount_stale' }).catch(function(err){
+        console.warn('[HOME_REFRESH] SPA re-mount silent refresh failed:', err?.message || err);
+      });
     }
   }
 
@@ -2788,17 +2849,18 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   refreshBtnEl.addEventListener('click', async () => {
-    const oldText = refreshBtnEl.textContent;
+    refreshBtnEl.classList.add('btn-refreshing');
+    refreshBtnEl.innerHTML = '<span class="btn-spinner"></span>Refreshing\u2026';
     refreshBtnEl.disabled = true;
-    refreshBtnEl.textContent = 'Refreshing...';
     try{
-      await runLoadSequence({ force: true, showOverlay: true, reason: 'manual' });
+      await runLoadSequence({ force: true, showOverlay: false, reason: 'manual' });
       setError('');
     }catch(err){
       setError(String(err?.message || err || 'Refresh failed'));
     }finally{
       refreshBtnEl.disabled = false;
-      refreshBtnEl.textContent = oldText || 'Refresh';
+      refreshBtnEl.classList.remove('btn-refreshing');
+      refreshBtnEl.innerHTML = 'Refresh';
     }
   });
 
@@ -2844,6 +2906,10 @@ window.BenTradePages.initHome = function initHome(rootEl){
       overlay.destroy();
     }
     setRefreshingBadge(false);
-    cacheStore.setRenderer(null);
+    // NOTE: do NOT null the renderer here.
+    // The renderer is harmlessly overwritten on next initHome().
+    // Nulling it caused setSnapshot() calls (from in-flight refreshes completing
+    // after navigate-away) to fire into nothing, and subsequent remounts
+    // to lose the ability to render cached data.
   };
 };

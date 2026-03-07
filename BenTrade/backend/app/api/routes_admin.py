@@ -57,6 +57,20 @@ async def get_data_health(request: Request) -> dict:
     except Exception:
         source_health = {}
 
+    # Include model endpoint health
+    from app.services.model_health_service import check_model_health
+    model_health = check_model_health()
+    model_models = model_health.get("models_loaded") or []
+    source_health["model_endpoint"] = {
+        "status": "green" if model_health["status"] == "healthy" else "red",
+        "message": (
+            (model_models[0] if model_models else "No models loaded")
+            + f" · {model_health.get('latency_ms', 0)} ms"
+            + (f" · {model_health.get('source_name', '')}" if model_health.get("source_name") else "")
+        ),
+        "last_http": 200 if model_health["status"] == "healthy" else None,
+    }
+
     events_service = getattr(request.app.state, "validation_events", None)
     if not isinstance(events_service, ValidationEventsService):
         events_service = ValidationEventsService(results_dir=request.app.state.results_dir)

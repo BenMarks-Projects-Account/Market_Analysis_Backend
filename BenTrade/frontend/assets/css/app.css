@@ -2730,16 +2730,12 @@ main.main{
     transform: rotate(180deg);
 }
 
-/* ── AT Card flex layout: actions pinned to bottom ── */
+/* ── AT Card flex layout ── */
 .at-card-grid .trade-card{
     display:flex;
     flex-direction:column;
 }
-.at-card-grid .trade-card .at-card-body{
-    flex:1 1 auto;
-}
 .at-card-grid .trade-card .trade-actions{
-    margin-top:auto;
     border-top:1px solid rgba(0,234,255,0.08);
 }
 
@@ -3474,71 +3470,40 @@ main.main{
     50%{ opacity:0.5; }
 }
 
-/* ── LAYER 2: Core Position Metrics ── */
-.at-core-metrics{
+/* ── Active Trade Cards: reuse standard .metric-grid at 4 columns ── */
+.trade-card.at-v2 .trade-body{
     padding:14px 16px 10px;
 }
-
-.at-core-row{
-    display:grid;
+.trade-card.at-v2 .metric-grid{
     grid-template-columns: repeat(4, 1fr);
     gap:10px;
-    margin-bottom:10px;
 }
-
-.at-core-tile{
+.trade-card.at-v2 .metric{
     text-align:center;
-    padding:12px 8px;
-    border-radius:10px;
     border:1px solid rgba(0,234,255,0.10);
     background: rgba(0,234,255,0.03);
     transition: border-color 0.15s;
 }
-.at-core-tile:hover{
+.trade-card.at-v2 .metric:hover{
     border-color: rgba(0,234,255,0.20);
 }
-
-.at-core-val{
-    font-size:16px;
-    font-weight:700;
-    font-family:'Orbitron',sans-serif;
-    color:var(--text);
-    letter-spacing:0.02em;
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
+.trade-card.at-v2 .metric-label{
+    text-align:center;
 }
-.at-core-val.positive{
-    color:#7ef7b8;
-    text-shadow: 0 0 12px rgba(126,247,184,0.25);
+.trade-card.at-v2 .metric-value{
+    text-align:center;
 }
-.at-core-val.negative{
-    color:#ff7ea6;
-    text-shadow: 0 0 12px rgba(255,79,102,0.25);
-}
-.at-core-val-small{
-    font-size:12px;
-    font-family:inherit;
-}
-.at-core-val small{
+.trade-card.at-v2 .metric-value small{
     font-size:10px;
     opacity:0.65;
-    font-family:inherit;
 }
 
-.at-core-label{
-    display:block;
-    font-size:9px;
-    font-weight:700;
-    letter-spacing:0.12em;
-    text-transform:uppercase;
-    color:var(--muted);
-    margin-top:5px;
+/* Responsive: tablet 2 cols, mobile stacked */
+@media (max-width:768px){
+    .trade-card.at-v2 .metric-grid{ grid-template-columns: repeat(2, 1fr); }
 }
-
-/* Responsive: 2 cols on narrow */
 @media (max-width:480px){
-    .at-core-row{ grid-template-columns: repeat(2, 1fr); }
+    .trade-card.at-v2 .metric-grid{ grid-template-columns: 1fr; }
 }
 
 /* ── AI Recommendation Panel ── */
@@ -4717,6 +4682,38 @@ main.main{
 }
 }
 
+/* ── Freshness tags (live / eod) ── */
+.home-freshness-tag,
+.mc-freshness-tag{
+    display:inline-block;
+    font-size:0.6rem;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:0.04em;
+    padding:1px 4px;
+    border-radius:3px;
+    vertical-align:middle;
+    margin-left:4px;
+    line-height:1;
+}
+.home-freshness-live,
+.mc-freshness-live{
+    color:#0f0;
+    background:rgba(0,255,0,0.12);
+    border:1px solid rgba(0,255,0,0.25);
+}
+.home-freshness-eod,
+.mc-freshness-eod{
+    color:rgba(255,199,88,0.85);
+    background:rgba(255,199,88,0.1);
+    border:1px solid rgba(255,199,88,0.2);
+}
+.mc-freshness-delayed{
+    color:rgba(255,160,60,0.85);
+    background:rgba(255,160,60,0.1);
+    border:1px solid rgba(255,160,60,0.2);
+}
+
 .home-playbook-chips{
     display:grid;
     gap:8px;
@@ -5851,4 +5848,52 @@ main.main{
     filter: blur(1.5px);
     pointer-events: none;
     transition: opacity 0.18s ease, filter 0.18s ease;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Reusable inline button spinner — stale-while-refresh UX
+   Add .btn-refreshing to a button to show inline spinner + text.
+   ═══════════════════════════════════════════════════════════════ */
+.btn-refreshing{
+    position:relative;
+    pointer-events:none;
+    opacity:0.82;
+}
+.btn-refreshing .btn-spinner{
+    display:inline-block;
+    width:12px; height:12px;
+    border-radius:50%;
+    border:2px solid rgba(0,234,255,0.2);
+    border-top-color:rgba(0,234,255,0.95);
+    animation:btnInlineSpin 0.8s linear infinite;
+    vertical-align:middle;
+    margin-right:5px;
+}
+@keyframes btnInlineSpin{ to { transform:rotate(360deg); } }
+
+/* Toast banner for stale-while-refresh errors */
+.bt-toast{
+    position:fixed;
+    bottom:20px;
+    right:20px;
+    z-index:1300;
+    padding:10px 18px;
+    border-radius:10px;
+    font-size:13px;
+    max-width:420px;
+    animation:btToastIn 0.25s ease-out;
+}
+.bt-toast.error{
+    background:rgba(255,60,80,0.12);
+    border:1px solid rgba(255,60,80,0.4);
+    color:rgba(255,200,200,0.98);
+}
+.bt-toast.success{
+    background:rgba(0,230,120,0.1);
+    border:1px solid rgba(0,230,120,0.35);
+    color:rgba(200,255,230,0.98);
+}
+@keyframes btToastIn{
+    from{ opacity:0; transform:translateY(12px); }
+    to{ opacity:1; transform:translateY(0); }
 }

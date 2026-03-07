@@ -135,23 +135,43 @@ window.BenTradePages.initPortfolioRisk = function initPortfolioRisk(rootEl){
     notesEl.innerHTML = notes.map(msg => `<div class="stock-note">• ${msg}</div>`).join('');
   }
 
+  var _cache = window.BenTradeDashboardCache;
+  var CACHE_KEY = 'portfolioRisk';
+
+  function renderPayload(){
+    renderTotals();
+    renderUnderlying();
+    renderBuckets();
+    renderScenarios();
+    renderWarningsAndNotes();
+    if(sourceHealthUi?.renderFromSnapshot){
+      sourceHealthUi.renderFromSnapshot(payload?.source_health || {});
+    }
+  }
+
+  function setRefreshState(refreshing){
+    if(refreshing){
+      refreshBtn.disabled = true;
+      refreshBtn.classList.add('btn-refreshing');
+      refreshBtn.innerHTML = '<span class="btn-spinner"></span>Refreshing\u2026';
+    } else {
+      refreshBtn.disabled = false;
+      refreshBtn.classList.remove('btn-refreshing');
+      refreshBtn.innerHTML = 'Refresh';
+    }
+  }
+
   async function refresh(){
     try{
       setError('');
-      refreshBtn.disabled = true;
+      setRefreshState(true);
       payload = await api.getPortfolioRiskMatrix();
-      renderTotals();
-      renderUnderlying();
-      renderBuckets();
-      renderScenarios();
-      renderWarningsAndNotes();
-      if(sourceHealthUi?.renderFromSnapshot){
-        sourceHealthUi.renderFromSnapshot(payload?.source_health || {});
-      }
+      renderPayload();
+      if(_cache) _cache.set(CACHE_KEY, payload);
     }catch(err){
       setError(String(err?.message || err || 'Failed to load portfolio risk matrix'));
     }finally{
-      refreshBtn.disabled = false;
+      setRefreshState(false);
     }
   }
 
@@ -164,5 +184,12 @@ window.BenTradePages.initPortfolioRisk = function initPortfolioRisk(rootEl){
     }
   });
 
+  // Render cached data immediately if available
+  var _cached = _cache && _cache.get(CACHE_KEY);
+  if(_cached && _cached.isLoaded && _cached.data){
+    payload = _cached.data;
+    renderPayload();
+  }
+  // Always fetch fresh data in background
   refresh();
 };

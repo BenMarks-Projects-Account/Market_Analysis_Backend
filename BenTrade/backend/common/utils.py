@@ -711,7 +711,7 @@ def generate_mock_report() -> str:
     # to append a `model_evaluation` object to each trade. By default this is disabled
     # to avoid automatic model calls on report generation. Set environment variable
     # AUTO_CALL_MODEL=1 to enable automatic calling (useful for batch runs).
-    def _call_model_and_append(trades, target_path, model_url=None, retries=2, timeout=30, batch_size=1):
+    def _call_model_and_append(trades, target_path, model_url=None, retries=0, timeout=500, batch_size=1):
         """
         Send trades to the model in batches of `batch_size`, merge returned
         `model_evaluation` into each trade, and write combined output to a new
@@ -784,6 +784,7 @@ def generate_mock_report() -> str:
                 ],
                 'max_tokens': 2048,
                 'temperature': 0.0,
+                'stream': False,
             }
 
             attempt = 0
@@ -793,6 +794,7 @@ def generate_mock_report() -> str:
                     attempt += 1
                     print(f"[utils] Calling model at {model_url} (attempt {attempt}) for batch size {len(batch)}")
                     resp = requests.post(model_url, json=payload, timeout=timeout)
+                    print(f"[utils] Response HTTP {resp.status_code} ({len(resp.content)} bytes, {resp.elapsed.total_seconds():.1f}s)")
                     resp.raise_for_status()
 
                     # extract assistant text from chat response
@@ -927,7 +929,7 @@ def generate_mock_report() -> str:
     return filename
 
 
-def analyze_trade_with_model(trade: dict, source_filename: str, model_url=None, retries=2, timeout=120):
+def analyze_trade_with_model(trade: dict, source_filename: str, model_url=None, retries=1, timeout=500):
     """Send a single trade to the local model and append the evaluated trade
     to ``results/model_<source_filename>``.  Returns the evaluated trade dict
     (including ``model_evaluation`` and ``engine_calculations``) on success.
@@ -1161,6 +1163,7 @@ def _attempt_repair(
     try:
         print(f"{tag} REPAIR attempt — {len(violations)} violation(s)")
         resp = requests.post(model_url, json=repair_payload, timeout=timeout)
+        print(f"{tag} REPAIR response HTTP {resp.status_code} ({len(resp.content)} bytes, {resp.elapsed.total_seconds():.1f}s)")
         resp.raise_for_status()
 
         resp_json = None
@@ -1314,7 +1317,7 @@ def hard_gate_override(trade: dict, me: dict) -> dict:
 _analyze_trade_with_model_legacy = analyze_trade_with_model
 
 
-def analyze_trade_with_model(trade: dict, source_filename: str, model_url=None, retries=2, timeout=30):
+def analyze_trade_with_model(trade: dict, source_filename: str, model_url=None, retries=1, timeout=500):
     # TODO(architecture): remove this compatibility shim once all imports use common.model_analysis directly.
     from app.models.trade_contract import TradeContract
     from common.model_analysis import analyze_trade

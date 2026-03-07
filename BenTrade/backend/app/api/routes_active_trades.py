@@ -806,6 +806,7 @@ Be direct and specific. Reference the actual numbers.
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.3,
                 "max_tokens": 500,
+                "stream": False,
             },
             timeout=30.0,
         )
@@ -1004,7 +1005,7 @@ MARKET CONTEXT
             from app.services.model_router import get_model_endpoint
             llm_response = await request.app.state.http_client.post(
                 get_model_endpoint(),
-                json=llm_payload,
+                json={**llm_payload, "stream": False},
                 timeout=30.0,
             )
             if llm_response.status_code != 200:

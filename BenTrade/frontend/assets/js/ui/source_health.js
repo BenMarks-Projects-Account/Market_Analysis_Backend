@@ -1,5 +1,6 @@
 window.BenTradeSourceHealth = (function(){
   const SOURCE_ORDER = ['Finnhub', 'Yahoo', 'Tradier', 'FRED'];
+  const AI_MODEL_LABEL = 'AI Model';
 
   function escapeHtml(value){
     return String(value ?? '')
@@ -59,15 +60,41 @@ window.BenTradeSourceHealth = (function(){
     });
 
     const ordered = SOURCE_ORDER.map((name) => map.get(name)).filter(Boolean);
-    const extras = sources.filter((item) => !SOURCE_ORDER.includes(String(item?.name || '').trim()));
-    const all = [...ordered, ...extras];
+    // AI Model entry is always listed last
+    const modelEntry = sources.find((item) => String(item?.name || '').trim() === AI_MODEL_LABEL);
+    const extras = sources.filter((item) => {
+      const name = String(item?.name || '').trim();
+      return !SOURCE_ORDER.includes(name) && name !== AI_MODEL_LABEL;
+    });
+    const all = [...ordered, ...extras, ...(modelEntry ? [modelEntry] : [])];
 
     const rows = all.map((item) => {
       const notes = Array.isArray(item?.notes) ? item.notes.filter(Boolean).map(String) : [];
+      const name = String(item?.name || 'Unknown');
+      const isModel = name === AI_MODEL_LABEL;
+
+      // For model entries, build a richer tooltip with latency and model name
+      let tooltip = '';
+      if(isModel){
+        const latency = item?.latency_ms;
+        const parts = [];
+        if(item?.status === 'ok' || item?.status === 'green'){
+          parts.push('PASS');
+        }else{
+          parts.push('FAIL');
+        }
+        if(latency != null) parts.push(latency + ' ms');
+        // First note is usually the model name
+        if(notes.length) parts.push(notes[0]);
+        tooltip = parts.join(' · ');
+      }else{
+        tooltip = notes.length ? notes.join(' • ') : 'No notes';
+      }
+
       return {
-        label: item?.name || 'Unknown',
+        label: name,
         statusClass: statusClass(item?.status),
-        tooltip: notes.length ? notes.join(' • ') : 'No notes',
+        tooltip,
       };
     });
 
