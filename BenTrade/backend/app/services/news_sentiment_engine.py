@@ -145,6 +145,7 @@ def compute_engine_scores(
         "regime_label": regime_label,
         "components": components,
         "weights": _WEIGHTS,
+        "explanation": build_engine_explanation(composite, regime_label, components, _WEIGHTS),
         "as_of": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -442,3 +443,306 @@ def _compute_recency_pressure(items: list[dict[str, Any]]) -> dict[str, Any]:
         "signals": signals,
         "inputs": {"decayed_avg": round(decayed_avg, 4), "item_count": len(items)},
     }
+
+
+# ── Display name and tooltip mappings ──────────────────────────────
+
+_DISPLAY_NAMES: dict[str, str] = {
+    "headline_sentiment": "Headline Strength",
+    "negative_pressure": "Negative Pressure / Risk Load",
+    "narrative_severity": "Narrative Strength",
+    "source_agreement": "Source Agreement",
+    "macro_stress": "Macro Stress",
+    "recency_pressure": "Signal Freshness",
+}
+
+_TOOLTIPS: dict[str, str] = {
+    "headline_sentiment": "How constructive or supportive the headline set is. Higher = more bullish tone across headlines.",
+    "negative_pressure": "Intensity of adverse or downside news pressure. Higher = less bearish pressure (inverted: 100 means no bearish headlines).",
+    "narrative_severity": "How coherent and persistent the dominant market stories are in risk categories. Higher = fewer high-severity bearish narratives.",
+    "source_agreement": "How consistently major news sources point in the same direction. Higher = stronger cross-source consensus.",
+    "macro_stress": "Degree of macro strain in the economic backdrop (VIX, yield curve, stress level). Higher = calmer macro environment.",
+    "recency_pressure": "How recent and relevant the input signal set is. Higher = recent headlines skew bullish; lower = recent flow is bearish.",
+}
+
+# Components where a higher raw score means LESS market risk
+# (inverted semantics — score is already normalized: 100 = good)
+_INVERTED_COMPONENTS = {"negative_pressure", "narrative_severity", "macro_stress"}
+
+
+def _interpret_component(name: str, score: float) -> str:
+    """Generate a plain-English interpretation of a component score.
+
+    For inverted components (negative_pressure, narrative_severity, macro_stress),
+    explains that a higher score means less risk, not more.
+    """
+    if name == "headline_sentiment":
+        if score >= 65:
+            return "Headlines are predominantly constructive and growth-oriented."
+        if score >= 40:
+            return "Headlines are balanced with no strong directional lean."
+        if score >= 25:
+            return "Headlines tilt negative with notable caution signals."
+        return "Headlines are heavily bearish with widespread risk language."
+
+    if name == "negative_pressure":
+        # Higher score = less bearish pressure (inverted)
+        if score >= 80:
+            return "Very few bearish headlines in the last 24 hours — minimal downside pressure."
+        if score >= 60:
+            return "Some bearish headlines present but not dominant."
+        if score >= 40:
+            return "Meaningful bearish pressure — roughly half of recent headlines are negative."
+        return "Heavy bearish pressure — the majority of recent headlines signal risk or decline."
+
+    if name == "narrative_severity":
+        # Higher score = fewer severe narratives (inverted)
+        if score >= 80:
+            return "Critical categories (geopolitics, Fed, macro) are mostly calm."
+        if score >= 60:
+            return "Some activity in high-severity categories but not alarming."
+        if score >= 40:
+            return "Notable bearish narratives in critical categories are dragging this score down."
+        return "Significant bearish activity in geopolitical, Fed, or macro categories."
+
+    if name == "source_agreement":
+        if score >= 70:
+            return "Major news sources agree on market direction — high-conviction signal."
+        if score >= 45:
+            return "Sources are loosely aligned or sending independent signals."
+        return "Sources are sending conflicting signals — low conviction in any single direction."
+
+    if name == "macro_stress":
+        # Higher score = lower stress (inverted)
+        if score >= 75:
+            return "Macro backdrop is calm — low VIX, healthy yield curve."
+        if score >= 50:
+            return "Moderate macro stress — some concern signals but no acute crisis."
+        if score >= 30:
+            return "Elevated macro stress — VIX high or yield curve inverting."
+        return "Severe macro stress — high VIX, inverted curve, or acute strain."
+
+    if name == "recency_pressure":
+        if score >= 65:
+            return "The most recent headlines lean bullish, supporting upward momentum."
+        if score >= 40:
+            return "Recent headlines are mixed — no strong recency signal."
+        return "Recent headlines lean bearish, suggesting deteriorating near-term sentiment."
+
+    return ""
+
+
+def _contribution_label(score: float) -> str:
+    """Classify a component's contribution to the composite."""
+    if score >= 60:
+        return "positive"
+    if score <= 40:
+        return "negative"
+    return "neutral"
+
+
+def build_engine_explanation(
+    composite: float,
+    regime_label: str,
+    components: dict[str, dict[str, Any]],
+    weights: dict[str, float],
+) -> dict[str, Any]:
+    """Build a structured explanation object from the engine computation.
+
+    Input fields:
+      composite: weighted composite score 0-100
+      regime_label: regime string from _regime_from_score
+      components: dict of component_name → {score, signals, inputs}
+      weights: dict of component_name → weight
+
+    Returns structured explanation matching the required schema.
+    """
+    # ── Map regime_label to new label set ───────────────────────
+    label_map = {
+        "Risk-On": "BULLISH",
+        "Neutral": "NEUTRAL",
+        "Mixed": "MIXED",
+        "Risk-Off": "RISK-OFF",
+        "High Stress": "RISK-OFF",
+    }
+    label = label_map.get(regime_label, "NEUTRAL")
+
+    # ── Component analysis ──────────────────────────────────────
+    component_analysis = []
+    weighted_contributions: list[tuple[str, float, float]] = []  # (name, score, weighted)
+    total_weight = sum(weights.values())
+
+    for name in (
+        "headline_sentiment", "negative_pressure", "narrative_severity",
+        "source_agreement", "macro_stress", "recency_pressure",
+    ):
+        comp = components.get(name)
+        if not comp:
+            continue
+        score = comp.get("score", 50.0)
+        weight = weights.get(name, 0)
+        weighted_val = (score * weight) / total_weight if total_weight else 0
+
+        interpretation = _interpret_component(name, score)
+        contribution = _contribution_label(score)
+        details = comp.get("signals", [])
+
+        component_analysis.append({
+            "component": name,
+            "display_name": _DISPLAY_NAMES.get(name, name),
+            "score": round(score, 2),
+            "weight": weight,
+            "interpretation": interpretation,
+            "contribution": contribution,
+            "tooltip": _TOOLTIPS.get(name, ""),
+            "details": details,
+        })
+
+        weighted_contributions.append((name, score, weighted_val))
+
+    # ── Score logic: positive/negative/balancing contributors ───
+    positive = []
+    negative = []
+    balancing = []
+
+    for name, score, weighted_val in sorted(weighted_contributions, key=lambda x: -x[2]):
+        display = _DISPLAY_NAMES.get(name, name)
+        if score >= 60:
+            positive.append(f"{display} at {score:.0f} (w:{weights.get(name, 0):.0f})")
+        elif score <= 40:
+            negative.append(f"{display} at {score:.0f} (w:{weights.get(name, 0):.0f})")
+        else:
+            balancing.append(f"{display} at {score:.0f} — neither helping nor hurting")
+
+    # ── Signal quality ──────────────────────────────────────────
+    scores = [c.get("score", 50) for c in components.values() if c]
+    score_spread = max(scores) - min(scores) if scores else 0
+    count_extreme = sum(1 for s in scores if s >= 75 or s <= 25)
+
+    if score_spread < 20 and count_extreme == 0:
+        sig_strength = "low"
+        sig_explain = (
+            "Components are clustered near neutral with no strong readings. "
+            "The composite score reflects a lack of conviction in any direction."
+        )
+    elif count_extreme >= 3 or score_spread > 50:
+        sig_strength = "high"
+        sig_explain = (
+            "Multiple components show strong readings with clear directional bias. "
+            "The composite score carries high conviction."
+        )
+    else:
+        sig_strength = "medium"
+        sig_explain = (
+            "Some components show meaningful readings while others are neutral. "
+            "The composite score reflects a moderate-confidence assessment."
+        )
+
+    # ── Summary ─────────────────────────────────────────────────
+    summary = _build_engine_summary(composite, regime_label, positive, negative, balancing)
+
+    # ── Trader takeaway ─────────────────────────────────────────
+    trader_takeaway = _build_trader_takeaway(composite, regime_label, positive, negative)
+
+    return {
+        "label": label,
+        "composite_score": round(composite, 2),
+        "summary": summary,
+        "component_analysis": component_analysis,
+        "score_logic": {
+            "largest_positive_contributors": positive,
+            "largest_negative_contributors": negative,
+            "balancing_forces": balancing,
+        },
+        "signal_quality": {
+            "strength": sig_strength,
+            "explanation": sig_explain,
+        },
+        "trader_takeaway": trader_takeaway,
+    }
+
+
+def _build_engine_summary(
+    composite: float,
+    regime_label: str,
+    positive: list[str],
+    negative: list[str],
+    balancing: list[str],
+) -> str:
+    """Build a 2-3 sentence plain-English summary of the engine state."""
+    # Opening: describe the regime
+    if composite >= 65:
+        opening = f"The engine reads a constructive market environment (score: {composite:.1f}, regime: {regime_label})."
+    elif composite >= 40:
+        opening = f"The engine sees a broadly neutral market backdrop (score: {composite:.1f}, regime: {regime_label})."
+    elif composite >= 25:
+        opening = f"The engine detects mixed signals with notable caution flags (score: {composite:.1f}, regime: {regime_label})."
+    else:
+        opening = f"The engine flags a stressed market environment (score: {composite:.1f}, regime: {regime_label})."
+
+    # Contributors
+    parts = []
+    if positive:
+        top = positive[0].split(" at ")[0] if positive else ""
+        parts.append(f"the strongest positive contributor is {top}")
+    if negative:
+        top_neg = negative[0].split(" at ")[0] if negative else ""
+        parts.append(f"the largest drag is {top_neg}")
+    if balancing and not negative and not positive:
+        parts.append("most components are near neutral with no strong readings")
+
+    contrib_sentence = ""
+    if parts:
+        contrib_sentence = " " + parts[0].capitalize()
+        for p in parts[1:]:
+            contrib_sentence += ", and " + p
+        contrib_sentence += "."
+
+    # Why not more extreme
+    if balancing and (positive or negative):
+        balance_note = f" The score is moderated by {len(balancing)} neutral-range component{'s' if len(balancing) != 1 else ''} that limit conviction."
+    elif positive and negative:
+        balance_note = " Positive and negative forces are partially offsetting, keeping the composite in a middle range."
+    else:
+        balance_note = ""
+
+    return (opening + contrib_sentence + balance_note).strip()
+
+
+def _build_trader_takeaway(
+    composite: float,
+    regime_label: str,
+    positive: list[str],
+    negative: list[str],
+) -> str:
+    """Build a 2-3 sentence practical takeaway for traders."""
+    if composite >= 70:
+        return (
+            "The deterministic engine is firmly constructive. This backdrop supports "
+            "premium-selling strategies with a bullish bias — favor bull put spreads and "
+            "short strangles on index ETFs. Monitor for complacency signals if macro stress "
+            "stays very low."
+        )
+    if composite >= 55:
+        return (
+            "The engine leans mildly constructive. Standard premium-selling is reasonable "
+            "but keep position sizes moderate. The signal is not strong enough to justify "
+            "aggressive directional bets."
+        )
+    if composite >= 40:
+        return (
+            "The engine reads neutral with no strong edge in either direction. Iron condors "
+            "and balanced strangles are appropriate. Avoid directional bias and keep "
+            "positions small until a clearer signal emerges."
+        )
+    if composite >= 25:
+        return (
+            "The engine shows mixed readings with notable headwinds. Widen your spreads, "
+            "reduce notional exposure, and favor defensive positioning. Consider bear call "
+            "spreads if negative contributors dominate."
+        )
+    return (
+        "The engine flags significant market stress. This is not the environment for "
+        "aggressive premium selling. Reduce exposure, hedge existing positions, and wait "
+        "for conditions to stabilize before re-engaging."
+    )

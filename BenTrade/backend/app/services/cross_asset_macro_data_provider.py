@@ -1,0 +1,246 @@
+"""Cross-Asset / Macro Confirmation — Data Provider.
+
+Fetches all raw inputs needed by the cross-asset scoring engine.
+Uses MarketContextService for metrics already available (VIX, yields, oil, USD)
+and FRED directly for additional series (gold, copper, credit spreads).
+
+Data sources:
+  MarketContextService → VIX, 10Y/2Y yields, fed funds, oil, USD, yield curve spread
+  FRED GOLDAMGBD228NLBM → Gold price (London PM fix, EOD)
+  FRED PCOPPUSDM        → Copper price (monthly, LME)
+  FRED BAMLC0A0CM       → IG OAS spread (ICE BofA)
+  FRED BAMLH0A0HYM2     → HY OAS spread (ICE BofA)
+
+Returns a dict with pillar-keyed sub-dicts:
+  rates_data, dollar_commodity_data, credit_data, defensive_growth_data, coherence_data
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any
+
+from app.clients.fred_client import FredClient
+from app.services.market_context_service import MarketContextService
+
+logger = logging.getLogger(__name__)
+
+# Additional FRED series IDs not in MarketContextService
+_FRED_GOLD = "GOLDAMGBD228NLBM"       # Gold fixing price London PM (USD/troy oz)
+_FRED_COPPER = "PCOPPUSDM"            # Global copper price (USD/metric ton, monthly)
+_FRED_IG_SPREAD = "BAMLC0A0CM"        # ICE BofA US Corp IG OAS
+_FRED_HY_SPREAD = "BAMLH0A0HYM2"     # ICE BofA US HY OAS
+
+
+def _extract_value(metric: dict[str, Any] | None) -> float | None:
+    """Extract the numeric value from a MarketContextService metric envelope."""
+    if metric is None:
+        return None
+    return metric.get("value")
+
+
+class CrossAssetMacroDataProvider:
+    """Fetches raw data for the Cross-Asset / Macro Confirmation engine."""
+
+    def __init__(
+        self,
+        market_context_service: MarketContextService,
+        fred_client: FredClient,
+    ) -> None:
+        self.market_context = market_context_service
+        self.fred = fred_client
+
+    async def fetch_cross_asset_data(self) -> dict[str, Any]:
+        """Fetch all cross-asset data and return pillar-keyed input dicts.
+
+        Fault-tolerant: individual upstream failures degrade gracefully.
+        The engine receives None for any failed source instead of crashing.
+
+        Returns
+        -------
+        dict with keys:
+          rates_data: inputs for Pillar 1 (Rates & Yield Curve)
+          dollar_commodity_data: inputs for Pillar 2 (Dollar & Commodity)
+          credit_data: inputs for Pillar 3 (Credit & Risk Appetite)
+          defensive_growth_data: inputs for Pillar 4 (Defensive vs Growth)
+          coherence_data: inputs for Pillar 5 (Macro Coherence)
+          source_meta: data freshness / source metadata
+          source_errors: per-source error details (empty if all OK)
+        """
+        logger.info("event=cross_asset_fetch_start")
+
+        # ── Fetch with partial-failure tolerance ─────────────────
+        # Each source is wrapped so a single HTTP 400 / timeout does
+        # NOT crash the entire gather.  The engine already handles None.
+        source_errors: dict[str, str] = {}
+
+        async def _safe_market_ctx() -> dict[str, Any] | None:
+            try:
+                return await self.market_context.get_market_context()
+            except Exception as exc:
+                source_errors["market_context"] = str(exc)
+                logger.error(
+                    "event=cross_asset_source_failed source=market_context error=%s",
+                    exc,
+                )
+                return None
+
+        async def _safe_fred(series_id: str, label: str) -> dict[str, Any] | None:
+            try:
+                return await self.fred.get_series_with_date(series_id)
+            except Exception as exc:
+                source_errors[label] = str(exc)
+                logger.error(
+                    "event=cross_asset_source_failed source=%s series=%s error=%s",
+                    label, series_id, exc,
+                )
+                return None
+
+        market_ctx, gold_obs, copper_obs, ig_obs, hy_obs = await asyncio.gather(
+            _safe_market_ctx(),
+            _safe_fred(_FRED_GOLD, "fred_gold"),
+            _safe_fred(_FRED_COPPER, "fred_copper"),
+            _safe_fred(_FRED_IG_SPREAD, "fred_ig_spread"),
+            _safe_fred(_FRED_HY_SPREAD, "fred_hy_spread"),
+        )
+
+        # If market_context failed entirely, use empty dict so
+        # downstream extraction safely returns None for each metric.
+        if market_ctx is None:
+            market_ctx = {}
+
+        # Extract values from market context metric envelopes
+        ten_year = _extract_value(market_ctx.get("ten_year_yield"))
+        two_year = _extract_value(market_ctx.get("two_year_yield"))
+        fed_funds = _extract_value(market_ctx.get("fed_funds_rate"))
+        vix = _extract_value(market_ctx.get("vix"))
+        oil = _extract_value(market_ctx.get("oil_wti"))
+        usd = _extract_value(market_ctx.get("usd_index"))
+        yield_spread = market_ctx.get("yield_curve_spread")  # already a float
+        cpi_yoy = _extract_value(market_ctx.get("cpi_yoy"))
+
+        # Extract FRED observation values
+        gold = gold_obs["value"] if gold_obs else None
+        copper = copper_obs["value"] if copper_obs else None
+        ig_spread = ig_obs["value"] if ig_obs else None
+        hy_spread = hy_obs["value"] if hy_obs else None
+
+        # Log data availability
+        available = sum(1 for v in [ten_year, two_year, fed_funds, vix, oil,
+                                     usd, yield_spread, gold, copper,
+                                     ig_spread, hy_spread, cpi_yoy] if v is not None)
+        logger.info(
+            "event=cross_asset_fetch_complete available=%d/12 source_errors=%d "
+            "vix=%s ten_year=%s two_year=%s oil=%s usd=%s gold=%s copper=%s "
+            "ig_spread=%s hy_spread=%s",
+            available, len(source_errors), vix, ten_year, two_year, oil, usd,
+            gold, copper, ig_spread, hy_spread,
+        )
+        if source_errors:
+            logger.warning(
+                "event=cross_asset_partial_failure errors=%s", source_errors,
+            )
+
+        # -- Build pillar input dicts --
+
+        # Pillar 1: Rates & Yield Curve (25%)
+        rates_data = {
+            "ten_year_yield": ten_year,
+            "two_year_yield": two_year,
+            "yield_curve_spread": yield_spread,
+            "fed_funds_rate": fed_funds,
+        }
+
+        # Pillar 2: Dollar & Commodity (20%)
+        dollar_commodity_data = {
+            "usd_index": usd,
+            "oil_wti": oil,
+            "gold_price": gold,
+            "copper_price": copper,
+        }
+
+        # Pillar 3: Credit & Risk Appetite (25%)
+        credit_data = {
+            "ig_spread": ig_spread,
+            "hy_spread": hy_spread,
+            "vix": vix,
+        }
+
+        # Pillar 4: Defensive vs Growth Alignment (15%)
+        # Second-pass: VIX and hy_spread removed — Pillar 4 is VIX-free
+        defensive_growth_data = {
+            "gold_price": gold,
+            "ten_year_yield": ten_year,
+            "copper_price": copper,
+        }
+
+        # Pillar 5: Macro Coherence (15%)
+        # Meta-pillar that checks consistency across pillar inputs
+        coherence_data = {
+            "vix": vix,
+            "yield_curve_spread": yield_spread,
+            "ig_spread": ig_spread,
+            "hy_spread": hy_spread,
+            "usd_index": usd,
+            "oil_wti": oil,
+            "gold_price": gold,
+            "copper_price": copper,
+            "cpi_yoy": cpi_yoy,
+        }
+
+        # Source metadata for UI freshness display
+        source_meta = {
+            "market_context_generated_at": market_ctx.get("context_generated_at"),
+            "vix_source": market_ctx.get("vix", {}).get("source"),
+            "vix_freshness": market_ctx.get("vix", {}).get("freshness"),
+            "fred_gold_date": gold_obs.get("observation_date") if gold_obs else None,
+            "fred_copper_date": copper_obs.get("observation_date") if copper_obs else None,
+            "fred_ig_date": ig_obs.get("observation_date") if ig_obs else None,
+            "fred_hy_date": hy_obs.get("observation_date") if hy_obs else None,
+            # FRED source honesty — frequency and delay metadata
+            "fred_source_detail": {
+                _FRED_GOLD: {
+                    "series_id": _FRED_GOLD,
+                    "label": "Gold Fixing Price London Bullion Market (PM)",
+                    "frequency": "daily",
+                    "typical_delay": "1 business day",
+                    "unit": "USD/troy ounce",
+                },
+                _FRED_COPPER: {
+                    "series_id": _FRED_COPPER,
+                    "label": "Global Copper Price (LME)",
+                    "frequency": "monthly",
+                    "typical_delay": "up to 30 days (monthly average)",
+                    "unit": "USD/metric ton",
+                    "stale_warning": (
+                        "Monthly series — may not reflect recent price "
+                        "movements. Treat as slow proxy for growth."
+                    ),
+                },
+                _FRED_IG_SPREAD: {
+                    "series_id": _FRED_IG_SPREAD,
+                    "label": "ICE BofA US Corporate IG OAS",
+                    "frequency": "daily",
+                    "typical_delay": "1-2 business days",
+                    "unit": "percent (OAS)",
+                },
+                _FRED_HY_SPREAD: {
+                    "series_id": _FRED_HY_SPREAD,
+                    "label": "ICE BofA US High Yield OAS",
+                    "frequency": "daily",
+                    "typical_delay": "1-2 business days",
+                    "unit": "percent (OAS)",
+                },
+            },
+        }
+
+        return {
+            "rates_data": rates_data,
+            "dollar_commodity_data": dollar_commodity_data,
+            "credit_data": credit_data,
+            "defensive_growth_data": defensive_growth_data,
+            "coherence_data": coherence_data,
+            "source_meta": source_meta,
+            "source_errors": source_errors,
+        }

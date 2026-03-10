@@ -11,6 +11,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/favicon-180.png">
 
   <link rel="stylesheet" href="assets/css/app.css">
+  <link rel="stylesheet" href="assets/css/module-dashboard.css">
   <style>
     :root{
       --scroll-pad: 36px;
@@ -230,11 +231,51 @@
                 <span class="nav-item-sub">Market overview command center</span>
               </span>
             </a>
+          </section>
+
+          <section class="nav-group" aria-label="Market Picture">
+            <div class="nav-group-header">Market Picture</div>
+            <div class="nav-group-desc">Full market context modules</div>
             <a class="nav-link" href="#/news-sentiment" data-route="news-sentiment">
               <span class="nav-dot"></span>
               <span class="nav-item-text">
                 <span class="nav-item-title">News &amp; Sentiment</span>
                 <span class="nav-item-sub">Macro &amp; headline intelligence</span>
+              </span>
+            </a>
+            <a class="nav-link" href="#/market/breadth" data-route="market/breadth">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Breadth &amp; Participation</span>
+                <span class="nav-item-sub">Market internals depth</span>
+              </span>
+            </a>
+            <a class="nav-link" href="#/market/volatility" data-route="market/volatility">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Volatility &amp; Options</span>
+                <span class="nav-item-sub">Vol regime &amp; options posture</span>
+              </span>
+            </a>
+            <a class="nav-link" href="#/market/cross-asset" data-route="market/cross-asset">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Cross-Asset / Macro</span>
+                <span class="nav-item-sub">Confirmation signals</span>
+              </span>
+            </a>
+            <a class="nav-link" href="#/market/flows" data-route="market/flows">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Flows &amp; Positioning</span>
+                <span class="nav-item-sub">Positioning &amp; flow dynamics</span>
+              </span>
+            </a>
+            <a class="nav-link" href="#/market/liquidity" data-route="market/liquidity">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Liquidity &amp; Conditions</span>
+                <span class="nav-item-sub">Financial conditions &amp; policy</span>
               </span>
             </a>
           </section>
@@ -512,6 +553,11 @@
   <script src="assets/js/pages/data_health.js?v=20260217a"></script>
   <script src="assets/js/pages/news_sentiment.js?v=20260306c"></script>
   <script src="assets/js/pages/admin_data_workbench.js?v=20260217b"></script>
+  <script src="assets/js/pages/breadth_participation.js?v=20260310a"></script>
+  <script src="assets/js/pages/volatility_options.js?v=20260310a"></script>
+  <script src="assets/js/pages/cross_asset_macro.js?v=20260310a"></script>
+  <script src="assets/js/pages/flows_positioning.js?v=20260310a"></script>
+  <script src="assets/js/pages/liquidity_conditions.js?v=20260310a"></script>
   <script src="assets/js/app.js?v=20260217a"></script>
   <script src="assets/js/router.js?v=20260216c"></script>
 </body>

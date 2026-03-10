@@ -369,7 +369,7 @@ def analyze_regime(
     playbook_data: dict[str, Any] | None = None,
     model_url: str | None = None,
     retries: int = 0,
-    timeout: int = 300,
+    timeout: int = 180,
 ) -> dict[str, Any]:
     """Call the local LLM with raw regime inputs only (no derived scores/labels).
 
@@ -513,7 +513,22 @@ def analyze_regime(
             if assistant_text is None:
                 assistant_text = getattr(response, "text", "")
 
-            parsed = _extract_json_payload(assistant_text)
+            # ── Sanitize: strip <think> tags and any hidden reasoning ──
+            from common.model_sanitize import had_think_tags
+            if had_think_tags(assistant_text):
+                _log.info("[MODEL_REGIME] <think> content detected and stripped (attempt %d)", attempt)
+            assistant_text = _strip_think_tags(assistant_text)
+
+            # Try robust JSON extraction via repair pipeline first
+            from common.json_repair import extract_and_repair_json
+            parsed, method = extract_and_repair_json(assistant_text)
+            if parsed is None:
+                parsed = _extract_json_payload(assistant_text)
+                method = "legacy_fallback"
+
+            if method:
+                _log.info("[MODEL_REGIME] JSON extracted via method=%s", method)
+
             normalized = _coerce_regime_model_output(parsed)
             if normalized is None:
                 raise ValueError("Model returned invalid regime analysis payload")
@@ -549,7 +564,7 @@ def analyze_trade(
     source: str,
     model_url: str | None = None,
     retries: int = 1,
-    timeout: int = 120,
+    timeout: int = 180,
 ) -> dict[str, Any] | None:
     # Keep the legacy JSON contract exactly the same by delegating to the legacy implementation.
     # TODO(architecture): migrate implementation from common.utils into this module and delete legacy shim.
@@ -575,7 +590,7 @@ def analyze_stock_idea(
     source: str,
     model_url: str | None = None,
     retries: int = 0,
-    timeout: int = 120,
+    timeout: int = 180,
 ) -> dict[str, Any]:
     import logging
     from common import utils as legacy_utils
@@ -649,7 +664,22 @@ def analyze_stock_idea(
             if assistant_text is None:
                 assistant_text = getattr(response, "text", "")
 
-            parsed = _extract_json_payload(assistant_text)
+            # ── Sanitize: strip <think> tags and any hidden reasoning ──
+            from common.model_sanitize import had_think_tags
+            if had_think_tags(assistant_text):
+                _log.info("[MODEL_STOCK_IDEA] <think> content detected and stripped (attempt %d)", attempt)
+            assistant_text = _strip_think_tags(assistant_text)
+
+            # Try robust JSON extraction via repair pipeline first
+            from common.json_repair import extract_and_repair_json
+            parsed, method = extract_and_repair_json(assistant_text)
+            if parsed is None:
+                parsed = _extract_json_payload(assistant_text)
+                method = "legacy_fallback"
+
+            if method:
+                _log.info("[MODEL_STOCK_IDEA] JSON extracted via method=%s", method)
+
             normalized = _coerce_stock_model_output(parsed)
             if normalized is None:
                 raise ValueError("Model returned invalid stock analysis payload")
@@ -846,7 +876,7 @@ def analyze_stock_strategy(
     candidate: dict[str, Any],
     model_url: str | None = None,
     retries: int = 0,
-    timeout: int = 300,
+    timeout: int = 180,
 ) -> dict[str, Any]:
     """Run LLM model analysis on a stock strategy scanner candidate.
 
@@ -1052,7 +1082,12 @@ def analyze_stock_strategy(
 
 
 def _coerce_news_sentiment_model_output(candidate: Any) -> dict[str, Any] | None:
-    """Normalise the LLM response for news/sentiment analysis into a consistent dict."""
+    """Normalise the LLM response for news/sentiment analysis into a consistent dict.
+
+    Accepts the enhanced schema with headline_drivers, major_headlines,
+    score_drivers, market_implications, uncertainty_flags, and trader_takeaway.
+    Falls back gracefully for any missing optional sections.
+    """
     if isinstance(candidate, list) and candidate:
         first = candidate[0]
         if isinstance(first, dict):
@@ -1062,10 +1097,10 @@ def _coerce_news_sentiment_model_output(candidate: Any) -> dict[str, Any] | None
 
     out: dict[str, Any] = {}
 
-    # ── Regime label ────────────────────────────────────────────
-    label = str(candidate.get("regime_label") or "Neutral").strip()
-    valid_labels = {"Risk-On", "Neutral", "Mixed", "Risk-Off", "High Stress"}
-    out["regime_label"] = label if label in valid_labels else "Neutral"
+    # ── Label (expanded set) ────────────────────────────────────
+    label = str(candidate.get("label") or candidate.get("regime_label") or "NEUTRAL").strip().upper()
+    valid_labels = {"BULLISH", "BEARISH", "MIXED", "NEUTRAL", "RISK-OFF", "RISK-ON"}
+    out["label"] = label if label in valid_labels else "NEUTRAL"
 
     # ── Score 0-100 ─────────────────────────────────────────────
     score_raw = candidate.get("score")
@@ -1081,29 +1116,93 @@ def _coerce_news_sentiment_model_output(candidate: Any) -> dict[str, Any] | None
     except (TypeError, ValueError):
         out["confidence"] = None
 
-    # ── String sections ─────────────────────────────────────────
-    for key in ("executive_summary", "sentiment_outlook", "risk_assessment"):
+    # ── Tone ────────────────────────────────────────────────────
+    tone = candidate.get("tone") or candidate.get("headline_tone")
+    out["tone"] = str(tone).strip() if isinstance(tone, str) and tone.strip() else None
+
+    # ── Summary (required) ──────────────────────────────────────
+    summary = candidate.get("summary") or candidate.get("executive_summary")
+    out["summary"] = str(summary).strip() if isinstance(summary, str) and summary.strip() else None
+
+    # ── Headline drivers (list of dicts) ────────────────────────
+    hd_raw = candidate.get("headline_drivers")
+    if isinstance(hd_raw, list):
+        drivers = []
+        for item in hd_raw[:8]:
+            if isinstance(item, dict):
+                drivers.append({
+                    "theme": str(item.get("theme") or "").strip(),
+                    "impact": str(item.get("impact") or "neutral").strip().lower(),
+                    "strength": max(1, min(int(item.get("strength") or 1), 5)) if item.get("strength") is not None else 1,
+                    "explanation": str(item.get("explanation") or "").strip(),
+                })
+        out["headline_drivers"] = drivers if drivers else None
+    else:
+        out["headline_drivers"] = None
+
+    # ── Major headlines (list of dicts) ─────────────────────────
+    mh_raw = candidate.get("major_headlines")
+    if isinstance(mh_raw, list):
+        headlines = []
+        for item in mh_raw[:10]:
+            if isinstance(item, dict):
+                headlines.append({
+                    "headline": str(item.get("headline") or "").strip(),
+                    "category": str(item.get("category") or "macro").strip().lower(),
+                    "market_impact": str(item.get("market_impact") or "neutral").strip().lower(),
+                    "why_it_matters": str(item.get("why_it_matters") or "").strip(),
+                })
+        out["major_headlines"] = headlines if headlines else None
+    else:
+        out["major_headlines"] = None
+
+    # ── Score drivers (bullish/bearish/offsetting factors) ──────
+    sd_raw = candidate.get("score_drivers")
+    if isinstance(sd_raw, dict):
+        out["score_drivers"] = {
+            "bullish_factors": _coerce_string_list(sd_raw.get("bullish_factors"), max_items=8),
+            "bearish_factors": _coerce_string_list(sd_raw.get("bearish_factors"), max_items=8),
+            "offsetting_factors": _coerce_string_list(sd_raw.get("offsetting_factors"), max_items=8),
+        }
+    else:
+        out["score_drivers"] = None
+
+    # ── Market implications ─────────────────────────────────────
+    mi_raw = candidate.get("market_implications")
+    if isinstance(mi_raw, dict):
+        out["market_implications"] = {
+            k: str(mi_raw.get(k) or "").strip() or None
+            for k in ("equities", "volatility", "rates", "energy_or_commodities", "sector_rotation")
+        }
+    else:
+        out["market_implications"] = None
+
+    # ── Uncertainty flags ───────────────────────────────────────
+    out["uncertainty_flags"] = _coerce_string_list(candidate.get("uncertainty_flags"), max_items=8)
+
+    # ── Trader takeaway ─────────────────────────────────────────
+    tt = candidate.get("trader_takeaway")
+    out["trader_takeaway"] = str(tt).strip() if isinstance(tt, str) and tt.strip() else None
+
+    # ── Legacy fields (kept for backward compat) ────────────────
+    for key in ("sentiment_outlook", "risk_assessment"):
         val = candidate.get(key)
         out[key] = str(val).strip() if isinstance(val, str) and val.strip() else None
 
-    # ── List sections ───────────────────────────────────────────
     for key in ("dominant_narratives", "underpriced_risks", "key_drivers", "change_triggers"):
-        val = candidate.get(key)
-        if isinstance(val, list):
-            out[key] = [str(item).strip() for item in val if str(item or "").strip()][:8]
-        elif isinstance(val, str) and val.strip():
-            out[key] = [val.strip()]
-        else:
-            out[key] = None
-
-    # ── Headline tone label ─────────────────────────────────────
-    tone = candidate.get("headline_tone")
-    if isinstance(tone, str) and tone.strip():
-        out["headline_tone"] = tone.strip()
-    else:
-        out["headline_tone"] = None
+        out[key] = _coerce_string_list(candidate.get(key), max_items=8)
 
     return out
+
+
+def _coerce_string_list(val: Any, *, max_items: int = 8) -> list[str] | None:
+    """Coerce a value to a list of non-empty strings, or None."""
+    if isinstance(val, list):
+        items = [str(item).strip() for item in val if str(item or "").strip()][:max_items]
+        return items if items else None
+    if isinstance(val, str) and val.strip():
+        return [val.strip()]
+    return None
 
 
 def _extract_news_raw_evidence(
@@ -1162,7 +1261,7 @@ def analyze_news_sentiment(
     macro_context: dict[str, Any],
     model_url: str | None = None,
     retries: int = 0,
-    timeout: int = 300,
+    timeout: int = 180,
 ) -> dict[str, Any]:
     """Call the local LLM with raw news/macro evidence only (no derived scores).
 
@@ -1171,6 +1270,7 @@ def analyze_news_sentiment(
     are deliberately excluded to prevent anchoring.
     """
     import logging
+    import re as _re
 
     if model_url is None:
         from app.services.model_router import get_model_endpoint
@@ -1197,29 +1297,71 @@ def analyze_news_sentiment(
 
     # ── 3. Build prompt ─────────────────────────────────────────
     prompt = (
-        "You are an independent market news and sentiment analyst for options trading.\n"
-        "You will receive a JSON object with:\n"
-        "  - headlines: array of recent market news items (source, headline, category, time, symbols)\n"
-        "  - headline_count: total number of headlines provided\n"
-        "  - macro_snapshot: current macro data (VIX, yields, oil, fed funds, yield curve spread)\n\n"
-        "IMPORTANT RULES:\n"
-        "  1. You must form your OWN sentiment assessment from the raw headlines and macro data.\n"
-        "  2. Do NOT assume any pre-computed sentiment scores or labels exist.\n"
-        "  3. If macro data fields are null/missing, note them and adjust confidence.\n"
-        "  4. Focus on what matters for options traders: volatility outlook, directional bias,\n"
-        "     and tail risks that could affect short-term premium selling strategies.\n\n"
-        "Return valid JSON only (no markdown, no code fences) with exactly these keys:\n"
-        "  regime_label       – string, one of: 'Risk-On', 'Neutral', 'Mixed', 'Risk-Off', 'High Stress'\n"
-        "  score              – float 0-100 (100 = most bullish/calm, 0 = extreme fear/stress)\n"
-        "  confidence         – float 0-1 representing your overall confidence\n"
-        "  headline_tone      – string, one of: 'Bullish', 'Neutral', 'Mixed', 'Bearish'\n"
-        "  executive_summary  – string, 2-4 sentence overview of current market sentiment\n"
-        "  sentiment_outlook  – string, 1-2 sentence forward-looking sentiment assessment\n"
-        "  dominant_narratives – string array of 3-5 major narrative themes you identify\n"
-        "  underpriced_risks  – string array of 2-3 risks the market may be underpricing\n"
-        "  key_drivers        – string array of 3-5 top factors driving your assessment\n"
-        "  risk_assessment    – string, 2-3 sentences on tail risk and volatility outlook\n"
-        "  change_triggers    – string array of 3-5 conditions that would shift sentiment\n"
+        "You are the BenTrade Market News Analyst. Analyze the supplied news, sentiment, "
+        "macro, and market context and return ONLY valid JSON matching the required schema.\n\n"
+        "Your task is to produce an institutional-style market news brief for traders. Focus on:\n"
+        "- the dominant headline clusters\n"
+        "- the narratives driving risk appetite\n"
+        "- what is bullish, bearish, and conflicting\n"
+        "- why the final score, label, and confidence are justified\n\n"
+        "Rules:\n"
+        "- Return JSON only\n"
+        "- No markdown\n"
+        "- No prose outside JSON\n"
+        "- No chain-of-thought\n"
+        "- No hidden reasoning\n"
+        "- No <think> tags\n"
+        "- No filler language\n"
+        "- Summarize clusters of news, not random isolated stories\n"
+        "- Keep score, label, confidence, and explanations internally consistent\n\n"
+        "The summary MUST explicitly answer:\n"
+        "- what happened\n"
+        "- why markets care\n"
+        "- what pushed risk up\n"
+        "- what pushed risk down\n"
+        "- what the trader should do with the information\n\n"
+        "Scoring guide:\n"
+        "- 0-20 = strongly bearish / risk-off\n"
+        "- 21-40 = bearish\n"
+        "- 41-59 = mixed / conflicted\n"
+        "- 60-79 = constructive / mildly bullish\n"
+        "- 80-100 = strongly bullish / risk-on\n\n"
+        "If evidence conflicts:\n"
+        "- use MIXED or NEUTRAL when appropriate\n"
+        "- lower confidence\n"
+        "- explicitly include offsetting factors and uncertainty flags\n\n"
+        "Required JSON schema (return EXACTLY this shape):\n"
+        "{\n"
+        '  "label": "BULLISH | BEARISH | MIXED | NEUTRAL | RISK-OFF | RISK-ON",\n'
+        '  "score": <float 0-100>,\n'
+        '  "confidence": <float 0-1>,\n'
+        '  "tone": "<string>",\n'
+        '  "summary": "<2-4 sentence executive market brief>",\n'
+        '  "headline_drivers": [\n'
+        '    {"theme": "<short theme title>", "impact": "bullish|bearish|mixed|neutral", '
+        '"strength": <1-5>, "explanation": "<why this theme matters>"}\n'
+        "  ],\n"
+        '  "major_headlines": [\n'
+        '    {"headline": "<cleaned headline>", '
+        '"category": "macro|geopolitics|rates|commodities|earnings|sector|policy|sentiment", '
+        '"market_impact": "bullish|bearish|mixed|neutral", '
+        '"why_it_matters": "<1-2 sentence explanation>"}\n'
+        "  ],\n"
+        '  "score_drivers": {\n'
+        '    "bullish_factors": ["<specific factor>"],\n'
+        '    "bearish_factors": ["<specific factor>"],\n'
+        '    "offsetting_factors": ["<specific balancing/conflicting factor>"]\n'
+        "  },\n"
+        '  "market_implications": {\n'
+        '    "equities": "<brief interpretation>",\n'
+        '    "volatility": "<brief interpretation>",\n'
+        '    "rates": "<brief interpretation>",\n'
+        '    "energy_or_commodities": "<brief interpretation>",\n'
+        '    "sector_rotation": "<brief interpretation>"\n'
+        "  },\n"
+        '  "uncertainty_flags": ["<uncertainty or conflict in the signal>"],\n'
+        '  "trader_takeaway": "<2-4 sentence practical trader takeaway>"\n'
+        "}\n\n"
         "Do not include any keys beyond this schema."
     )
 
@@ -1241,7 +1383,7 @@ def analyze_news_sentiment(
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_data_str},
         ],
-        "max_tokens": 2000,
+        "max_tokens": 4000,
         "temperature": 0.0,
         "stream": False,
     }
@@ -1279,7 +1421,23 @@ def analyze_news_sentiment(
             if assistant_text is None:
                 assistant_text = getattr(response, "text", "")
 
-            parsed = _extract_json_payload(assistant_text)
+            # ── Sanitize: strip <think> tags and any hidden reasoning ──
+            from common.model_sanitize import had_think_tags
+            if had_think_tags(assistant_text):
+                _log.info("[MODEL_NEWS] <think> content detected and stripped (attempt %d)", attempt)
+            assistant_text = _strip_think_tags(assistant_text)
+
+            # Try robust JSON extraction via repair pipeline first
+            from common.json_repair import extract_and_repair_json
+            parsed, method = extract_and_repair_json(assistant_text)
+            if parsed is None:
+                # Fallback to legacy extractor
+                parsed = _extract_json_payload(assistant_text)
+                method = "legacy_fallback"
+
+            if method:
+                _log.info("[MODEL_NEWS] JSON extracted via method=%s", method)
+
             normalized = _coerce_news_sentiment_model_output(parsed)
             if normalized is None:
                 raise ValueError("Model returned invalid news sentiment payload")
@@ -1290,6 +1448,7 @@ def analyze_news_sentiment(
                 "headlines_provided": included_headlines,
                 "excluded_derived_fields": _NEWS_SENTIMENT_EXCLUDED_FIELDS,
                 "missing_macro_fields": missing_macro,
+                "json_parse_method": method,
             }
 
             return normalized
@@ -1304,3 +1463,1269 @@ def analyze_news_sentiment(
             f"Local model endpoint unavailable at {model_url}: {last_error}"
         ) from last_error
     raise RuntimeError(f"News sentiment model analysis failed: {last_error}")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Breadth & Participation Model Analysis
+# ────────────────────────────────────────────────────────────────────────────
+
+# Fields excluded from breadth model input to prevent anchoring
+_BREADTH_EXCLUDED_FIELDS = [
+    "score",
+    "label",
+    "short_label",
+    "summary",
+    "trader_takeaway",
+    "positive_contributors",
+    "negative_contributors",
+    "conflicting_signals",
+    "confidence_score",
+    "signal_quality",
+]
+
+
+def _extract_breadth_raw_evidence(engine_result: dict[str, Any]) -> dict[str, Any]:
+    """Build raw evidence packet for the breadth model — NO derived scores/labels.
+
+    Includes only:
+      - raw_inputs: participation, trend, volume, leadership, stability sub-dicts
+      - pillar_scores: the 5 numeric scores (the model may reinterpret these)
+      - pillar_weights: how pillars are weighted
+      - universe: coverage stats
+      - warnings: data quality warnings
+      - missing_inputs: what data was unavailable
+
+    Explicitly excluded:
+      - composite score, label, summary (engine-derived)
+      - positive/negative contributors, conflicting signals (engine narratives)
+      - confidence_score, signal_quality (engine assessments)
+    """
+    raw_inputs = engine_result.get("raw_inputs", {})
+    evidence = {
+        "raw_inputs": {
+            "participation": raw_inputs.get("participation", {}),
+            "trend": raw_inputs.get("trend", {}),
+            "volume": raw_inputs.get("volume", {}),
+            "leadership": raw_inputs.get("leadership", {}),
+            "stability": raw_inputs.get("stability", {}),
+        },
+        "pillar_scores": engine_result.get("pillar_scores", {}),
+        "pillar_weights": engine_result.get("pillar_weights", {}),
+        "universe": engine_result.get("universe", {}),
+        "warnings": engine_result.get("warnings", []),
+        "missing_inputs": engine_result.get("missing_inputs", []),
+    }
+    return evidence
+
+
+def _coerce_breadth_model_output(candidate: Any) -> dict[str, Any] | None:
+    """Normalize LLM breadth analysis output into a consistent schema.
+
+    Returns None if candidate is not a valid dict with required fields.
+    """
+    if not isinstance(candidate, dict):
+        return None
+
+    label = candidate.get("label")
+    score = candidate.get("score")
+    confidence = candidate.get("confidence")
+    summary = candidate.get("summary")
+
+    if label is None or score is None or summary is None:
+        return None
+
+    # Clamp score 0-100
+    try:
+        score = float(score)
+        score = max(0.0, min(100.0, score))
+    except (TypeError, ValueError):
+        return None
+
+    # Clamp confidence 0-1
+    try:
+        confidence = float(confidence) if confidence is not None else 0.5
+        confidence = max(0.0, min(1.0, confidence))
+    except (TypeError, ValueError):
+        confidence = 0.5
+
+    result: dict[str, Any] = {
+        "label": str(label).strip().upper(),
+        "score": round(score, 1),
+        "confidence": round(confidence, 2),
+        "summary": str(summary).strip(),
+    }
+
+    # Pillar interpretations
+    pa = candidate.get("pillar_analysis")
+    if isinstance(pa, dict):
+        result["pillar_analysis"] = {
+            k: str(v).strip() if isinstance(v, str) else v
+            for k, v in pa.items()
+        }
+    else:
+        result["pillar_analysis"] = {}
+
+    # Breadth drivers
+    bd = candidate.get("breadth_drivers")
+    if isinstance(bd, dict):
+        result["breadth_drivers"] = {
+            "constructive_factors": _coerce_string_list(bd.get("constructive_factors")) or [],
+            "warning_factors": _coerce_string_list(bd.get("warning_factors")) or [],
+            "conflicting_factors": _coerce_string_list(bd.get("conflicting_factors")) or [],
+        }
+    else:
+        result["breadth_drivers"] = {
+            "constructive_factors": [],
+            "warning_factors": [],
+            "conflicting_factors": [],
+        }
+
+    # Market implications
+    mi = candidate.get("market_implications")
+    if isinstance(mi, dict):
+        result["market_implications"] = {
+            "directional_bias": str(mi.get("directional_bias", "")).strip(),
+            "position_sizing": str(mi.get("position_sizing", "")).strip(),
+            "strategy_recommendation": str(mi.get("strategy_recommendation", "")).strip(),
+            "risk_level": str(mi.get("risk_level", "")).strip(),
+            "sector_tilt": str(mi.get("sector_tilt", "")).strip(),
+        }
+    else:
+        result["market_implications"] = {}
+
+    # Uncertainty flags
+    result["uncertainty_flags"] = _coerce_string_list(candidate.get("uncertainty_flags")) or []
+
+    # Trader takeaway
+    ta = candidate.get("trader_takeaway")
+    result["trader_takeaway"] = str(ta).strip() if ta else ""
+
+    return result
+
+
+def analyze_breadth_participation(
+    *,
+    engine_result: dict[str, Any],
+    model_url: str | None = None,
+    retries: int = 0,
+    timeout: int = 180,
+) -> dict[str, Any]:
+    """Call the local LLM with raw breadth evidence only (no derived labels/summary).
+
+    The model independently assesses market breadth from raw pillar data.
+    Engine-computed labels, summaries, and narrative contributors are
+    deliberately excluded to prevent anchoring.
+    """
+    import logging
+    import re as _re
+
+    if model_url is None:
+        from app.services.model_router import get_model_endpoint
+        model_url = get_model_endpoint()
+    import requests as _requests
+
+    _log = logging.getLogger("bentrade.model_analysis")
+
+    # ── 1. Extract raw evidence ─────────────────────────────────
+    raw_evidence = _extract_breadth_raw_evidence(engine_result)
+
+    # ── 2. Trace logging ────────────────────────────────────────
+    pillar_scores = raw_evidence.get("pillar_scores", {})
+    universe = raw_evidence.get("universe", {})
+    _log.info(
+        "[MODEL_BREADTH_TRACE] input_mode=raw_only "
+        "pillar_scores=%s universe_coverage=%.1f%% "
+        "excluded_derived=%s warnings=%d missing=%d",
+        pillar_scores,
+        universe.get("coverage_pct", 0),
+        _BREADTH_EXCLUDED_FIELDS,
+        len(raw_evidence.get("warnings", [])),
+        len(raw_evidence.get("missing_inputs", [])),
+    )
+
+    # ── 3. Build prompt ─────────────────────────────────────────
+    prompt = (
+        "You are the BenTrade Breadth & Participation Analyst. Analyze the supplied "
+        "market breadth data and return ONLY valid JSON matching the required schema.\n\n"
+        "Your task is to produce an institutional-style market breadth assessment for "
+        "options traders. Focus on:\n"
+        "- Whether the rally/sell-off is broad or narrow\n"
+        "- Whether participation is expanding or contracting\n"
+        "- What the advance/decline, volume, trend, and leadership data says about conviction\n"
+        "- How breadth conditions affect risk for income-style options strategies\n"
+        "- Whether breadth supports or undermines the current price trend\n\n"
+        "Rules:\n"
+        "- Return JSON only\n"
+        "- No markdown\n"
+        "- No prose outside JSON\n"
+        "- No chain-of-thought or <think> tags\n"
+        "- Keep score, label, confidence, and explanations internally consistent\n\n"
+        "The summary MUST explicitly answer:\n"
+        "- Is the market rally/decline broadly supported or driven by a few names?\n"
+        "- Are trend and volume confirming or diverging?\n"
+        "- What does leadership quality tell us about sustainability?\n"
+        "- What should a risk-defined options trader do with this information?\n\n"
+        "Scoring guide:\n"
+        "- 0-20 = extremely narrow / deteriorating breadth\n"
+        "- 21-40 = weak / selective participation\n"
+        "- 41-59 = mixed / transitional breadth\n"
+        "- 60-79 = constructive / broadening participation\n"
+        "- 80-100 = strong / robust broad rally\n\n"
+        "Label options: BROAD_RALLY | NARROW_RALLY | DETERIORATING | WEAK | "
+        "RECOVERING | MIXED | STRONG\n\n"
+        "Required JSON schema (return EXACTLY this shape):\n"
+        "{\n"
+        '  "label": "BROAD_RALLY | NARROW_RALLY | DETERIORATING | WEAK | RECOVERING | MIXED | STRONG",\n'
+        '  "score": <float 0-100>,\n'
+        '  "confidence": <float 0-1>,\n'
+        '  "summary": "<2-4 sentence executive breadth brief>",\n'
+        '  "pillar_analysis": {\n'
+        '    "participation": "<interpretation of A/D data, pct advancing, new highs/lows>",\n'
+        '    "trend": "<interpretation of MA breadth — pct above 200/50/20 DMA>",\n'
+        '    "volume": "<interpretation of up/down volume balance>",\n'
+        '    "leadership": "<interpretation of EW vs CW, outperformance, sector dispersion>",\n'
+        '    "stability": "<interpretation of breadth consistency and mean reversion risk>"\n'
+        "  },\n"
+        '  "breadth_drivers": {\n'
+        '    "constructive_factors": ["<factor supporting breadth>"],\n'
+        '    "warning_factors": ["<factor weakening breadth>"],\n'
+        '    "conflicting_factors": ["<signal conflict or divergence>"]\n'
+        "  },\n"
+        '  "market_implications": {\n'
+        '    "directional_bias": "<bullish/bearish/neutral lean from breadth>",\n'
+        '    "position_sizing": "<recommendation on sizing given breadth>",\n'
+        '    "strategy_recommendation": "<which options strategies breadth supports>",\n'
+        '    "risk_level": "<low/moderate/elevated/high>",\n'
+        '    "sector_tilt": "<sectors breadth favors or warns against>"\n'
+        "  },\n"
+        '  "uncertainty_flags": ["<data gap, divergence, or low-confidence area>"],\n'
+        '  "trader_takeaway": "<2-4 sentence practical trader takeaway for options income strategies>"\n'
+        "}\n\n"
+        "Do not include any keys beyond this schema."
+    )
+
+    # ── 4. Build user data (raw evidence only) ──────────────────
+    user_data_str = json.dumps(raw_evidence, ensure_ascii=False, indent=None)
+
+    # Verify no derived fields leaked
+    for forbidden in _BREADTH_EXCLUDED_FIELDS:
+        if f'"{forbidden}"' in user_data_str:
+            _log.error(
+                "[MODEL_BREADTH_TRACE] LEAK DETECTED: derived field '%s' in user_data",
+                forbidden,
+            )
+
+    _log.debug("[MODEL_BREADTH_TRACE] user_data_snapshot=%s", user_data_str[:2000])
+
+    payload = {
+        "messages": [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_data_str},
+        ],
+        "max_tokens": 4000,
+        "temperature": 0.0,
+        "stream": False,
+    }
+
+    # ── 5. Call the model ───────────────────────────────────────
+    last_error: Exception | None = None
+    attempt = 0
+    while attempt <= int(max(retries, 0)):
+        attempt += 1
+        try:
+            _log.info("[MODEL_BREADTH] POST %s (attempt %d, timeout=%ds)", model_url, attempt, timeout)
+            response = _requests.post(model_url, json=payload, timeout=timeout)
+            _log.info(
+                "[MODEL_BREADTH] response HTTP %d (%d bytes, %.1fs)",
+                response.status_code, len(response.content), response.elapsed.total_seconds(),
+            )
+            response.raise_for_status()
+
+            response_json = None
+            try:
+                response_json = response.json()
+            except Exception:
+                response_json = None
+
+            assistant_text = None
+            if isinstance(response_json, dict):
+                choices = response_json.get("choices") or []
+                if choices and isinstance(choices, list) and isinstance(choices[0], dict):
+                    first = choices[0]
+                    message = first.get("message")
+                    if isinstance(message, dict) and "content" in message:
+                        assistant_text = message.get("content")
+                    elif "text" in first:
+                        assistant_text = first.get("text")
+            if assistant_text is None:
+                assistant_text = getattr(response, "text", "")
+
+            # Sanitize: strip <think> tags
+            from common.model_sanitize import had_think_tags
+            if had_think_tags(assistant_text):
+                _log.info("[MODEL_BREADTH] <think> content detected and stripped (attempt %d)", attempt)
+            assistant_text = _strip_think_tags(assistant_text)
+
+            # Try robust JSON extraction
+            from common.json_repair import extract_and_repair_json
+            parsed, method = extract_and_repair_json(assistant_text)
+            if parsed is None:
+                parsed = _extract_json_payload(assistant_text)
+                method = "legacy_fallback"
+
+            if method:
+                _log.info("[MODEL_BREADTH] JSON extracted via method=%s", method)
+
+            normalized = _coerce_breadth_model_output(parsed)
+            if normalized is None:
+                raise ValueError("Model returned invalid breadth analysis payload")
+
+            # ── 6. Attach trace metadata ────────────────────────
+            normalized["_trace"] = {
+                "input_mode": "raw_only",
+                "pillar_scores_provided": pillar_scores,
+                "excluded_derived_fields": _BREADTH_EXCLUDED_FIELDS,
+                "universe_coverage_pct": universe.get("coverage_pct", 0),
+                "json_parse_method": method,
+            }
+
+            return normalized
+        except RequestException as exc:
+            last_error = exc
+        except Exception as exc:
+            last_error = exc
+            break
+
+    if isinstance(last_error, RequestException):
+        raise LocalModelUnavailableError(
+            f"Local model endpoint unavailable at {model_url}: {last_error}"
+        ) from last_error
+    raise RuntimeError(f"Breadth model analysis failed: {last_error}")
+
+
+def _strip_think_tags(text: str) -> str:
+    """Remove <think>...</think> blocks, scratchpad, and hidden reasoning from LLM output.
+
+    Handles nested tags, unclosed tags, and partial reasoning blocks.
+    """
+    import re as _re
+    if not text:
+        return text
+    # Remove <think>...</think> blocks (greedy, handles nested)
+    text = _re.sub(r"<think>.*?</think>", "", text, flags=_re.DOTALL | _re.IGNORECASE)
+    # Remove unclosed <think> tags (everything from <think> to end)
+    text = _re.sub(r"<think>.*$", "", text, flags=_re.DOTALL | _re.IGNORECASE)
+    # Remove <scratchpad>...</scratchpad> blocks
+    text = _re.sub(r"<scratchpad>.*?</scratchpad>", "", text, flags=_re.DOTALL | _re.IGNORECASE)
+    text = _re.sub(r"<scratchpad>.*$", "", text, flags=_re.DOTALL | _re.IGNORECASE)
+    return text.strip()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# VOLATILITY & OPTIONS STRUCTURE MODEL ANALYSIS
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Fields excluded from volatility model input to prevent anchoring
+_VOL_EXCLUDED_FIELDS = [
+    "score",
+    "label",
+    "short_label",
+    "summary",
+    "trader_takeaway",
+    "positive_contributors",
+    "negative_contributors",
+    "conflicting_signals",
+    "confidence_score",
+    "signal_quality",
+]
+
+
+def _extract_vol_raw_evidence(engine_result: dict[str, Any]) -> dict[str, Any]:
+    """Build raw evidence for the volatility model — NO derived scores/labels.
+
+    Includes only:
+      - raw_inputs: regime, structure, skew, positioning, strategy sub-dicts
+      - pillar_scores: the 5 numeric scores
+      - pillar_weights: how pillars are weighted
+      - strategy_scores: individual strategy suitability scores
+      - warnings: data quality warnings
+      - missing_inputs: what data was unavailable
+    """
+    raw_inputs = engine_result.get("raw_inputs", {})
+    evidence = {
+        "raw_inputs": {
+            "regime": raw_inputs.get("regime", {}),
+            "structure": raw_inputs.get("structure", {}),
+            "skew": raw_inputs.get("skew", {}),
+            "positioning": raw_inputs.get("positioning", {}),
+            "strategy": raw_inputs.get("strategy", {}),
+        },
+        "pillar_scores": engine_result.get("pillar_scores", {}),
+        "pillar_weights": engine_result.get("pillar_weights", {}),
+        "strategy_scores": engine_result.get("strategy_scores", {}),
+        "warnings": engine_result.get("warnings", []),
+        "missing_inputs": engine_result.get("missing_inputs", []),
+    }
+    return evidence
+
+
+def _coerce_vol_model_output(candidate: Any) -> dict[str, Any] | None:
+    """Normalize LLM volatility analysis output into a consistent schema."""
+    if not isinstance(candidate, dict):
+        return None
+
+    label = candidate.get("label")
+    score = candidate.get("score")
+    confidence = candidate.get("confidence")
+    summary = candidate.get("summary")
+
+    if label is None or score is None or summary is None:
+        return None
+
+    try:
+        score = max(0.0, min(100.0, float(score)))
+    except (TypeError, ValueError):
+        return None
+
+    try:
+        confidence = max(0.0, min(1.0, float(confidence) if confidence is not None else 0.5))
+    except (TypeError, ValueError):
+        confidence = 0.5
+
+    result: dict[str, Any] = {
+        "label": str(label).strip().upper(),
+        "score": round(score, 1),
+        "confidence": round(confidence, 2),
+        "summary": str(summary).strip(),
+    }
+
+    # Pillar interpretations
+    pa = candidate.get("pillar_analysis")
+    if isinstance(pa, dict):
+        result["pillar_analysis"] = {
+            k: str(v).strip() if isinstance(v, str) else v
+            for k, v in pa.items()
+        }
+    else:
+        result["pillar_analysis"] = {}
+
+    # Vol drivers
+    vd = candidate.get("vol_drivers")
+    if isinstance(vd, dict):
+        result["vol_drivers"] = {
+            "favorable_factors": _coerce_string_list(vd.get("favorable_factors")) or [],
+            "warning_factors": _coerce_string_list(vd.get("warning_factors")) or [],
+            "conflicting_factors": _coerce_string_list(vd.get("conflicting_factors")) or [],
+        }
+    else:
+        result["vol_drivers"] = {
+            "favorable_factors": [],
+            "warning_factors": [],
+            "conflicting_factors": [],
+        }
+
+    # Strategy implications
+    si = candidate.get("strategy_implications")
+    if isinstance(si, dict):
+        result["strategy_implications"] = {
+            "premium_selling": str(si.get("premium_selling", "")).strip(),
+            "directional": str(si.get("directional", "")).strip(),
+            "vol_structure": str(si.get("vol_structure", "")).strip(),
+            "hedging": str(si.get("hedging", "")).strip(),
+            "position_sizing": str(si.get("position_sizing", "")).strip(),
+            "risk_level": str(si.get("risk_level", "")).strip(),
+        }
+    else:
+        result["strategy_implications"] = {}
+
+    result["uncertainty_flags"] = _coerce_string_list(candidate.get("uncertainty_flags")) or []
+
+    ta = candidate.get("trader_takeaway")
+    result["trader_takeaway"] = str(ta).strip() if ta else ""
+
+    return result
+
+
+def analyze_volatility_options(
+    *,
+    engine_result: dict[str, Any],
+    model_url: str | None = None,
+    retries: int = 0,
+    timeout: int = 180,
+) -> dict[str, Any]:
+    """Call the local LLM with raw volatility evidence only.
+
+    The model independently assesses volatility conditions from raw pillar data.
+    Engine-computed labels, summaries, and narratives are deliberately excluded.
+    """
+    import logging
+    import re as _re
+
+    if model_url is None:
+        from app.services.model_router import get_model_endpoint
+        model_url = get_model_endpoint()
+    import requests as _requests
+
+    _log = logging.getLogger("bentrade.model_analysis")
+
+    # ── 1. Extract raw evidence ─────────────────────────────────
+    raw_evidence = _extract_vol_raw_evidence(engine_result)
+
+    pillar_scores = raw_evidence.get("pillar_scores", {})
+
+    _log.info(
+        "[MODEL_VOL_TRACE] input_mode=raw_only "
+        "pillar_scores=%s excluded_derived=%s warnings=%d missing=%d",
+        pillar_scores,
+        _VOL_EXCLUDED_FIELDS,
+        len(raw_evidence.get("warnings", [])),
+        len(raw_evidence.get("missing_inputs", [])),
+    )
+
+    # ── 2. Build prompt ─────────────────────────────────────────
+    prompt = (
+        "You are the BenTrade Volatility & Options Structure Analyst. Analyze the "
+        "supplied volatility data and return ONLY valid JSON matching the required schema.\n\n"
+        "Your task is to produce an institutional-style volatility assessment for "
+        "options income traders. Focus on:\n"
+        "- What the VIX level, trend, and regime tell us about market fear\n"
+        "- Whether term structure (contango/backwardation) supports premium selling\n"
+        "- What IV vs realized vol says about option pricing (overpriced = sell, cheap = buy)\n"
+        "- How skew and tail risk signals affect strategy selection\n"
+        "- Which specific strategies are best suited to current conditions\n\n"
+        "Rules:\n"
+        "- Return JSON only\n"
+        "- No markdown\n"
+        "- No prose outside JSON\n"
+        "- No chain-of-thought or <think> tags\n"
+        "- Keep score, label, confidence, and explanations internally consistent\n\n"
+        "Scoring guide (higher = more favorable for premium selling):\n"
+        "- 0-20 = extreme vol stress / crisis\n"
+        "- 21-40 = elevated risk / defensive\n"
+        "- 41-59 = mixed / transitional\n"
+        "- 60-79 = constructive for selling\n"
+        "- 80-100 = strongly favorable for premium selling\n\n"
+        "Label options: PREMIUM_SELLING_FAVORED | CONSTRUCTIVE | MIXED | FRAGILE | "
+        "RISK_ELEVATED | VOL_STRESS | DEFENSIVE\n\n"
+        "Required JSON schema (return EXACTLY this shape):\n"
+        "{\n"
+        '  "label": "PREMIUM_SELLING_FAVORED | CONSTRUCTIVE | MIXED | FRAGILE | '
+        'RISK_ELEVATED | VOL_STRESS | DEFENSIVE",\n'
+        '  "score": <float 0-100>,\n'
+        '  "confidence": <float 0-1>,\n'
+        '  "summary": "<2-4 sentence executive volatility brief>",\n'
+        '  "pillar_analysis": {\n'
+        '    "volatility_regime": "<VIX level, trend, IV rank interpretation>",\n'
+        '    "volatility_structure": "<term structure shape, IV vs RV assessment>",\n'
+        '    "tail_risk_skew": "<skew and tail risk assessment>",\n'
+        '    "positioning_options_posture": "<put/call ratios, option richness>",\n'
+        '    "strategy_suitability": "<which strategies current conditions favor>"\n'
+        "  },\n"
+        '  "vol_drivers": {\n'
+        '    "favorable_factors": ["<factor supporting premium selling>"],\n'
+        '    "warning_factors": ["<factor creating risk>"],\n'
+        '    "conflicting_factors": ["<signal conflict or divergence>"]\n'
+        "  },\n"
+        '  "strategy_implications": {\n'
+        '    "premium_selling": "<iron condors, credit spreads assessment>",\n'
+        '    "directional": "<debit spreads, long straddles assessment>",\n'
+        '    "vol_structure": "<calendars, diagonals assessment>",\n'
+        '    "hedging": "<protective puts, collars assessment>",\n'
+        '    "position_sizing": "<sizing recommendation given vol conditions>",\n'
+        '    "risk_level": "<low/moderate/elevated/high>"\n'
+        "  },\n"
+        '  "uncertainty_flags": ["<data gap, divergence, or low-confidence area>"],\n'
+        '  "trader_takeaway": "<2-4 sentence practical takeaway for options income traders>"\n'
+        "}\n\n"
+        "Do not include any keys beyond this schema."
+    )
+
+    # ── 3. Build user data ──────────────────────────────────────
+    user_data_str = json.dumps(raw_evidence, ensure_ascii=False, indent=None)
+
+    for forbidden in _VOL_EXCLUDED_FIELDS:
+        if f'"{forbidden}"' in user_data_str:
+            _log.error(
+                "[MODEL_VOL_TRACE] LEAK DETECTED: derived field '%s' in user_data",
+                forbidden,
+            )
+
+    _log.debug("[MODEL_VOL_TRACE] user_data_snapshot=%s", user_data_str[:2000])
+
+    payload = {
+        "messages": [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_data_str},
+        ],
+        "max_tokens": 4000,
+        "temperature": 0.0,
+        "stream": False,
+    }
+
+    # ── 4. Call the model ───────────────────────────────────────
+    last_error: Exception | None = None
+    attempt = 0
+    while attempt <= int(max(retries, 0)):
+        attempt += 1
+        try:
+            _log.info("[MODEL_VOL] POST %s (attempt %d, timeout=%ds)", model_url, attempt, timeout)
+            response = _requests.post(model_url, json=payload, timeout=timeout)
+            _log.info(
+                "[MODEL_VOL] response HTTP %d (%d bytes, %.1fs)",
+                response.status_code, len(response.content), response.elapsed.total_seconds(),
+            )
+            response.raise_for_status()
+
+            response_json = None
+            try:
+                response_json = response.json()
+            except Exception:
+                response_json = None
+
+            assistant_text = None
+            if isinstance(response_json, dict):
+                choices = response_json.get("choices") or []
+                if choices and isinstance(choices, list) and isinstance(choices[0], dict):
+                    first = choices[0]
+                    message = first.get("message")
+                    if isinstance(message, dict) and "content" in message:
+                        assistant_text = message.get("content")
+                    elif "text" in first:
+                        assistant_text = first.get("text")
+            if assistant_text is None:
+                assistant_text = getattr(response, "text", "")
+
+            from common.model_sanitize import had_think_tags
+            if had_think_tags(assistant_text):
+                _log.info("[MODEL_VOL] <think> content detected and stripped (attempt %d)", attempt)
+            assistant_text = _strip_think_tags(assistant_text)
+
+            from common.json_repair import extract_and_repair_json
+            parsed, method = extract_and_repair_json(assistant_text)
+            if parsed is None:
+                parsed = _extract_json_payload(assistant_text)
+                method = "legacy_fallback"
+
+            if method:
+                _log.info("[MODEL_VOL] JSON extracted via method=%s", method)
+
+            normalized = _coerce_vol_model_output(parsed)
+            if normalized is None:
+                raise ValueError("Model returned invalid volatility analysis payload")
+
+            normalized["_trace"] = {
+                "input_mode": "raw_only",
+                "pillar_scores_provided": pillar_scores,
+                "excluded_derived_fields": _VOL_EXCLUDED_FIELDS,
+                "json_parse_method": method,
+            }
+
+            return normalized
+        except RequestException as exc:
+            last_error = exc
+        except Exception as exc:
+            last_error = exc
+            break
+
+    if isinstance(last_error, RequestException):
+        raise LocalModelUnavailableError(
+            f"Local model endpoint unavailable at {model_url}: {last_error}"
+        ) from last_error
+    raise RuntimeError(f"Volatility model analysis failed: {last_error}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CROSS-ASSET / MACRO CONFIRMATION MODEL ANALYSIS
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Fields excluded from cross-asset model input to prevent anchoring
+_CROSS_ASSET_EXCLUDED_FIELDS = [
+    "score",
+    "label",
+    "short_label",
+    "summary",
+    "trader_takeaway",
+    "confirming_signals",
+    "contradicting_signals",
+    "mixed_signals",
+    "confidence_score",
+    "signal_quality",
+]
+
+
+def _extract_cross_asset_raw_evidence(engine_result: dict[str, Any]) -> dict[str, Any]:
+    """Build raw evidence for the cross-asset model — NO derived scores/labels.
+
+    Includes only:
+      - raw_inputs: rates, dollar_commodity, credit, defensive_growth, coherence sub-dicts
+      - pillar_scores: the 5 numeric scores
+      - pillar_weights: how pillars are weighted
+      - warnings: data quality warnings
+      - missing_inputs: what data was unavailable
+    """
+    raw_inputs = engine_result.get("raw_inputs", {})
+    return {
+        "raw_inputs": {
+            "rates": raw_inputs.get("rates", {}),
+            "dollar_commodity": raw_inputs.get("dollar_commodity", {}),
+            "credit": raw_inputs.get("credit", {}),
+            "defensive_growth": raw_inputs.get("defensive_growth", {}),
+            "coherence": raw_inputs.get("coherence", {}),
+        },
+        "pillar_scores": engine_result.get("pillar_scores", {}),
+        "pillar_weights": engine_result.get("pillar_weights", {}),
+        "warnings": engine_result.get("warnings", []),
+        "missing_inputs": engine_result.get("missing_inputs", []),
+    }
+
+
+def _coerce_cross_asset_model_output(candidate: Any) -> dict[str, Any] | None:
+    """Normalize LLM cross-asset analysis output into a consistent schema."""
+    if not isinstance(candidate, dict):
+        return None
+
+    label = candidate.get("label")
+    score = candidate.get("score")
+    confidence = candidate.get("confidence")
+    summary = candidate.get("summary")
+
+    if label is None or score is None or summary is None:
+        return None
+
+    try:
+        score = max(0.0, min(100.0, float(score)))
+    except (TypeError, ValueError):
+        return None
+
+    try:
+        confidence = max(0.0, min(1.0, float(confidence) if confidence is not None else 0.5))
+    except (TypeError, ValueError):
+        confidence = 0.5
+
+    result: dict[str, Any] = {
+        "label": str(label).strip().upper(),
+        "score": round(score, 1),
+        "confidence": round(confidence, 2),
+        "summary": str(summary).strip(),
+    }
+
+    pa = candidate.get("pillar_analysis")
+    if isinstance(pa, dict):
+        result["pillar_analysis"] = {
+            k: str(v).strip() if isinstance(v, str) else v
+            for k, v in pa.items()
+        }
+    else:
+        result["pillar_analysis"] = {}
+
+    md = candidate.get("macro_drivers")
+    if isinstance(md, dict):
+        result["macro_drivers"] = {
+            "confirming_factors": _coerce_string_list(md.get("confirming_factors")) or [],
+            "contradicting_factors": _coerce_string_list(md.get("contradicting_factors")) or [],
+            "ambiguous_factors": _coerce_string_list(md.get("ambiguous_factors")) or [],
+        }
+    else:
+        result["macro_drivers"] = {
+            "confirming_factors": [],
+            "contradicting_factors": [],
+            "ambiguous_factors": [],
+        }
+
+    ti = candidate.get("trading_implications")
+    if isinstance(ti, dict):
+        result["trading_implications"] = {
+            "directional_bias": str(ti.get("directional_bias", "")).strip(),
+            "position_sizing": str(ti.get("position_sizing", "")).strip(),
+            "strategy_recommendation": str(ti.get("strategy_recommendation", "")).strip(),
+            "risk_level": str(ti.get("risk_level", "")).strip(),
+            "hedging_guidance": str(ti.get("hedging_guidance", "")).strip(),
+        }
+    else:
+        result["trading_implications"] = {}
+
+    result["uncertainty_flags"] = _coerce_string_list(candidate.get("uncertainty_flags")) or []
+
+    ta = candidate.get("trader_takeaway")
+    result["trader_takeaway"] = str(ta).strip() if ta else ""
+
+    return result
+
+
+def analyze_cross_asset_macro(
+    *,
+    engine_result: dict[str, Any],
+    model_url: str | None = None,
+    retries: int = 0,
+    timeout: int = 180,
+) -> dict[str, Any]:
+    """Call the local LLM with raw cross-asset evidence only.
+
+    The model independently assesses cross-asset macro conditions from raw
+    pillar data. Engine-computed labels, summaries, and narratives are
+    deliberately excluded to prevent anchoring.
+    """
+    import logging
+    import re as _re
+
+    if model_url is None:
+        from app.services.model_router import get_model_endpoint
+        model_url = get_model_endpoint()
+    import requests as _requests
+
+    _log = logging.getLogger("bentrade.model_analysis")
+
+    raw_evidence = _extract_cross_asset_raw_evidence(engine_result)
+
+    pillar_scores = raw_evidence.get("pillar_scores", {})
+    _log.info(
+        "[MODEL_CROSS_ASSET_TRACE] input_mode=raw_only "
+        "pillar_scores=%s excluded_derived=%s warnings=%d missing=%d",
+        pillar_scores,
+        _CROSS_ASSET_EXCLUDED_FIELDS,
+        len(raw_evidence.get("warnings", [])),
+        len(raw_evidence.get("missing_inputs", [])),
+    )
+
+    prompt = (
+        "You are the BenTrade Cross-Asset & Macro Confirmation Analyst. Analyze the supplied "
+        "cross-asset macro data and return ONLY valid JSON matching the required schema.\n\n"
+        "Your job: Determine whether non-equity markets (rates, credit, commodities, currencies) "
+        "are confirming or contradicting the equity story.\n\n"
+        "REQUIRED JSON SCHEMA:\n"
+        "{\n"
+        '  "label": "STRONG CONFIRMATION|CONFIRMING|PARTIAL CONFIRMATION|MIXED SIGNALS|PARTIAL CONTRADICTION|STRONG CONTRADICTION",\n'
+        '  "score": <number 0-100>,\n'
+        '  "confidence": <number 0.0-1.0>,\n'
+        '  "summary": "<2-3 sentence macro assessment>",\n'
+        '  "pillar_analysis": {\n'
+        '    "rates_yield_curve": "<interpretation>",\n'
+        '    "dollar_commodity": "<interpretation>",\n'
+        '    "credit_risk_appetite": "<interpretation>",\n'
+        '    "defensive_vs_growth": "<interpretation>",\n'
+        '    "macro_coherence": "<interpretation>"\n'
+        "  },\n"
+        '  "macro_drivers": {\n'
+        '    "confirming_factors": ["<factor1>", ...],\n'
+        '    "contradicting_factors": ["<factor1>", ...],\n'
+        '    "ambiguous_factors": ["<factor1>", ...]\n'
+        "  },\n"
+        '  "trading_implications": {\n'
+        '    "directional_bias": "<bullish|neutral|bearish>",\n'
+        '    "position_sizing": "<full|reduced|minimal>",\n'
+        '    "strategy_recommendation": "<specific guidance>",\n'
+        '    "risk_level": "<low|moderate|elevated|high>",\n'
+        '    "hedging_guidance": "<specific guidance>"\n'
+        "  },\n"
+        '  "uncertainty_flags": ["<flag1>", ...],\n'
+        '  "trader_takeaway": "<one actionable paragraph>"\n'
+        "}\n\n"
+        "SCORING GUIDE:\n"
+        "  85-100 = Strong Confirmation — most cross-asset signals confirm equities\n"
+        "  70-84  = Confirming — clear majority confirms\n"
+        "  55-69  = Partial Confirmation — more confirm than contradict\n"
+        "  45-54  = Mixed Signals — roughly split\n"
+        "  30-44  = Partial Contradiction — more contradict than confirm\n"
+        "  0-29   = Strong Contradiction — most signals contradict equities\n\n"
+        "IMPORTANT: Base your analysis on the RAW DATA provided. Do not invent data points.\n\n"
+        "DATA SOURCE AWARENESS (proxy honesty):\n"
+        "  - Copper price (FRED PCOPPUSDM) is a MONTHLY series. It may be up to 30 days stale.\n"
+        "    Do not treat it as confirming/contradicting real-time moves.\n"
+        "  - Gold (FRED GOLDAMGBD228NLBM) has a ~1 business day delay.\n"
+        "  - Credit spreads (IG OAS, HY OAS) have a 1-2 business day delay.\n"
+        "  - USD index is a trade-weighted broad index proxy, not DXY.\n"
+        "  - Oil (WTI) is inherently ambiguous: declining oil can mean supply glut (neutral)\n"
+        "    OR demand destruction (bearish). If oil is between $45–$85, treat it as ambiguous\n"
+        "    rather than forcing a directional interpretation.\n"
+        "  - If data is missing or stale, reflect that as LOWER confidence, not as a zero value."
+    )
+
+    user_data_str = json.dumps(raw_evidence, ensure_ascii=False, indent=None)
+
+    for forbidden in _CROSS_ASSET_EXCLUDED_FIELDS:
+        if f'"{forbidden}"' in user_data_str:
+            _log.error(
+                "[MODEL_CROSS_ASSET_TRACE] LEAK DETECTED: derived field '%s' in user_data",
+                forbidden,
+            )
+
+    _log.debug("[MODEL_CROSS_ASSET_TRACE] user_data_snapshot=%s", user_data_str[:2000])
+
+    payload = {
+        "messages": [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_data_str},
+        ],
+        "max_tokens": 4000,
+        "temperature": 0.0,
+        "stream": False,
+    }
+
+    last_error: Exception | None = None
+    attempt = 0
+    while attempt <= int(max(retries, 0)):
+        attempt += 1
+        try:
+            _log.info("[MODEL_CROSS_ASSET] POST %s (attempt %d, timeout=%ds)", model_url, attempt, timeout)
+            response = _requests.post(model_url, json=payload, timeout=timeout)
+            _log.info(
+                "[MODEL_CROSS_ASSET] response HTTP %d (%d bytes, %.1fs)",
+                response.status_code, len(response.content), response.elapsed.total_seconds(),
+            )
+            response.raise_for_status()
+
+            response_json = None
+            try:
+                response_json = response.json()
+            except Exception:
+                response_json = None
+
+            assistant_text = None
+            if isinstance(response_json, dict):
+                choices = response_json.get("choices") or []
+                if choices and isinstance(choices, list) and isinstance(choices[0], dict):
+                    first = choices[0]
+                    message = first.get("message")
+                    if isinstance(message, dict) and "content" in message:
+                        assistant_text = message.get("content")
+                    elif "text" in first:
+                        assistant_text = first.get("text")
+            if assistant_text is None:
+                assistant_text = getattr(response, "text", "")
+
+            from common.model_sanitize import had_think_tags
+            if had_think_tags(assistant_text):
+                _log.info("[MODEL_CROSS_ASSET] <think> content detected and stripped (attempt %d)", attempt)
+            assistant_text = _strip_think_tags(assistant_text)
+
+            from common.json_repair import extract_and_repair_json
+            parsed, method = extract_and_repair_json(assistant_text)
+            if parsed is None:
+                parsed = _extract_json_payload(assistant_text)
+                method = "legacy_fallback"
+
+            if method:
+                _log.info("[MODEL_CROSS_ASSET] JSON extracted via method=%s", method)
+
+            normalized = _coerce_cross_asset_model_output(parsed)
+            if normalized is None:
+                raise ValueError("Model returned invalid cross-asset analysis payload")
+
+            normalized["_trace"] = {
+                "input_mode": "raw_only",
+                "pillar_scores_provided": pillar_scores,
+                "excluded_derived_fields": _CROSS_ASSET_EXCLUDED_FIELDS,
+                "json_parse_method": method,
+            }
+
+            return normalized
+        except RequestException as exc:
+            last_error = exc
+        except Exception as exc:
+            last_error = exc
+            break
+
+    if isinstance(last_error, RequestException):
+        raise LocalModelUnavailableError(
+            f"Local model endpoint unavailable at {model_url}: {last_error}"
+        ) from last_error
+    raise RuntimeError(f"Cross-asset model analysis failed: {last_error}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FLOWS & POSITIONING MODEL ANALYSIS
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Fields excluded from flows positioning model input to prevent anchoring
+_FLOWS_POSITIONING_EXCLUDED_FIELDS = [
+    "score",
+    "label",
+    "short_label",
+    "summary",
+    "trader_takeaway",
+    "positive_contributors",
+    "negative_contributors",
+    "conflicting_signals",
+    "confidence_score",
+    "signal_quality",
+    "strategy_bias",
+]
+
+
+def _extract_flows_positioning_raw_evidence(engine_result: dict[str, Any]) -> dict[str, Any]:
+    """Build raw evidence for the flows positioning model — NO derived scores/labels.
+
+    Includes only:
+      - raw_inputs: positioning, crowding, squeeze, flow, stability sub-dicts
+      - pillar_scores: the 5 numeric scores
+      - pillar_weights: how pillars are weighted
+      - warnings: data quality warnings
+      - missing_inputs: what data was unavailable
+    """
+    raw_inputs = engine_result.get("raw_inputs", {})
+    return {
+        "raw_inputs": {
+            "positioning": raw_inputs.get("positioning", {}),
+            "crowding": raw_inputs.get("crowding", {}),
+            "squeeze": raw_inputs.get("squeeze", {}),
+            "flow": raw_inputs.get("flow", {}),
+            "stability": raw_inputs.get("stability", {}),
+        },
+        "pillar_scores": engine_result.get("pillar_scores", {}),
+        "pillar_weights": engine_result.get("pillar_weights", {}),
+        "warnings": engine_result.get("warnings", []),
+        "missing_inputs": engine_result.get("missing_inputs", []),
+    }
+
+
+def _coerce_flows_positioning_model_output(candidate: Any) -> dict[str, Any] | None:
+    """Normalize LLM flows & positioning analysis output into a consistent schema."""
+    if not isinstance(candidate, dict):
+        return None
+
+    label = candidate.get("label")
+    score = candidate.get("score")
+    confidence = candidate.get("confidence")
+    summary = candidate.get("summary")
+
+    if label is None or score is None or summary is None:
+        return None
+
+    try:
+        score = max(0.0, min(100.0, float(score)))
+    except (TypeError, ValueError):
+        return None
+
+    try:
+        confidence = max(0.0, min(1.0, float(confidence) if confidence is not None else 0.5))
+    except (TypeError, ValueError):
+        confidence = 0.5
+
+    result: dict[str, Any] = {
+        "label": str(label).strip().upper(),
+        "score": round(score, 1),
+        "confidence": round(confidence, 2),
+        "summary": str(summary).strip(),
+    }
+
+    pa = candidate.get("pillar_analysis")
+    if isinstance(pa, dict):
+        result["pillar_analysis"] = {
+            k: str(v).strip() if isinstance(v, str) else v
+            for k, v in pa.items()
+        }
+    else:
+        result["pillar_analysis"] = {}
+
+    fd = candidate.get("flow_drivers")
+    if isinstance(fd, dict):
+        result["flow_drivers"] = {
+            "supportive_factors": _coerce_string_list(fd.get("supportive_factors")) or [],
+            "risk_factors": _coerce_string_list(fd.get("risk_factors")) or [],
+            "ambiguous_factors": _coerce_string_list(fd.get("ambiguous_factors")) or [],
+        }
+    else:
+        result["flow_drivers"] = {
+            "supportive_factors": [],
+            "risk_factors": [],
+            "ambiguous_factors": [],
+        }
+
+    ti = candidate.get("trading_implications")
+    if isinstance(ti, dict):
+        result["trading_implications"] = {
+            "continuation_support": str(ti.get("continuation_support", "")).strip(),
+            "reversal_risk": str(ti.get("reversal_risk", "")).strip(),
+            "position_sizing": str(ti.get("position_sizing", "")).strip(),
+            "strategy_recommendation": str(ti.get("strategy_recommendation", "")).strip(),
+            "squeeze_guidance": str(ti.get("squeeze_guidance", "")).strip(),
+        }
+    else:
+        result["trading_implications"] = {}
+
+    result["uncertainty_flags"] = _coerce_string_list(candidate.get("uncertainty_flags")) or []
+
+    ta = candidate.get("trader_takeaway")
+    result["trader_takeaway"] = str(ta).strip() if ta else ""
+
+    return result
+
+
+def analyze_flows_positioning(
+    *,
+    engine_result: dict[str, Any],
+    model_url: str | None = None,
+    retries: int = 0,
+    timeout: int = 180,
+) -> dict[str, Any]:
+    """Run LLM-based flows & positioning analysis using ONLY raw engine inputs.
+
+    The model receives raw positioning data (put/call, VIX, futures proxies,
+    sentiment, flow signals) and pillar scores. It does NOT receive the
+    composite label, summary, or trader takeaway to prevent anchoring.
+
+    Returns a dict matching the Flows & Positioning model schema.
+    """
+    if model_url is None:
+        from app.services.model_router import get_model_endpoint
+        model_url = get_model_endpoint()
+    import requests as _requests
+
+    _log = logging.getLogger("bentrade.model_analysis")
+
+    raw_evidence = _extract_flows_positioning_raw_evidence(engine_result)
+
+    pillar_scores = raw_evidence.get("pillar_scores", {})
+    _log.info(
+        "[MODEL_FLOWS_POS] input_mode=raw_only "
+        "pillar_scores=%s excluded_derived=%s warnings=%d missing=%d",
+        pillar_scores,
+        _FLOWS_POSITIONING_EXCLUDED_FIELDS,
+        len(raw_evidence.get("warnings", [])),
+        len(raw_evidence.get("missing_inputs", [])),
+    )
+
+    prompt = (
+        "You are the BenTrade Flows & Positioning Analyst. Analyze the supplied "
+        "positioning and flow data and return ONLY valid JSON matching the required schema.\n\n"
+        "Your job: Determine whether current positioning and flows support continuation, "
+        "indicate crowding, create squeeze risk, or signal reversal potential.\n\n"
+        "REQUIRED JSON SCHEMA:\n"
+        "{\n"
+        '  "label": "STRONGLY SUPPORTIVE|SUPPORTIVE|MIXED|FRAGILE|REVERSAL RISK|UNSTABLE",\n'
+        '  "score": <number 0-100>,\n'
+        '  "confidence": <number 0.0-1.0>,\n'
+        '  "summary": "<2-3 sentence flows & positioning assessment>",\n'
+        '  "pillar_analysis": {\n'
+        '    "positioning_pressure": "<interpretation>",\n'
+        '    "crowding_stretch": "<interpretation>",\n'
+        '    "squeeze_unwind_risk": "<interpretation>",\n'
+        '    "flow_direction_persistence": "<interpretation>",\n'
+        '    "positioning_stability": "<interpretation>"\n'
+        "  },\n"
+        '  "flow_drivers": {\n'
+        '    "supportive_factors": ["<factor1>", ...],\n'
+        '    "risk_factors": ["<factor1>", ...],\n'
+        '    "ambiguous_factors": ["<factor1>", ...]\n'
+        "  },\n"
+        '  "trading_implications": {\n'
+        '    "continuation_support": "<strong|moderate|weak|none>",\n'
+        '    "reversal_risk": "<low|moderate|elevated|high>",\n'
+        '    "position_sizing": "<full|reduced|minimal>",\n'
+        '    "strategy_recommendation": "<specific guidance>",\n'
+        '    "squeeze_guidance": "<specific guidance>"\n'
+        "  },\n"
+        '  "uncertainty_flags": ["<flag1>", ...],\n'
+        '  "trader_takeaway": "<one actionable paragraph>"\n'
+        "}\n\n"
+        "SCORING GUIDE:\n"
+        "  85-100 = Strongly Supportive Flows — positioning/flows support continuation\n"
+        "  70-84  = Supportive Positioning — healthy positioning with room to run\n"
+        "  55-69  = Mixed but Tradable — some concerns but tradable\n"
+        "  45-54  = Fragile / Crowded — elevated fragility, reduce exposure\n"
+        "  30-44  = Reversal Risk Elevated — significant risk of positioning unwind\n"
+        "  0-29   = Unstable / Unwind Risk — extreme positioning risk, defensive posture\n\n"
+        "IMPORTANT: Base your analysis on the RAW DATA provided. Do not invent data points.\n\n"
+        "DATA SOURCE AWARENESS (proxy honesty):\n"
+        "  - Phase 1 uses PROXY data derived from VIX and market context, NOT direct\n"
+        "    institutional flow feeds, CFTC COT data, or true dealer gamma reports.\n"
+        "  - Put/call ratio is a VIX-derived PROXY, not exchange-reported.\n"
+        "  - Futures positioning, short interest, systematic allocation, and retail\n"
+        "    sentiment are ALL PROXY ESTIMATES from VIX regime heuristics.\n"
+        "  - Flow direction, persistence, and follow-through are derived proxies.\n"
+        "  - This significantly limits the precision of any positioning assessment.\n"
+        "  - Reflect proxy limitations as LOWER confidence, not as confident assessments.\n"
+        "  - If data is missing, reflect that as lower confidence and note it explicitly.\n"
+        "  - NEVER claim precision that the proxy data cannot support."
+    )
+
+    user_data_str = json.dumps(raw_evidence, ensure_ascii=False, indent=None)
+
+    for forbidden in _FLOWS_POSITIONING_EXCLUDED_FIELDS:
+        if f'"{forbidden}"' in user_data_str:
+            _log.error(
+                "[MODEL_FLOWS_POS] LEAK DETECTED: derived field '%s' in user_data",
+                forbidden,
+            )
+
+    _log.debug("[MODEL_FLOWS_POS] user_data_snapshot=%s", user_data_str[:2000])
+
+    payload = {
+        "messages": [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_data_str},
+        ],
+        "max_tokens": 4000,
+        "temperature": 0.0,
+        "stream": False,
+    }
+
+    last_error: Exception | None = None
+    attempt = 0
+    while attempt <= int(max(retries, 0)):
+        attempt += 1
+        try:
+            _log.info("[MODEL_FLOWS_POS] POST %s (attempt %d, timeout=%ds)", model_url, attempt, timeout)
+            response = _requests.post(model_url, json=payload, timeout=timeout)
+            _log.info(
+                "[MODEL_FLOWS_POS] response HTTP %d (%d bytes, %.1fs)",
+                response.status_code, len(response.content), response.elapsed.total_seconds(),
+            )
+            response.raise_for_status()
+
+            response_json = None
+            try:
+                response_json = response.json()
+            except Exception:
+                response_json = None
+
+            assistant_text = None
+            if isinstance(response_json, dict):
+                choices = response_json.get("choices") or []
+                if choices and isinstance(choices, list) and isinstance(choices[0], dict):
+                    first = choices[0]
+                    message = first.get("message")
+                    if isinstance(message, dict) and "content" in message:
+                        assistant_text = message.get("content")
+                    elif "text" in first:
+                        assistant_text = first.get("text")
+            if assistant_text is None:
+                assistant_text = getattr(response, "text", "")
+
+            from common.model_sanitize import had_think_tags
+            if had_think_tags(assistant_text):
+                _log.info("[MODEL_FLOWS_POS] <think> content detected and stripped (attempt %d)", attempt)
+            assistant_text = _strip_think_tags(assistant_text)
+
+            from common.json_repair import extract_and_repair_json
+            parsed, method = extract_and_repair_json(assistant_text)
+            if parsed is None:
+                parsed = _extract_json_payload(assistant_text)
+                method = "legacy_fallback"
+
+            if method:
+                _log.info("[MODEL_FLOWS_POS] JSON extracted via method=%s", method)
+
+            normalized = _coerce_flows_positioning_model_output(parsed)
+            if normalized is None:
+                raise ValueError("Model returned invalid flows & positioning analysis payload")
+
+            normalized["_trace"] = {
+                "input_mode": "raw_only",
+                "pillar_scores_provided": pillar_scores,
+                "excluded_derived_fields": _FLOWS_POSITIONING_EXCLUDED_FIELDS,
+                "json_parse_method": method,
+            }
+
+            return normalized
+        except RequestException as exc:
+            last_error = exc
+        except Exception as exc:
+            last_error = exc
+            break
+
+    if isinstance(last_error, RequestException):
+        raise LocalModelUnavailableError(
+            f"Local model endpoint unavailable at {model_url}: {last_error}"
+        ) from last_error
+    raise RuntimeError(f"Flows positioning model analysis failed: {last_error}")

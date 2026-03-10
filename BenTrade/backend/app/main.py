@@ -31,7 +31,11 @@ from app.api.routes_trade_lifecycle import router as trade_lifecycle_router
 from app.api.routes_trading import router as trading_router
 from app.api.routes_underlying import router as underlying_router
 from app.api.routes_workbench import router as workbench_router
+from app.api.routes_breadth import router as breadth_router
+from app.api.routes_cross_asset_macro import router as cross_asset_macro_router
+from app.api.routes_flows_positioning import router as flows_positioning_router
 from app.api.routes_news_sentiment import router as news_sentiment_router
+from app.api.routes_volatility_options import router as volatility_options_router
 from app.clients.finnhub_client import FinnhubClient
 from app.clients.fred_client import FredClient
 from app.clients.polygon_client import PolygonClient
@@ -65,8 +69,16 @@ from app.utils.http import UpstreamError
 from app.utils.snapshot import SnapshotChainSource, SnapshotRecorder, TradierChainSource, run_snapshot_cleanup
 from app.services.platform_settings import PlatformSettings
 from app.services.active_trade_monitor_service import ActiveTradeMonitorService
+from app.services.breadth_data_provider import BreadthDataProvider
+from app.services.breadth_service import BreadthService
+from app.services.cross_asset_macro_data_provider import CrossAssetMacroDataProvider
+from app.services.cross_asset_macro_service import CrossAssetMacroService
+from app.services.flows_positioning_data_provider import FlowsPositioningDataProvider
+from app.services.flows_positioning_service import FlowsPositioningService
 from app.services.news_sentiment_service import NewsSentimentService
 from app.services.market_context_service import MarketContextService
+from app.services.volatility_options_data_provider import VolatilityOptionsDataProvider
+from app.services.volatility_options_service import VolatilityOptionsService
 
 
 def _setup_logging() -> None:
@@ -260,6 +272,43 @@ def create_app() -> FastAPI:
     )
     app.state.news_sentiment_service = news_sentiment_service
 
+    breadth_data_provider = BreadthDataProvider(tradier_client=tradier_client)
+    breadth_service = BreadthService(
+        data_provider=breadth_data_provider,
+        cache=cache,
+    )
+    app.state.breadth_service = breadth_service
+
+    vol_data_provider = VolatilityOptionsDataProvider(
+        tradier_client=tradier_client,
+        market_context_service=market_context_service,
+        fred_client=fred_client,
+    )
+    vol_service = VolatilityOptionsService(
+        data_provider=vol_data_provider,
+        cache=cache,
+    )
+    app.state.volatility_options_service = vol_service
+
+    cross_asset_data_provider = CrossAssetMacroDataProvider(
+        market_context_service=market_context_service,
+        fred_client=fred_client,
+    )
+    cross_asset_macro_service = CrossAssetMacroService(
+        data_provider=cross_asset_data_provider,
+        cache=cache,
+    )
+    app.state.cross_asset_macro_service = cross_asset_macro_service
+
+    flows_data_provider = FlowsPositioningDataProvider(
+        market_context_service=market_context_service,
+    )
+    flows_positioning_service = FlowsPositioningService(
+        data_provider=flows_data_provider,
+        cache=cache,
+    )
+    app.state.flows_positioning_service = flows_positioning_service
+
     app.state.settings = settings
     app.state.backend_dir = backend_dir
     app.state.frontend_dir = frontend_dir
@@ -289,6 +338,10 @@ def create_app() -> FastAPI:
     app.include_router(decisions_router)
     app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
     app.include_router(news_sentiment_router)
+    app.include_router(breadth_router)
+    app.include_router(volatility_options_router)
+    app.include_router(cross_asset_macro_router)
+    app.include_router(flows_positioning_router)
     app.include_router(snapshots_router)
     app.include_router(dev_router)
     app.include_router(frontend_router)

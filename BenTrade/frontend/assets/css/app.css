@@ -2721,10 +2721,6 @@ main.main{
     .at-card-grid{ grid-template-columns: 1fr; }
 }
 
-.at-card-grid.at-compact .at-card-body:not(.at-panel-open){
-    /* Compact: data is on header only, body collapsed by default */
-}
-
 /* ── AT Chevron rotation (JS-driven toggle, mirrors scanner details[open]) ── */
 .trade-card.at-expanded .chev svg{
     transform: rotate(180deg);
@@ -2739,9 +2735,10 @@ main.main{
     border-top:1px solid rgba(0,234,255,0.08);
 }
 
-/* ── Heat bar between header and body ── */
+/* ── Heat bar inside summary band ── */
 .at-heat-bar-outer{
-    padding:0 14px;
+    padding:0;
+    margin-bottom:6px;
 }
 
 /* (old AT header-left/symbol/strategy/meta/right removed — now using scanner .trade-header-* classes) */
@@ -2766,16 +2763,66 @@ main.main{
 
 /* ── Card Body ── */
 .at-card-body{
-    padding:12px 14px 14px;
     transition: max-height 0.3s ease, opacity 0.2s ease;
     overflow:hidden;
 }
 
 .at-card-body.at-collapsed{
     max-height:0;
-    padding:0 14px;
     opacity:0;
     overflow:hidden;
+}
+
+/* ── Summary Strip (compact data line, always visible) ── */
+.at-summary-strip{
+    padding:6px 20px 8px;
+    border-bottom:1px solid rgba(126,170,200,0.08);
+}
+.at-strip-data{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    padding:3px 0 0;
+}
+.at-strip-item{
+    display:inline-flex;
+    align-items:baseline;
+    gap:4px;
+}
+.at-strip-lbl{
+    font-size:9px;
+    font-weight:600;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--muted);
+}
+.at-strip-val{
+    font-size:12px;
+    font-weight:700;
+    color:var(--text);
+    letter-spacing:0.02em;
+}
+.at-strip-val.positive{ color:#7ef7b8; }
+.at-strip-val.negative{ color:#ff7ea6; }
+.at-strip-val.neutral{ color:#ffd77a; }
+.at-strip-sep{
+    color:rgba(126,170,200,0.25);
+    font-size:10px;
+    padding:0 2px;
+}
+
+/* Legacy pill aliases kept for compat */
+.at-summary-pill.at-rec-reduce,
+.at-summary-pill.at-rec-close{
+    color:#ffb3c7;
+    border-color:rgba(255,126,166,0.34);
+    background:rgba(255,126,166,0.12);
+}
+
+.at-summary-pill.at-rec-hold{
+    color:#9defff;
+    border-color:rgba(0,234,255,0.28);
+    background:rgba(0,234,255,0.1);
 }
 
 /* ── Section 4: Metric Rows ── */
@@ -3348,99 +3395,224 @@ main.main{
 }
 
 /* ═══════════════════════════════════════════════════════════════
- * Active Trades v2 — Institutional Card Redesign
- * 3-layer layout: Header → Core Metrics → AI Panel → Actions
+ * Active Trades v2 — BenTrade Trade Card (Position Variant)
+ * Family-aligned with scanner/analysis trade cards
  * ═══════════════════════════════════════════════════════════════ */
 
-/* ── V2 Card shell ── */
+/* ── Card Shell: matches Q3 trade-card depth treatment ── */
 .trade-card.at-v2{
     display:flex;
     flex-direction:column;
-    border-radius:14px;
-    border:1px solid rgba(0,234,255,0.16);
-    background: linear-gradient(165deg, rgba(6,10,20,0.92), rgba(2,6,14,0.96));
-    box-shadow: 0 12px 40px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(0,234,255,0.05);
-    transition: border-color 0.2s, box-shadow 0.2s;
+    border-radius:16px;
+    border:1px solid rgba(128,170,202,0.32);
+    background: linear-gradient(168deg, rgba(8,12,22,0.96), rgba(2,6,14,0.98));
+    box-shadow:
+        0 20px 40px rgba(0,0,0,0.55),
+        0 8px 18px rgba(2,8,16,0.40),
+        inset 0 1px 0 rgba(226,242,255,0.14),
+        inset 0 -1px 0 rgba(0,0,0,0.40),
+        inset 0 0 0 1px rgba(0,234,255,0.06);
+    transition: border-color 0.25s, box-shadow 0.25s;
     overflow:hidden;
+    position:relative;
+}
+.trade-card.at-v2:before{
+    content:'';
+    position:absolute;
+    inset:-1px;
+    border-radius:17px;
+    pointer-events:none;
+    opacity:0.22;
+    filter:blur(6px);
+    background: linear-gradient(180deg, rgba(0,234,255,0.10), transparent 40%);
 }
 .trade-card.at-v2:hover{
-    border-color: rgba(0,234,255,0.30);
-    box-shadow: 0 14px 48px rgba(0,0,0,0.50), 0 0 20px rgba(0,234,255,0.08);
+    border-color: rgba(0,234,255,0.36);
+    box-shadow:
+        0 22px 48px rgba(0,0,0,0.58),
+        0 10px 22px rgba(2,8,16,0.42),
+        inset 0 1px 0 rgba(226,242,255,0.16),
+        inset 0 -1px 0 rgba(0,0,0,0.40),
+        inset 0 0 0 1px rgba(0,234,255,0.10),
+        0 0 28px rgba(0,234,255,0.08);
 }
 
-/* ── LAYER 1: Header ── */
+/* ── Header: institutional summary bar ── */
 .at-card-header{
     display:flex;
-    align-items:center;
-    justify-content:space-between;
-    padding:12px 16px;
+    flex-direction:column;
+    gap:0;
+    padding:14px 20px 10px;
     cursor:pointer;
-    border-bottom:1px solid rgba(0,234,255,0.08);
+    border-bottom:1px solid rgba(126,170,200,0.14);
     user-select:none;
     transition: background 0.15s;
+    position:relative;
+    z-index:1;
 }
 .at-card-header:hover{
     background: rgba(0,234,255,0.03);
 }
 
-.at-hdr-left{
+/* Main row: chev+symbol | strategy·status·pos | P&L */
+.at-hdr-main{
+    display:flex;
+    align-items:center;
+    gap:16px;
+}
+.at-hdr-identity{
     display:flex;
     align-items:center;
     gap:10px;
+    flex-shrink:0;
+}
+.at-hdr-identity .chev{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    width:30px;
+    height:30px;
+    border-radius:8px;
+    border:1px solid rgba(0,234,255,0.14);
+    background: linear-gradient(180deg, rgba(7,10,16,0.60), rgba(3,4,8,0.40));
+    box-shadow: 0 4px 10px rgba(0,0,0,0.30);
+    color:rgba(207,238,247,0.80);
+    flex-shrink:0;
+    transition: transform 0.25s ease, border-color 0.15s;
+}
+.at-hdr-identity .chev:hover{ border-color: rgba(0,234,255,0.28); }
+.trade-card.at-v2.at-expanded .at-hdr-identity .chev svg{
+    transform: rotate(180deg);
 }
 
 .at-symbol-badge{
     font-family:'Orbitron',sans-serif;
     font-size:14px;
     font-weight:800;
-    letter-spacing:0.10em;
+    letter-spacing:0.08em;
     color:#00eaff;
-    padding:3px 12px;
-    border-radius:8px;
-    border:1px solid rgba(0,234,255,0.30);
-    background: rgba(0,234,255,0.08);
-    text-shadow: 0 0 14px rgba(0,234,255,0.30);
+    text-shadow: 0 0 10px rgba(0,234,255,0.22);
+    white-space:nowrap;
 }
 
-.at-hdr-direction{
-    font-size:12px;
-    font-weight:600;
-    letter-spacing:0.06em;
-    color:var(--text);
-}
-
-.at-hdr-qty{
-    font-size:12px;
-    font-weight:700;
-    color:var(--muted);
-    letter-spacing:0.04em;
-}
-
-.at-hdr-right{
+/* Info group: strategy · status · direction · qty */
+.at-hdr-info{
     display:flex;
     align-items:center;
-    gap:8px;
+    gap:10px;
+    flex:1 1 auto;
+    min-width:0;
 }
-
-.at-hdr-flags{
-    display:inline-flex;
-    gap:4px;
+.at-hdr-strategy{
+    font-size:13px;
+    font-weight:600;
+    color:var(--text);
+    white-space:nowrap;
 }
-
-.at-hdr-chevron{
+.at-hdr-status{
     display:inline-flex;
     align-items:center;
-    opacity:0.5;
-    transition: transform 0.25s, opacity 0.15s;
+    padding:2px 7px;
+    border-radius:4px;
+    font-size:9px;
+    font-weight:700;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
 }
-.trade-card.at-v2.at-expanded .at-hdr-chevron svg{
-    transform: rotate(180deg);
+.at-status-open{
+    color:#9defff;
+    background:rgba(0,234,255,0.08);
 }
-.at-card-header:hover .at-hdr-chevron{
-    opacity:0.8;
+.at-status-closing{
+    color:#ffd77a;
+    background:rgba(255,199,88,0.10);
+}
+.at-status-closed{
+    color:#98aab8;
+    background:rgba(152,170,184,0.08);
+}
+.at-hdr-pos{
+    font-size:12px;
+    color:var(--muted);
+    white-space:nowrap;
+}
+.at-hdr-qty{
+    font-weight:700;
+    letter-spacing:0.03em;
 }
 
-/* ── AI Status Indicator ── */
+/* P&L hero — right-aligned */
+.at-hdr-pnl{
+    flex-shrink:0;
+    margin-left:auto;
+}
+.at-pnl-readout{
+    font-family:'Orbitron',sans-serif;
+    font-size:17px;
+    font-weight:700;
+    letter-spacing:0.04em;
+    white-space:nowrap;
+}
+.at-pnl-readout.positive{
+    color:#7ef7b8;
+    text-shadow: 0 0 12px rgba(126,247,184,0.25);
+}
+.at-pnl-readout.negative{
+    color:#ff7ea6;
+    text-shadow: 0 0 12px rgba(255,79,102,0.25);
+}
+.at-pnl-readout.neutral{
+    color:#ffd77a;
+}
+
+/* Meta row: subdued context tags */
+.at-hdr-meta{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    padding-top:6px;
+    margin-top:6px;
+    border-top:1px solid rgba(126,170,200,0.06);
+}
+.at-meta-tag{
+    display:inline-flex;
+    align-items:center;
+    padding:1px 6px;
+    border-radius:4px;
+    font-size:9px;
+    font-weight:700;
+    letter-spacing:0.05em;
+    text-transform:uppercase;
+    color:rgba(170,200,220,0.65);
+    background:rgba(128,170,202,0.06);
+}
+/* Meta tag variants follow rec/account coloring but subdued */
+.at-meta-tag.at-rec-hold{ color:rgba(157,239,255,0.60); }
+.at-meta-tag.at-rec-add{ color:rgba(126,247,184,0.65); }
+.at-meta-tag.at-rec-reduce,
+.at-meta-tag.at-rec-close{ color:rgba(255,179,199,0.65); }
+.at-meta-tag.badge-paper{ color:rgba(255,215,122,0.65); }
+.at-meta-tag.badge-live{ color:rgba(126,247,184,0.65); }
+
+/* AI status dot (minimal indicator) */
+.at-ai-dot{
+    display:inline-block;
+    width:6px;
+    height:6px;
+    border-radius:50%;
+    flex-shrink:0;
+}
+.at-ai-dot.at-ai-ok{ background:#7ef7b8; box-shadow: 0 0 6px rgba(126,247,184,0.40); }
+.at-ai-dot.at-ai-err{ background:#ff7ea6; box-shadow: 0 0 6px rgba(255,79,102,0.40); }
+
+/* Responsive header: stack on narrow screens */
+@media (max-width:640px){
+    .at-hdr-main{ flex-wrap:wrap; gap:8px; }
+    .at-hdr-pnl{ margin-left:0; width:100%; }
+    .at-hdr-meta{ flex-wrap:wrap; }
+}
+
+/* ── AI Status Indicator (dot + legacy text styles) ── */
 .at-ai-status{
     display:inline-block;
     padding:1px 7px;
@@ -3449,7 +3621,7 @@ main.main{
     font-weight:800;
     letter-spacing:0.08em;
 }
-.at-ai-ok{
+.at-ai-ok, .at-ai-dot.at-ai-ok{
     color:#7ef7b8;
     background: rgba(126,247,184,0.12);
     border:1px solid rgba(126,247,184,0.25);
@@ -3470,22 +3642,40 @@ main.main{
     50%{ opacity:0.5; }
 }
 
-/* ── Active Trade Cards: reuse standard .metric-grid at 4 columns ── */
+/* ── Trade Body: sections + gradient overlay (matches standard card) ── */
 .trade-card.at-v2 .trade-body{
-    padding:14px 16px 10px;
+    padding:18px 20px 14px;
+    position:relative;
 }
+.trade-card.at-v2 .trade-body:before{
+    content:'';
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+    background:
+        linear-gradient(180deg, rgba(0,220,255,0.03), transparent 18%),
+        radial-gradient(800px 260px at 20% 0%, rgba(0,220,255,0.04), transparent 65%);
+    opacity:0.6;
+}
+
+/* Section spacing: controlled vertical rhythm */
+.trade-card.at-v2 .section{
+    margin-bottom:14px;
+}
+.trade-card.at-v2 .section:last-child{
+    margin-bottom:0;
+}
+.trade-card.at-v2 .section-title{
+    margin-bottom:10px;
+}
+
+/* Metric grid: 3-column for 6 core position metrics */
 .trade-card.at-v2 .metric-grid{
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap:10px;
 }
 .trade-card.at-v2 .metric{
     text-align:center;
-    border:1px solid rgba(0,234,255,0.10);
-    background: rgba(0,234,255,0.03);
-    transition: border-color 0.15s;
-}
-.trade-card.at-v2 .metric:hover{
-    border-color: rgba(0,234,255,0.20);
 }
 .trade-card.at-v2 .metric-label{
     text-align:center;
@@ -3498,7 +3688,6 @@ main.main{
     opacity:0.65;
 }
 
-/* Responsive: tablet 2 cols, mobile stacked */
 @media (max-width:768px){
     .trade-card.at-v2 .metric-grid{ grid-template-columns: repeat(2, 1fr); }
 }
@@ -3506,15 +3695,72 @@ main.main{
     .trade-card.at-v2 .metric-grid{ grid-template-columns: 1fr; }
 }
 
-/* ── AI Recommendation Panel ── */
-.at-ai-panel{
-    margin:0 16px 10px;
-    border-radius:10px;
-    border:1px solid rgba(0,234,255,0.14);
-    background: linear-gradient(145deg, rgba(0,234,255,0.04), rgba(6,10,20,0.6));
-    overflow:hidden;
+/* ── Card Footer: unified bottom-anchored action zone (scanner-aligned) ── */
+.trade-card.at-v2 > .at-card-footer{
+    margin:0;
+    padding:14px 18px 18px;
+    border-top:1px solid rgba(126,170,200,0.10);
+    background: linear-gradient(180deg, rgba(8,10,26,0.45), rgba(6,6,18,0.25));
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    flex-shrink:0;
 }
 
+/* Run row: full-width primary action */
+.at-footer-run .btn{
+    width:100%;
+    padding:10px 14px;
+    font-size:13px;
+}
+
+/* Execute + Close row */
+.at-footer-actions{
+    display:flex;
+    gap:12px;
+}
+.at-footer-actions .btn{
+    flex:1 1 0;
+    width:100%;
+    min-width:0;
+    padding:10px 12px;
+    font-size:13px;
+}
+
+/* Tool row (secondary): quieter, smaller */
+.at-footer-tools{
+    display:flex;
+    gap:8px;
+    padding-top:4px;
+    border-top:1px solid rgba(126,170,200,0.06);
+}
+.at-btn-tool{
+    flex:1 1 0;
+    padding:7px 10px;
+    border-radius:8px;
+    font-size:10px;
+    font-weight:600;
+    letter-spacing:0.05em;
+    text-transform:uppercase;
+    text-align:center;
+    border:1px solid rgba(128,170,202,0.14);
+    background:rgba(128,170,202,0.04);
+    color:var(--muted);
+    cursor:pointer;
+    transition: background .15s, color .15s;
+}
+.at-btn-tool:hover{
+    background:rgba(0,234,255,0.08);
+    color:var(--text);
+    border-color:rgba(0,234,255,0.22);
+}
+
+@media (max-width:640px){
+    .at-footer-actions{ flex-direction:column; }
+    .at-footer-tools{ flex-direction:column; }
+}
+
+/* ── AI Recommendation Card (inside model panel) ── */
 .at-ai-card{
     padding:14px 16px;
 }
@@ -3578,6 +3824,63 @@ main.main{
     border:1px solid rgba(120,140,160,0.25);
 }
 
+/* ── Stance badge variants ── */
+.at-ai-stance-hold{ background:rgba(126,247,184,0.14); color:#7ef7b8; border:1px solid rgba(126,247,184,0.35); text-shadow:0 0 8px rgba(126,247,184,0.20); }
+.at-ai-stance-add{ background:rgba(0,234,255,0.12); color:#00eaff; border:1px solid rgba(0,234,255,0.30); text-shadow:0 0 8px rgba(0,234,255,0.20); }
+.at-ai-stance-reduce{ background:rgba(255,193,7,0.14); color:#ffe0a0; border:1px solid rgba(255,193,7,0.35); text-shadow:0 0 8px rgba(255,193,7,0.15); }
+.at-ai-stance-exit{ background:rgba(255,79,102,0.14); color:#ff7ea6; border:1px solid rgba(255,79,102,0.35); text-shadow:0 0 8px rgba(255,79,102,0.18); }
+.at-ai-stance-watch{ background:rgba(120,140,160,0.12); color:var(--muted); border:1px solid rgba(120,140,160,0.25); }
+
+/* ── Generic inline badge ── */
+.at-ai-badge{
+    display:inline-block;
+    padding:3px 10px;
+    border-radius:5px;
+    font-size:10px;
+    font-weight:700;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+}
+.at-ai-badge-sm{
+    font-size:9px;
+    padding:2px 7px;
+    vertical-align:middle;
+    margin-left:6px;
+}
+
+/* Confidence */
+.at-ai-conf-high{ background:rgba(126,247,184,0.12); color:#7ef7b8; border:1px solid rgba(126,247,184,0.25); }
+.at-ai-conf-mid{  background:rgba(255,193,7,0.12);   color:#ffe0a0; border:1px solid rgba(255,193,7,0.25); }
+.at-ai-conf-low{  background:rgba(255,79,102,0.10);   color:#ff7ea6; border:1px solid rgba(255,79,102,0.20); }
+
+/* Thesis status */
+.at-ai-thesis-intact{    background:rgba(126,247,184,0.12); color:#7ef7b8; border:1px solid rgba(126,247,184,0.25); }
+.at-ai-thesis-weakening{ background:rgba(255,193,7,0.12);   color:#ffe0a0; border:1px solid rgba(255,193,7,0.25); }
+.at-ai-thesis-broken{    background:rgba(255,79,102,0.10);   color:#ff7ea6; border:1px solid rgba(255,79,102,0.20); }
+
+/* Urgency */
+.at-ai-urgency-low{    background:rgba(120,140,160,0.10); color:var(--muted); border:1px solid rgba(120,140,160,0.20); }
+.at-ai-urgency-medium{ background:rgba(255,193,7,0.12);   color:#ffe0a0;     border:1px solid rgba(255,193,7,0.25); }
+.at-ai-urgency-high{   background:rgba(255,79,102,0.14);   color:#ff7ea6;     border:1px solid rgba(255,79,102,0.30); }
+
+/* ── Memo layout ── */
+.at-ai-memo .at-ai-memo-header{
+    margin-bottom:10px;
+}
+.at-ai-headline{
+    font-size:14px;
+    font-weight:700;
+    color:var(--text);
+    margin-bottom:8px;
+    line-height:1.4;
+}
+.at-ai-badges{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    align-items:center;
+}
+
 .at-ai-confidence{
     font-size:12px;
     color:var(--text);
@@ -3594,6 +3897,32 @@ main.main{
     background: rgba(0,234,255,0.02);
     border-radius:0 8px 8px 0;
 }
+
+/* ── Position Snapshot Grid ── */
+.at-ai-snapshot-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(100px,1fr));
+    gap:6px 10px;
+}
+.at-ai-snap{
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+}
+.at-ai-snap-label{
+    font-size:9px;
+    font-weight:700;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--muted);
+}
+.at-ai-snap-val{
+    font-size:13px;
+    font-weight:600;
+    color:var(--text);
+}
+.at-ai-pnl-pos{ color:#7ef7b8; }
+.at-ai-pnl-neg{ color:#ff7ea6; }
 
 .at-ai-section{
     margin-bottom:8px;
@@ -3623,6 +3952,104 @@ main.main{
     font-size:12px;
     color:#ffe0a0;
     line-height:1.65;
+}
+
+/* ── Key Supports ── */
+.at-ai-supports{
+    margin:0;
+    padding-left:16px;
+    list-style:none;
+    font-size:12px;
+    color:#7ef7b8;
+    line-height:1.65;
+}
+
+/* ── Technical State Grid ── */
+.at-ai-tech-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:4px 12px;
+}
+.at-ai-tech-row{
+    display:flex;
+    justify-content:space-between;
+    font-size:12px;
+    padding:3px 0;
+    border-bottom:1px solid rgba(255,255,255,0.04);
+}
+.at-ai-tech-row.at-ai-tech-wide{
+    grid-column:1 / -1;
+}
+.at-ai-tech-label{
+    color:var(--muted);
+    font-size:10px;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+}
+.at-ai-tech-val{
+    color:var(--text);
+}
+
+/* ── Action Plan Grid ── */
+.at-ai-action-grid{
+    display:grid;
+    gap:4px 0;
+}
+.at-ai-action-row{
+    display:flex;
+    gap:10px;
+    align-items:baseline;
+    font-size:12px;
+    padding:3px 0;
+    border-bottom:1px solid rgba(255,255,255,0.04);
+}
+.at-ai-action-label{
+    flex:0 0 90px;
+    color:var(--muted);
+    font-size:10px;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+}
+.at-ai-action-val{
+    color:var(--text);
+    flex:1;
+}
+.at-ai-trigger-risk{  color:#ff7ea6; }
+.at-ai-trigger-upside{ color:#7ef7b8; }
+
+/* ── Analyst Memo Section ── */
+.at-ai-memo-section{
+    background:rgba(0,234,255,0.02);
+    border:1px solid rgba(0,234,255,0.08);
+    border-radius:6px;
+    padding:10px 12px;
+}
+.at-ai-memo-row{
+    display:flex;
+    gap:10px;
+    align-items:baseline;
+    font-size:12px;
+    padding:4px 0;
+    border-bottom:1px solid rgba(255,255,255,0.04);
+}
+.at-ai-memo-row:last-child{ border-bottom:none; }
+.at-ai-memo-label{
+    flex:0 0 100px;
+    color:var(--muted);
+    font-size:10px;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+}
+.at-ai-memo-val{
+    color:var(--text);
+    flex:1;
+}
+.at-ai-memo-decision{
+    font-weight:700;
+    color:#00eaff;
 }
 
 .at-ai-next-check{
@@ -3691,36 +4118,6 @@ main.main{
 .at-ai-retry{
     font-size:9px !important;
     padding:3px 10px !important;
-}
-
-/* ── LAYER 3: Actions v2 ── */
-.at-actions-v2{
-    border-top:1px solid rgba(0,234,255,0.08);
-    padding:10px 14px 12px;
-    display:flex;
-    flex-direction:column;
-    gap:8px;
-}
-.at-actions-primary{
-    display:flex;
-}
-.at-actions-primary .btn-run{
-    flex:1;
-}
-.at-actions-main{
-    display:flex;
-    gap:8px;
-}
-.at-actions-main .btn{
-    flex:1;
-}
-.at-actions-secondary{
-    display:flex;
-    gap:6px;
-}
-.at-actions-secondary .at-btn-secondary{
-    flex:1;
-    text-align:center;
 }
 
 .at-legs-table th{

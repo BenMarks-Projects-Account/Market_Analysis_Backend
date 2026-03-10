@@ -738,9 +738,11 @@ async def get_monitor_results(
 async def get_monitor_narrative(
     request: Request,
 ) -> dict[str, Any]:
-    """Generate an LLM narrative for a single position's monitor result.
+    """Generate a structured LLM memo for a single position's monitor result.
 
     Called on-demand when user clicks "Run Monitor Analysis".
+    Returns a structured JSON memo with label, summary, thesis_check,
+    key_risks, action, and confidence — never raw reasoning text.
 
     Request body:
       { "symbol": "AAPL", "position": {...}, "monitor_result": {...} }
@@ -753,7 +755,9 @@ async def get_monitor_narrative(
     if not symbol:
         return {"ok": False, "error": {"message": "symbol is required"}}
 
-    # Build prompt for local LLM
+    from common.model_sanitize import sanitize_model_text, had_think_tags, classify_model_error, user_facing_error_message
+
+    # ── Build structured prompt ──────────────────────────────────
     status = monitor_result.get("status", "UNKNOWN")
     score = monitor_result.get("score_0_100", "?")
     breakdown = monitor_result.get("breakdown", {})
@@ -768,67 +772,144 @@ async def get_monitor_narrative(
     pnl_pct_str = f"{pnl_pct:.1%}" if pnl_pct is not None else "N/A"
     qty = position.get("quantity") or "N/A"
 
-    prompt = f"""You are a senior portfolio analyst monitoring an active equity position.
+    system_msg = (
+        "You are a senior portfolio analyst for BenTrade.\n"
+        "Review the supplied position-monitor data and return ONLY the final "
+        "assessment as a single valid JSON object.\n\n"
+        "RULES — follow these exactly:\n"
+        "1. Do NOT include chain-of-thought, reasoning traces, or <think> tags.\n"
+        "2. Do NOT include markdown fences, explanation, or any text outside the JSON.\n"
+        "3. Do NOT repeat the raw input data verbatim.\n"
+        "4. Return ONLY the JSON object — nothing before or after it.\n"
+        "5. Keep it concise, specific, and trader-usable.\n"
+        "6. Reference actual price levels, P&L numbers, and indicator values.\n\n"
+        "Required JSON schema:\n"
+        "{\n"
+        '  "label": "HOLD | WATCH | REDUCE | EXIT | ADD",\n'
+        '  "summary": "2-3 sentence executive memo",\n'
+        '  "thesis_check": "1-2 sentence assessment of whether original thesis is intact",\n'
+        '  "key_risks": ["risk 1", "risk 2", "risk 3"],\n'
+        '  "action": "clear action recommendation",\n'
+        '  "confidence": 0-100\n'
+        "}\n\n"
+        "label must be exactly one of: HOLD, WATCH, REDUCE, EXIT, ADD\n"
+        "confidence must be an integer 0-100\n"
+        "key_risks must have 1-5 items"
+    )
 
-POSITION SNAPSHOT:
-  Symbol: {symbol}
-  Quantity: {qty}
-  Avg Entry: ${avg_entry}
-  Current Price: ${current}
-  Unrealized P&L: ${pnl} ({pnl_pct_str})
+    user_msg = (
+        f"POSITION SNAPSHOT:\n"
+        f"  Symbol: {symbol}\n"
+        f"  Quantity: {qty}\n"
+        f"  Avg Entry: ${avg_entry}\n"
+        f"  Current Price: ${current}\n"
+        f"  Unrealized P&L: ${pnl} ({pnl_pct_str})\n\n"
+        f"MONITOR ASSESSMENT:\n"
+        f"  Status: {status}\n"
+        f"  Score: {score}/100\n"
+        f"  Breakdown:\n"
+        f"{_fmt_breakdown(breakdown)}\n\n"
+        f"ACTIVE TRIGGERS:\n"
+        f"{_fmt_triggers(hit_triggers) if hit_triggers else '  None'}\n\n"
+        f"RECOMMENDED ACTION: {action.get('action', 'N/A')} — {action.get('reason_short', '')}\n\n"
+        f"Return your assessment as the required JSON object only."
+    )
 
-MONITOR ASSESSMENT:
-  Status: {status}
-  Score: {score}/100
-  Breakdown:
-{_fmt_breakdown(breakdown)}
+    logger.info(
+        "[monitor-narrative] request symbol=%s status=%s score=%s",
+        symbol, status, score,
+    )
 
-ACTIVE TRIGGERS:
-{_fmt_triggers(hit_triggers) if hit_triggers else "  None"}
-
-RECOMMENDED ACTION: {action.get('action', 'N/A')} — {action.get('reason_short', '')}
-
-Write a concise 3-5 sentence memo:
-1. Thesis check — is the original trade thesis still intact?
-2. Key risks — what are the immediate concerns?
-3. Action recommendation — hold, reduce, or close, with reasoning.
-
-Be direct and specific. Reference the actual numbers.
-"""
-
+    # ── LLM call ─────────────────────────────────────────────────
     try:
-        import httpx
         from app.services.model_router import get_model_endpoint
         llm_response = await request.app.state.http_client.post(
             get_model_endpoint(),
             json={
                 "model": "local-model",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
-                "max_tokens": 500,
+                "messages": [
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": user_msg},
+                ],
+                "temperature": 0.2,
+                "max_tokens": 600,
                 "stream": False,
             },
-            timeout=30.0,
+            timeout=90.0,
         )
-        if llm_response.status_code == 200:
-            data = llm_response.json()
-            narrative = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
-        else:
-            narrative = f"LLM returned HTTP {llm_response.status_code}"
-            return {"ok": False, "symbol": symbol, "narrative": narrative,
-                    "error": {"message": narrative}}
-    except Exception as exc:
-        logger.warning("[monitor-narrative] LLM call failed symbol=%s error=%s", symbol, exc)
-        return {"ok": False, "symbol": symbol, "narrative": "",
-                "error": {"message": f"LLM unavailable: {exc}"}}
 
-    return {
-        "ok": True,
-        "symbol": symbol,
-        "narrative": narrative.strip(),
-        "monitor_status": status,
-        "monitor_score": score,
-    }
+        if llm_response.status_code != 200:
+            msg = f"LLM returned HTTP {llm_response.status_code}"
+            logger.warning("[monitor-narrative] %s symbol=%s", msg, symbol)
+            return {"ok": False, "symbol": symbol, "error": {"message": msg}}
+
+        data = llm_response.json()
+        raw_content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+
+        logger.info(
+            "[monitor-narrative] response len=%d think_detected=%s symbol=%s",
+            len(raw_content), had_think_tags(raw_content), symbol,
+        )
+
+        # ── Sanitize + parse ──────────────────────────────────────
+        cleaned = sanitize_model_text(raw_content)
+
+        if not cleaned:
+            logger.warning("[monitor-narrative] empty after sanitization symbol=%s", symbol)
+            return {
+                "ok": True,
+                "symbol": symbol,
+                "narrative": None,
+                "structured": _build_fallback_narrative(status, score),
+                "monitor_status": status,
+                "monitor_score": score,
+                "error": {"message": "Model returned empty content after sanitization."},
+            }
+
+        # Try JSON parse
+        from common.json_repair import extract_and_repair_json
+        parsed, method = extract_and_repair_json(cleaned)
+
+        logger.info(
+            "[monitor-narrative] parse method=%s success=%s symbol=%s",
+            method, parsed is not None, symbol,
+        )
+
+        structured = _coerce_narrative_memo(parsed) if parsed else None
+
+        if structured:
+            return {
+                "ok": True,
+                "symbol": symbol,
+                "narrative": structured.get("summary", ""),
+                "structured": structured,
+                "monitor_status": status,
+                "monitor_score": score,
+            }
+
+        # Fallback: treat sanitized text as plain narrative
+        logger.warning(
+            "[monitor-narrative] JSON parse failed, using plain text fallback symbol=%s first200=%s",
+            symbol, cleaned[:200],
+        )
+        return {
+            "ok": True,
+            "symbol": symbol,
+            "narrative": cleaned[:1000],
+            "structured": None,
+            "monitor_status": status,
+            "monitor_score": score,
+        }
+
+    except Exception as exc:
+        error_kind = classify_model_error(exc)
+        msg = user_facing_error_message(error_kind)
+        logger.error(
+            "[monitor-narrative] %s symbol=%s error_kind=%s exc=%s",
+            msg, symbol, error_kind, exc,
+        )
+        return {"ok": False, "symbol": symbol, "narrative": "",
+                "error": {"message": msg, "kind": error_kind}}
 
 
 def _fmt_breakdown(bd: dict) -> str:
@@ -845,6 +926,56 @@ def _fmt_triggers(triggers: list) -> str:
     return "\n".join(lines) if lines else "  None"
 
 
+def _coerce_narrative_memo(parsed: Any) -> dict[str, Any] | None:
+    """Normalize LLM response into the monitor narrative memo contract."""
+    if not isinstance(parsed, dict):
+        return None
+
+    label = str(parsed.get("label") or "WATCH").strip().upper()
+    if label not in {"HOLD", "WATCH", "REDUCE", "EXIT", "ADD"}:
+        label = "WATCH"
+
+    summary = str(parsed.get("summary") or "").strip()
+    thesis_check = str(parsed.get("thesis_check") or "").strip()
+    action = str(parsed.get("action") or "").strip()
+
+    risks_raw = parsed.get("key_risks") or []
+    if isinstance(risks_raw, list):
+        key_risks = [str(r).strip() for r in risks_raw if str(r).strip()][:5]
+    else:
+        key_risks = [str(risks_raw).strip()] if str(risks_raw).strip() else []
+
+    conf = parsed.get("confidence")
+    try:
+        confidence = max(0, min(100, int(float(conf))))
+    except (TypeError, ValueError):
+        confidence = 50
+
+    if not summary:
+        return None
+
+    return {
+        "label": label,
+        "summary": summary,
+        "thesis_check": thesis_check,
+        "key_risks": key_risks,
+        "action": action,
+        "confidence": confidence,
+    }
+
+
+def _build_fallback_narrative(status: str, score: Any) -> dict[str, Any]:
+    """Build a minimal fallback memo when the model returns empty/unparseable."""
+    return {
+        "label": "WATCH",
+        "summary": f"Monitor status is {status} with score {score}/100. Model analysis unavailable.",
+        "thesis_check": "Unable to assess — model did not return a valid response.",
+        "key_risks": ["Model analysis unavailable"],
+        "action": "Review position manually.",
+        "confidence": 0,
+    }
+
+
 # ═══════════════════════════════════════════════════════════════
 # Active Trade Model Analysis — purpose-built LLM analysis
 # POST /api/trading/active/model-analysis
@@ -853,6 +984,193 @@ def _fmt_triggers(triggers: list) -> str:
 # Does NOT include any monitor scores, triggers, or recommended actions.
 # The model must form its own independent opinion.
 # ═══════════════════════════════════════════════════════════════
+
+# JSON schema instruction block for the model analysis prompt.
+# Defined as a module constant so the system message stays readable.
+_MODEL_ANALYSIS_SCHEMA = """{
+  "headline": "<short attention-grabbing headline>",
+  "stance": "HOLD|REDUCE|EXIT|ADD|WATCH",
+  "confidence": 0-100,
+  "thesis_status": "INTACT|WEAKENING|BROKEN",
+  "summary": "<2-3 sentence executive summary>",
+  "key_risks": ["<risk 1>", "<risk 2>"],
+  "key_supports": ["<support 1>", "<support 2>"],
+  "technical_state": {
+    "price_vs_sma20": "ABOVE|BELOW|NEAR",
+    "price_vs_sma50": "ABOVE|BELOW|NEAR",
+    "trend_assessment": "<1 sentence>",
+    "drawdown_assessment": "<1 sentence>"
+  },
+  "action_plan": {
+    "primary_action": "<what to do>",
+    "urgency": "LOW|MEDIUM|HIGH",
+    "next_step": "<concrete next step>",
+    "risk_trigger": "<what would force an exit>",
+    "upside_trigger": "<what would justify adding>"
+  },
+  "memo": {
+    "thesis_check": "<is original thesis intact?>",
+    "what_changed": "<what moved since entry?>",
+    "decision": "<clear recommendation>"
+  }
+}"""
+
+_MODEL_ANALYSIS_SYSTEM_MSG = (
+    "You are a senior portfolio and risk analyst writing a structured "
+    "active-position review for a trading desk UI.\n\n"
+    "RULES — follow these exactly:\n"
+    "1. Use ONLY the provided position and market context data.\n"
+    "2. Do NOT invent catalysts, fundamentals, or news.\n"
+    "3. Do NOT output chain-of-thought, reasoning tags, <think> tags, "
+    "markdown fences, or any text outside the JSON.\n"
+    "4. Return a single valid JSON object using the schema below.\n"
+    "5. Be concise, specific, and decision-oriented. "
+    "Reference actual price levels, P&L numbers, and indicator values.\n"
+    "6. Avoid filler, generic advice, and educational explanations.\n"
+    "7. Keep risk/action language specific to the provided data.\n"
+    "8. confidence is an integer 0-100, NOT a float.\n"
+    "9. stance must be exactly one of: HOLD, REDUCE, EXIT, ADD, WATCH\n"
+    "10. thesis_status must be exactly: INTACT, WEAKENING, or BROKEN\n"
+    "11. urgency must be exactly: LOW, MEDIUM, or HIGH\n\n"
+    "Required JSON schema:\n" + _MODEL_ANALYSIS_SCHEMA
+)
+
+
+def _sanitize_model_analysis(raw: dict) -> dict:
+    """Validate and coerce a parsed model analysis dict into the required schema.
+
+    Input:  raw dict from LLM JSON parse
+    Output: cleaned dict conforming to the position review schema
+    """
+    # ── stance ──
+    valid_stances = {"HOLD", "REDUCE", "EXIT", "ADD", "WATCH"}
+    stance = str(raw.get("stance") or raw.get("suggested_action") or "HOLD").upper()
+    # Map old schema values to new
+    if stance == "CLOSE":
+        stance = "EXIT"
+    if stance not in valid_stances:
+        stance = "HOLD"
+
+    # ── confidence (0-100 int) ──
+    conf = raw.get("confidence")
+    try:
+        conf = int(float(conf))
+        if conf < 0:
+            conf = 0
+        elif conf > 100:
+            conf = 100
+    except (TypeError, ValueError):
+        conf = 0
+
+    # ── thesis_status ──
+    valid_thesis = {"INTACT", "WEAKENING", "BROKEN"}
+    thesis = str(raw.get("thesis_status") or "INTACT").upper()
+    if thesis not in valid_thesis:
+        thesis = "INTACT"
+
+    # ── string fields ──
+    headline = str(raw.get("headline") or raw.get("one_sentence_summary") or "")
+    summary = str(raw.get("summary") or raw.get("one_sentence_summary") or "")
+
+    # ── array fields ──
+    key_risks = raw.get("key_risks") or raw.get("risk_flags") or []
+    if not isinstance(key_risks, list):
+        key_risks = []
+    key_risks = [str(r) for r in key_risks if r]
+
+    key_supports = raw.get("key_supports") or []
+    if not isinstance(key_supports, list):
+        key_supports = []
+    key_supports = [str(s) for s in key_supports if s]
+
+    # ── technical_state ──
+    ts_raw = raw.get("technical_state") or {}
+    if not isinstance(ts_raw, dict):
+        ts_raw = {}
+    valid_price_pos = {"ABOVE", "BELOW", "NEAR"}
+
+    def _price_pos(val: Any) -> str:
+        v = str(val or "").upper()
+        return v if v in valid_price_pos else "NEAR"
+
+    technical_state = {
+        "price_vs_sma20": _price_pos(ts_raw.get("price_vs_sma20")),
+        "price_vs_sma50": _price_pos(ts_raw.get("price_vs_sma50")),
+        "trend_assessment": str(ts_raw.get("trend_assessment") or ""),
+        "drawdown_assessment": str(ts_raw.get("drawdown_assessment") or ""),
+    }
+
+    # ── action_plan ──
+    ap_raw = raw.get("action_plan") or {}
+    if not isinstance(ap_raw, dict):
+        ap_raw = {}
+    valid_urgency = {"LOW", "MEDIUM", "HIGH"}
+    urgency = str(ap_raw.get("urgency") or "LOW").upper()
+    if urgency not in valid_urgency:
+        urgency = "LOW"
+
+    action_plan = {
+        "primary_action": str(ap_raw.get("primary_action") or ""),
+        "urgency": urgency,
+        "next_step": str(ap_raw.get("next_step") or raw.get("next_check") or ""),
+        "risk_trigger": str(ap_raw.get("risk_trigger") or ""),
+        "upside_trigger": str(ap_raw.get("upside_trigger") or ""),
+    }
+
+    # ── memo ──
+    memo_raw = raw.get("memo") or {}
+    if not isinstance(memo_raw, dict):
+        memo_raw = {}
+    memo = {
+        "thesis_check": str(memo_raw.get("thesis_check") or ""),
+        "what_changed": str(memo_raw.get("what_changed") or ""),
+        "decision": str(memo_raw.get("decision") or ""),
+    }
+
+    return {
+        "headline": headline,
+        "stance": stance,
+        "confidence": conf,
+        "thesis_status": thesis,
+        "summary": summary,
+        "key_risks": key_risks,
+        "key_supports": key_supports,
+        "technical_state": technical_state,
+        "action_plan": action_plan,
+        "memo": memo,
+    }
+
+
+def _build_fallback_analysis(reason: str) -> dict:
+    """Return a safe fallback analysis dict when parsing fails completely."""
+    return {
+        "headline": "Analysis unavailable",
+        "stance": "WATCH",
+        "confidence": 0,
+        "thesis_status": "INTACT",
+        "summary": reason,
+        "key_risks": ["Model response could not be parsed"],
+        "key_supports": [],
+        "technical_state": {
+            "price_vs_sma20": "NEAR",
+            "price_vs_sma50": "NEAR",
+            "trend_assessment": "",
+            "drawdown_assessment": "",
+        },
+        "action_plan": {
+            "primary_action": "Retry analysis",
+            "urgency": "LOW",
+            "next_step": "Re-run model analysis",
+            "risk_trigger": "",
+            "upside_trigger": "",
+        },
+        "memo": {
+            "thesis_check": "",
+            "what_changed": "",
+            "decision": "Retry analysis for actionable recommendation.",
+        },
+    }
+
 
 @router.post("/active/model-analysis")
 async def active_trade_model_analysis(
@@ -867,26 +1185,8 @@ async def active_trade_model_analysis(
     NO monitor scores, triggers, or recommendations are included.
     The LLM must form its own independent opinion.
 
-    Request body:
-      {
-        "symbol": "AAPL",
-        "position": { ... raw position fields ... },
-        "account_mode": "live"|"paper"
-      }
-
-    Returns strict JSON:
-      {
-        "ok": true,
-        "symbol": "AAPL",
-        "analysis": {
-          "suggested_action": "HOLD"|"REDUCE"|"CLOSE"|"ADD",
-          "confidence": 0.0-1.0,
-          "one_sentence_summary": "...",
-          "rationale_bullets": ["...", "..."],
-          "risk_flags": ["...", "..."],
-          "next_check": "..."
-        }
-      }
+    Returns a structured position-review memo (see _MODEL_ANALYSIS_SCHEMA).
+    Chain-of-thought / ``<think>`` blocks are stripped server-side.
     """
     body = await request.json()
     symbol = str(body.get("symbol") or "").upper()
@@ -896,7 +1196,6 @@ async def active_trade_model_analysis(
         return {"ok": False, "error": {"message": "symbol is required"}}
 
     # ── Fetch raw market context (regime + indicators) ───────
-    # NOTE: app.state attr is "active_trade_monitor_service" (set in main.py)
     monitor_svc = getattr(request.app.state, "active_trade_monitor_service", None)
     regime_ctx = {"regime_label": None, "regime_score": None}
     indicators = {"sma20": None, "sma50": None, "rsi14": None}
@@ -933,30 +1232,27 @@ async def active_trade_model_analysis(
     regime_score = regime_ctx.get("regime_score")
     regime_score_str = f"{regime_score:.0f}/100" if isinstance(regime_score, (int, float)) else "N/A"
 
-    # ── Build messages (system + user split for strict JSON output) ──────
-    # System message: enforce JSON-only output, no chain-of-thought leakage.
-    # User message: raw position data only, no schema instructions mixed in.
-    system_msg = (
-        "You are a senior portfolio analyst. "
-        "Return ONLY a single valid JSON object — no markdown fences, no commentary, "
-        "no chain-of-thought, no <think> tags, no text before or after the JSON.\n\n"
-        "Required JSON schema:\n"
-        "{\n"
-        '  "suggested_action": "HOLD" | "REDUCE" | "CLOSE" | "ADD",\n'
-        '  "confidence": <float 0.0–1.0>,\n'
-        '  "one_sentence_summary": "<concise thesis>",\n'
-        '  "rationale_bullets": ["<bullet 1>", "<bullet 2>", ...],\n'
-        '  "risk_flags": ["<risk 1>", ...],\n'
-        '  "next_check": "<when to re-evaluate>"\n'
-        "}\n\n"
-        "Rules:\n"
-        "- suggested_action must be exactly one of: HOLD, REDUCE, CLOSE, ADD\n"
-        "- confidence must be a float between 0.0 and 1.0\n"
-        "- rationale_bullets: 2-5 bullets with actual numbers from the data\n"
-        "- risk_flags: 0-3 specific risks, or empty array\n"
-        "- Reference actual price levels, P&L, and indicator values"
-    )
+    # ── Compute derived price-vs-SMA comparisons for prompt context ──
+    _cur = None
+    try:
+        _cur = float(current) if current != "N/A" else None
+    except (TypeError, ValueError):
+        pass
 
+    def _price_rel(price, sma_val):
+        if price is None or sma_val is None:
+            return "N/A"
+        pct = (price - sma_val) / sma_val * 100
+        if pct > 1.5:
+            return f"ABOVE (+{pct:.1f}%)"
+        if pct < -1.5:
+            return f"BELOW ({pct:.1f}%)"
+        return f"NEAR ({pct:+.1f}%)"
+
+    sma20_rel = _price_rel(_cur, indicators.get("sma20"))
+    sma50_rel = _price_rel(_cur, indicators.get("sma50"))
+
+    # ── Build user prompt with raw data only ─────────────────
     user_msg = f"""Evaluate this active position using ONLY the data below.
 
 POSITION SNAPSHOT
@@ -973,31 +1269,24 @@ POSITION SNAPSHOT
 
 MARKET CONTEXT
   Regime: {regime_label} (score: {regime_score_str})
-  SMA 20-day: {sma20_str}
-  SMA 50-day: {sma50_str}
-  RSI 14-day: {rsi14_str}"""
+  SMA 20-day: {sma20_str}  — Price vs SMA20: {sma20_rel}
+  SMA 50-day: {sma50_str}  — Price vs SMA50: {sma50_rel}
+  RSI 14-day: {rsi14_str}
+
+Produce a concise position review memo as JSON. Be decisive."""
 
     llm_payload = {
         "model": "local-model",
         "messages": [
-            {"role": "system", "content": system_msg},
+            {"role": "system", "content": _MODEL_ANALYSIS_SYSTEM_MSG},
             {"role": "user", "content": user_msg},
         ],
         "temperature": 0.2,
-        "max_tokens": 600,
+        "max_tokens": 900,
     }
 
     # ── LLM call with retry-once on JSON parse failure ───────
-    _FALLBACK_ANALYSIS = {
-        "suggested_action": "UNKNOWN",
-        "confidence": 0.0,
-        "one_sentence_summary": "Model response could not be parsed.",
-        "rationale_bullets": ["LLM response was not valid JSON"],
-        "risk_flags": [],
-        "next_check": "Retry analysis",
-    }
-
-    MAX_ATTEMPTS = 2  # initial + 1 retry
+    MAX_ATTEMPTS = 2
     analysis = None
 
     try:
@@ -1006,7 +1295,7 @@ MARKET CONTEXT
             llm_response = await request.app.state.http_client.post(
                 get_model_endpoint(),
                 json={**llm_payload, "stream": False},
-                timeout=30.0,
+                timeout=90.0,
             )
             if llm_response.status_code != 200:
                 msg = f"LLM returned HTTP {llm_response.status_code}"
@@ -1022,16 +1311,19 @@ MARKET CONTEXT
                 .get("content", "")
             )
 
-            # ── Strip <think>…</think> blocks (chain-of-thought leakage) ──
-            # Input:  raw_content from LLM
-            # Output: cleaned text with <think> blocks removed
-            cleaned = re.sub(
-                r"<think>.*?</think>", "", raw_content, flags=re.DOTALL
-            ).strip()
+            # Log raw content for debugging (never exposed to UI)
+            logger.debug(
+                "[model-analysis] raw LLM output (attempt %d) symbol=%s: %s",
+                attempt, symbol, raw_content[:500],
+            )
+
+            # ── Sanitize: strip <think> blocks and reasoning traces ──
+            from common.model_sanitize import sanitize_model_text, had_think_tags
+            if had_think_tags(raw_content):
+                logger.info("[model-analysis] <think> content detected and stripped (attempt %d) symbol=%s", attempt, symbol)
+            cleaned = sanitize_model_text(raw_content)
 
             # ── Parse via json_repair pipeline ──
-            # Input:  cleaned text (fences, smart quotes, trailing commas handled)
-            # Output: (parsed_dict | None, method_used | None)
             parsed, method = extract_and_repair_json(cleaned)
 
             if parsed is not None and isinstance(parsed, dict):
@@ -1039,48 +1331,54 @@ MARKET CONTEXT
                     "[model-analysis] JSON parsed via %s (attempt %d) symbol=%s",
                     method, attempt, symbol,
                 )
-                analysis = parsed
+                analysis = _sanitize_model_analysis(parsed)
                 break
 
             logger.warning(
                 "[model-analysis] JSON parse failed (attempt %d) symbol=%s first200=%s",
                 attempt, symbol, cleaned[:200],
             )
-            # On last attempt, fall through to fallback
 
         if analysis is None:
-            analysis = dict(_FALLBACK_ANALYSIS)
-
-        # ── Validate/coerce fields ───────────────────────────────
-        valid_actions = {"HOLD", "REDUCE", "CLOSE", "ADD"}
-        sa = str(analysis.get("suggested_action", "UNKNOWN")).upper()
-        if sa not in valid_actions:
-            sa = "UNKNOWN"
-        analysis["suggested_action"] = sa
-
-        conf = analysis.get("confidence")
-        try:
-            conf = max(0.0, min(1.0, float(conf)))
-        except (TypeError, ValueError):
-            conf = 0.0
-        analysis["confidence"] = round(conf, 2)
-
-        if not isinstance(analysis.get("rationale_bullets"), list):
-            analysis["rationale_bullets"] = []
-        if not isinstance(analysis.get("risk_flags"), list):
-            analysis["risk_flags"] = []
-        if not isinstance(analysis.get("one_sentence_summary"), str):
-            analysis["one_sentence_summary"] = ""
-        if not isinstance(analysis.get("next_check"), str):
-            analysis["next_check"] = ""
+            analysis = _build_fallback_analysis("Model response could not be parsed.")
 
     except Exception as exc:
-        logger.warning("[model-analysis] LLM call failed symbol=%s error=%s", symbol, exc)
+        from common.model_sanitize import classify_model_error, user_facing_error_message
+        error_kind = classify_model_error(exc)
+        msg = user_facing_error_message(error_kind)
+        logger.error(
+            "[model-analysis] %s symbol=%s error_kind=%s exc=%s",
+            msg, symbol, error_kind, exc,
+        )
         return {
             "ok": False,
             "symbol": symbol,
-            "error": {"message": f"LLM unavailable: {exc}"},
+            "error": {"message": msg, "kind": error_kind},
         }
+
+    # ── Inject position_context from raw data (not from model) ──
+    # Input fields: avg_entry, current, pnl, pnl_pct — from the position payload
+    # Formula: these are pass-through values, not model-generated
+    position_context = {}
+    try:
+        position_context["entry_price"] = float(avg_entry) if avg_entry != "N/A" else None
+    except (TypeError, ValueError):
+        position_context["entry_price"] = None
+    try:
+        position_context["current_price"] = float(current) if current != "N/A" else None
+    except (TypeError, ValueError):
+        position_context["current_price"] = None
+    try:
+        position_context["pnl_dollar"] = float(pnl) if pnl != "N/A" else None
+    except (TypeError, ValueError):
+        position_context["pnl_dollar"] = None
+    try:
+        position_context["pnl_percent"] = round(float(pnl_pct) * 100, 2) if isinstance(pnl_pct, (int, float)) else None
+    except (TypeError, ValueError):
+        position_context["pnl_percent"] = None
+    position_context["score"] = None  # populated by monitor, not model
+
+    analysis["position_context"] = position_context
 
     return {
         "ok": True,

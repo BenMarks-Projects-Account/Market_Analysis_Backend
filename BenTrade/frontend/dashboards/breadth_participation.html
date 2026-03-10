@@ -1,0 +1,393 @@
+<link rel="stylesheet" href="assets/css/module-dashboard.css">
+<div class="view-wrap mod-page">
+
+  <!-- ── Module Banner ────────────────────────────────────────── -->
+  <div class="mod-banner accent-breadth">
+    <div class="mod-banner-left">
+      <div class="mod-banner-breadcrumb">BenTrade · Market Picture</div>
+      <div class="mod-banner-title">Breadth &amp; Participation</div>
+      <div class="mod-banner-subtitle">Market participation health — are rallies broad or dangerously narrow?</div>
+    </div>
+    <div class="mod-banner-right">
+      <span class="mod-banner-tag">Module 2 of 6</span>
+      <span class="mod-last-updated" id="breadthLastUpdated">Updated: —</span>
+      <button class="mod-refresh-btn" id="breadthRefreshBtn" title="Refresh breadth data">↻</button>
+    </div>
+  </div>
+
+  <!-- ══ TOP ROW — Hero + Summary + Signal Quality ════════════ -->
+  <div class="mod-top-row">
+
+    <!-- Hero Score Card -->
+    <div class="mod-card mod-hero-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Composite Breadth Score</span>
+        <span class="mod-chip mod-chip-bullish" id="breadthLabelChip">—</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-hero-label" id="breadthHeroLabel" style="color:#00e676;">—</div>
+        <div class="mod-hero-score" id="breadthHeroScore">—</div>
+        <div class="mod-summary" id="breadthSummary">
+          Loading breadth data…
+        </div>
+      </div>
+    </div>
+
+    <!-- Driver Summary Card -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Key Drivers</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-section-title">Positive Contributors</div>
+        <ul class="mod-contrib-list" id="breadthPositiveDrivers">
+          <li class="mod-contrib-item"><span class="mod-contrib-dot positive"></span>Loading…</li>
+        </ul>
+        <div class="mod-divider"></div>
+        <div class="mod-section-title">Risk Signals</div>
+        <ul class="mod-warning-list" id="breadthNegativeDrivers">
+          <li class="mod-warning-item"><span class="mod-warning-icon">⚠</span>Loading…</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Signal Quality Card -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Signal Quality</span>
+      </div>
+      <div class="mod-card-body" style="text-align:center;">
+        <div class="mod-gauge" style="border-color:rgba(0,230,118,0.3);">
+          <span class="mod-gauge-val" id="breadthSignalQuality" style="color:#00e676;">—</span>
+          <span class="mod-gauge-label">Conviction</span>
+        </div>
+        <div class="mod-summary" id="breadthConfidenceNote" style="text-align:center;margin-top:10px;">
+          Loading…
+        </div>
+        <div style="margin-top:10px;">
+          <span class="mod-signal-chip" id="breadthConfidenceChip">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ AI MODEL ANALYSIS ═════════════════════════════════════ -->
+  <div class="mod-card mod-model-card" style="margin-bottom:14px;">
+    <div class="mod-card-header">
+      <span class="mod-card-title">AI Model Analysis</span>
+      <span class="mod-chip mod-chip-neutral" style="font-size:10px;padding:2px 8px;">LLM</span>
+    </div>
+    <div class="mod-card-body">
+      <div class="mod-model-label" id="breadthModelLabel">—</div>
+      <div class="mod-score-row" style="display:flex;align-items:center;gap:12px;margin:6px 0;">
+        <span style="font-size:11px;opacity:0.6;">Model Score</span>
+        <span class="mod-hero-score" id="breadthModelScore" style="font-size:28px;">—</span>
+      </div>
+      <div class="mod-model-summary" id="breadthModelSummary">
+        <div class="mod-model-cta" id="breadthModelCta">
+          <p style="opacity:0.6;font-size:12px;margin:0 0 10px;">Model analysis has not been run yet.</p>
+          <button class="mod-refresh-btn" id="breadthRunModelBtn" type="button">Analyze with Model</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ MODEL DETAILS ROW (hidden until model runs) ══════════ -->
+  <div class="mod-grid-2" id="breadthModelDetailsRow" style="display:none;">
+
+    <!-- Model Pillar Interpretations -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Model — Pillar Interpretations</span></div>
+      <div class="mod-card-body" id="breadthModelPillars"></div>
+    </div>
+
+    <!-- Model Market Implications -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Model — Market Implications</span></div>
+      <div class="mod-card-body" id="breadthModelImplications"></div>
+    </div>
+  </div>
+
+  <!-- ══ COMPONENT GRID — 4-up subcards ═══════════════════════ -->
+  <div class="mod-grid-4">
+
+    <!-- Advance / Decline -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Advance / Decline</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip">
+          <div class="mod-metric">
+            <span class="mod-metric-key">Advancing</span>
+            <span class="mod-metric-val positive" id="breadthAdvancing">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">Declining</span>
+            <span class="mod-metric-val negative" id="breadthDeclining">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">A/D Ratio</span>
+            <span class="mod-metric-val" id="breadthADRatio">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">Participation %</span>
+            <span class="mod-metric-val" id="breadthPctUp">—</span>
+          </div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">Participation Score</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="breadthPartBar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="breadthPartScore">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Moving Average Breadth -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">% Above Key MAs</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-bar-row">
+          <span class="mod-bar-label">Above 200-MA</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="breadthMA200Bar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="breadthMA200Val">—</span>
+        </div>
+        <div class="mod-bar-row">
+          <span class="mod-bar-label">Above 50-MA</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="breadthMA50Bar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="breadthMA50Val">—</span>
+        </div>
+        <div class="mod-bar-row">
+          <span class="mod-bar-label">Above 20-MA</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="breadthMA20Bar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="breadthMA20Val">—</span>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">Trend Score</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="breadthTrendBar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="breadthTrendScore">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- New Highs / New Lows -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">New Highs / New Lows</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip">
+          <div class="mod-metric">
+            <span class="mod-metric-key">New Highs</span>
+            <span class="mod-metric-val positive" id="breadthNewHighs">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">New Lows</span>
+            <span class="mod-metric-val" id="breadthNewLows">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">H/L Ratio</span>
+            <span class="mod-metric-val" id="breadthHLRatio">—</span>
+          </div>
+        </div>
+        <div class="mod-pressure-strip" style="margin-top:10px;" title="New Highs vs Lows">
+          <div class="mod-pressure-seg" id="breadthHLHighSeg" style="width:50%;background:rgba(0,230,118,0.35);"></div>
+          <div class="mod-pressure-seg" id="breadthHLLowSeg" style="width:50%;background:rgba(255,79,102,0.35);"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Volume Breadth -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Volume Breadth</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip">
+          <div class="mod-metric">
+            <span class="mod-metric-key">Up Volume</span>
+            <span class="mod-metric-val positive" id="breadthUpVol">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">Down Volume</span>
+            <span class="mod-metric-val negative" id="breadthDownVol">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">UV/DV Ratio</span>
+            <span class="mod-metric-val" id="breadthVolRatio">—</span>
+          </div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">Volume Score</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="breadthVolBar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="breadthVolScore">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECOND ROW — 4 more subcards ═════════════════════════ -->
+  <div class="mod-grid-4">
+
+    <!-- Equal Weight vs Cap Weight -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">EW vs CW Confirmation</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip">
+          <div class="mod-metric">
+            <span class="mod-metric-key">SPY (CW)</span>
+            <span class="mod-metric-val" id="breadthCWReturn">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">RSP (EW)</span>
+            <span class="mod-metric-val" id="breadthEWReturn">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">Gap</span>
+            <span class="mod-metric-val muted" id="breadthEWCWGap">—</span>
+          </div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">Leadership Score</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="breadthLeaderBar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="breadthLeaderScore">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sector Participation -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Sector Participation</span>
+      </div>
+      <div class="mod-card-body" id="breadthSectorBars">
+        <div class="mod-summary" style="font-size:10px;">Loading sector data…</div>
+      </div>
+    </div>
+
+    <!-- Leadership Concentration -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Leadership Quality</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip">
+          <div class="mod-metric">
+            <span class="mod-metric-key">% Outperforming Index</span>
+            <span class="mod-metric-val" id="breadthPctOutperf">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">Median vs Index</span>
+            <span class="mod-metric-val" id="breadthMedVsIdx">—</span>
+          </div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">Stability Score</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="breadthStabBar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="breadthStabScore">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data Quality / Diagnostics -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Data Quality</span>
+      </div>
+      <div class="mod-card-body">
+        <!-- Top metrics row -->
+        <div class="mod-metric-strip">
+          <div class="mod-metric">
+            <span class="mod-metric-key">Universe Coverage</span>
+            <span class="mod-metric-val" id="breadthCoverage">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">Confidence</span>
+            <span class="mod-metric-val" id="breadthConfidence">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">Data Quality</span>
+            <span class="mod-metric-val" id="breadthDataQuality">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">Historical Validity</span>
+            <span class="mod-metric-val" id="breadthHistValidity">—</span>
+          </div>
+        </div>
+        <!-- PIT status -->
+        <div id="breadthPITStatus" style="margin-top:8px;"></div>
+        <!-- Grouped warnings -->
+        <div id="breadthWarnings" style="margin-top:8px;font-size:10px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ VISUAL ANALYTICS ROW ═════════════════════════════════ -->
+  <div class="mod-grid-2">
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Sector Heatmap</span></div>
+      <div class="mod-card-body">
+        <div class="mod-heatmap" id="breadthHeatmap" style="grid-template-columns:repeat(5,1fr);">
+          <div class="mod-heatmap-cell mod-heat-neutral">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Participation Trend</span></div>
+      <div class="mod-card-body">
+        <div id="breadthTrendChartWrap" style="min-height:140px;">
+          <div style="text-align:center;padding:20px 0;font-size:11px;opacity:0.4;">Loading trend data…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ BOTTOM — Detail / Explanation ════════════════════════ -->
+  <div class="mod-card" style="margin-bottom:14px;">
+    <div class="mod-card-header"><span class="mod-card-title">Detailed Analysis</span></div>
+    <div class="mod-card-body">
+
+      <div class="mod-section-title">Positive Contributors</div>
+      <ul class="mod-contrib-list" id="breadthDetailPositive">
+        <li class="mod-contrib-item"><span class="mod-contrib-dot positive"></span>Loading…</li>
+      </ul>
+
+      <div class="mod-divider"></div>
+      <div class="mod-section-title">Negative Contributors</div>
+      <ul class="mod-contrib-list" id="breadthDetailNegative">
+        <li class="mod-contrib-item"><span class="mod-contrib-dot negative"></span>Loading…</li>
+      </ul>
+
+      <div class="mod-divider"></div>
+      <div class="mod-section-title">Conflicting Signals</div>
+      <ul class="mod-contrib-list" id="breadthDetailConflicts">
+        <li class="mod-contrib-item"><span class="mod-contrib-dot conflict"></span>Loading…</li>
+      </ul>
+
+      <div class="mod-divider"></div>
+      <div class="mod-takeaway">
+        <div class="mod-section-title">Trader Takeaway</div>
+        <div class="mod-takeaway-text" id="breadthTakeaway">
+          Loading…
+        </div>
+      </div>
+
+      <details class="mod-details">
+        <summary>Pillar Scores</summary>
+        <div class="mod-details-body" id="breadthPillarBars">
+          <div class="mod-bar-row"><span class="mod-bar-label">Participation</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:0%;"></div></div><span class="mod-bar-val">—</span></div>
+          <div class="mod-bar-row"><span class="mod-bar-label">Trend</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:0%;"></div></div><span class="mod-bar-val">—</span></div>
+          <div class="mod-bar-row"><span class="mod-bar-label">Volume</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:0%;"></div></div><span class="mod-bar-val">—</span></div>
+          <div class="mod-bar-row"><span class="mod-bar-label">Leadership</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:0%;"></div></div><span class="mod-bar-val">—</span></div>
+          <div class="mod-bar-row"><span class="mod-bar-label">Stability</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:0%;"></div></div><span class="mod-bar-val">—</span></div>
+        </div>
+      </details>
+    </div>
+  </div>
+
+</div>

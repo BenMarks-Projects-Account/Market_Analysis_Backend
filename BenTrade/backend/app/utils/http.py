@@ -54,8 +54,7 @@ async def request_json(
             logger.info("[http] %s %s params=%s", method, url, params)
 
         # === DIAGNOSTIC: Final HTTP callsite ===
-        print(f"HTTP REQUEST: {method} {url}")
-        print(f"HTTP BODY: {json_body or data}")
+        logger.debug("[http] request %s %s body=%s", method, url, json_body or data)
 
         try:
             response = await client.request(

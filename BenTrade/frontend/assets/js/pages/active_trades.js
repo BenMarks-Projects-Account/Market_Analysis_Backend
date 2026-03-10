@@ -319,92 +319,135 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
         monChip = '<span class="' + monCls + '">' + (mon.status || '?') + ' ' + (mon.score_0_100 != null ? mon.score_0_100 : '?') + '</span>';
       }
 
-      /* ═════════════════════════════════════════════════════════════
-       * Card structure (matches standard trade card hierarchy)
-       *   .trade-card.at-v2 (flex column)
-       *     ├── 1. HEADER  (.at-card-header)
-       *     ├── 2. WIN/LOSS BAR (.at-heat-bar-outer)
-       *     ├── 3. METRIC GRID (.trade-body > .metric-grid)
-       *     ├── 4. PRIMARY ACTION (Run Model Analysis)
-       *     ├── 5. TRADE ACTIONS (Execute / Close)
-       *     ├── 6. SECONDARY ACTIONS (Legs / Sim / Monitor)
-       *     └── 7. COLLAPSIBLE PANELS (.at-card-body) — analytics
-       * ═════════════════════════════════════════════════════════════ */
-      var html = '<div class="trade-card at-v2' + (isOpen ? ' at-expanded' : '') + '" data-trade-key="' + key + '">';
+      /* ══════════════════════════════════════════════════════════════
+       * BenTrade Trade Card — Active Position Variant
+       *
+       *   .trade-card.at-v2
+       *     ├── HEADER (.at-card-header — clickable)
+       *     │     main: chev+symbol | strategy·status·dir/qty | P&L
+       *     │     meta: account · rec · risk flags · monitor · AI
+       *     ├── SUMMARY STRIP (.at-summary-strip — always visible)
+       *     │     heat bar + compact P&L / Mark / Exposure
+       *     ├── COLLAPSIBLE BODY (.at-card-body)
+       *     │     .trade-body (metrics + details)
+       *     │     analytics panels
+       *     └── FOOTER (.at-card-footer — always visible, bottom-anchored)
+       *           run-row · execute+close · show-legs+sim+monitor
+       * ══════════════════════════════════════════════════════════════ */
+      var _tc = window.BenTradeTradeCard;
 
-      /* ── 1. HEADER ── */
-      html += '<div class="at-card-header trade-header-click" data-toggle-key="' + key + '">';
-      html += '<div class="at-hdr-left">';
-      html += '<span class="at-symbol-badge">' + (trade.symbol || 'N/A') + '</span>';
-      html += '<span class="at-hdr-direction">' + posType + '</span>';
-      html += '<span class="at-hdr-qty">x' + Math.abs(qty) + '</span>';
-      html += '</div>';
-      html += '<div class="at-hdr-right">';
-      html += '<span class="active-account-badge ' + badgeClass + '">' + badgeLabel + '</span>';
-      if (monChip) html += monChip;
-      if (riskFlags) html += '<span class="at-hdr-flags">' + riskFlags + '</span>';
+      var tradeStatus = String(trade.status || 'OPEN').toUpperCase();
+      var statusCls = 'at-status-' + tradeStatus.toLowerCase();
+      var recAction = (mon && mon.recommended_action && mon.recommended_action.action)
+        ? String(mon.recommended_action.action).toUpperCase()
+        : 'HOLD';
+      var recCls = 'at-rec-' + recAction.toLowerCase();
+      var strategyLabel = String(strategy || 'single').replace(/_/g, ' ');
+      strategyLabel = strategyLabel.charAt(0).toUpperCase() + strategyLabel.slice(1);
+
       var aiStatus = '';
       if (window.BenTradeModelAnalysisStore?.get) {
         var cached = window.BenTradeModelAnalysisStore.get(key);
         if (cached && cached.status === 'success') aiStatus = 'ok';
         else if (cached && cached.status === 'error') aiStatus = 'error';
       }
-      if (aiStatus === 'ok') html += '<span class="at-ai-status at-ai-ok" title="AI analysis available">AI ✓</span>';
-      else if (aiStatus === 'error') html += '<span class="at-ai-status at-ai-err" title="AI analysis failed">AI ✗</span>';
-      html += '<span class="at-hdr-chevron chev">';
-      html += '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
-      html += '</span>';
+
+      var html = '<div class="trade-card at-v2' + (isOpen ? ' at-expanded' : '') + '" data-trade-key="' + key + '">';
+
+      /* ─── 1. HEADER ─── */
+      html += '<div class="at-card-header" data-toggle-key="' + key + '">';
+
+      /* Main row: Identity | Info | P&L */
+      html += '<div class="at-hdr-main">';
+      html += '<div class="at-hdr-identity">';
+      html += '<span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span>';
+      html += '<span class="at-symbol-badge">' + (trade.symbol || 'N/A') + '</span>';
       html += '</div>';
+      html += '<div class="at-hdr-info">';
+      html += '<span class="at-hdr-strategy">' + strategyLabel + '</span>';
+      html += '<span class="at-hdr-status ' + statusCls + '">' + tradeStatus + '</span>';
+      html += '<span class="at-hdr-pos">' + posType + ' <span class="at-hdr-qty">\u00d7' + Math.abs(qty) + '</span></span>';
+      html += '</div>';
+      html += '<div class="at-hdr-pnl">';
+      html += '<span class="at-pnl-readout ' + (pnlCl || 'neutral') + '">' + fmtSignedTotal(trade.unrealized_pnl) + '</span>';
+      html += '</div>';
+      html += '</div>'; /* .at-hdr-main */
+
+      /* Meta row: subdued context tags */
+      html += '<div class="at-hdr-meta">';
+      html += '<span class="at-meta-tag ' + badgeClass + '">' + badgeLabel + '</span>';
+      html += '<span class="at-meta-tag ' + recCls + '">' + recAction + '</span>';
+      if (monChip) html += monChip;
+      if (riskFlags) html += riskFlags;
+      if (aiStatus === 'ok') html += '<span class="at-ai-dot at-ai-ok" title="AI analysis available"></span>';
+      else if (aiStatus === 'error') html += '<span class="at-ai-dot at-ai-err" title="AI analysis failed"></span>';
+      html += '</div>'; /* .at-hdr-meta */
+
       html += '</div>'; /* .at-card-header */
 
-      /* ── 2. WIN / LOSS BAR ── */
-      html += '<div class="at-heat-bar-outer">' + heatBar + '</div>';
+      /* ─── 2. SUMMARY STRIP (compact, always visible) ─── */
+      html += '<div class="at-summary-strip">';
+      html += heatBar;
+      html += '<div class="at-strip-data">';
+      html += '<span class="at-strip-item"><span class="at-strip-lbl">P&L</span><span class="at-strip-val ' + (pnlCl || 'neutral') + '">' + fmtSignedTotal(trade.unrealized_pnl) + '</span></span>';
+      html += '<span class="at-strip-sep">\u00b7</span>';
+      html += '<span class="at-strip-item"><span class="at-strip-lbl">Mark</span><span class="at-strip-val">' + fmtDollars(trade.mark_price) + '</span></span>';
+      html += '<span class="at-strip-sep">\u00b7</span>';
+      html += '<span class="at-strip-item"><span class="at-strip-lbl">Exp</span><span class="at-strip-val">' + fmtTotal(exposure) + '</span></span>';
+      html += '</div>';
+      html += '</div>';
 
-      /* ── 3. METRIC GRID (inside .trade-body, below heat bar) ── */
-      var _tc = window.BenTradeTradeCard;
+      /* ─── 3. COLLAPSIBLE BODY ─── */
+      html += '<div class="at-card-body' + (isOpen ? '' : ' at-collapsed') + '" data-body-key="' + key + '">';
+
+      /* Trade body: sections mirroring standard BenTrade card family */
+      html += '<div class="trade-body">';
+
+      /* Section: POSITION METRICS */
       var coreMetrics = [
         { label: 'Current Price',  value: fmtDollars(trade.mark_price),         cssClass: 'neutral',           dataMetric: 'current_price' },
         { label: 'Unrealized P&L', value: fmtSignedTotal(trade.unrealized_pnl), cssClass: pnlCl || 'neutral',  dataMetric: 'unrealized_pnl' },
         { label: 'Position Value', value: fmtTotal(marketValue),                cssClass: 'neutral',           dataMetric: 'position_value' },
         { label: 'Cost Basis',     value: fmtTotal(costBasis),                  cssClass: 'neutral',           dataMetric: 'cost_basis' },
-        { label: 'Avg Entry',      value: fmtDollars(trade.avg_open_price),     cssClass: 'neutral',           dataMetric: 'avg_entry' },
         { label: 'Day Change',     value: dayChangeStr + (dayChangePctStr ? ' <small>' + dayChangePctStr + '</small>' : ''), cssClass: pnlClass(dayChange) || 'neutral', dataMetric: 'day_change' },
         { label: 'Exposure',       value: fmtTotal(exposure),                   cssClass: 'neutral',           dataMetric: 'exposure' },
-        { label: 'Last Update',    value: asOf,                                 cssClass: 'neutral',           dataMetric: 'last_update' },
       ];
-      html += '<div class="trade-body">' + _tc.metricGrid(coreMetrics) + '</div>';
+      html += _tc.section('POSITION METRICS', _tc.metricGrid(coreMetrics), 'section-core');
 
-      /* ── 4–6. ACTION BUTTONS ── */
-      html += '<div class="trade-actions at-actions-v2">';
-      /* 4. Primary */
-      html += '<div class="at-actions-primary">';
-      html += '<button class="btn btn-run btn-action" data-action="model-analysis" data-trade-key="' + key + '">Run Model Analysis</button>';
-      html += '</div>';
-      /* 5. Trade actions */
-      html += '<div class="at-actions-main">';
-      html += '<button class="btn btn-exec btn-action" data-action="execute-trade" data-trade-key="' + key + '">Execute Trade</button>';
-      html += '<button class="btn btn-reject btn-action" data-action="close-position" data-trade-key="' + key + '">Close Position</button>';
-      html += '</div>';
-      /* 6. Secondary actions */
-      html += '<div class="at-actions-secondary">';
-      html += '<button class="btn at-btn-secondary" data-action="show-legs" data-trade-key="' + key + '">Show Legs</button>';
-      html += '<button class="btn at-btn-secondary" data-action="simulate-close" data-trade-key="' + key + '">Simulate Close</button>';
-      html += '<button class="btn at-btn-secondary" data-action="show-monitor" data-trade-key="' + key + '">Monitor</button>';
-      html += '</div>';
-      html += '</div>'; /* .trade-actions */
+      /* Section: POSITION DETAILS */
+      var detailItems = [
+        { label: 'Avg Entry Price', value: fmtDollars(trade.avg_open_price) || '\u2014', dataMetric: 'avg_entry' },
+        { label: 'Last Update',     value: asOf,                                          dataMetric: 'last_update' },
+      ];
+      html += _tc.section('POSITION DETAILS', _tc.detailRows(detailItems), 'section-details');
 
-      /* ── 7. COLLAPSIBLE PANELS (analytics, AI, model output — toggled by secondary buttons) ── */
-      html += '<div class="at-card-body' + (isOpen ? '' : ' at-collapsed') + '" data-body-key="' + key + '">';
-      html += '<div class="at-ai-panel" data-ai-panel data-trade-key="' + key + '" style="display:none;"></div>';
-      html += '<div class="trade-model-output" data-model-output data-trade-key="' + key + '" style="display:none;"></div>';
+      html += '</div>'; /* .trade-body */
+
+      /* Analytics panels */
       html += '<div class="at-analytics" data-analytics-key="' + key + '">';
       html += '<div class="at-panel at-panel-legs" data-panel="legs-' + key + '" style="display:none;"><div class="at-panel-title">Position Breakdown</div><div class="at-panel-content">' + buildLegsTable(trade) + '</div></div>';
       html += '<div class="at-panel at-panel-sim" data-panel="sim-' + key + '" style="display:none;"><div class="at-panel-title">PnL Simulation</div><div class="at-panel-content" data-sim-content="' + key + '"></div></div>';
       html += '<div class="at-panel at-panel-model" data-panel="model-' + key + '" style="display:none;"></div>';
       html += '<div class="at-panel at-panel-monitor" data-panel="monitor-' + key + '" style="display:none;"><div class="at-panel-title">Position Monitor</div><div class="at-panel-content" data-monitor-content="' + key + '">' + buildMonitorPanel(trade) + '</div></div>';
-      html += '<div class="at-panel at-panel-notes" data-panel="notes-' + key + '" style="display:none;"><div class="at-panel-title">Trade Notes</div><div class="at-panel-content"><textarea class="at-notes-input" placeholder="Add notes about this position…" rows="3"></textarea></div></div>';
+      html += '<div class="at-panel at-panel-notes" data-panel="notes-' + key + '" style="display:none;"><div class="at-panel-title">Trade Notes</div><div class="at-panel-content"><textarea class="at-notes-input" placeholder="Add notes about this position\u2026" rows="3"></textarea></div></div>';
       html += '</div>'; /* .at-analytics */
+
       html += '</div>'; /* .at-card-body */
+
+      /* ─── 4. FOOTER (always visible — bottom-anchored action zone) ─── */
+      html += '<div class="at-card-footer">';
+      html += '<div class="at-footer-run"><button class="btn btn-run btn-action" data-action="model-analysis" data-trade-key="' + key + '">Run Model Analysis</button></div>';
+      html += '<div class="trade-model-output" data-model-output data-trade-key="' + key + '" style="display:none;"></div>';
+      html += '<div class="at-footer-actions">';
+      html += '<button class="btn btn-exec btn-action" data-action="execute-trade" data-trade-key="' + key + '">Execute Trade</button>';
+      html += '<button class="btn btn-reject btn-action" data-action="close-position" data-trade-key="' + key + '">Close Position</button>';
+      html += '</div>';
+      html += '<div class="at-footer-tools">';
+      html += '<button class="btn at-btn-tool" data-action="show-legs" data-trade-key="' + key + '">Show Legs</button>';
+      html += '<button class="btn at-btn-tool" data-action="simulate-close" data-trade-key="' + key + '">Simulate Close</button>';
+      html += '<button class="btn at-btn-tool" data-action="show-monitor" data-trade-key="' + key + '">Monitor</button>';
+      html += '</div>';
+      html += '</div>'; /* .at-card-footer */
 
       html += '</div>'; /* .trade-card */
 
@@ -553,7 +596,13 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
       btn.addEventListener('click', function () {
         var key = btn.getAttribute('data-trade-key');
         var trade = findTrade(filtered, key);
-        if (trade) openExecuteTrade(trade);
+        console.info('[ACTIVE_TRADE] execute_trade_click', { symbol: trade?.symbol, strategy: trade?.strategy, key: key });
+        if (!trade) {
+          console.warn('[ACTIVE_TRADE] action_failure', { action: 'execute-trade', reason: 'trade not found', key: key });
+          showToast('Could not find trade data', 'error');
+          return;
+        }
+        openExecuteTrade(trade);
       });
     });
     listEl.querySelectorAll('[data-action="close-position"]').forEach(function (btn) {
@@ -568,8 +617,18 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
     listEl.querySelectorAll('[data-action="show-legs"]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var key = btn.getAttribute('data-trade-key');
+        var trade = findTrade(filtered, key);
+        console.info('[ACTIVE_TRADE] show_legs_click', { symbol: trade?.symbol, strategy: trade?.strategy, key: key });
         var panel = listEl.querySelector('[data-panel="legs-' + key + '"]');
-        if (panel) togglePanel(panel);
+        if (!panel) {
+          console.warn('[ACTIVE_TRADE] action_failure', { action: 'show-legs', reason: 'panel not found', key: key });
+          showToast('Legs panel not available', 'error');
+          return;
+        }
+        /* Expand the card body first so the panel is visible */
+        expandCardBody(key);
+        togglePanel(panel);
+        console.info('[ACTIVE_TRADE] action_success', { action: 'show-legs', key: key, visible: panel.style.display !== 'none' });
       });
     });
     listEl.querySelectorAll('[data-action="simulate-close"]').forEach(function (btn) {
@@ -582,8 +641,18 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
     listEl.querySelectorAll('[data-action="show-monitor"]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var key = btn.getAttribute('data-trade-key');
+        var trade = findTrade(filtered, key);
+        console.info('[ACTIVE_TRADE] monitor_click', { symbol: trade?.symbol, strategy: trade?.strategy, key: key });
         var panel = listEl.querySelector('[data-panel="monitor-' + key + '"]');
-        if (panel) togglePanel(panel);
+        if (!panel) {
+          console.warn('[ACTIVE_TRADE] action_failure', { action: 'show-monitor', reason: 'panel not found', key: key });
+          showToast('Monitor panel not available', 'error');
+          return;
+        }
+        /* Expand the card body first so the panel is visible */
+        expandCardBody(key);
+        togglePanel(panel);
+        console.info('[ACTIVE_TRADE] action_success', { action: 'show-monitor', key: key, visible: panel.style.display !== 'none' });
       });
     });
 
@@ -601,6 +670,20 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
     return list.find(function (t, i) { return stableKey(t, i) === key; });
   }
 
+  /**
+   * Expand the card body for a given trade key.
+   * Required when footer buttons (outside .at-card-body) need to reveal
+   * panels that live inside the collapsible body.
+   */
+  function expandCardBody(key) {
+    var body = listEl.querySelector('[data-body-key="' + key + '"]');
+    if (!body || !body.classList.contains('at-collapsed')) return;
+    body.classList.remove('at-collapsed');
+    var card = body.closest('.trade-card');
+    if (card) card.classList.add('at-expanded');
+    expandedCards.add(key);
+  }
+
   function togglePanel(panel) {
     if (panel.style.display === 'none') {
       panel.style.display = 'block';
@@ -614,17 +697,15 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
   /* ── Model Analysis ── */
   function runModelAnalysis(trade, tradeKey) {
     var outputEl = listEl.querySelector('.trade-model-output[data-trade-key="' + tradeKey + '"]');
-    var aiPanelEl = listEl.querySelector('.at-ai-panel[data-trade-key="' + tradeKey + '"]');
     var panelEl = listEl.querySelector('[data-panel="model-' + tradeKey + '"]');
-    if (!outputEl && !aiPanelEl) return;
+    if (!panelEl) return;
 
-    /* Show loading in AI panel */
-    if (aiPanelEl) {
-      aiPanelEl.style.display = 'block';
-      aiPanelEl.innerHTML = '<div class="at-ai-loading"><span class="at-ai-spinner"></span> Running model analysis…</div>';
-    }
+    /* Show loading in model panel */
+    panelEl.style.display = 'block';
+    panelEl.classList.add('at-panel-open');
+    panelEl.innerHTML = '<div class="at-ai-loading"><span class="at-ai-spinner"></span> Running model analysis…</div>';
     if (outputEl) {
-      outputEl.style.display = 'block';
+      outputEl.style.display = 'none';
       outputEl.innerHTML = '';
     }
 
@@ -633,11 +714,9 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
     var existingStatus = headerEl ? headerEl.querySelector('.at-ai-status') : null;
     if (existingStatus) existingStatus.outerHTML = '<span class="at-ai-status at-ai-running" title="Running…">AI ⟳</span>';
 
-    if (panelEl) { panelEl.style.display = 'block'; panelEl.classList.add('at-panel-open'); }
-
     /* Expand card body if collapsed so user sees result */
     var bodyEl = listEl.querySelector('[data-body-key="' + tradeKey + '"]');
-    var cardEl = (aiPanelEl || outputEl).closest('.trade-card');
+    var cardEl = panelEl.closest('.trade-card');
     if (bodyEl && bodyEl.classList.contains('at-collapsed')) {
       bodyEl.classList.remove('at-collapsed');
       if (cardEl) cardEl.classList.add('at-expanded');
@@ -655,7 +734,7 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
     };
 
     if (!api.analyzeActiveTrade) {
-      if (aiPanelEl) aiPanelEl.innerHTML = '<div class="at-ai-error">Active trade analysis not available.</div>';
+      panelEl.innerHTML = '<div class="at-ai-error">Active trade analysis not available.</div>';
       return;
     }
 
@@ -663,22 +742,18 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
       .then(function (result) {
         if (!result || !result.ok) {
           var errMsg = (result && result.error) ? result.error.message : 'Unknown error';
+          var errKind = (result && result.error && result.error.kind) ? ' (' + result.error.kind + ')' : '';
           var errHtml = '<div class="at-ai-error">' +
-            '<span class="at-ai-error-icon">✗</span> Analysis failed: ' + escapeHtml(errMsg) +
+            '<span class="at-ai-error-icon">✗</span> ' + escapeHtml(errMsg) + escapeHtml(errKind) +
             '<button class="btn at-btn-secondary at-ai-retry" data-action="model-analysis" data-trade-key="' + tradeKey + '" style="margin-left:10px;">Retry</button>' +
             '</div>';
-          if (aiPanelEl) aiPanelEl.innerHTML = errHtml;
-          if (outputEl) outputEl.innerHTML = errHtml;
+          panelEl.innerHTML = errHtml;
           _updateAiStatusBadge(headerEl, 'error');
           return;
         }
         var a = result.analysis || {};
         var rendered = renderActiveTradeAnalysis(a, result.context_used, tradeKey);
-        if (aiPanelEl) { aiPanelEl.style.display = 'block'; aiPanelEl.innerHTML = rendered; }
-        if (outputEl) outputEl.innerHTML = '';
-        if (panelEl) {
-          panelEl.innerHTML = '<div class="at-panel-title">Active Trade Analysis</div><div class="at-panel-content">' + rendered + '</div>';
-        }
+        panelEl.innerHTML = '<div class="at-panel-title">Active Trade Analysis</div><div class="at-panel-content">' + rendered + '</div>';
         _updateAiStatusBadge(headerEl, 'ok');
         if (window.BenTradeModelAnalysisStore?.set) {
           window.BenTradeModelAnalysisStore.set(tradeKey, { status: 'success', result: result });
@@ -689,8 +764,7 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
           '<span class="at-ai-error-icon">✗</span> ' + escapeHtml(err.message || String(err)) +
           '<button class="btn at-btn-secondary at-ai-retry" data-action="model-analysis" data-trade-key="' + tradeKey + '" style="margin-left:10px;">Retry</button>' +
           '</div>';
-        if (aiPanelEl) aiPanelEl.innerHTML = errHtml;
-        if (outputEl) outputEl.innerHTML = errHtml;
+        panelEl.innerHTML = errHtml;
         _updateAiStatusBadge(headerEl, 'error');
       });
   }
@@ -711,64 +785,135 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
 
   /* ── Render structured Active Trade Analysis result ── */
   function renderActiveTradeAnalysis(analysis, ctx, tradeKey) {
-    var action = analysis.suggested_action || 'UNKNOWN';
-    var conf = analysis.confidence != null ? Math.round(analysis.confidence * 100) : '?';
-    var summary = analysis.one_sentence_summary || '';
-    var bullets = analysis.rationale_bullets || [];
-    var risks = analysis.risk_flags || [];
-    var nextCheck = analysis.next_check || '';
+    var stance = analysis.stance || analysis.suggested_action || 'HOLD';
+    var conf = analysis.confidence != null ? analysis.confidence : 0;
+    // Handle old 0–1 scale: if confidence is a float ≤1, convert to 0–100
+    if (typeof conf === 'number' && conf > 0 && conf <= 1) conf = Math.round(conf * 100);
+    var thesisStatus = analysis.thesis_status || 'INTACT';
+    var headline = analysis.headline || analysis.one_sentence_summary || '';
+    var summary = analysis.summary || analysis.one_sentence_summary || '';
+    var risks = analysis.key_risks || analysis.risk_flags || [];
+    var supports = analysis.key_supports || [];
+    var ts = analysis.technical_state || {};
+    var ap = analysis.action_plan || {};
+    var memo = analysis.memo || {};
+    var pc = analysis.position_context || {};
 
-    /* Action color */
-    var actionCls = 'at-ai-action-unknown';
-    if (action === 'HOLD') actionCls = 'at-ai-action-hold';
-    else if (action === 'ADD') actionCls = 'at-ai-action-add';
-    else if (action === 'REDUCE') actionCls = 'at-ai-action-reduce';
-    else if (action === 'CLOSE') actionCls = 'at-ai-action-close';
+    /* Stance color class */
+    var stanceCls = 'at-ai-stance-watch';
+    if (stance === 'HOLD') stanceCls = 'at-ai-stance-hold';
+    else if (stance === 'ADD') stanceCls = 'at-ai-stance-add';
+    else if (stance === 'REDUCE') stanceCls = 'at-ai-stance-reduce';
+    else if (stance === 'EXIT' || stance === 'CLOSE') stanceCls = 'at-ai-stance-exit';
 
-    var html = '<div class="at-ai-card">';
+    /* Thesis status color class */
+    var thesisCls = 'at-ai-thesis-intact';
+    if (thesisStatus === 'WEAKENING') thesisCls = 'at-ai-thesis-weakening';
+    else if (thesisStatus === 'BROKEN') thesisCls = 'at-ai-thesis-broken';
 
-    /* Recommendation header */
-    html += '<div class="at-ai-rec-header">';
-    html += '<div class="at-ai-rec-title">AI Recommendation</div>';
-    html += '<div class="at-ai-rec-row">';
-    html += '<span class="at-ai-action-badge ' + actionCls + '">' + escapeHtml(action) + '</span>';
-    html += '<span class="at-ai-confidence">Confidence <strong>' + conf + '%</strong></span>';
-    html += '</div>';
-    html += '</div>';
+    /* Urgency color class */
+    var urgency = (ap.urgency || 'LOW').toUpperCase();
+    var urgencyCls = 'at-ai-urgency-low';
+    if (urgency === 'MEDIUM') urgencyCls = 'at-ai-urgency-medium';
+    else if (urgency === 'HIGH') urgencyCls = 'at-ai-urgency-high';
 
-    /* Summary */
+    /* Confidence color class */
+    var confCls = 'at-ai-conf-low';
+    if (conf >= 70) confCls = 'at-ai-conf-high';
+    else if (conf >= 40) confCls = 'at-ai-conf-mid';
+
+    var html = '<div class="at-ai-card at-ai-memo">';
+
+    /* ── 1. Header: headline + badges ── */
+    html += '<div class="at-ai-memo-header">';
+    if (headline) {
+      html += '<div class="at-ai-headline">' + escapeHtml(headline) + '</div>';
+    }
+    html += '<div class="at-ai-badges">';
+    html += '<span class="at-ai-action-badge ' + stanceCls + '">' + escapeHtml(stance) + '</span>';
+    html += '<span class="at-ai-badge ' + confCls + '">Confidence ' + conf + '%</span>';
+    html += '<span class="at-ai-badge ' + thesisCls + '">Thesis ' + escapeHtml(thesisStatus) + '</span>';
+    html += '</div></div>';
+
+    /* ── 2. Executive Summary ── */
     if (summary) {
       html += '<div class="at-ai-summary">' + escapeHtml(summary) + '</div>';
     }
 
-    /* Rationale bullets */
-    if (bullets.length) {
+    /* ── 3. Position Snapshot ── */
+    if (pc.entry_price != null || pc.current_price != null || pc.pnl_dollar != null) {
       html += '<div class="at-ai-section">';
-      html += '<div class="at-ai-section-title">Reasons</div>';
-      html += '<ul class="at-ai-bullets">';
-      bullets.forEach(function (b) {
-        html += '<li>' + escapeHtml(b) + '</li>';
-      });
-      html += '</ul></div>';
+      html += '<div class="at-ai-section-title">Position Snapshot</div>';
+      html += '<div class="at-ai-snapshot-grid">';
+      if (pc.entry_price != null) html += '<div class="at-ai-snap"><span class="at-ai-snap-label">Entry</span><span class="at-ai-snap-val">$' + Number(pc.entry_price).toFixed(2) + '</span></div>';
+      if (pc.current_price != null) html += '<div class="at-ai-snap"><span class="at-ai-snap-label">Current</span><span class="at-ai-snap-val">$' + Number(pc.current_price).toFixed(2) + '</span></div>';
+      if (pc.pnl_dollar != null) {
+        var pnlCls = pc.pnl_dollar >= 0 ? 'at-ai-pnl-pos' : 'at-ai-pnl-neg';
+        html += '<div class="at-ai-snap"><span class="at-ai-snap-label">P&amp;L $</span><span class="at-ai-snap-val ' + pnlCls + '">' + (pc.pnl_dollar >= 0 ? '+' : '') + Number(pc.pnl_dollar).toFixed(2) + '</span></div>';
+      }
+      if (pc.pnl_percent != null) {
+        var pctCls = pc.pnl_percent >= 0 ? 'at-ai-pnl-pos' : 'at-ai-pnl-neg';
+        html += '<div class="at-ai-snap"><span class="at-ai-snap-label">P&amp;L %</span><span class="at-ai-snap-val ' + pctCls + '">' + (pc.pnl_percent >= 0 ? '+' : '') + Number(pc.pnl_percent).toFixed(2) + '%</span></div>';
+      }
+      if (pc.score != null) html += '<div class="at-ai-snap"><span class="at-ai-snap-label">Score</span><span class="at-ai-snap-val">' + pc.score + '</span></div>';
+      html += '</div></div>';
     }
 
-    /* Risk flags */
+    /* ── 4. Key Risks ── */
     if (risks.length) {
       html += '<div class="at-ai-section">';
-      html += '<div class="at-ai-section-title">Risk Flags</div>';
+      html += '<div class="at-ai-section-title">Key Risks</div>';
       html += '<ul class="at-ai-risks">';
-      risks.forEach(function (r) {
-        html += '<li>⚠ ' + escapeHtml(r) + '</li>';
-      });
+      risks.forEach(function (r) { html += '<li>⚠ ' + escapeHtml(r) + '</li>'; });
       html += '</ul></div>';
     }
 
-    /* Next check */
-    if (nextCheck) {
-      html += '<div class="at-ai-next-check">Next check: ' + escapeHtml(nextCheck) + '</div>';
+    /* ── 5. Key Supports ── */
+    if (supports.length) {
+      html += '<div class="at-ai-section">';
+      html += '<div class="at-ai-section-title">Key Supports</div>';
+      html += '<ul class="at-ai-supports">';
+      supports.forEach(function (s) { html += '<li>✓ ' + escapeHtml(s) + '</li>'; });
+      html += '</ul></div>';
     }
 
-    /* Context (collapsible) */
+    /* ── 6. Technical State ── */
+    if (ts.trend_assessment || ts.drawdown_assessment || ts.price_vs_sma20 || ts.price_vs_sma50) {
+      html += '<div class="at-ai-section">';
+      html += '<div class="at-ai-section-title">Technical State</div>';
+      html += '<div class="at-ai-tech-grid">';
+      if (ts.price_vs_sma20) html += '<div class="at-ai-tech-row"><span class="at-ai-tech-label">Price vs SMA20</span><span class="at-ai-tech-val">' + escapeHtml(ts.price_vs_sma20) + '</span></div>';
+      if (ts.price_vs_sma50) html += '<div class="at-ai-tech-row"><span class="at-ai-tech-label">Price vs SMA50</span><span class="at-ai-tech-val">' + escapeHtml(ts.price_vs_sma50) + '</span></div>';
+      if (ts.trend_assessment) html += '<div class="at-ai-tech-row at-ai-tech-wide"><span class="at-ai-tech-label">Trend</span><span class="at-ai-tech-val">' + escapeHtml(ts.trend_assessment) + '</span></div>';
+      if (ts.drawdown_assessment) html += '<div class="at-ai-tech-row at-ai-tech-wide"><span class="at-ai-tech-label">Drawdown</span><span class="at-ai-tech-val">' + escapeHtml(ts.drawdown_assessment) + '</span></div>';
+      html += '</div></div>';
+    }
+
+    /* ── 7. Action Plan ── */
+    if (ap.primary_action || ap.next_step || ap.risk_trigger || ap.upside_trigger) {
+      html += '<div class="at-ai-section">';
+      html += '<div class="at-ai-section-title">Action Plan';
+      html += ' <span class="at-ai-badge at-ai-badge-sm ' + urgencyCls + '">' + escapeHtml(urgency) + '</span>';
+      html += '</div>';
+      html += '<div class="at-ai-action-grid">';
+      if (ap.primary_action) html += '<div class="at-ai-action-row"><span class="at-ai-action-label">Action</span><span class="at-ai-action-val">' + escapeHtml(ap.primary_action) + '</span></div>';
+      if (ap.next_step) html += '<div class="at-ai-action-row"><span class="at-ai-action-label">Next Step</span><span class="at-ai-action-val">' + escapeHtml(ap.next_step) + '</span></div>';
+      if (ap.risk_trigger) html += '<div class="at-ai-action-row"><span class="at-ai-action-label">Risk Trigger</span><span class="at-ai-action-val at-ai-trigger-risk">' + escapeHtml(ap.risk_trigger) + '</span></div>';
+      if (ap.upside_trigger) html += '<div class="at-ai-action-row"><span class="at-ai-action-label">Upside Trigger</span><span class="at-ai-action-val at-ai-trigger-upside">' + escapeHtml(ap.upside_trigger) + '</span></div>';
+      html += '</div></div>';
+    }
+
+    /* ── 8. Analyst Memo ── */
+    if (memo.thesis_check || memo.what_changed || memo.decision) {
+      html += '<div class="at-ai-section at-ai-memo-section">';
+      html += '<div class="at-ai-section-title">Analyst Memo</div>';
+      if (memo.thesis_check) html += '<div class="at-ai-memo-row"><span class="at-ai-memo-label">Thesis Check</span><span class="at-ai-memo-val">' + escapeHtml(memo.thesis_check) + '</span></div>';
+      if (memo.what_changed) html += '<div class="at-ai-memo-row"><span class="at-ai-memo-label">What Changed</span><span class="at-ai-memo-val">' + escapeHtml(memo.what_changed) + '</span></div>';
+      if (memo.decision) html += '<div class="at-ai-memo-row"><span class="at-ai-memo-label">Decision</span><span class="at-ai-memo-val at-ai-memo-decision">' + escapeHtml(memo.decision) + '</span></div>';
+      html += '</div>';
+    }
+
+    /* ── Data Context (collapsible) ── */
     if (ctx) {
       html += '<details class="at-ai-context">';
       html += '<summary>Data context used</summary>';
@@ -860,20 +1005,28 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
   /* ── Execute Trade ── */
   function openExecuteTrade(trade) {
     if (window.BenTradeTradeTicket?.open) {
+      console.info('[ACTIVE_TRADE] execute_trade opening trade ticket', { symbol: trade.symbol, strategy: trade.strategy });
       window.BenTradeTradeTicket.open({
         symbol: trade.symbol, underlying: trade.symbol,
         strategy: trade.strategy || 'single', strategy_id: trade.strategy_id || 'single',
         quantity: 1, trade_key: stableKey(trade, 0), account_mode: accountMode,
+      }).then(function () {
+        console.info('[ACTIVE_TRADE] action_success', { action: 'execute-trade', symbol: trade.symbol });
+      }).catch(function (err) {
+        console.error('[ACTIVE_TRADE] action_failure', { action: 'execute-trade', symbol: trade.symbol, error: err?.message || err });
+        showToast('Execute Trade failed: ' + (err?.message || 'Unknown error'), 'error');
       });
       return;
     }
     if (window.BenTradeStockExecution?.open) {
+      console.info('[ACTIVE_TRADE] execute_trade opening stock execution', { symbol: trade.symbol });
       window.BenTradeStockExecution.open({
         symbol: trade.symbol, side: 'buy', quantity: 1, account_mode: accountMode,
       });
       return;
     }
-    showToast('Execute Trade modal not available', 'error');
+    console.warn('[ACTIVE_TRADE] action_failure', { action: 'execute-trade', reason: 'no trade ticket or stock execution module available' });
+    showToast('Execute Trade modal not available — trade ticket module not loaded', 'error');
   }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -939,19 +1092,83 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
     try {
       var result = await api.getMonitorNarrative(sym, position, mon);
       if (outputEl) {
-        if (result && result.narrative) {
-          outputEl.innerHTML = '<div class="at-mon-narrative-text">' + escapeHtml(result.narrative) + '</div>';
+        if (result && result.structured) {
+          outputEl.innerHTML = renderMonitorMemo(result.structured);
+        } else if (result && result.narrative) {
+          outputEl.innerHTML = '<div class="at-mon-narrative-text">' + escapeHtml(stripThinkTags(result.narrative)) + '</div>';
+        } else if (result && result.error) {
+          var kind = (result.error.kind || '');
+          outputEl.innerHTML = '<div class="at-error-inline">' + escapeHtml(result.error.message || 'Model analysis failed') + '</div>';
         } else {
           outputEl.innerHTML = '<div class="at-no-data">No narrative returned.</div>';
         }
       }
     } catch (err) {
       if (outputEl) {
-        outputEl.innerHTML = '<div class="at-error-inline">Narrative failed: ' + (err.message || err) + '</div>';
+        outputEl.innerHTML = '<div class="at-error-inline">' + escapeHtml(err.message || String(err)) + '</div>';
       }
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = 'Run Monitor Analysis'; }
     }
+  }
+
+  /** Render a structured monitor memo object into styled HTML. */
+  function renderMonitorMemo(memo) {
+    if (!memo) return '<div class="at-no-data">No analysis available.</div>';
+    var label = memo.label || 'WATCH';
+    var conf = memo.confidence != null ? memo.confidence : 0;
+    var summary = memo.summary || '';
+    var thesis = memo.thesis_check || '';
+    var risks = memo.key_risks || [];
+    var action = memo.action || '';
+
+    var labelCls = 'at-ai-stance-watch';
+    if (label === 'HOLD') labelCls = 'at-ai-stance-hold';
+    else if (label === 'ADD') labelCls = 'at-ai-stance-add';
+    else if (label === 'REDUCE') labelCls = 'at-ai-stance-reduce';
+    else if (label === 'EXIT') labelCls = 'at-ai-stance-exit';
+
+    var confCls = 'at-ai-conf-low';
+    if (conf >= 70) confCls = 'at-ai-conf-high';
+    else if (conf >= 40) confCls = 'at-ai-conf-mid';
+
+    var html = '<div class="at-ai-card at-ai-memo at-mon-memo">';
+    html += '<div class="at-ai-memo-header">';
+    html += '<div class="at-ai-badges">';
+    html += '<span class="at-ai-action-badge ' + labelCls + '">' + escapeHtml(label) + '</span>';
+    html += '<span class="at-ai-badge ' + confCls + '">Confidence ' + conf + '%</span>';
+    html += '</div></div>';
+
+    if (summary) {
+      html += '<div class="at-ai-section"><div class="at-ai-section-title">Summary</div>';
+      html += '<div class="at-ai-summary">' + escapeHtml(summary) + '</div></div>';
+    }
+    if (thesis) {
+      html += '<div class="at-ai-section"><div class="at-ai-section-title">Thesis Check</div>';
+      html += '<div class="at-ai-summary">' + escapeHtml(thesis) + '</div></div>';
+    }
+    if (risks.length) {
+      html += '<div class="at-ai-section"><div class="at-ai-section-title">Key Risks</div>';
+      html += '<ul class="at-ai-risks">';
+      risks.forEach(function (r) { html += '<li>⚠ ' + escapeHtml(r) + '</li>'; });
+      html += '</ul></div>';
+    }
+    if (action) {
+      html += '<div class="at-ai-section"><div class="at-ai-section-title">Recommended Action</div>';
+      html += '<div class="at-ai-summary">' + escapeHtml(action) + '</div></div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  /** Strip <think>...</think> and similar reasoning tags from text (frontend safety net). */
+  function stripThinkTags(text) {
+    if (!text) return '';
+    text = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+    text = text.replace(/<think>[\s\S]*$/gi, '');
+    text = text.replace(/<scratchpad>[\s\S]*?<\/scratchpad>/gi, '');
+    text = text.replace(/<\/?(?:think|scratchpad|reasoning|thought|internal)>/gi, '');
+    return text.trim();
   }
 
   function escapeHtml(str) {

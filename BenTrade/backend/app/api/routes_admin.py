@@ -268,9 +268,13 @@ async def set_model_source_endpoint(request: Request) -> dict:
     """Switch the active model source.
 
     Body: ``{"source": "local" | "model_machine" | "premium_online"}``
+
+    After switching, the model health cache is reset and a fresh probe
+    is performed so the caller gets the real health of the new source.
     """
     from app.services.model_state import set_model_source
     from app.model_sources import MODEL_SOURCES
+    from app.services.model_health_service import check_model_health, reset_cache
 
     try:
         body = await request.json()
@@ -293,9 +297,21 @@ async def set_model_source_endpoint(request: Request) -> dict:
             content={"error": {"code": "INVALID_VALUE", "message": str(exc)}},
         )
     cfg = MODEL_SOURCES.get(active, {})
+
+    # Reset cache and run a live probe against the new source
+    reset_cache()
+    model_health = check_model_health(force=True)
+
     return {
         "success": True,
         "active_source": active,
         "active_name": cfg.get("name", active),
         "active_endpoint": cfg.get("endpoint"),
+        "model_health": {
+            "status": model_health.get("status"),
+            "error": model_health.get("error"),
+            "latency_ms": model_health.get("latency_ms"),
+            "models_loaded": model_health.get("models_loaded", []),
+            "checked_at": model_health.get("checked_at"),
+        },
     }

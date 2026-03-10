@@ -1,8 +1,11 @@
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
 
 from app.models.schemas import HealthResponse
+
+logger = logging.getLogger("bentrade.routes_health")
 
 router = APIRouter(prefix="/api/health", tags=["health"])
 
@@ -77,6 +80,20 @@ async def sources_health(request: Request) -> dict:
     from app.services.model_health_service import check_model_health
 
     model_health = check_model_health()
+
+    model_status_mapped = "ok" if model_health["status"] == "healthy" else "down"
+    logger.info(
+        "[SOURCES_HEALTH] model source=%s endpoint=%s probe_status=%s "
+        "mapped_ui=%s error=%s latency=%dms checked_at=%s",
+        model_health.get("source_key", "?"),
+        model_health.get("endpoint", "?"),
+        model_health.get("status"),
+        model_status_mapped,
+        model_health.get("error"),
+        model_health.get("latency_ms", 0),
+        model_health.get("checked_at", "?"),
+    )
+
     model_notes: list[str] = []
     model_models = model_health.get("models_loaded") or []
     if model_models:
@@ -88,7 +105,7 @@ async def sources_health(request: Request) -> dict:
     sources.append(
         {
             "name": "AI Model",
-            "status": "ok" if model_health["status"] == "healthy" else "down",
+            "status": model_status_mapped,
             "latency_ms": model_health.get("latency_ms"),
             "last_ok": now_iso if model_health["status"] == "healthy" else None,
             "notes": model_notes,

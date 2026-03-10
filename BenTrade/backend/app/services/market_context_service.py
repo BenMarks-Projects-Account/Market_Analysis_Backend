@@ -152,32 +152,43 @@ class MarketContextService:
 
     async def _vix_from_fred(self) -> dict[str, Any]:
         """FRED VIXCLS — always available but EOD only."""
-        obs = await self.fred.get_series_with_date("VIXCLS")
-        if obs:
-            val = obs["value"]
-            logger.info(
-                "[MARKET_CONTEXT] metric_normalized symbol=VIX source=fred"
-                " current_value=%s previous_close=None freshness=eod obs_date=%s",
-                val, obs["observation_date"],
-            )
-            return _metric(
-                value=val,
-                source="fred",
-                observation_date=obs["observation_date"],
-                is_intraday=False,
+        try:
+            obs = await self.fred.get_series_with_date("VIXCLS")
+            if obs:
+                val = obs["value"]
+                logger.info(
+                    "[MARKET_CONTEXT] metric_normalized symbol=VIX source=fred"
+                    " current_value=%s previous_close=None freshness=eod obs_date=%s",
+                    val, obs["observation_date"],
+                )
+                return _metric(
+                    value=val,
+                    source="fred",
+                    observation_date=obs["observation_date"],
+                    is_intraday=False,
+                )
+        except Exception as exc:
+            logger.warning(
+                "[MARKET_CONTEXT] fred_vix_failed error=%s", exc,
             )
         return _metric(None, "fred", is_intraday=False)
 
     # ── Generic FRED helper ──────────────────────────────────────
 
     async def _fred_metric(self, series_id: str) -> dict[str, Any]:
-        obs = await self.fred.get_series_with_date(series_id)
-        if obs:
-            return _metric(
-                value=obs["value"],
-                source="fred",
-                observation_date=obs["observation_date"],
-                is_intraday=False,
+        try:
+            obs = await self.fred.get_series_with_date(series_id)
+            if obs:
+                return _metric(
+                    value=obs["value"],
+                    source="fred",
+                    observation_date=obs["observation_date"],
+                    is_intraday=False,
+                )
+        except Exception as exc:
+            logger.warning(
+                "[MARKET_CONTEXT] fred_metric_failed series=%s error=%s",
+                series_id, exc,
             )
         return _metric(None, "fred", is_intraday=False)
 

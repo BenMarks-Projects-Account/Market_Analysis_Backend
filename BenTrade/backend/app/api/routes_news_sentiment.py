@@ -80,5 +80,12 @@ async def run_model_analysis(request: Request, force: bool = True) -> dict:
     service = request.app.state.news_sentiment_service
     result = await service.run_model_analysis(force=force)
     has_model = result.get("model_analysis") is not None
-    logger.info("[NEWS_MODEL] response status=200 has_model=%s", has_model)
+    error_info = result.get("error")
+    if error_info:
+        logger.warning(
+            "[NEWS_MODEL] response status=200 has_model=%s error_kind=%s error_msg=%s",
+            has_model, error_info.get("kind"), error_info.get("message"),
+        )
+    else:
+        logger.info("[NEWS_MODEL] response status=200 has_model=%s", has_model)
     return result

@@ -1,4 +1,8 @@
 window.BenTradeApi = (function(){
+  // Model/LLM requests get a 185s client-side timeout (slightly > backend 180s
+  // so the backend timeout fires first and returns a proper error).
+  var MODEL_TIMEOUT_MS = 185000;
+
   async function jsonFetch(url, options){
     const response = await fetch(url, options);
     const responseText = await response.text();
@@ -58,6 +62,14 @@ window.BenTradeApi = (function(){
     return payload;
   }
 
+  /** jsonFetch with an AbortController timeout for model/LLM calls. */
+  function modelFetch(url, options) {
+    var controller = new AbortController();
+    var timer = setTimeout(function() { controller.abort(); }, MODEL_TIMEOUT_MS);
+    var opts = Object.assign({}, options || {}, { signal: controller.signal });
+    return jsonFetch(url, opts).finally(function() { clearTimeout(timer); });
+  }
+
   function listReports(){
     return jsonFetch('/api/reports');
   }
@@ -108,7 +120,7 @@ window.BenTradeApi = (function(){
   }
 
   function modelAnalyze(trade, source){
-    return jsonFetch('/api/model/analyze', {
+    return modelFetch('/api/model/analyze', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ trade: _sanitizeTradeForModel(trade), source }),
@@ -116,7 +128,7 @@ window.BenTradeApi = (function(){
   }
 
   function modelAnalyzeStock(symbol, idea, source){
-    return jsonFetch('/api/model/analyze_stock', {
+    return modelFetch('/api/model/analyze_stock', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -128,7 +140,7 @@ window.BenTradeApi = (function(){
   }
 
   function modelAnalyzeStockStrategy(strategyId, candidate){
-    return jsonFetch('/api/model/analyze_stock_strategy', {
+    return modelFetch('/api/model/analyze_stock_strategy', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -139,7 +151,7 @@ window.BenTradeApi = (function(){
   }
 
   function modelAnalyzeRegime(regime, playbook){
-    return jsonFetch('/api/model/analyze_regime', {
+    return modelFetch('/api/model/analyze_regime', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -189,7 +201,7 @@ window.BenTradeApi = (function(){
   }
 
   function getMonitorNarrative(symbol, position, monitorResult){
-    return jsonFetch('/api/trading/monitor/narrative', {
+    return modelFetch('/api/trading/monitor/narrative', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ symbol: symbol, position: position, monitor_result: monitorResult }),
@@ -197,7 +209,7 @@ window.BenTradeApi = (function(){
   }
 
   function analyzeActiveTrade(symbol, position, accountMode){
-    return jsonFetch('/api/model/active-trade-analysis', {
+    return modelFetch('/api/model/active-trade-analysis', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ symbol: symbol, position: position, account_mode: accountMode || 'live' }),
@@ -480,5 +492,7 @@ window.BenTradeApi = (function(){
     getMonitorResults,
     getMonitorNarrative,
     analyzeActiveTrade,
+    MODEL_TIMEOUT_MS: MODEL_TIMEOUT_MS,
+    modelFetch: modelFetch,
   };
 })();

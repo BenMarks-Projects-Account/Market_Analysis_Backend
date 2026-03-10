@@ -6,11 +6,11 @@ and async callers (routes_active_trades.py) both route through here.
 
 Usage (sync):
     from app.services.model_router import model_request
-    result = model_request(payload, timeout=120)
+    result = model_request(payload, timeout=180)
 
 Usage (async):
     from app.services.model_router import async_model_request
-    result = await async_model_request(http_client, payload, timeout=120.0)
+    result = await async_model_request(http_client, payload, timeout=180.0)
 
 Endpoint resolution:
     from app.services.model_router import get_model_endpoint
@@ -24,9 +24,13 @@ from typing import Any
 
 import requests as _requests
 
+from app.config import get_settings
 from app.model_sources import MODEL_SOURCES
 
 logger = logging.getLogger("bentrade.model_router")
+
+_settings = get_settings()
+MODEL_TIMEOUT_SECONDS = _settings.MODEL_TIMEOUT_SECONDS
 
 
 def get_model_endpoint() -> str:
@@ -47,7 +51,7 @@ def get_model_endpoint() -> str:
     return endpoint
 
 
-def model_request(payload: dict[str, Any], *, timeout: int = 300, retries: int = 0) -> dict[str, Any]:
+def model_request(payload: dict[str, Any], *, timeout: float = MODEL_TIMEOUT_SECONDS, retries: int = 0) -> dict[str, Any]:
     """Synchronous model call (for common/model_analysis.py and common/utils.py).
 
     Replaces direct ``requests.post(model_url, ...)`` calls.
@@ -76,6 +80,12 @@ def model_request(payload: dict[str, Any], *, timeout: int = 300, retries: int =
                 finish = choices[0].get("finish_reason")
             logger.info("[model_router] response OK — finish_reason=%s", finish)
             return data
+        except _requests.ReadTimeout as exc:
+            last_exc = exc
+            logger.error(
+                "[model_router] attempt %d TIMED OUT after %ds — endpoint=%s",
+                attempt + 1, timeout, endpoint,
+            )
         except _requests.RequestException as exc:
             last_exc = exc
             logger.warning("[model_router] attempt %d failed: %s", attempt + 1, exc)
@@ -87,7 +97,7 @@ async def async_model_request(
     http_client: Any,
     payload: dict[str, Any],
     *,
-    timeout: float = 300.0,
+    timeout: float = MODEL_TIMEOUT_SECONDS,
 ) -> Any:
     """Async model call (for route handlers using httpx.AsyncClient).
 

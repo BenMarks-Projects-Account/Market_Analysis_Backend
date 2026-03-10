@@ -711,7 +711,7 @@ def generate_mock_report() -> str:
     # to append a `model_evaluation` object to each trade. By default this is disabled
     # to avoid automatic model calls on report generation. Set environment variable
     # AUTO_CALL_MODEL=1 to enable automatic calling (useful for batch runs).
-    def _call_model_and_append(trades, target_path, model_url=None, retries=0, timeout=500, batch_size=1):
+    def _call_model_and_append(trades, target_path, model_url=None, retries=0, timeout=90, batch_size=1):
         """
         Send trades to the model in batches of `batch_size`, merge returned
         `model_evaluation` into each trade, and write combined output to a new
@@ -929,7 +929,7 @@ def generate_mock_report() -> str:
     return filename
 
 
-def analyze_trade_with_model(trade: dict, source_filename: str, model_url=None, retries=1, timeout=500):
+def analyze_trade_with_model(trade: dict, source_filename: str, model_url=None, retries=1, timeout=90):
     """Send a single trade to the local model and append the evaluated trade
     to ``results/model_<source_filename>``.  Returns the evaluated trade dict
     (including ``model_evaluation`` and ``engine_calculations``) on success.
@@ -1039,6 +1039,14 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url=None, 
 
             raw_snippet = (assistant_text[:500] + '…') if len(assistant_text) > 500 else assistant_text
             print(f"{TAG} assistant_text length={len(assistant_text)} first500={raw_snippet!r}")
+
+            # --- Strip <think> / reasoning traces before JSON extraction ---
+            import re as _re
+            assistant_text = _re.sub(r"<think>.*?</think>", "", assistant_text, flags=_re.DOTALL | _re.IGNORECASE)
+            assistant_text = _re.sub(r"<think>.*$", "", assistant_text, flags=_re.DOTALL | _re.IGNORECASE)
+            assistant_text = _re.sub(r"<scratchpad>.*?</scratchpad>", "", assistant_text, flags=_re.DOTALL | _re.IGNORECASE)
+            assistant_text = _re.sub(r"</?(?:think|scratchpad|reasoning|thought|internal)>", "", assistant_text, flags=_re.IGNORECASE)
+            assistant_text = assistant_text.strip()
 
             # --- Robust JSON extraction (code fences, bare objects, arrays) ---
             parsed = _find_json_block(assistant_text)
@@ -1317,7 +1325,7 @@ def hard_gate_override(trade: dict, me: dict) -> dict:
 _analyze_trade_with_model_legacy = analyze_trade_with_model
 
 
-def analyze_trade_with_model(trade: dict, source_filename: str, model_url=None, retries=1, timeout=500):
+def analyze_trade_with_model(trade: dict, source_filename: str, model_url=None, retries=1, timeout=90):
     # TODO(architecture): remove this compatibility shim once all imports use common.model_analysis directly.
     from app.models.trade_contract import TradeContract
     from common.model_analysis import analyze_trade

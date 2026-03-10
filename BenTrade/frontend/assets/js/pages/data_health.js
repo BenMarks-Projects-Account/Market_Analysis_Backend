@@ -308,6 +308,14 @@ window.BenTradePages.initDataHealth = function initDataHealth(rootEl){
         // Re-fetch full state so buttons and meta update correctly
         const updated = await fetchModelSourceState();
         if(updated) renderModelSourceState(updated);
+
+        // Reset + refresh the global source health store so the sidebar
+        // indicator re-probes the NEW source instead of showing stale GREEN
+        // from the old source.
+        if(window.BenTradeSourceHealthStore){
+          if(window.BenTradeSourceHealthStore.resetCache) window.BenTradeSourceHealthStore.resetCache();
+          window.BenTradeSourceHealthStore.fetchSourceHealth({ force: true }).catch(function(){});
+        }
       }
     }catch(_err){
       // silent

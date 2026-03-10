@@ -1,0 +1,315 @@
+<link rel="stylesheet" href="assets/css/module-dashboard.css">
+<div class="view-wrap mod-page">
+
+  <!-- ── Module Banner ──────────────────────────────────────────── -->
+  <div class="mod-banner accent-liquidity">
+    <div class="mod-banner-left">
+      <div class="mod-banner-breadcrumb">BenTrade · Market Picture</div>
+      <div class="mod-banner-title">Liquidity &amp; Financial Conditions</div>
+      <div class="mod-banner-subtitle">Is market plumbing supportive or restrictive? Are financial conditions easing or tightening?</div>
+    </div>
+    <div class="mod-banner-right">
+      <span class="mod-banner-tag">Module 6 of 6</span>
+      <span class="mod-last-updated">Updated: demo data</span>
+      <span class="mod-placeholder-tag">MOCK UI</span>
+    </div>
+  </div>
+
+  <!-- ══ TOP ROW ══════════════════════════════════════════════ -->
+  <div class="mod-top-row">
+
+    <!-- Hero Score Card -->
+    <div class="mod-card mod-hero-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Liquidity Composite</span>
+        <span class="mod-chip mod-chip-neutral">Neutral</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-hero-label" style="color:var(--cyan);">CONDITIONS NEUTRAL</div>
+        <div class="mod-hero-score">56</div>
+        <div class="mod-trend mod-trend-up" style="justify-content:center;margin-top:6px;">
+          <span class="mod-trend-arrow">▲</span> +1.4 vs last session
+        </div>
+        <div class="mod-summary">
+          Financial conditions are neither strongly supportive nor restrictive. Real yields remain elevated but
+          rate expectations are shifting dovish. Credit conditions are healthy. Dollar liquidity is adequate.
+        </div>
+        <div style="margin-top:10px;display:flex;gap:6px;justify-content:center;">
+          <span class="mod-chip mod-chip-neutral">Policy: Tight</span>
+          <span class="mod-chip mod-chip-bullish">Credit: Healthy</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Conditions Summary Card -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Conditions Summary</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-section-title">Supportive Factors</div>
+        <ul class="mod-contrib-list">
+          <li class="mod-contrib-item"><span class="mod-contrib-dot positive"></span>Credit conditions remain healthy — spreads tight, no funding stress</li>
+          <li class="mod-contrib-item"><span class="mod-contrib-dot positive"></span>Rate expectations shifting dovish — market pricing cuts in 2026</li>
+          <li class="mod-contrib-item"><span class="mod-contrib-dot positive"></span>Dollar liquidity adequate — no repo/funding market stress signals</li>
+        </ul>
+        <div class="mod-divider"></div>
+        <div class="mod-section-title">Restrictive Factors</div>
+        <ul class="mod-contrib-list">
+          <li class="mod-contrib-item"><span class="mod-contrib-dot negative"></span>Real yields remain elevated at 2.1% — headwind for risk assets</li>
+          <li class="mod-contrib-item"><span class="mod-contrib-dot negative"></span>Fed still at terminal rate — policy remains tight by historical standards</li>
+          <li class="mod-contrib-item"><span class="mod-contrib-dot warning"></span>Financial conditions index slightly above neutral — neither helping nor hurting</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Policy Gauge -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Policy Pressure</span>
+      </div>
+      <div class="mod-card-body" style="text-align:center;">
+        <div class="mod-gauge" style="border-color:rgba(0,234,255,0.25);">
+          <span class="mod-gauge-val" style="color:var(--cyan);font-size:14px;">TIGHT</span>
+          <span class="mod-gauge-label">Policy</span>
+        </div>
+        <div class="mod-summary" style="text-align:center;margin-top:10px;">
+          Monetary policy remains restrictive but the market is pricing a transition. The gap between
+          policy stance and market expectations creates opportunity and uncertainty.
+        </div>
+        <div style="margin-top:8px;">
+          <span class="mod-signal-chip mod-signal-moderate">TRANSITIONAL</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ COMPONENT GRID ══════════════════════════════════════ -->
+  <div class="mod-grid-4">
+
+    <!-- Real Yields -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Real Yields</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">10Y Real (TIPS)</span><span class="mod-metric-val negative">2.10%</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">5Y Real</span><span class="mod-metric-val negative">1.95%</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Trend</span><span class="mod-metric-val muted">→ Stable</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Impact</span><span class="mod-metric-val negative">Headwind</span></div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">Supportiveness</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" style="width:32%;background:rgba(255,79,102,0.6);"></div></div>
+          <span class="mod-bar-val">32</span>
+        </div>
+        <div class="mod-summary" style="font-size:10px;">Elevated real yields compete with equities for capital allocation. Headwind until rates decline.</div>
+      </div>
+    </div>
+
+    <!-- Rate Expectations -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Rate Expectations</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">Fed Funds</span><span class="mod-metric-val">4.50%</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Mkt 6M Fwd</span><span class="mod-metric-val positive">4.00%</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Cuts Priced</span><span class="mod-metric-val positive">2 cuts</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Probability</span><span class="mod-metric-val positive">68%</span></div>
+        </div>
+        <div class="mod-summary" style="font-size:10px;margin-top:8px;">Market pricing 2 cuts by year-end. Dovish shift in expectations is supportive for risk assets.</div>
+      </div>
+    </div>
+
+    <!-- Financial Conditions Index -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Financial Conditions</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">FCI Level</span><span class="mod-metric-val muted">+0.3σ</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Status</span><span class="mod-metric-val muted">Slightly Tight</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Trend</span><span class="mod-metric-val positive">Easing</span></div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">FCI Score</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" style="width:48%;background:var(--cyan);"></div></div>
+          <span class="mod-bar-val">48</span>
+        </div>
+        <div class="mod-summary" style="font-size:10px;">Conditions slightly above neutral but easing. The trend direction is more important than the level.</div>
+      </div>
+    </div>
+
+    <!-- Funding Stress -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Funding Stress Proxy</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">SOFR-FF Spread</span><span class="mod-metric-val positive">2bp</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Repo Stress</span><span class="mod-metric-val positive">None</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">FRA-OIS</span><span class="mod-metric-val positive">8bp</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Status</span><span class="mod-metric-val positive">Calm</span></div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">Funding Health</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" style="width:85%;background:#00e676;"></div></div>
+          <span class="mod-bar-val">85</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECOND ROW ══════════════════════════════════════════ -->
+  <div class="mod-grid-4">
+
+    <!-- Credit Spread Pressure -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Credit Spread Pressure</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">IG OAS</span><span class="mod-metric-val positive">92bp</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">HY OAS</span><span class="mod-metric-val positive">310bp</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Percentile</span><span class="mod-metric-val positive">15th (tight)</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Trend</span><span class="mod-metric-val positive">Tightening</span></div>
+        </div>
+        <div class="mod-summary" style="font-size:10px;margin-top:8px;">Credit spreads at tight historical levels — no stress, strong demand for corporate bonds.</div>
+      </div>
+    </div>
+
+    <!-- Dollar Liquidity -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Dollar Liquidity Proxy</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">TGA Balance</span><span class="mod-metric-val muted">$680B</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">RRP Facility</span><span class="mod-metric-val positive">$120B</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Fed Balance</span><span class="mod-metric-val muted">$7.2T</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Net Liquidity</span><span class="mod-metric-val muted">Neutral</span></div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">Liquidity</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" style="width:55%;background:var(--cyan);"></div></div>
+          <span class="mod-bar-val">55</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Policy Backdrop -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Policy Tightness</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">Policy Stance</span><span class="mod-metric-val negative">Restrictive</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Real FFR</span><span class="mod-metric-val negative">+2.1%</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Direction</span><span class="mod-metric-val positive">Easing Expected</span></div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">Policy Score</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" style="width:38%;background:var(--warn);"></div></div>
+          <span class="mod-bar-val">38</span>
+        </div>
+        <div class="mod-summary" style="font-size:10px;">Policy still tight, but direction matters more. Easing expectations provide a tailwind even before actual cuts.</div>
+      </div>
+    </div>
+
+    <!-- Risk Sensitivity -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Risk Sensitivity</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:1fr;">
+          <div class="mod-metric"><span class="mod-metric-key">Rate Sensitivity</span><span class="mod-metric-val warn">High — equity multiples are rate-sensitive at current levels</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Liquidity Sensitivity</span><span class="mod-metric-val muted">Moderate — market functioning normally</span></div>
+        </div>
+        <div class="mod-summary" style="font-size:10px;margin-top:8px;">Markets are sensitive to rate surprises. A hawkish pivot or hot CPI print would be disruptive.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ VISUAL ANALYTICS ════════════════════════════════════ -->
+  <div class="mod-grid-2">
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Liquidity Conditions Heatmap</span></div>
+      <div class="mod-card-body">
+        <div class="mod-heatmap" style="grid-template-columns:repeat(4,1fr);">
+          <div class="mod-heatmap-cell mod-heat-red-1">Real Yields<br>Headwind</div>
+          <div class="mod-heatmap-cell mod-heat-green-1">Rate Expect<br>Easing</div>
+          <div class="mod-heatmap-cell mod-heat-neutral">FCI<br>Neutral</div>
+          <div class="mod-heatmap-cell mod-heat-green-2">Funding<br>Calm</div>
+          <div class="mod-heatmap-cell mod-heat-green-2">Credit<br>Tight</div>
+          <div class="mod-heatmap-cell mod-heat-neutral">Dollar Liq<br>Neutral</div>
+          <div class="mod-heatmap-cell mod-heat-red-1">Policy<br>Tight</div>
+          <div class="mod-heatmap-cell mod-heat-warn">Rate Sens<br>High</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Support vs Stress</span></div>
+      <div class="mod-card-body">
+        <div class="mod-section-title">Supportive</div>
+        <div class="mod-bar-row"><span class="mod-bar-label">Funding</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:85%;background:#00e676;"></div></div><span class="mod-bar-val">85</span></div>
+        <div class="mod-bar-row"><span class="mod-bar-label">Credit</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:78%;background:#00e676;"></div></div><span class="mod-bar-val">78</span></div>
+        <div class="mod-bar-row"><span class="mod-bar-label">Rate Expect</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:65%;background:var(--cyan);"></div></div><span class="mod-bar-val">65</span></div>
+        <div class="mod-divider"></div>
+        <div class="mod-section-title">Stress / Headwind</div>
+        <div class="mod-bar-row"><span class="mod-bar-label">Real Yields</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:68%;background:rgba(255,79,102,0.6);"></div></div><span class="mod-bar-val">68</span></div>
+        <div class="mod-bar-row"><span class="mod-bar-label">Policy Tight</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:62%;background:rgba(255,79,102,0.5);"></div></div><span class="mod-bar-val">62</span></div>
+        <div class="mod-bar-row"><span class="mod-bar-label">Rate Sens</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:55%;background:var(--warn);"></div></div><span class="mod-bar-val">55</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ BOTTOM DETAIL ═══════════════════════════════════════ -->
+  <div class="mod-card" style="margin-bottom:14px;">
+    <div class="mod-card-header"><span class="mod-card-title">Detailed Analysis</span></div>
+    <div class="mod-card-body">
+
+      <div class="mod-section-title">Supportive Liquidity Factors</div>
+      <ul class="mod-contrib-list">
+        <li class="mod-contrib-item"><span class="mod-contrib-dot positive"></span>No funding stress — SOFR-FF spread negligible, repo calm</li>
+        <li class="mod-contrib-item"><span class="mod-contrib-dot positive"></span>Credit spreads tight — market has confidence in corporate balance sheets</li>
+        <li class="mod-contrib-item"><span class="mod-contrib-dot positive"></span>Rate cut expectations providing anticipatory easing effect</li>
+      </ul>
+
+      <div class="mod-divider"></div>
+      <div class="mod-section-title">Restrictive Factors</div>
+      <ul class="mod-contrib-list">
+        <li class="mod-contrib-item"><span class="mod-contrib-dot negative"></span>Real yields at 2.1% — meaningful alternative to equities</li>
+        <li class="mod-contrib-item"><span class="mod-contrib-dot negative"></span>Policy rate still at terminal — no actual easing yet</li>
+      </ul>
+
+      <div class="mod-divider"></div>
+      <div class="mod-section-title">Latent Stress Signals</div>
+      <ul class="mod-warning-list">
+        <li class="mod-warning-item"><span class="mod-warning-icon">⚠</span>High rate sensitivity means any hawkish surprise could cause sharp repricing</li>
+        <li class="mod-warning-item"><span class="mod-warning-icon">⚠</span>If rate cut expectations are walked back, financial conditions tighten immediately</li>
+        <li class="mod-warning-item"><span class="mod-warning-icon">⚠</span>TGA balance at moderate levels — potential drain if Treasury issuance ramps</li>
+      </ul>
+
+      <div class="mod-divider"></div>
+      <div class="mod-takeaway">
+        <div class="mod-section-title">Trader Takeaway</div>
+        <div class="mod-takeaway-text">
+          Liquidity conditions are in a transition zone — tight policy but with easing expectations providing relief.
+          Credit and funding markets are healthy, which supports premium-selling strategies. However, elevated real
+          yields and rate sensitivity mean CPI/NFP releases carry outsized risk. Position conservatively around macro
+          data releases. Current conditions support income strategies but argue for hedging tail risk around
+          scheduled events. The direction of financial conditions (easing) is more important than the current level (slightly tight).
+        </div>
+      </div>
+
+      <details class="mod-details">
+        <summary>Liquidity Component Scores</summary>
+        <div class="mod-details-body">
+          <div class="mod-bar-row"><span class="mod-bar-label">Real Yields</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:32%;background:rgba(255,79,102,0.7);"></div></div><span class="mod-bar-val">32</span></div>
+          <div class="mod-bar-row"><span class="mod-bar-label">Rate Expect</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:65%;background:var(--cyan);"></div></div><span class="mod-bar-val">65</span></div>
+          <div class="mod-bar-row"><span class="mod-bar-label">FCI</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:48%;background:var(--cyan);"></div></div><span class="mod-bar-val">48</span></div>
+          <div class="mod-bar-row"><span class="mod-bar-label">Funding</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:85%;background:#00e676;"></div></div><span class="mod-bar-val">85</span></div>
+          <div class="mod-bar-row"><span class="mod-bar-label">Credit</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:78%;background:#00e676;"></div></div><span class="mod-bar-val">78</span></div>
+          <div class="mod-bar-row"><span class="mod-bar-label">Dollar Liq</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:55%;background:var(--cyan);"></div></div><span class="mod-bar-val">55</span></div>
+          <div class="mod-bar-row"><span class="mod-bar-label">Policy</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:38%;background:var(--warn);"></div></div><span class="mod-bar-val">38</span></div>
+          <div class="mod-bar-row"><span class="mod-bar-label">Rate Sens</span><div class="mod-bar-track"><div class="mod-bar-fill" style="width:45%;background:var(--warn);"></div></div><span class="mod-bar-val">45</span></div>
+        </div>
+      </details>
+    </div>
+  </div>
+
+</div>

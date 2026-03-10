@@ -1,0 +1,235 @@
+<link rel="stylesheet" href="assets/css/module-dashboard.css">
+<div class="view-wrap mod-page">
+
+  <!-- ── Module Banner ──────────────────────────────────────────── -->
+  <div class="mod-banner accent-flows">
+    <div class="mod-banner-left">
+      <div class="mod-banner-breadcrumb">BenTrade · Market Picture</div>
+      <div class="mod-banner-title">Flows &amp; Positioning</div>
+      <div class="mod-banner-subtitle">Do positioning and flows support continuation, or signal crowding, squeezes, or reversal risk?</div>
+    </div>
+    <div class="mod-banner-right">
+      <span class="mod-banner-tag">Module 5 of 6</span>
+      <span class="mod-last-updated" id="fpLastUpdated">Updated: —</span>
+      <button class="btn btn-sm btn-outline-primary" id="fpRefreshBtn">↻ Analyze</button>
+    </div>
+  </div>
+
+  <!-- Degraded-state banner (hidden by default) -->
+  <div id="fpDegradedBanner" class="mod-degraded-banner" style="display:none;"></div>
+
+  <!-- ══ TOP ROW ══════════════════════════════════════════════ -->
+  <div class="mod-top-row">
+
+    <!-- Hero Score Card -->
+    <div class="mod-card mod-hero-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Positioning Composite</span>
+        <span class="mod-chip" id="fpLabelChip">—</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-hero-label" id="fpHeroLabel">—</div>
+        <div class="mod-hero-score" id="fpHeroScore">—</div>
+        <div style="display:flex;gap:8px;justify-content:center;align-items:center;margin-top:4px;">
+          <span class="mod-signal-chip" id="fpSignalQuality">—</span>
+          <span id="fpConfidenceChip" style="font-size:10px;opacity:0.7;">—</span>
+        </div>
+        <div class="mod-summary" id="fpSummary">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Flow Summary Card -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Flow Dynamics</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-section-title">Positive Flow Drivers</div>
+        <ul class="mod-contrib-list" id="fpPositiveDrivers">
+          <li class="mod-contrib-item" style="opacity:0.5;">Loading…</li>
+        </ul>
+        <div class="mod-divider"></div>
+        <div class="mod-section-title">Negative Flow Drivers</div>
+        <ul class="mod-contrib-list" id="fpNegativeDrivers">
+          <li class="mod-contrib-item" style="opacity:0.5;">Loading…</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Strategy Bias Card -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Strategy Bias</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-bar-row">
+          <span class="mod-bar-label">Continuation Support</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="fpBiasContinuationBar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="fpBiasContinuationVal">—</span>
+        </div>
+        <div class="mod-bar-row">
+          <span class="mod-bar-label">Reversal Risk</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="fpBiasReversalBar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="fpBiasReversalVal">—</span>
+        </div>
+        <div class="mod-bar-row">
+          <span class="mod-bar-label">Squeeze Potential</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="fpBiasSqueezeBar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="fpBiasSqueezeVal">—</span>
+        </div>
+        <div class="mod-bar-row">
+          <span class="mod-bar-label">Fragility</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="fpBiasFragilityBar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="fpBiasFragilityVal">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ PILLAR SCORES ═══════════════════════════════════════ -->
+  <div class="mod-card" style="margin-bottom:10px;">
+    <div class="mod-card-header"><span class="mod-card-title">Pillar Scores</span></div>
+    <div class="mod-card-body" id="fpPillarBars">
+      <div style="opacity:0.5;font-size:10px;">Loading pillar scores…</div>
+    </div>
+  </div>
+
+  <!-- ══ COMPONENT GRID ══════════════════════════════════════ -->
+  <div class="mod-grid-4">
+
+    <!-- Positioning Pressure -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Positioning Pressure</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">Put/Call Ratio</span><span class="mod-metric-val" id="fpPutCall">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">VIX Level</span><span class="mod-metric-val" id="fpVIX">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Systematic Alloc</span><span class="mod-metric-val" id="fpSystematic">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Futures Net Long</span><span class="mod-metric-val" id="fpFuturesNet">—</span></div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">P1 Score</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="fpP1Bar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="fpP1Score">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Crowding / Stretch -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Crowding / Stretch</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">Crowding Level</span><span class="mod-metric-val" id="fpCrowding">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Retail Bull %</span><span class="mod-metric-val" id="fpRetailBull">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Retail Bear %</span><span class="mod-metric-val" id="fpRetailBear">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Short Interest</span><span class="mod-metric-val" id="fpShortInterest">—</span></div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">P2 Score</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="fpP2Bar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="fpP2Score">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Squeeze / Unwind Risk -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Squeeze / Unwind Risk</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">VIX Term Structure</span><span class="mod-metric-val" id="fpVIXTerm">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Asymmetry</span><span class="mod-metric-val" id="fpAsymmetry">—</span></div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">P3 Score</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="fpP3Bar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="fpP3Score">—</span>
+        </div>
+        <div class="mod-summary" id="fpSqueezeNote" style="font-size:10px;margin-top:6px;">—</div>
+      </div>
+    </div>
+
+    <!-- Flow Direction & Persistence -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Flow Direction &amp; Persistence</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">Flow Direction</span><span class="mod-metric-val" id="fpFlowDir">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">5d Persistence</span><span class="mod-metric-val" id="fpPersist5d">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">20d Persistence</span><span class="mod-metric-val" id="fpPersist20d">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Follow-Through</span><span class="mod-metric-val" id="fpFollowThru">—</span></div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">P4 Score</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="fpP4Bar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="fpP4Score">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECOND ROW ══════════════════════════════════════════ -->
+  <div class="mod-grid-2">
+
+    <!-- Positioning Stability -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Positioning Stability</span></div>
+      <div class="mod-card-body">
+        <div class="mod-bar-row">
+          <span class="mod-bar-label">Stability</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="fpP5Bar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="fpP5Score">—</span>
+        </div>
+        <div class="mod-summary" id="fpStabilityNote" style="font-size:10px;margin-top:6px;">—</div>
+      </div>
+    </div>
+
+    <!-- Data Quality & Warnings -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Data Quality &amp; Warnings</span></div>
+      <div class="mod-card-body">
+        <div style="display:flex;gap:12px;margin-bottom:6px;">
+          <span style="font-size:10px;opacity:0.7;">Confidence: <strong id="fpConfidenceScore">—</strong></span>
+          <span style="font-size:10px;opacity:0.7;">Proxy-based data — Phase 1</span>
+        </div>
+        <div id="fpWarnings" style="max-height:100px;overflow-y:auto;">
+          <div style="opacity:0.5;font-size:10px;">Loading…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ BOTTOM DETAIL ═══════════════════════════════════════ -->
+  <div class="mod-card" style="margin-bottom:10px;">
+    <div class="mod-card-header"><span class="mod-card-title">Detailed Analysis</span></div>
+    <div class="mod-card-body">
+      <div class="mod-takeaway">
+        <div class="mod-section-title">Trader Takeaway</div>
+        <div class="mod-takeaway-text" id="fpTakeaway">Loading…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ AI MODEL ANALYSIS ═══════════════════════════════════ -->
+  <div class="mod-card" style="margin-bottom:14px;">
+    <div class="mod-card-header">
+      <span class="mod-card-title">AI Model Analysis</span>
+      <button class="btn btn-sm btn-outline-primary" id="fpRunModelBtn">Run AI Model</button>
+    </div>
+    <div class="mod-card-body">
+      <div id="fpModelCta" style="text-align:center;padding:14px 0;">
+        <div style="font-size:11px;opacity:0.6;">Click "Run AI Model" to generate LLM-powered flows & positioning commentary.</div>
+      </div>
+      <div id="fpModelDetailsRow" style="display:none;">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;">
+          <span class="mod-hero-label" id="fpModelLabel" style="font-size:14px;">—</span>
+          <span class="mod-hero-score" id="fpModelScore" style="font-size:18px;">—</span>
+        </div>
+        <div class="mod-summary" id="fpModelSummary" style="margin-bottom:8px;">—</div>
+        <div id="fpModelPillars"></div>
+      </div>
+    </div>
+  </div>
+
+</div>

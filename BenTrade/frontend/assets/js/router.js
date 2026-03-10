@@ -197,6 +197,11 @@
     "admin-data-health": { title: "Data Health", group: "Admin", subgroup: "Operations", description: "Provider + validation health" },
     "admin/data-workbench": { title: "Data Workbench", group: "Admin", subgroup: "Operations", description: "Trade JSON + card inspection" },
     "admin/tooltip-test": { title: "Tooltip Test", group: "Admin", subgroup: "Dev", description: "Tooltip regression sandbox" },
+    "market/breadth": { title: "Breadth & Participation", group: "Market Picture", subgroup: "Internals", description: "Market breadth & participation depth" },
+    "market/volatility": { title: "Volatility & Options Structure", group: "Market Picture", subgroup: "Volatility", description: "Vol regime & options posture" },
+    "market/cross-asset": { title: "Cross-Asset / Macro", group: "Market Picture", subgroup: "Macro", description: "Cross-asset confirmation signals" },
+    "market/flows": { title: "Flows & Positioning", group: "Market Picture", subgroup: "Flows", description: "Positioning & flow dynamics" },
+    "market/liquidity": { title: "Liquidity & Financial Conditions", group: "Market Picture", subgroup: "Liquidity", description: "Financial conditions & policy" },
   };
 
   const routes = {
@@ -319,6 +324,31 @@
       view: "dashboards/tooltip_test.html",
       init: () => {},
       title: routeMeta["admin/tooltip-test"].title
+    },
+    "market/breadth": {
+      view: "dashboards/breadth_participation.html",
+      init: () => window.BenTradePages?.initBreadthParticipation?.(document.getElementById('view')),
+      title: routeMeta["market/breadth"].title
+    },
+    "market/volatility": {
+      view: "dashboards/volatility_options.html",
+      init: () => window.BenTradePages?.initVolatilityOptions?.(document.getElementById('view')),
+      title: routeMeta["market/volatility"].title
+    },
+    "market/cross-asset": {
+      view: "dashboards/cross_asset_macro.html",
+      init: () => window.BenTradePages?.initCrossAssetMacro?.(document.getElementById('view')),
+      title: routeMeta["market/cross-asset"].title
+    },
+    "market/flows": {
+      view: "dashboards/flows_positioning.html",
+      init: () => window.BenTradePages?.initFlowsPositioning?.(document.getElementById('view')),
+      title: routeMeta["market/flows"].title
+    },
+    "market/liquidity": {
+      view: "dashboards/liquidity_conditions.html",
+      init: () => window.BenTradePages?.initLiquidityConditions?.(document.getElementById('view')),
+      title: routeMeta["market/liquidity"].title
     }
   };
 

@@ -149,45 +149,73 @@ window.BenTradePages.initNewsSentiment = function initNewsSentiment(rootEl) {
     }
     var label = engine.regime_label || '—';
     var score = engine.score;
+    var expl = engine.explanation || {};
 
     if (engineLabel) {
-      engineLabel.textContent = label;
-      engineLabel.className = 'ns-regime-label ' + regimeClass(label);
+      engineLabel.textContent = expl.label || label;
+      engineLabel.className = 'ns-regime-label ' + regimeClass(expl.label || label);
     }
     if (engineScore) {
       engineScore.textContent = score != null ? score.toFixed(1) : '—';
       engineScore.style.color = scoreColor100(score);
     }
 
-    // Mini component bars
     if (engineComponents && engine.components) {
       var names = [
         'headline_sentiment', 'negative_pressure', 'narrative_severity',
         'source_agreement', 'macro_stress', 'recency_pressure'
       ];
-      var displayNames = {
-        headline_sentiment: 'Headlines',
-        negative_pressure: 'Neg. Pressure',
-        narrative_severity: 'Narratives',
-        source_agreement: 'Source Agree',
-        macro_stress: 'Macro Stress',
-        recency_pressure: 'Recency',
-      };
       var html = '';
+
+      // ── Summary section ──────────────────────────────────────
+      if (expl.summary) {
+        html += '<div class="ns-engine-summary">' + escapeHtml(expl.summary) + '</div>';
+      }
+
+      // ── Component bars with interpretation ───────────────────
+      var compAnalysis = {};
+      if (expl.component_analysis) {
+        for (var a = 0; a < expl.component_analysis.length; a++) {
+          compAnalysis[expl.component_analysis[a].component] = expl.component_analysis[a];
+        }
+      }
+
       for (var i = 0; i < names.length; i++) {
         var name = names[i];
         var comp = engine.components[name];
         if (!comp) continue;
         var s = comp.score != null ? comp.score : 0;
+        var ca = compAnalysis[name];
+        var displayName = ca ? ca.display_name : name;
+        var tooltip = ca ? ca.tooltip : '';
+        var interpretation = ca ? ca.interpretation : '';
+        var contribution = ca ? ca.contribution : 'neutral';
+        var contribCls = 'ns-contrib-' + contribution;
+
         html +=
-          '<div class="ns-comp-row">' +
-            '<span class="ns-comp-name">' + escapeHtml(displayNames[name] || name) + '</span>' +
-            '<div class="ns-comp-bar-track">' +
-              '<div class="ns-comp-bar-fill" style="width:' + s + '%;background:' + barColor(s) + '"></div>' +
+          '<div class="ns-comp-row-enhanced">' +
+            '<div class="ns-comp-row">' +
+              '<span class="ns-comp-name" title="' + escapeHtml(tooltip) + '">' +
+                escapeHtml(displayName) +
+                '<span class="ns-comp-contrib ' + contribCls + '"></span>' +
+              '</span>' +
+              '<div class="ns-comp-bar-track">' +
+                '<div class="ns-comp-bar-fill" style="width:' + s + '%;background:' + barColor(s) + '"></div>' +
+              '</div>' +
+              '<span class="ns-comp-val">' + s.toFixed(0) + '</span>' +
             '</div>' +
-            '<span class="ns-comp-val">' + s.toFixed(0) + '</span>' +
+            (interpretation ? '<div class="ns-comp-interp">' + escapeHtml(interpretation) + '</div>' : '') +
           '</div>';
       }
+
+      // ── Trader takeaway ──────────────────────────────────────
+      if (expl.trader_takeaway) {
+        html += '<div class="ns-engine-takeaway">' +
+                '<div class="ns-engine-section-title">TRADER TAKEAWAY</div>' +
+                '<div class="ns-engine-takeaway-text">' + escapeHtml(expl.trader_takeaway) + '</div>' +
+                '</div>';
+      }
+
       engineComponents.innerHTML = html || '<div class="ns-loading">No components</div>';
     }
   }
@@ -230,12 +258,15 @@ window.BenTradePages.initNewsSentiment = function initNewsSentiment(rootEl) {
   function renderModel(model) {
     if (!model) { renderModelNotRun(); return; }
 
-    var label = model.regime_label || '—';
+    // Use new "label" field, fall back to legacy "regime_label"
+    var label = model.label || model.regime_label || '—';
     var score = model.score;
 
     if (modelLabel) {
       modelLabel.textContent = label;
-      modelLabel.className = 'ns-regime-label ' + regimeClass(label);
+      // Map label to CSS class
+      var labelCls = label.toLowerCase().replace(/[\s_]+/g, '-');
+      modelLabel.className = 'ns-regime-label ' + regimeClass(labelCls);
     }
     if (modelScore) {
       modelScore.textContent = score != null ? score.toFixed(1) : '—';
@@ -243,19 +274,134 @@ window.BenTradePages.initNewsSentiment = function initNewsSentiment(rootEl) {
     }
     if (modelSummary) {
       var html = '';
-      if (model.executive_summary) {
-        html += '<div style="margin-bottom:6px;">' + escapeHtml(model.executive_summary) + '</div>';
-      }
-      if (model.headline_tone) {
-        html += '<div style="font-size:11px;color:var(--muted);">Tone: <strong>' +
-                escapeHtml(model.headline_tone) + '</strong></div>';
-      }
+
+      // ── Confidence + Tone row ────────────────────────────────
+      var metaHtml = '';
       if (model.confidence != null) {
-        html += '<div style="font-size:11px;color:var(--muted);">Confidence: ' +
-                (model.confidence * 100).toFixed(0) + '%</div>';
+        metaHtml += '<span class="ns-model-meta-item">Confidence: <strong>' +
+                    (model.confidence * 100).toFixed(0) + '%</strong></span>';
       }
+      var tone = model.tone || model.headline_tone;
+      if (tone) {
+        metaHtml += '<span class="ns-model-meta-item">Tone: <strong>' +
+                    escapeHtml(tone) + '</strong></span>';
+      }
+      if (metaHtml) {
+        html += '<div class="ns-model-meta-row">' + metaHtml + '</div>';
+      }
+
+      // ── Summary ──────────────────────────────────────────────
+      var summary = model.summary || model.executive_summary;
+      if (summary) {
+        html += '<div class="ns-model-section ns-model-summary-text">' +
+                escapeHtml(summary) + '</div>';
+      }
+
+      // ── Headline Drivers ─────────────────────────────────────
+      if (model.headline_drivers && model.headline_drivers.length) {
+        html += '<div class="ns-model-section">' +
+                '<div class="ns-model-section-title">HEADLINE DRIVERS</div>' +
+                '<div class="ns-driver-list">';
+        for (var d = 0; d < model.headline_drivers.length; d++) {
+          var drv = model.headline_drivers[d];
+          var impactCls = (drv.impact || 'neutral').toLowerCase();
+          html += '<div class="ns-driver-item">' +
+                  '<span class="ns-driver-theme">' + escapeHtml(drv.theme || '') + '</span>' +
+                  '<span class="ns-driver-impact ns-impact-' + escapeHtml(impactCls) + '">' +
+                  escapeHtml(drv.impact || '') + '</span>' +
+                  (drv.explanation ? '<div class="ns-driver-explain">' + escapeHtml(drv.explanation) + '</div>' : '') +
+                  '</div>';
+        }
+        html += '</div></div>';
+      }
+
+      // ── Score Drivers (bullish / bearish / offsetting) ───────
+      if (model.score_drivers) {
+        var sd = model.score_drivers;
+        html += '<div class="ns-model-section ns-score-drivers-grid">';
+        if (sd.bullish_factors && sd.bullish_factors.length) {
+          html += '<div class="ns-factor-col ns-factor-bullish">' +
+                  '<div class="ns-factor-title">BULLISH</div>' +
+                  renderFactorList(sd.bullish_factors, 'bullish') + '</div>';
+        }
+        if (sd.bearish_factors && sd.bearish_factors.length) {
+          html += '<div class="ns-factor-col ns-factor-bearish">' +
+                  '<div class="ns-factor-title">BEARISH</div>' +
+                  renderFactorList(sd.bearish_factors, 'bearish') + '</div>';
+        }
+        if (sd.offsetting_factors && sd.offsetting_factors.length) {
+          html += '<div class="ns-factor-col ns-factor-offsetting">' +
+                  '<div class="ns-factor-title">OFFSETTING</div>' +
+                  renderFactorList(sd.offsetting_factors, 'mixed') + '</div>';
+        }
+        html += '</div>';
+      }
+
+      // ── Trader Takeaway ──────────────────────────────────────
+      if (model.trader_takeaway) {
+        html += '<div class="ns-model-section ns-trader-takeaway">' +
+                '<div class="ns-model-section-title">TRADER TAKEAWAY</div>' +
+                '<div class="ns-takeaway-text">' + escapeHtml(model.trader_takeaway) + '</div>' +
+                '</div>';
+      }
+
+      // ── Collapsible: Headlines Detail + Uncertainty + Market Implications ──
+      var detailHtml = '';
+      if (model.major_headlines && model.major_headlines.length) {
+        detailHtml += '<div class="ns-model-section">' +
+                      '<div class="ns-model-section-title">MAJOR HEADLINES</div>';
+        for (var h = 0; h < model.major_headlines.length; h++) {
+          var mh = model.major_headlines[h];
+          var mhImpact = (mh.market_impact || 'neutral').toLowerCase();
+          detailHtml += '<div class="ns-major-headline">' +
+                        '<div class="ns-mh-top">' +
+                        '<span class="ns-mh-headline">' + escapeHtml(mh.headline || '') + '</span>' +
+                        '<span class="ns-badge ns-badge-sentiment ' + escapeHtml(mhImpact) + '">' +
+                        escapeHtml(mh.market_impact || '') + '</span>' +
+                        '</div>' +
+                        (mh.why_it_matters ? '<div class="ns-mh-why">' + escapeHtml(mh.why_it_matters) + '</div>' : '') +
+                        '</div>';
+        }
+        detailHtml += '</div>';
+      }
+      if (model.market_implications) {
+        var mi = model.market_implications;
+        var miKeys = ['equities', 'volatility', 'rates', 'energy_or_commodities', 'sector_rotation'];
+        var miLabels = { equities: 'Equities', volatility: 'Volatility', rates: 'Rates',
+                         energy_or_commodities: 'Energy/Commodities', sector_rotation: 'Sector Rotation' };
+        var miHtml = '';
+        for (var m = 0; m < miKeys.length; m++) {
+          if (mi[miKeys[m]]) {
+            miHtml += '<div class="ns-mi-item"><span class="ns-mi-key">' +
+                      miLabels[miKeys[m]] + '</span><span class="ns-mi-val">' +
+                      escapeHtml(mi[miKeys[m]]) + '</span></div>';
+          }
+        }
+        if (miHtml) {
+          detailHtml += '<div class="ns-model-section">' +
+                        '<div class="ns-model-section-title">MARKET IMPLICATIONS</div>' +
+                        '<div class="ns-mi-grid">' + miHtml + '</div></div>';
+        }
+      }
+      if (model.uncertainty_flags && model.uncertainty_flags.length) {
+        detailHtml += '<div class="ns-model-section">' +
+                      '<div class="ns-model-section-title">UNCERTAINTY FLAGS</div>' +
+                      '<ul class="ns-insight-list ns-uncertainty-list">';
+        for (var u = 0; u < model.uncertainty_flags.length; u++) {
+          detailHtml += '<li>' + escapeHtml(model.uncertainty_flags[u]) + '</li>';
+        }
+        detailHtml += '</ul></div>';
+      }
+
+      if (detailHtml) {
+        html += '<details class="ns-model-details">' +
+                '<summary class="ns-model-details-toggle">Show Full Analysis</summary>' +
+                '<div class="ns-model-details-body">' + detailHtml + '</div>' +
+                '</details>';
+      }
+
       // Always provide re-run option after model completes
-      html += '<div style="margin-top:8px;text-align:center;">' +
+      html += '<div style="margin-top:10px;text-align:center;">' +
               '<button class="btn ns-model-run-btn" id="nsRunModelBtn" type="button" ' +
               'style="font-size:10px;padding:3px 10px;">Re-run Model</button></div>';
       modelSummary.innerHTML = html || '<div class="ns-model-unavailable">No summary</div>';
@@ -263,7 +409,7 @@ window.BenTradePages.initNewsSentiment = function initNewsSentiment(rootEl) {
       if (runModelBtn) runModelBtn.addEventListener('click', triggerModelAnalysis);
     }
 
-    // Insights row
+    // Insights row — legacy fields still supported
     if (insightsRow) {
       var hasInsights = (model.dominant_narratives && model.dominant_narratives.length) ||
                         (model.underpriced_risks && model.underpriced_risks.length) ||
@@ -274,6 +420,17 @@ window.BenTradePages.initNewsSentiment = function initNewsSentiment(rootEl) {
     renderInsightList(modelNarratives, model.dominant_narratives);
     renderInsightList(modelRisks, model.underpriced_risks);
     renderInsightList(modelTriggers, model.change_triggers);
+  }
+
+  function renderFactorList(items, type) {
+    if (!items || !items.length) return '';
+    var cls = type === 'bullish' ? 'ns-factor-bull' : (type === 'bearish' ? 'ns-factor-bear' : 'ns-factor-offset');
+    var html = '<ul class="ns-factor-list ' + cls + '">';
+    for (var i = 0; i < items.length; i++) {
+      html += '<li>' + escapeHtml(items[i]) + '</li>';
+    }
+    html += '</ul>';
+    return html;
   }
 
   function renderInsightList(el, items) {
@@ -443,18 +600,19 @@ window.BenTradePages.initNewsSentiment = function initNewsSentiment(rootEl) {
 
     // If engine components are available, render them
     if (engine && engine.components) {
+      var expl = engine.explanation || {};
       var names = [
         'headline_sentiment', 'negative_pressure', 'narrative_severity',
         'source_agreement', 'macro_stress', 'recency_pressure'
       ];
-      var displayNames = {
-        headline_sentiment: 'Headline Sentiment',
-        negative_pressure: 'Negative Pressure',
-        narrative_severity: 'Narrative Severity',
-        source_agreement: 'Source Agreement',
-        macro_stress: 'Macro Stress',
-        recency_pressure: 'Recency Pressure',
-      };
+
+      // Build lookup from explanation component_analysis
+      var compAnalysis = {};
+      if (expl.component_analysis) {
+        for (var a = 0; a < expl.component_analysis.length; a++) {
+          compAnalysis[expl.component_analysis[a].component] = expl.component_analysis[a];
+        }
+      }
 
       var html = '';
       for (var i = 0; i < names.length; i++) {
@@ -464,10 +622,18 @@ window.BenTradePages.initNewsSentiment = function initNewsSentiment(rootEl) {
         var s = comp.score != null ? comp.score : 0;
         var weight = engine.weights ? engine.weights[name] : null;
         var signals = (comp.signals || []).join(' \u00b7 ');
+        var ca = compAnalysis[name];
+        var displayName = ca ? ca.display_name : name;
+        var tooltip = ca ? ca.tooltip : '';
+        var interpretation = ca ? ca.interpretation : '';
+        var contribution = ca ? ca.contribution : 'neutral';
+        var contribCls = 'ns-contrib-' + contribution;
 
         html += '<div class="ns-breakdown-comp">' +
           '<div class="ns-breakdown-comp-header">' +
-            '<span class="ns-breakdown-comp-name">' + escapeHtml(displayNames[name] || name) +
+            '<span class="ns-breakdown-comp-name" title="' + escapeHtml(tooltip) + '">' +
+              escapeHtml(displayName) +
+              '<span class="ns-comp-contrib ' + contribCls + '"></span>' +
               (weight != null ? ' <span style="font-weight:400;color:var(--muted);font-size:10px;">(w:' + weight + ')</span>' : '') +
             '</span>' +
             '<span class="ns-breakdown-comp-score" style="color:' + scoreColor100(s) + '">' + s.toFixed(1) + '</span>' +
@@ -475,8 +641,46 @@ window.BenTradePages.initNewsSentiment = function initNewsSentiment(rootEl) {
           '<div class="ns-breakdown-comp-bar">' +
             '<div class="ns-breakdown-comp-fill" style="width:' + s + '%;background:' + barColor(s) + '"></div>' +
           '</div>' +
+          (interpretation ? '<div class="ns-comp-interp">' + escapeHtml(interpretation) + '</div>' : '') +
           (signals ? '<div class="ns-breakdown-signals">' + escapeHtml(signals) + '</div>' : '') +
         '</div>';
+      }
+
+      // ── Score logic section ────────────────────────────────
+      if (expl.score_logic) {
+        var sl = expl.score_logic;
+        html += '<div class="ns-score-logic">';
+        html += '<div class="ns-engine-section-title">SCORE CONTRIBUTORS</div>';
+        if (sl.positive_contributors && sl.positive_contributors.length) {
+          html += '<div class="ns-contrib-group"><span class="ns-contrib-label ns-contrib-positive">\u25B2 Positive</span> ' +
+                  escapeHtml(sl.positive_contributors.join(', ')) + '</div>';
+        }
+        if (sl.negative_contributors && sl.negative_contributors.length) {
+          html += '<div class="ns-contrib-group"><span class="ns-contrib-label ns-contrib-negative">\u25BC Negative</span> ' +
+                  escapeHtml(sl.negative_contributors.join(', ')) + '</div>';
+        }
+        if (sl.balancing_contributors && sl.balancing_contributors.length) {
+          html += '<div class="ns-contrib-group"><span class="ns-contrib-label ns-contrib-balancing">\u25C6 Balancing</span> ' +
+                  escapeHtml(sl.balancing_contributors.join(', ')) + '</div>';
+        }
+        html += '</div>';
+      }
+
+      // ── Signal quality ─────────────────────────────────────
+      if (expl.signal_quality) {
+        html += '<div class="ns-signal-quality">' +
+                '<span class="ns-signal-quality-badge ns-sq-' + (expl.signal_quality.strength || 'moderate').toLowerCase() + '">' +
+                  escapeHtml(expl.signal_quality.strength || '') + '</span> ' +
+                '<span class="ns-signal-quality-text">' + escapeHtml(expl.signal_quality.explanation || '') + '</span>' +
+                '</div>';
+      }
+
+      // ── Trader takeaway ────────────────────────────────────
+      if (expl.trader_takeaway) {
+        html += '<div class="ns-engine-takeaway">' +
+                '<div class="ns-engine-section-title">TRADER TAKEAWAY</div>' +
+                '<div class="ns-engine-takeaway-text">' + escapeHtml(expl.trader_takeaway) + '</div>' +
+                '</div>';
       }
 
       breakdownEl.innerHTML = html || '<div class="ns-loading">No components</div>';
@@ -615,34 +819,84 @@ window.BenTradePages.initNewsSentiment = function initNewsSentiment(rootEl) {
   async function triggerModelAnalysis() {
     if (_destroyed) return;
     setModelBtnState(true);
-    console.log('[NEWS_MODEL] request_start', { endpoint: MODEL_URL, method: 'POST' });
+
+    // Use centralized model timeout from API client (single source of truth)
+    var CLIENT_TIMEOUT = (window.BenTradeApi && window.BenTradeApi.MODEL_TIMEOUT_MS) || 185000;
+    var t0 = performance.now();
+    console.log('[NEWS_MODEL] request_start', {
+      endpoint: MODEL_URL, method: 'POST',
+      timeout_ms: CLIENT_TIMEOUT,
+      timestamp: new Date().toISOString(),
+    });
+
+    var controller = new AbortController();
+    var timerFired = false;
+    var timer = setTimeout(function() {
+      timerFired = true;
+      console.warn('[NEWS_MODEL] abort_timer_fired', {
+        elapsed_ms: Math.round(performance.now() - t0),
+        timeout_ms: CLIENT_TIMEOUT,
+      });
+      controller.abort();
+    }, CLIENT_TIMEOUT);
 
     try {
-      var resp = await fetch(MODEL_URL, { method: 'POST' });
-      console.log('[NEWS_MODEL] response', { status: resp.status, ok: resp.ok });
+      var resp = await fetch(MODEL_URL, { method: 'POST', signal: controller.signal });
+      var tHeaders = performance.now();
+      console.log('[NEWS_MODEL] response_headers', {
+        status: resp.status, ok: resp.ok,
+        elapsed_ms: Math.round(tHeaders - t0),
+      });
+
       if (!resp.ok) {
         var text = await resp.text();
-        console.error('[NEWS_MODEL] failure', { status: resp.status, body: text.slice(0, 300) });
+        console.error('[NEWS_MODEL] http_error', { status: resp.status, body: text.slice(0, 300) });
         throw new Error('HTTP ' + resp.status + ': ' + (text || 'Model request failed').slice(0, 300));
       }
-      var result = await resp.json();
-      var modelData = result.model_analysis || null;
-      console.log('[NEWS_MODEL] success', { hasModel: !!modelData, score: modelData ? modelData.score : null });
 
-      // Cache model result separately
+      var result = await resp.json();
+      var tParsed = performance.now();
+      console.log('[NEWS_MODEL] body_parsed', { elapsed_ms: Math.round(tParsed - t0) });
+
+      var modelData = result.model_analysis || null;
+      var errorInfo = result.error || null;
+      console.log('[NEWS_MODEL] result', {
+        hasModel: !!modelData,
+        score: modelData ? modelData.score : null,
+        errorKind: errorInfo ? errorInfo.kind : null,
+        total_ms: Math.round(performance.now() - t0),
+      });
+
+      // Cache model result separately (only if successful)
       if (_cache && modelData) {
         _cache.set(MODEL_CACHE_KEY, modelData);
       }
 
       renderModel(modelData);
       if (!modelData) {
-        renderModelError('Model returned no result. The LLM may be unavailable.');
+        // Use specific error message from backend if available
+        var errMsg = (errorInfo && errorInfo.message)
+          ? errorInfo.message
+          : 'Model returned no result. The LLM may be unavailable.';
+        var errKind = (errorInfo && errorInfo.kind) ? ' (' + errorInfo.kind + ')' : '';
+        renderModelError(errMsg + errKind);
       }
     } catch (err) {
-      console.error('[NEWS_MODEL] failure', err);
-      renderModelError(String(err.message || 'Model analysis failed'));
+      var elapsed = Math.round(performance.now() - t0);
+      console.error('[NEWS_MODEL] failure', { error: err.message, name: err.name, elapsed_ms: elapsed, timerFired: timerFired });
+
+      var msg;
+      if (err.name === 'AbortError') {
+        var timeoutSec = Math.round(CLIENT_TIMEOUT / 1000);
+        msg = 'Model request timed out after ' + timeoutSec + 's. Is the local LLM running?';
+      } else {
+        msg = String(err.message || 'Model analysis failed');
+      }
+      renderModelError(msg);
     } finally {
+      clearTimeout(timer);
       setModelBtnState(false);
+      console.log('[NEWS_MODEL] lifecycle_complete', { total_ms: Math.round(performance.now() - t0) });
     }
   }
 

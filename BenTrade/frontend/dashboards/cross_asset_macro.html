@@ -1,0 +1,250 @@
+<link rel="stylesheet" href="assets/css/module-dashboard.css">
+<div class="view-wrap mod-page">
+
+  <!-- ── Module Banner ──────────────────────────────────────────── -->
+  <div class="mod-banner accent-macro">
+    <div class="mod-banner-left">
+      <div class="mod-banner-breadcrumb">BenTrade · Market Picture</div>
+      <div class="mod-banner-title">Cross-Asset / Macro Confirmation</div>
+      <div class="mod-banner-subtitle">Are other major markets confirming or contradicting the equity story?</div>
+    </div>
+    <div class="mod-banner-right">
+      <span class="mod-banner-tag">Module 4 of 6</span>
+      <span class="mod-last-updated" id="caLastUpdated">Updated: —</span>
+      <button class="mod-refresh-btn" id="caRefreshBtn" title="Refresh cross-asset data">↻</button>
+    </div>
+  </div>
+
+  <!-- ── Degraded-state banner (hidden until source errors detected) ── -->
+  <div id="caDegradedBanner" class="mod-degraded-banner" style="display:none;
+    background:rgba(255,171,64,0.12);border:1px solid rgba(255,171,64,0.35);
+    color:#ffab40;padding:8px 14px;border-radius:8px;margin:0 12px 8px 12px;
+    font-size:11px;font-weight:500;">
+  </div>
+
+  <!-- ══ TOP ROW ══════════════════════════════════════════════ -->
+  <div class="mod-top-row">
+
+    <!-- Hero Score Card -->
+    <div class="mod-card mod-hero-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Cross-Asset Confirmation</span>
+        <span class="mod-chip mod-chip-neutral" id="caLabelChip">—</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-hero-label" id="caHeroLabel">—</div>
+        <div class="mod-hero-score" id="caHeroScore">—</div>
+        <div class="mod-summary" id="caSummary">
+          Loading cross-asset macro data…
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirmation Summary Card -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Confirming vs Contradicting</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-section-title">Confirming Equity Bull Case</div>
+        <ul class="mod-contrib-list" id="caConfirmingDrivers">
+          <li class="mod-contrib-item" style="opacity:0.5;">Loading…</li>
+        </ul>
+        <div class="mod-divider"></div>
+        <div class="mod-section-title">Contradicting / Cautionary</div>
+        <ul class="mod-contrib-list" id="caContradictingDrivers">
+          <li class="mod-contrib-item" style="opacity:0.5;">Loading…</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Macro Coherence -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Macro Coherence</span>
+      </div>
+      <div class="mod-card-body" style="text-align:center;">
+        <div class="mod-gauge">
+          <span class="mod-gauge-val" id="caCoherenceGauge">—</span>
+          <span class="mod-gauge-label" id="caCoherenceLabel">Coherence</span>
+        </div>
+        <div style="margin-top:6px;font-size:9px;opacity:0.6;font-style:italic;">
+          Measures signal alignment, not conviction. High coherence = signals agree. Low = mixed/contradictory.
+        </div>
+        <div style="margin-top:10px;">
+          <span class="mod-signal-chip" id="caSignalQuality">—</span>
+        </div>
+        <div style="margin-top:6px;">
+          <span class="mod-signal-chip" id="caConfidenceChip">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ ASSET GRID ══════════════════════════════════════════ -->
+  <div class="mod-grid-4">
+
+    <!-- Treasury / Yield Curve -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Rates &amp; Yield Curve</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">10Y Yield</span><span class="mod-metric-val" id="caTenYield">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">2Y Yield</span><span class="mod-metric-val" id="caTwoYield">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">10Y−2Y Spread</span><span class="mod-metric-val" id="caYieldSpread">—</span></div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">Confirmation</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="caRatesBar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="caRatesScore">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dollar -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">US Dollar (DXY)</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip">
+          <div class="mod-metric"><span class="mod-metric-key">USD Index</span><span class="mod-metric-val" id="caUSD">—</span></div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">Confirmation</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="caDollarBar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="caDollarScore">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gold -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Gold</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip">
+          <div class="mod-metric"><span class="mod-metric-key">Spot Price</span><span class="mod-metric-val" id="caGold">—</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Copper -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Copper (Growth Proxy)</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip">
+          <div class="mod-metric"><span class="mod-metric-key">Price</span><span class="mod-metric-val" id="caCopper">—</span></div>
+        </div>
+        <div style="margin-top:4px;font-size:9px;opacity:0.6;font-style:italic;">
+          Source: FRED PCOPPUSDM (monthly) — may be up to 30 days delayed
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECOND ROW ══════════════════════════════════════════ -->
+  <div class="mod-grid-4">
+
+    <!-- Oil -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Oil (WTI)</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip">
+          <div class="mod-metric"><span class="mod-metric-key">Price</span><span class="mod-metric-val" id="caOil">—</span></div>
+        </div>
+        <div id="caOilAmbiguityNote" style="display:none;margin-top:6px;font-size:10px;opacity:0.7;font-style:italic;">
+          ⚠ Oil in ambiguous zone ($45–$85) — direction not interpretable without trend context.
+        </div>
+      </div>
+    </div>
+
+    <!-- Credit Spreads -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Credit &amp; Risk</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">IG Spread</span><span class="mod-metric-val" id="caIGSpread">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">HY Spread</span><span class="mod-metric-val" id="caHYSpread">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">VIX</span><span class="mod-metric-val" id="caVIX">—</span></div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">Credit Health</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="caCreditBar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="caCreditScore">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data Quality -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Data Quality</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric">
+          <span class="mod-metric-key">Confidence</span>
+          <span class="mod-metric-val" id="caConfidenceScore">—</span>
+        </div>
+        <div id="caWarnings" style="margin-top:6px;">
+          <div style="opacity:0.5;font-size:10px;">No warnings</div>
+        </div>
+        <div style="margin-top:8px;font-size:9px;opacity:0.6;border-top:1px solid rgba(255,255,255,0.1);padding-top:6px;">
+          <div>FRED-sourced data (gold, copper, credit spreads) may have 1-2 day delay.</div>
+          <div>Copper (PCOPPUSDM) is a monthly series — significant lag risk.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Placeholder -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Asset Trend Strip</span></div>
+      <div class="mod-card-body">
+        <div class="mod-chart-placeholder" data-label="📊 Multi-asset trend sparklines — engine integration pending" style="min-height:100px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ AI MODEL ANALYSIS ═══════════════════════════════════ -->
+  <div class="mod-card mod-model-card" style="margin-bottom:14px;">
+    <div class="mod-card-header"><span class="mod-card-title">AI Model Analysis</span></div>
+    <div class="mod-card-body">
+      <div class="mod-model-label" id="caModelLabel">—</div>
+      <div style="text-align:center;">
+        <span class="mod-hero-score" id="caModelScore" style="font-size:28px;">—</span>
+      </div>
+      <div class="mod-model-summary" id="caModelSummary">
+        <div class="mod-model-cta" id="caModelCta">
+          Run the AI model for a deeper cross-asset analysis.
+          <button class="mod-refresh-btn" id="caRunModelBtn" type="button">Analyze with Model</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mod-grid-2" id="caModelDetailsRow" style="display:none;">
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Model — Pillar Analysis</span></div>
+      <div class="mod-card-body" id="caModelPillars"></div>
+    </div>
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Model — Trading Implications</span></div>
+      <div class="mod-card-body" id="caModelImplications"></div>
+    </div>
+  </div>
+
+  <!-- ══ BOTTOM DETAIL ═══════════════════════════════════════ -->
+  <div class="mod-card" style="margin-bottom:14px;">
+    <div class="mod-card-header"><span class="mod-card-title">Detailed Analysis</span></div>
+    <div class="mod-card-body">
+
+      <div class="mod-takeaway">
+        <div class="mod-section-title">Trader Takeaway</div>
+        <div class="mod-takeaway-text" id="caTakeaway">—</div>
+      </div>
+
+      <details class="mod-details">
+        <summary>Pillar Confirmation Scores</summary>
+        <div class="mod-details-body" id="caPillarBars">
+          <!-- Populated dynamically by JS -->
+        </div>
+      </details>
+    </div>
+  </div>
+
+</div>

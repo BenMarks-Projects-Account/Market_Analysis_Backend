@@ -220,29 +220,64 @@ class NewsSentimentService:
         self,
         items: list[dict[str, Any]],
         macro_context: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        """Attempt LLM-based news sentiment analysis. Returns None on failure."""
+    ) -> dict[str, Any]:
+        """Attempt LLM-based news sentiment analysis.
+
+        Returns dict with model_analysis (or None) and error info if failed.
+        """
+        from common.model_sanitize import classify_model_error, user_facing_error_message
+        import time as _time
+
+        t0 = _time.monotonic()
+        logger.info(
+            "event=news_model_analysis_start items=%d macro_keys=%d",
+            len(items), len(macro_context),
+        )
+
+        if not items:
+            logger.warning("event=news_model_analysis_skip reason=no_items")
+            return {
+                "model_analysis": None,
+                "error": {
+                    "kind": "empty_response",
+                    "message": "No news headlines available for model analysis.",
+                },
+            }
+
         try:
             from common.model_analysis import analyze_news_sentiment
             result = analyze_news_sentiment(
                 items=items,
                 macro_context=macro_context,
-                timeout=300,
+                timeout=180,
                 retries=0,
             )
-            logger.info("event=news_model_analysis_ok score=%s", result.get("score"))
-            return result
+            elapsed = round(_time.monotonic() - t0, 2)
+            logger.info("event=news_model_analysis_ok score=%s elapsed_s=%.2f", result.get("score"), elapsed)
+            return {"model_analysis": result}
         except Exception as exc:
-            logger.warning("event=news_model_analysis_failed error=%s", exc)
-            return None
+            elapsed = round(_time.monotonic() - t0, 2)
+            error_kind = classify_model_error(exc)
+            error_msg = user_facing_error_message(error_kind)
+            logger.warning(
+                "event=news_model_analysis_failed error_kind=%s elapsed_s=%.2f error=%s",
+                error_kind, elapsed, exc,
+            )
+            return {
+                "model_analysis": None,
+                "error": {"kind": error_kind, "message": error_msg},
+            }
 
     async def run_model_analysis(self, *, force: bool = False) -> dict[str, Any]:
         """Run LLM model analysis on demand. Uses cached base payload for inputs.
 
         Returns:
           model_analysis: dict | None — the model result, or None on failure
+          error: dict | None — { kind, message } if model failed
           as_of: ISO timestamp
         """
+        import asyncio
+
         model_cache_key = "news_sentiment:model"
 
         if not force:
@@ -255,15 +290,25 @@ class NewsSentimentService:
         items = base.get("items", [])
         macro = base.get("macro_context", {})
 
-        model_result = self._run_model_analysis(items, macro)
+        # Run blocking model call in executor to avoid blocking the event loop
+        loop = asyncio.get_running_loop()
+        model_outcome = await loop.run_in_executor(
+            None, self._run_model_analysis, items, macro
+        )
 
         result = {
-            "model_analysis": model_result,
+            "model_analysis": model_outcome.get("model_analysis"),
             "as_of": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Cache model result for same TTL as base payload
-        await self.cache.set(model_cache_key, result, NEWS_CACHE_TTL)
+        # Pass through error info if model failed
+        if model_outcome.get("error"):
+            result["error"] = model_outcome["error"]
+
+        # Only cache successful results — don't cache failures
+        if result["model_analysis"] is not None:
+            await self.cache.set(model_cache_key, result, NEWS_CACHE_TTL)
+
         return result
 
     # ── Finnhub fetch ───────────────────────────────────────────────

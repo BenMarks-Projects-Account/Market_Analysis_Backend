@@ -200,14 +200,156 @@ window.BenTradeDashboardCache = (function(){
     try{ sessionStorage.removeItem(STORAGE_KEY); }catch(_e){}
   }
 
+  /* ── Convenience selectors / helpers ── */
+
+  /**
+   * Get the raw data payload for a dashboard (unwrapped from entry wrapper).
+   * @param {string} key
+   * @returns {*|null}
+   */
+  function getData(key){
+    var entry = _mem[key];
+    return (entry && entry.isLoaded && entry.data != null) ? entry.data : null;
+  }
+
+  /**
+   * Get current dashboard status string.
+   * @param {string} key
+   * @returns {'idle'|'loading'|'ready'|'refreshing'|'error'}
+   */
+  function getStatus(key){
+    var entry = _mem[key];
+    if(_refreshing[key]) return 'refreshing';
+    if(!entry) return 'idle';
+    if(entry.isLoaded && entry.data != null) return entry.lastError ? 'error' : 'ready';
+    if(entry.lastError) return 'error';
+    return 'loading';
+  }
+
+  /**
+   * Get the last updated ISO timestamp.
+   * @param {string} key
+   * @returns {string|null}
+   */
+  function getLastUpdated(key){
+    var entry = _mem[key];
+    return entry ? (entry.lastUpdated || null) : null;
+  }
+
+  /**
+   * Check whether any cached data exists for a dashboard.
+   * @param {string} key
+   * @returns {boolean}
+   */
+  function hasCache(key){
+    var entry = _mem[key];
+    return !!(entry && entry.isLoaded && entry.data != null);
+  }
+
+  /**
+   * Should a full-page loading skeleton be shown?
+   * True only when no cached data exists and no prior error.
+   * @param {string} key
+   * @returns {boolean}
+   */
+  function shouldShowLoader(key){
+    return !hasCache(key) && !_refreshing[key] && getStatus(key) !== 'error';
+  }
+
+  /**
+   * Should a lightweight refresh overlay be shown over existing data?
+   * @param {string} key
+   * @returns {boolean}
+   */
+  function shouldShowRefreshOverlay(key){
+    return !!_refreshing[key] && hasCache(key);
+  }
+
+  /**
+   * Should cached data be rendered?
+   * @param {string} key
+   * @returns {boolean}
+   */
+  function shouldShowCachedData(key){
+    return hasCache(key);
+  }
+
+  /**
+   * Validate a payload before allowing cache write.
+   * @param {*} data        — proposed payload
+   * @param {Array} requiredFields — list of dot-separated field paths
+   * @returns {boolean}
+   */
+  function validatePayload(data, requiredFields){
+    if(data == null || typeof data !== 'object') return false;
+    if(!requiredFields || requiredFields.length === 0) return true;
+    for(var i = 0; i < requiredFields.length; i++){
+      var parts = requiredFields[i].split('.');
+      var cur = data;
+      for(var j = 0; j < parts.length; j++){
+        if(cur == null || typeof cur !== 'object') return false;
+        cur = cur[parts[j]];
+      }
+      if(cur === undefined) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Safe cache write: validates payload before overwriting.
+   * If validation fails, records an error but preserves prior cache.
+   *
+   * @param {string} key
+   * @param {*} data
+   * @param {Array} [requiredFields] — dot-path fields that must exist
+   * @returns {boolean} true if write succeeded
+   */
+  function setSafe(key, data, requiredFields){
+    if(!validatePayload(data, requiredFields)){
+      console.warn('[DashboardCache] Payload validation failed for "' + key + '", preserving prior cache');
+      setError(key, 'Invalid payload — prior data preserved');
+      return false;
+    }
+    set(key, data);
+    return true;
+  }
+
+  /**
+   * Build a status snapshot for diagnostics / logging.
+   * @param {string} key
+   * @returns {Object}
+   */
+  function getStatusSnapshot(key){
+    var entry = _mem[key];
+    return {
+      dashboard_key: key,
+      status: getStatus(key),
+      has_loaded_once: hasCache(key),
+      last_loaded_at: entry ? entry.lastUpdated : null,
+      last_error: entry ? entry.lastError : null,
+      source: _refreshing[key] ? 'network' : (hasCache(key) ? 'cache' : null)
+    };
+  }
+
   return {
     get: get,
     set: set,
+    setSafe: setSafe,
     setError: setError,
     isRefreshing: isRefreshing,
     setRefreshing: setRefreshing,
     fetchWithCache: fetchWithCache,
     clear: clear,
-    clearAll: clearAll
+    clearAll: clearAll,
+    /* Selectors / helpers */
+    getData: getData,
+    getStatus: getStatus,
+    getLastUpdated: getLastUpdated,
+    hasCache: hasCache,
+    shouldShowLoader: shouldShowLoader,
+    shouldShowRefreshOverlay: shouldShowRefreshOverlay,
+    shouldShowCachedData: shouldShowCachedData,
+    validatePayload: validatePayload,
+    getStatusSnapshot: getStatusSnapshot
   };
 })();

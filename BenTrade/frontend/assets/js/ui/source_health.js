@@ -137,8 +137,9 @@ window.BenTradeSourceHealth = (function(){
 })();
 
 window.BenTradeSourceHealthStore = (function(){
-  const TTL_MS = 45000;
-  const MIN_FORCE_GAP_MS = 5000;
+  const TTL_MS = 15000;       // reduced from 45s — model health backend cache is 10s
+  const MIN_FORCE_GAP_MS = 3000;  // reduced from 5s
+  const STALE_LIMIT_MS = 30000;   // discard cached payload older than this
   const state = {
     payload: null,
     fetchedAt: 0,
@@ -153,10 +154,28 @@ window.BenTradeSourceHealthStore = (function(){
     return (Date.now() - state.fetchedAt) >= MIN_FORCE_GAP_MS;
   }
 
+  function isStale(){
+    return !state.payload || (Date.now() - state.fetchedAt) > STALE_LIMIT_MS;
+  }
+
   function render(payload){
     if(window.BenTradeSourceHealth?.renderFromCanonical){
       window.BenTradeSourceHealth.renderFromCanonical(payload || {});
     }
+  }
+
+  /** Render all sources as unknown/red when no data is available. */
+  function renderUnknown(){
+    var target = document.getElementById('sourceHealthRows');
+    if(!target) return;
+    target.innerHTML = '<div class="diagnosticRow"><span class="diagnosticLabel" style="opacity:.6">Health check pending…</span></div>';
+  }
+
+  function resetCache(){
+    state.payload = null;
+    state.fetchedAt = 0;
+    state.inflight = null;
+    if(window.BenTradeDebug) console.log('[source-health-store] cache reset');
   }
 
   async function fetchSourceHealth(options){
@@ -190,12 +209,24 @@ window.BenTradeSourceHealthStore = (function(){
 
     try{
       const payload = await state.inflight;
+      if(window.BenTradeDebug){
+        var modelEntry = (payload?.sources || []).find(function(s){ return s?.name === 'AI Model'; });
+        console.log('[source-health-store] fetched', {
+          as_of: payload?.as_of,
+          model_status: modelEntry?.status || 'missing',
+          model_notes: modelEntry?.notes,
+        });
+      }
       render(payload);
       return payload;
     }catch(err){
-      if(state.payload){
-        render(state.payload);
-        return state.payload;
+      // Fail CLOSED: do NOT fall back to stale data — show unknown state.
+      // Old behaviour returned last cached payload which could be an old GREEN.
+      if(window.BenTradeDebug) console.warn('[source-health-store] fetch failed, clearing stale state', err);
+      if(isStale()){
+        state.payload = null;
+        state.fetchedAt = 0;
+        renderUnknown();
       }
       throw err;
     }finally{
@@ -211,5 +242,6 @@ window.BenTradeSourceHealthStore = (function(){
     fetchSourceHealth,
     refresh,
     render,
+    resetCache,
   };
 })();

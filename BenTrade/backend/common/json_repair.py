@@ -148,30 +148,37 @@ def _repair_json_text(text: str) -> str:
     Apply common text repairs for LLM JSON formatting errors.
 
     Repairs applied (in order):
-      1. Replace smart/curly quotes with straight quotes.
-      2. Remove single-line // comments.
-      3. Remove trailing commas before } or ].
-      4. Replace Python-style None/True/False with JSON null/true/false.
-      5. Strip control characters.
+      1. Strip <think>/<scratchpad> reasoning blocks.
+      2. Replace smart/curly quotes with straight quotes.
+      3. Remove single-line // comments.
+      4. Remove trailing commas before } or ].
+      5. Replace Python-style None/True/False with JSON null/true/false.
+      6. Strip control characters.
     """
-    # 1. Smart quotes → straight
+    # 1. Strip <think>/<scratchpad> reasoning blocks
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<think>.*$', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<scratchpad>.*?</scratchpad>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<scratchpad>.*$', '', text, flags=re.DOTALL | re.IGNORECASE)
+
+    # 2. Smart quotes → straight
     text = text.replace("\u201c", '"').replace("\u201d", '"')  # " "
     text = text.replace("\u2018", "'").replace("\u2019", "'")  # ' '
     text = text.replace("\u00ab", '"').replace("\u00bb", '"')  # « »
 
-    # 2. Remove // single-line comments (but not inside strings — best effort)
+    # 3. Remove // single-line comments (but not inside strings — best effort)
     text = re.sub(r'(?m)^\s*//.*$', '', text)
     text = re.sub(r',\s*//[^\n]*', ',', text)
 
-    # 3. Trailing commas before } or ]
+    # 4. Trailing commas before } or ]
     text = re.sub(r',\s*([}\]])', r'\1', text)
 
-    # 4. Python literals → JSON
+    # 5. Python literals → JSON
     text = re.sub(r'\bNone\b', 'null', text)
     text = re.sub(r'\bTrue\b', 'true', text)
     text = re.sub(r'\bFalse\b', 'false', text)
 
-    # 5. Strip non-printable control chars (except \n, \r, \t)
+    # 6. Strip non-printable control chars (except \n, \r, \t)
     text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
 
     return text

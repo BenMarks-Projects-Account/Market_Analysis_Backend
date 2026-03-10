@@ -1,0 +1,256 @@
+<link rel="stylesheet" href="assets/css/module-dashboard.css">
+<div class="view-wrap mod-page">
+
+  <!-- ── Module Banner ──────────────────────────────────────────── -->
+  <div class="mod-banner accent-volatility">
+    <div class="mod-banner-left">
+      <div class="mod-banner-breadcrumb">BenTrade · Market Picture</div>
+      <div class="mod-banner-title">Volatility &amp; Options Structure</div>
+      <div class="mod-banner-subtitle">How is the market pricing fear, hedging demand, and option structure conditions?</div>
+    </div>
+    <div class="mod-banner-right">
+      <span class="mod-banner-tag">Module 3 of 6</span>
+      <span class="mod-last-updated" id="volLastUpdated">Updated: —</span>
+      <button class="mod-refresh-btn" id="volRefreshBtn" title="Refresh data">⟳</button>
+    </div>
+  </div>
+
+  <!-- Refresh overlay -->
+  <div class="mod-refresh-overlay" id="volRefreshOverlay" style="display:none;">
+    <span class="mod-refresh-spinner">⟳</span> Refreshing…
+  </div>
+  <!-- Error banner -->
+  <div class="mod-refresh-error" id="volRefreshError" style="display:none;"></div>
+
+  <!-- ══ TOP ROW ══════════════════════════════════════════════ -->
+  <div class="mod-top-row">
+
+    <!-- Hero Score Card -->
+    <div class="mod-card mod-hero-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Vol Regime Score</span>
+        <span class="mod-chip" id="volLabelChip">—</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-hero-label" id="volHeroLabel">—</div>
+        <div class="mod-hero-score" id="volHeroScore">—</div>
+        <div class="mod-summary" id="volSummary">Loading…</div>
+        <div style="margin-top:10px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">
+          <span class="mod-chip mod-chip-neutral" id="volPremiumChip">Premium Selling —</span>
+          <span class="mod-chip mod-chip-neutral" id="volDirectionalChip">Directional —</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Vol Context Card -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Volatility Context</span>
+      </div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(3,1fr);">
+          <div class="mod-metric">
+            <span class="mod-metric-key">VIX Spot</span>
+            <span class="mod-metric-val" id="volVixSpot">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">VIX 20d Avg</span>
+            <span class="mod-metric-val" id="volVixAvg">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">VIX Trend</span>
+            <span class="mod-metric-val" id="volVixTrend">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">VVIX</span>
+            <span class="mod-metric-val" id="volVvix">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">IV Rank (30d)</span>
+            <span class="mod-metric-val" id="volIVRank">—</span>
+          </div>
+          <div class="mod-metric">
+            <span class="mod-metric-key">IV Percentile (1Y)</span>
+            <span class="mod-metric-val" id="volIVPctl">—</span>
+          </div>
+        </div>
+        <div class="mod-divider"></div>
+        <div class="mod-section-title">Regime Assessment</div>
+        <div class="mod-summary" id="volRegimeExplanation">—</div>
+      </div>
+    </div>
+
+    <!-- Options Posture Card -->
+    <div class="mod-card">
+      <div class="mod-card-header">
+        <span class="mod-card-title">Options Posture</span>
+      </div>
+      <div class="mod-card-body" style="text-align:center;">
+        <div class="mod-gauge" id="volPostureGauge" style="border-color:rgba(136,136,136,0.3);">
+          <span class="mod-gauge-val" id="volPostureBias" style="font-size:14px;">—</span>
+          <span class="mod-gauge-label">Premium Bias</span>
+        </div>
+        <div class="mod-summary" id="volPostureSummary" style="text-align:center;margin-top:10px;">—</div>
+        <div style="margin-top:8px;">
+          <span class="mod-signal-chip" id="volSignalChip">—</span>
+        </div>
+        <div style="margin-top:6px;font-size:10px;opacity:0.7;">
+          Confidence: <span id="volConfidence">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ COMPONENT GRID ══════════════════════════════════════ -->
+  <div class="mod-grid-4">
+
+    <!-- VIX Term Structure -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">VIX Term Structure</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">Front Month</span><span class="mod-metric-val" id="volFront">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">2nd Month</span><span class="mod-metric-val" id="vol2nd">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">3rd Month</span><span class="mod-metric-val" id="vol3rd">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Shape</span><span class="mod-metric-val" id="volTermShape">—</span></div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">Structure</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="volStructBar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="volStructScore">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- IV vs RV -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Implied vs Realized Vol</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">IV (30d)</span><span class="mod-metric-val" id="volIV30">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">RV (30d)</span><span class="mod-metric-val" id="volRV30">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">IV − RV Spread</span><span class="mod-metric-val" id="volIVRVSpread">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Vol Risk Premium</span><span class="mod-metric-val" id="volVRP">—</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Skew -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Skew &amp; Tail Risk</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">CBOE Skew</span><span class="mod-metric-val" id="volSkew">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">25d Put Skew</span><span class="mod-metric-val" id="volPutSkew">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Tail Risk Signal</span><span class="mod-metric-val" id="volTailRisk">—</span></div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">Skew Risk</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="volSkewBar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="volSkewScore">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Put/Call Conditions -->
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Put/Call &amp; Richness</span></div>
+      <div class="mod-card-body">
+        <div class="mod-metric-strip" style="grid-template-columns:repeat(2,1fr);">
+          <div class="mod-metric"><span class="mod-metric-key">Equity P/C Ratio</span><span class="mod-metric-val" id="volEqPC">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Index P/C Ratio</span><span class="mod-metric-val" id="volIdxPC">—</span></div>
+          <div class="mod-metric"><span class="mod-metric-key">Option Richness</span><span class="mod-metric-val" id="volRichness">—</span></div>
+        </div>
+        <div class="mod-bar-row" style="margin-top:10px;">
+          <span class="mod-bar-label">Positioning</span>
+          <div class="mod-bar-track"><div class="mod-bar-fill" id="volPosBar" style="width:0%;"></div></div>
+          <span class="mod-bar-val" id="volPosScore">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ VISUAL ANALYTICS ════════════════════════════════════ -->
+  <div class="mod-grid-2">
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Pillar Scores</span></div>
+      <div class="mod-card-body">
+        <div class="mod-bar-row"><span class="mod-bar-label">Volatility Regime (25%)</span><div class="mod-bar-track"><div class="mod-bar-fill" id="volP1Bar" style="width:0%;"></div></div><span class="mod-bar-val" id="volP1Val">—</span></div>
+        <div class="mod-bar-row"><span class="mod-bar-label">Vol Structure (25%)</span><div class="mod-bar-track"><div class="mod-bar-fill" id="volP2Bar" style="width:0%;"></div></div><span class="mod-bar-val" id="volP2Val">—</span></div>
+        <div class="mod-bar-row"><span class="mod-bar-label">Tail Risk / Skew (20%)</span><div class="mod-bar-track"><div class="mod-bar-fill" id="volP3Bar" style="width:0%;"></div></div><span class="mod-bar-val" id="volP3Val">—</span></div>
+        <div class="mod-bar-row"><span class="mod-bar-label">Positioning (15%)</span><div class="mod-bar-track"><div class="mod-bar-fill" id="volP4Bar" style="width:0%;"></div></div><span class="mod-bar-val" id="volP4Val">—</span></div>
+        <div class="mod-bar-row"><span class="mod-bar-label">Strategy Suitability (15%)</span><div class="mod-bar-track"><div class="mod-bar-fill" id="volP5Bar" style="width:0%;"></div></div><span class="mod-bar-val" id="volP5Val">—</span></div>
+      </div>
+    </div>
+
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Strategy Suitability</span></div>
+      <div class="mod-card-body">
+        <div class="mod-bar-row"><span class="mod-bar-label" title="Iron condors, credit spreads, short strangles">Premium Selling</span><div class="mod-bar-track"><div class="mod-bar-fill" id="volS1Bar" style="width:0%;"></div></div><span class="mod-bar-val" id="volS1Val">—</span></div>
+        <div class="mod-bar-row"><span class="mod-bar-label" title="Directional debit spreads, long straddles">Directional</span><div class="mod-bar-track"><div class="mod-bar-fill" id="volS2Bar" style="width:0%;"></div></div><span class="mod-bar-val" id="volS2Val">—</span></div>
+        <div class="mod-bar-row"><span class="mod-bar-label" title="Calendar spreads, diagonals">Vol Structure</span><div class="mod-bar-track"><div class="mod-bar-fill" id="volS3Bar" style="width:0%;"></div></div><span class="mod-bar-val" id="volS3Val">—</span></div>
+        <div class="mod-bar-row"><span class="mod-bar-label" title="Hedging with puts, collars">Hedging</span><div class="mod-bar-track"><div class="mod-bar-fill" id="volS4Bar" style="width:0%;"></div></div><span class="mod-bar-val" id="volS4Val">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ BOTTOM DETAIL ═══════════════════════════════════════ -->
+  <div class="mod-card" style="margin-bottom:14px;">
+    <div class="mod-card-header"><span class="mod-card-title">Detailed Analysis</span></div>
+    <div class="mod-card-body">
+
+      <div class="mod-section-title">Supportive Conditions</div>
+      <ul class="mod-contrib-list" id="volDetailPositive">
+        <li class="mod-contrib-item"><span class="mod-contrib-dot positive"></span>—</li>
+      </ul>
+
+      <div class="mod-divider"></div>
+      <div class="mod-section-title">Warning Signs</div>
+      <ul class="mod-warning-list" id="volDetailNegative">
+        <li class="mod-warning-item"><span class="mod-warning-icon">⚠</span>—</li>
+      </ul>
+
+      <div class="mod-divider"></div>
+      <div class="mod-section-title">Conflicting Signals</div>
+      <ul class="mod-contrib-list" id="volDetailConflicts">
+        <li class="mod-contrib-item"><span class="mod-contrib-dot conflict"></span>—</li>
+      </ul>
+
+      <div class="mod-divider"></div>
+      <div class="mod-takeaway">
+        <div class="mod-section-title">Trader Takeaway</div>
+        <div class="mod-takeaway-text" id="volTakeaway">—</div>
+      </div>
+
+      <details class="mod-details" id="volDiagnostics">
+        <summary>Diagnostics</summary>
+        <div class="mod-details-body">
+          <pre id="volDiagPre" style="font-size:10px;white-space:pre-wrap;color:var(--muted);">—</pre>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- ══ MODEL ANALYSIS ══════════════════════════════════════ -->
+  <div class="mod-card mod-model-card" style="margin-bottom:14px;">
+    <div class="mod-card-header">
+      <span class="mod-card-title">AI Model Analysis</span>
+      <span class="mod-chip" id="volModelLabel">Not Run</span>
+    </div>
+    <div class="mod-card-body">
+      <div class="mod-summary" id="volModelSummary">Click below to run AI analysis on current volatility conditions.</div>
+      <div style="text-align:center;margin:12px 0;">
+        <button class="mod-action-btn" id="volRunModelBtn">Run Model Analysis</button>
+      </div>
+      <div id="volModelDetailsRow" style="display:none;">
+        <div class="mod-divider"></div>
+        <div class="mod-section-title">Pillar Analysis</div>
+        <div id="volModelPillars" class="mod-summary">—</div>
+        <div class="mod-divider"></div>
+        <div class="mod-section-title">Strategy Implications</div>
+        <div id="volModelImplications" class="mod-summary">—</div>
+      </div>
+    </div>
+  </div>
+
+</div>
