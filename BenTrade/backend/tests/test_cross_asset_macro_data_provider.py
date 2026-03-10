@@ -40,7 +40,7 @@ def _mock_market_context() -> dict[str, Any]:
         "fed_funds_rate": _m(5.25),
         "oil_wti": _m(75.0),
         "usd_index": _m(100.0),
-        "yield_curve_spread": 0.20,
+        "yield_curve_spread": _m(0.20),
         "cpi_yoy": _m(0.032),
         "context_generated_at": "2025-01-10T12:00:00Z",
     }

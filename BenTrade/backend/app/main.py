@@ -34,6 +34,7 @@ from app.api.routes_workbench import router as workbench_router
 from app.api.routes_breadth import router as breadth_router
 from app.api.routes_cross_asset_macro import router as cross_asset_macro_router
 from app.api.routes_flows_positioning import router as flows_positioning_router
+from app.api.routes_liquidity_conditions import router as liquidity_conditions_router
 from app.api.routes_news_sentiment import router as news_sentiment_router
 from app.api.routes_volatility_options import router as volatility_options_router
 from app.clients.finnhub_client import FinnhubClient
@@ -75,6 +76,8 @@ from app.services.cross_asset_macro_data_provider import CrossAssetMacroDataProv
 from app.services.cross_asset_macro_service import CrossAssetMacroService
 from app.services.flows_positioning_data_provider import FlowsPositioningDataProvider
 from app.services.flows_positioning_service import FlowsPositioningService
+from app.services.liquidity_conditions_data_provider import LiquidityConditionsDataProvider
+from app.services.liquidity_conditions_service import LiquidityConditionsService
 from app.services.news_sentiment_service import NewsSentimentService
 from app.services.market_context_service import MarketContextService
 from app.services.volatility_options_data_provider import VolatilityOptionsDataProvider
@@ -309,6 +312,15 @@ def create_app() -> FastAPI:
     )
     app.state.flows_positioning_service = flows_positioning_service
 
+    liquidity_conditions_data_provider = LiquidityConditionsDataProvider(
+        market_context_service=market_context_service,
+    )
+    liquidity_conditions_service = LiquidityConditionsService(
+        data_provider=liquidity_conditions_data_provider,
+        cache=cache,
+    )
+    app.state.liquidity_conditions_service = liquidity_conditions_service
+
     app.state.settings = settings
     app.state.backend_dir = backend_dir
     app.state.frontend_dir = frontend_dir
@@ -342,6 +354,7 @@ def create_app() -> FastAPI:
     app.include_router(volatility_options_router)
     app.include_router(cross_asset_macro_router)
     app.include_router(flows_positioning_router)
+    app.include_router(liquidity_conditions_router)
     app.include_router(snapshots_router)
     app.include_router(dev_router)
     app.include_router(frontend_router)

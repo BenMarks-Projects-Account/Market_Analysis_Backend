@@ -217,9 +217,26 @@ class MarketContextService:
             )
 
             # Derived: yield curve spread
-            yield_spread = None
+            yield_spread_val = None
             if ten_year["value"] is not None and two_year["value"] is not None:
-                yield_spread = round(ten_year["value"] - two_year["value"], 3)
+                yield_spread_val = round(ten_year["value"] - two_year["value"], 3)
+
+            # Wrap in metric envelope for consistent downstream handling.
+            # Source = "derived" since it's computed from 10Y - 2Y.
+            # Freshness inherits from the stalest input.
+            _input_freshness = [ten_year.get("freshness"), two_year.get("freshness")]
+            if "delayed" in _input_freshness:
+                _spread_freshness = "delayed"
+            elif "eod" in _input_freshness:
+                _spread_freshness = "eod"
+            else:
+                _spread_freshness = ten_year.get("freshness", "delayed")
+            yield_spread = _metric(
+                yield_spread_val,
+                source="derived (10Y-2Y)",
+                is_intraday=(_spread_freshness == "intraday"),
+                observation_date=ten_year.get("observation_date"),
+            )
 
             # CPI is monthly and slow-changing — fetch via FRED raw
             cpi_yoy = await self._compute_cpi_yoy()
@@ -303,7 +320,7 @@ class MarketContextService:
             return m["value"]
 
         freshness = {}
-        for key in ("vix", "ten_year_yield", "two_year_yield", "fed_funds_rate", "oil_wti", "usd_index", "cpi_yoy"):
+        for key in ("vix", "ten_year_yield", "two_year_yield", "fed_funds_rate", "oil_wti", "usd_index", "yield_curve_spread", "cpi_yoy"):
             m = ctx.get(key)
             if m:
                 freshness[key] = {
@@ -323,7 +340,7 @@ class MarketContextService:
             "fed_funds_rate": _val("fed_funds_rate"),
             "oil_wti": _val("oil_wti"),
             "usd_index": _val("usd_index"),
-            "yield_curve_spread": ctx.get("yield_curve_spread"),
+            "yield_curve_spread": _val("yield_curve_spread"),
             "cpi_yoy": _val("cpi_yoy"),
             "notes": notes,
             "_freshness": freshness,

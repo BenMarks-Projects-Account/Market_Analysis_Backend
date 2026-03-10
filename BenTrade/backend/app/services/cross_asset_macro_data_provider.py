@@ -33,11 +33,19 @@ _FRED_IG_SPREAD = "BAMLC0A0CM"        # ICE BofA US Corp IG OAS
 _FRED_HY_SPREAD = "BAMLH0A0HYM2"     # ICE BofA US HY OAS
 
 
-def _extract_value(metric: dict[str, Any] | None) -> float | None:
-    """Extract the numeric value from a MarketContextService metric envelope."""
+def _extract_value(metric: dict[str, Any] | float | int | None) -> float | None:
+    """Extract the numeric value from a MarketContextService metric envelope.
+
+    Handles both dict envelopes ({value, source, freshness, ...}) and raw
+    scalars for robustness.
+    """
     if metric is None:
         return None
-    return metric.get("value")
+    if isinstance(metric, (int, float)):
+        return float(metric)
+    if isinstance(metric, dict):
+        return metric.get("value")
+    return None
 
 
 class CrossAssetMacroDataProvider:
@@ -117,7 +125,7 @@ class CrossAssetMacroDataProvider:
         vix = _extract_value(market_ctx.get("vix"))
         oil = _extract_value(market_ctx.get("oil_wti"))
         usd = _extract_value(market_ctx.get("usd_index"))
-        yield_spread = market_ctx.get("yield_curve_spread")  # already a float
+        yield_spread = _extract_value(market_ctx.get("yield_curve_spread"))
         cpi_yoy = _extract_value(market_ctx.get("cpi_yoy"))
 
         # Extract FRED observation values

@@ -2729,3 +2729,322 @@ def analyze_flows_positioning(
             f"Local model endpoint unavailable at {model_url}: {last_error}"
         ) from last_error
     raise RuntimeError(f"Flows positioning model analysis failed: {last_error}")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# LIQUIDITY & FINANCIAL CONDITIONS
+# ═══════════════════════════════════════════════════════════════════════
+
+_LIQUIDITY_CONDITIONS_EXCLUDED_FIELDS = [
+    "score",
+    "label",
+    "short_label",
+    "summary",
+    "trader_takeaway",
+    "positive_contributors",
+    "negative_contributors",
+    "conflicting_signals",
+    "confidence_score",
+    "signal_quality",
+    "support_vs_stress",
+]
+
+
+def _extract_liquidity_conditions_raw_evidence(engine_result: dict[str, Any]) -> dict[str, Any]:
+    """Build raw evidence for the liquidity conditions model — NO derived scores/labels.
+
+    Includes only:
+      - raw_inputs: rates, conditions, credit, dollar, stability sub-dicts
+      - pillar_scores: the 5 numeric scores
+      - pillar_weights: how pillars are weighted
+      - warnings: data quality warnings
+      - missing_inputs: what data was unavailable
+    """
+    raw_inputs = engine_result.get("raw_inputs", {})
+    return {
+        "raw_inputs": {
+            "rates": raw_inputs.get("rates", {}),
+            "conditions": raw_inputs.get("conditions", {}),
+            "credit": raw_inputs.get("credit", {}),
+            "dollar": raw_inputs.get("dollar", {}),
+            "stability": raw_inputs.get("stability", {}),
+        },
+        "pillar_scores": engine_result.get("pillar_scores", {}),
+        "pillar_weights": engine_result.get("pillar_weights", {}),
+        "warnings": engine_result.get("warnings", []),
+        "missing_inputs": engine_result.get("missing_inputs", []),
+    }
+
+
+def _coerce_liquidity_conditions_model_output(candidate: Any) -> dict[str, Any] | None:
+    """Normalize LLM liquidity & conditions analysis output into a consistent schema."""
+    if not isinstance(candidate, dict):
+        return None
+
+    label = candidate.get("label")
+    score = candidate.get("score")
+    confidence = candidate.get("confidence")
+    summary = candidate.get("summary")
+
+    if label is None or score is None or summary is None:
+        return None
+
+    try:
+        score = max(0.0, min(100.0, float(score)))
+    except (TypeError, ValueError):
+        return None
+
+    try:
+        confidence = max(0.0, min(1.0, float(confidence) if confidence is not None else 0.5))
+    except (TypeError, ValueError):
+        confidence = 0.5
+
+    result: dict[str, Any] = {
+        "label": str(label).strip().upper(),
+        "score": round(score, 1),
+        "confidence": round(confidence, 2),
+        "summary": str(summary).strip(),
+    }
+
+    # Tone
+    tone = candidate.get("tone")
+    result["tone"] = str(tone).strip().lower() if tone else "neutral"
+
+    # Pillar interpretation
+    pi = candidate.get("pillar_interpretation")
+    if isinstance(pi, dict):
+        result["pillar_interpretation"] = {
+            k: str(v).strip() if isinstance(v, str) else v
+            for k, v in pi.items()
+        }
+    else:
+        result["pillar_interpretation"] = {}
+
+    # Liquidity drivers
+    ld = candidate.get("liquidity_drivers")
+    if isinstance(ld, dict):
+        result["liquidity_drivers"] = {
+            "supportive_factors": _coerce_string_list(ld.get("supportive_factors")) or [],
+            "restrictive_factors": _coerce_string_list(ld.get("restrictive_factors")) or [],
+            "latent_stress_signals": _coerce_string_list(ld.get("latent_stress_signals")) or [],
+        }
+    else:
+        result["liquidity_drivers"] = {
+            "supportive_factors": [],
+            "restrictive_factors": [],
+            "latent_stress_signals": [],
+        }
+
+    # Score drivers
+    sd = candidate.get("score_drivers")
+    if isinstance(sd, dict):
+        result["score_drivers"] = {
+            "primary_driver": str(sd.get("primary_driver", "")).strip(),
+            "secondary_drivers": _coerce_string_list(sd.get("secondary_drivers")) or [],
+        }
+    else:
+        result["score_drivers"] = {"primary_driver": "", "secondary_drivers": []}
+
+    # Market implications
+    mi = candidate.get("market_implications")
+    if isinstance(mi, dict):
+        result["market_implications"] = {
+            "risk_asset_outlook": str(mi.get("risk_asset_outlook", "")).strip(),
+            "credit_conditions": str(mi.get("credit_conditions", "")).strip(),
+            "funding_assessment": str(mi.get("funding_assessment", "")).strip(),
+            "position_sizing": str(mi.get("position_sizing", "")).strip(),
+            "strategy_recommendation": str(mi.get("strategy_recommendation", "")).strip(),
+        }
+    else:
+        result["market_implications"] = {}
+
+    result["uncertainty_flags"] = _coerce_string_list(candidate.get("uncertainty_flags")) or []
+
+    ta = candidate.get("trader_takeaway")
+    result["trader_takeaway"] = str(ta).strip() if ta else ""
+
+    return result
+
+
+def analyze_liquidity_conditions(
+    *,
+    engine_result: dict[str, Any],
+    model_url: str | None = None,
+    retries: int = 0,
+    timeout: int = 180,
+) -> dict[str, Any]:
+    """Run LLM-based liquidity & conditions analysis using ONLY raw engine inputs.
+
+    The model receives raw rates/credit/dollar/conditions data and pillar scores.
+    It does NOT receive the composite label, summary, or trader takeaway
+    to prevent anchoring.
+
+    Returns a dict matching the Liquidity Conditions model schema.
+    """
+    if model_url is None:
+        from app.services.model_router import get_model_endpoint
+        model_url = get_model_endpoint()
+    import requests as _requests
+
+    _log = logging.getLogger("bentrade.model_analysis")
+
+    raw_evidence = _extract_liquidity_conditions_raw_evidence(engine_result)
+
+    pillar_scores = raw_evidence.get("pillar_scores", {})
+    _log.info(
+        "[MODEL_LIQ_COND] input_mode=raw_only "
+        "pillar_scores=%s excluded_derived=%s warnings=%d missing=%d",
+        pillar_scores,
+        _LIQUIDITY_CONDITIONS_EXCLUDED_FIELDS,
+        len(raw_evidence.get("warnings", [])),
+        len(raw_evidence.get("missing_inputs", [])),
+    )
+
+    prompt = (
+        "You are the BenTrade Liquidity & Financial Conditions Analyst. Analyze the supplied "
+        "rates, credit, dollar, and conditions data and return ONLY valid JSON matching the "
+        "required schema.\n\n"
+        "Your job: Determine whether current liquidity conditions and financial market "
+        "plumbing are supportive, neutral, or restrictive for risk assets.\n\n"
+        "REQUIRED JSON SCHEMA:\n"
+        "{\n"
+        '  "label": "STRONGLY SUPPORTIVE|SUPPORTIVE|MIXED|TIGHTENING|RESTRICTIVE|STRESS",\n'
+        '  "score": <number 0-100>,\n'
+        '  "confidence": <number 0.0-1.0>,\n'
+        '  "tone": "<supportive|cautious|neutral|concerned|alarmed>",\n'
+        '  "summary": "<2-3 sentence liquidity conditions assessment>",\n'
+        '  "pillar_interpretation": {\n'
+        '    "rates_policy_pressure": "<interpretation>",\n'
+        '    "financial_conditions_tightness": "<interpretation>",\n'
+        '    "credit_funding_stress": "<interpretation>",\n'
+        '    "dollar_global_liquidity": "<interpretation>",\n'
+        '    "liquidity_stability_fragility": "<interpretation>"\n'
+        "  },\n"
+        '  "liquidity_drivers": {\n'
+        '    "supportive_factors": ["<factor1>", ...],\n'
+        '    "restrictive_factors": ["<factor1>", ...],\n'
+        '    "latent_stress_signals": ["<factor1>", ...]\n'
+        "  },\n"
+        '  "score_drivers": {\n'
+        '    "primary_driver": "<what is driving the score most>",\n'
+        '    "secondary_drivers": ["<driver1>", ...]\n'
+        "  },\n"
+        '  "market_implications": {\n'
+        '    "risk_asset_outlook": "<supportive|neutral|headwind|hostile>",\n'
+        '    "credit_conditions": "<easy|neutral|tightening|stressed>",\n'
+        '    "funding_assessment": "<stable|manageable|strained|stressed>",\n'
+        '    "position_sizing": "<full|reduced|minimal|defensive>",\n'
+        '    "strategy_recommendation": "<specific guidance>"\n'
+        "  },\n"
+        '  "uncertainty_flags": ["<flag1>", ...],\n'
+        '  "trader_takeaway": "<one actionable paragraph>"\n'
+        "}\n\n"
+        "SCORING GUIDE:\n"
+        "  85-100 = Liquidity Strongly Supportive — conditions ideal for risk\n"
+        "  70-84  = Supportive Conditions — favorable rates/credit/funding\n"
+        "  55-69  = Mixed but Manageable — some tightening but tradable\n"
+        "  45-54  = Neutral / Tightening — headwinds emerging, caution warranted\n"
+        "  30-44  = Restrictive Conditions — active tightening, reduce exposure\n"
+        "  0-29   = Liquidity Stress — hostile conditions, defensive posture\n\n"
+        "IMPORTANT: Base your analysis on the RAW DATA provided. Do not invent data points.\n\n"
+        "DATA SOURCE AWARENESS:\n"
+        "  - Rate data (2Y, 10Y, Fed Funds, yield curve) is DIRECT from FRED.\n"
+        "  - Credit spreads (IG, HY OAS) are DIRECT from FRED when available.\n"
+        "  - USD index is DIRECT from FRED.\n"
+        "  - VIX is from Tradier/Finnhub/FRED waterfall.\n"
+        "  - Financial conditions index is a PROXY composite, NOT a true FCI.\n"
+        "  - Funding stress is a PROXY from VIX + fed funds heuristic.\n"
+        "  - If data is missing, reflect that as lower confidence.\n"
+        "  - NEVER claim precision that the data cannot support."
+    )
+
+    user_data_str = json.dumps(raw_evidence, ensure_ascii=False, indent=None)
+
+    for forbidden in _LIQUIDITY_CONDITIONS_EXCLUDED_FIELDS:
+        if f'"{forbidden}"' in user_data_str:
+            _log.error(
+                "[MODEL_LIQ_COND] LEAK DETECTED: derived field '%s' in user_data",
+                forbidden,
+            )
+
+    _log.debug("[MODEL_LIQ_COND] user_data_snapshot=%s", user_data_str[:2000])
+
+    payload = {
+        "messages": [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_data_str},
+        ],
+        "max_tokens": 4000,
+        "temperature": 0.0,
+        "stream": False,
+    }
+
+    last_error: Exception | None = None
+    attempt = 0
+    while attempt <= int(max(retries, 0)):
+        attempt += 1
+        try:
+            _log.info("[MODEL_LIQ_COND] POST %s (attempt %d, timeout=%ds)", model_url, attempt, timeout)
+            response = _requests.post(model_url, json=payload, timeout=timeout)
+            _log.info(
+                "[MODEL_LIQ_COND] response HTTP %d (%d bytes, %.1fs)",
+                response.status_code, len(response.content), response.elapsed.total_seconds(),
+            )
+            response.raise_for_status()
+
+            response_json = None
+            try:
+                response_json = response.json()
+            except Exception:
+                response_json = None
+
+            assistant_text = None
+            if isinstance(response_json, dict):
+                choices = response_json.get("choices") or []
+                if choices and isinstance(choices, list) and isinstance(choices[0], dict):
+                    first = choices[0]
+                    message = first.get("message")
+                    if isinstance(message, dict) and "content" in message:
+                        assistant_text = message.get("content")
+                    elif "text" in first:
+                        assistant_text = first.get("text")
+            if assistant_text is None:
+                assistant_text = getattr(response, "text", "")
+
+            from common.model_sanitize import had_think_tags
+            if had_think_tags(assistant_text):
+                _log.info("[MODEL_LIQ_COND] <think> content detected and stripped (attempt %d)", attempt)
+            assistant_text = _strip_think_tags(assistant_text)
+
+            from common.json_repair import extract_and_repair_json
+            parsed, method = extract_and_repair_json(assistant_text)
+            if parsed is None:
+                parsed = _extract_json_payload(assistant_text)
+                method = "legacy_fallback"
+
+            if method:
+                _log.info("[MODEL_LIQ_COND] JSON extracted via method=%s", method)
+
+            normalized = _coerce_liquidity_conditions_model_output(parsed)
+            if normalized is None:
+                raise ValueError("Model returned invalid liquidity conditions analysis payload")
+
+            normalized["_trace"] = {
+                "input_mode": "raw_only",
+                "pillar_scores_provided": pillar_scores,
+                "excluded_derived_fields": _LIQUIDITY_CONDITIONS_EXCLUDED_FIELDS,
+                "json_parse_method": method,
+            }
+
+            return normalized
+        except RequestException as exc:
+            last_error = exc
+        except Exception as exc:
+            last_error = exc
+            break
+
+    if isinstance(last_error, RequestException):
+        raise LocalModelUnavailableError(
+            f"Local model endpoint unavailable at {model_url}: {last_error}"
+        ) from last_error
+    raise RuntimeError(f"Liquidity conditions model analysis failed: {last_error}")
