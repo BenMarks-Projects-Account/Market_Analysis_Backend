@@ -2,7 +2,7 @@
 <div class="view-wrap mod-page">
 
   <!-- ── Module Banner ──────────────────────────────────────────── -->
-  <div class="mod-banner accent-volatility">
+  <div class="mod-banner">
     <div class="mod-banner-left">
       <div class="mod-banner-breadcrumb">BenTrade · Market Picture</div>
       <div class="mod-banner-title">Volatility &amp; Options Structure</div>
@@ -11,7 +11,7 @@
     <div class="mod-banner-right">
       <span class="mod-banner-tag">Module 3 of 6</span>
       <span class="mod-last-updated" id="volLastUpdated">Updated: —</span>
-      <button class="mod-refresh-btn" id="volRefreshBtn" title="Refresh data">⟳</button>
+      <button class="mod-refresh-btn" id="volRefreshBtn" title="Refresh data">Refresh</button>
     </div>
   </div>
 
@@ -98,6 +98,39 @@
           Confidence: <span id="volConfidence">—</span>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ══ AI MODEL ANALYSIS ═════════════════════════════════════ -->
+  <div class="mod-card mod-model-card" style="margin-bottom:14px;">
+    <div class="mod-card-header">
+      <span class="mod-card-title">AI Model Analysis</span>
+      <span class="mod-chip mod-chip-neutral" style="font-size:10px;padding:2px 8px;">LLM</span>
+    </div>
+    <div class="mod-card-body">
+      <div class="mod-model-label" id="volModelLabel">—</div>
+      <div class="mod-score-row" style="display:flex;align-items:center;gap:12px;margin:6px 0;">
+        <span style="font-size:11px;opacity:0.6;">Model Score</span>
+        <span class="mod-hero-score" id="volModelScore" style="font-size:28px;">—</span>
+      </div>
+      <div class="mod-model-summary" id="volModelSummary">
+        <div class="mod-model-cta" id="volModelCta">
+          <p style="opacity:0.6;font-size:12px;margin:0 0 10px;">Model analysis has not been run yet.</p>
+          <button class="mod-action-btn" id="volRunModelBtn" type="button">Run Model Analysis</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ MODEL DETAILS ROW (hidden until model runs) ══════════ -->
+  <div class="mod-grid-2" id="volModelDetailsRow" style="display:none;">
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Model — Pillar Analysis</span></div>
+      <div class="mod-card-body" id="volModelPillars"></div>
+    </div>
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Model — Strategy Implications</span></div>
+      <div class="mod-card-body" id="volModelImplications"></div>
     </div>
   </div>
 
@@ -232,25 +265,5 @@
   </div>
 
   <!-- ══ MODEL ANALYSIS ══════════════════════════════════════ -->
-  <div class="mod-card mod-model-card" style="margin-bottom:14px;">
-    <div class="mod-card-header">
-      <span class="mod-card-title">AI Model Analysis</span>
-      <span class="mod-chip" id="volModelLabel">Not Run</span>
-    </div>
-    <div class="mod-card-body">
-      <div class="mod-summary" id="volModelSummary">Click below to run AI analysis on current volatility conditions.</div>
-      <div style="text-align:center;margin:12px 0;">
-        <button class="mod-action-btn" id="volRunModelBtn">Run Model Analysis</button>
-      </div>
-      <div id="volModelDetailsRow" style="display:none;">
-        <div class="mod-divider"></div>
-        <div class="mod-section-title">Pillar Analysis</div>
-        <div id="volModelPillars" class="mod-summary">—</div>
-        <div class="mod-divider"></div>
-        <div class="mod-section-title">Strategy Implications</div>
-        <div id="volModelImplications" class="mod-summary">—</div>
-      </div>
-    </div>
-  </div>
 
 </div>

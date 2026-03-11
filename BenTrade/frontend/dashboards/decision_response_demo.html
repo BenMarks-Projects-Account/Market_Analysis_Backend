@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BenTrade — Decision Response Card Demo</title>
+
+<!-- BenTrade core styles -->
+<link rel="stylesheet" href="../assets/css/app.css">
+<link rel="stylesheet" href="../assets/css/module-dashboard.css">
+<link rel="stylesheet" href="../assets/css/decision-response-card.css">
+
+<style>
+  body {
+    background: var(--bg, #02040a);
+    color: var(--text, #d7fbff);
+    font-family: 'Inter', -apple-system, sans-serif;
+    margin: 0;
+    padding: 24px;
+  }
+  .demo-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.10em;
+    color: var(--cyan, #00eaff);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .demo-subtitle {
+    font-size: 12px;
+    color: var(--muted, #93a7b6);
+    margin-bottom: 24px;
+  }
+  .demo-section {
+    margin-bottom: 32px;
+  }
+  .demo-label {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--warn, #f4c85f);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    opacity: 0.8;
+  }
+  .demo-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 20px;
+  }
+</style>
+</head>
+<body>
+
+<div class="demo-title">Decision Response Card — Demo</div>
+<div class="demo-subtitle">
+  All five decision states rendered with the same card component.
+  Each card uses the Final Decision Response Contract v1 schema.
+</div>
+
+<div class="demo-grid">
+  <!-- Cards will be injected here by JS -->
+  <div class="demo-section" id="card-approve"></div>
+  <div class="demo-section" id="card-cautious"></div>
+  <div class="demo-section" id="card-watchlist"></div>
+  <div class="demo-section" id="card-reject"></div>
+  <div class="demo-section" id="card-insufficient"></div>
+</div>
+
+<!-- Decision Response Card renderer -->
+<script src="../assets/js/ui/decision_response_card.js"></script>
+
+<script>
+(function () {
+  'use strict';
+
+  // ── Sample responses ──────────────────────────────────────────────
+
+  var approveResponse = {
+    response_version: '1.0',
+    generated_at: new Date().toISOString(),
+    status: 'complete',
+    decision: 'approve',
+    decision_label: 'Approve',
+    conviction: 'high',
+    market_alignment: 'aligned',
+    portfolio_fit: 'good',
+    policy_alignment: 'clear',
+    event_risk: 'low',
+    time_horizon: '1-5 DTE',
+    summary: 'SPY 560/555 put credit spread shows strong alignment across all factors. Market regime supports bullish premium selling, portfolio has room for additional short delta, and policy checks are clear. High probability setup with favorable risk/reward at current IV levels.',
+    reasons_for: [
+      'Market regime aligned — bullish trend with moderate volatility',
+      'Portfolio has capacity for additional short delta exposure',
+      'IV rank at 0.62 favors premium selling strategies',
+      'Short strike below 1-sigma expected move',
+      'Clean policy evaluation — no blocking or restrictive checks',
+    ],
+    reasons_against: [
+      'DTE is short (3 days) — limited time for recovery if tested',
+    ],
+    key_risks: [
+      'Overnight gap risk on earnings in correlated sectors',
+      'Short DTE amplifies gamma risk near expiration',
+    ],
+    size_guidance: 'normal',
+    invalidation_notes: [
+      'Invalidate if SPY breaks below 558 (approaching short strike)',
+      'Close or roll if unrealized loss exceeds 1.5x credit received',
+    ],
+    monitoring_notes: [
+      'Monitor VIX for sudden spike above 22',
+      'Watch for intraday reversal patterns after 2 PM ET',
+    ],
+    warning_flags: [],
+    evidence: { symbol: 'SPY', strategy: 'put_credit_spread' },
+    metadata: { source: 'model', response_version: '1.0' },
+  };
+
+  var cautiousResponse = {
+    response_version: '1.0',
+    generated_at: new Date().toISOString(),
+    status: 'partial',
+    decision: 'cautious_approve',
+    decision_label: 'Cautious Approve',
+    conviction: 'moderate',
+    market_alignment: 'neutral',
+    portfolio_fit: 'acceptable',
+    policy_alignment: 'conditional',
+    event_risk: 'moderate',
+    time_horizon: '7-14 DTE',
+    summary: 'QQQ 480/475 put credit spread has acceptable fundamentals but faces mixed market signals and an upcoming FOMC meeting within the trade window. Proceed with reduced size.',
+    reasons_for: [
+      'IV rank elevated at 0.55 — premium is rich',
+      'Short strike well below support cluster at 482',
+      'Portfolio has room but is approaching concentration limit',
+    ],
+    reasons_against: [
+      'FOMC meeting within 3 days — event risk elevated',
+      'Market regime shows mixed signals (trend vs momentum divergence)',
+      'Portfolio already has 2 short premium positions in tech sector',
+    ],
+    key_risks: [
+      'FOMC rate decision could trigger 2%+ move',
+      'Tech sector concentration approaching policy limit',
+      'Conflicting trend and momentum signals in QQQ',
+    ],
+    size_guidance: 'reduced',
+    invalidation_notes: [
+      'Invalidate if FOMC statement is unexpectedly hawkish',
+      'Close pre-FOMC if unrealized loss exceeds 50% of max',
+    ],
+    monitoring_notes: [
+      'Review position sizing after FOMC',
+      'Monitor sector correlation with existing TQQQ position',
+    ],
+    warning_flags: [
+      'event_risk_within_window',
+      'portfolio_sector_concentration_elevated',
+    ],
+    evidence: { symbol: 'QQQ', strategy: 'put_credit_spread' },
+    metadata: { source: 'model', response_version: '1.0' },
+  };
+
+  var watchlistResponse = {
+    response_version: '1.0',
+    generated_at: new Date().toISOString(),
+    status: 'complete',
+    decision: 'watchlist',
+    decision_label: 'Watchlist',
+    conviction: 'low',
+    market_alignment: 'neutral',
+    portfolio_fit: 'good',
+    policy_alignment: 'clear',
+    event_risk: 'low',
+    time_horizon: '14-21 DTE',
+    summary: 'IWM 210/205 put credit spread is structurally sound but IV rank is too low for premium entry. Add to watchlist and revisit if IV expands above 0.40.',
+    reasons_for: [
+      'Portfolio has no small-cap exposure — diversification benefit',
+      'Support level at 208 is technically validated',
+    ],
+    reasons_against: [
+      'IV rank at 0.22 — insufficient premium for risk taken',
+      'Credit received would be below minimum threshold',
+    ],
+    key_risks: [
+      'Small-cap rotation risk if macro sentiment shifts',
+    ],
+    size_guidance: 'none',
+    invalidation_notes: [],
+    monitoring_notes: [
+      'Revisit if IV rank rises above 0.40',
+      'Watch for Russell rotation signals in breadth data',
+    ],
+    warning_flags: [],
+    evidence: { symbol: 'IWM', strategy: 'put_credit_spread' },
+    metadata: { source: 'manual', response_version: '1.0' },
+  };
+
+  var rejectResponse = {
+    response_version: '1.0',
+    generated_at: new Date().toISOString(),
+    status: 'partial',
+    decision: 'reject',
+    decision_label: 'Reject',
+    conviction: 'high',
+    market_alignment: 'misaligned',
+    portfolio_fit: 'poor',
+    policy_alignment: 'blocked',
+    event_risk: 'high',
+    time_horizon: '1-5 DTE',
+    summary: 'DIA 400/395 put credit spread is rejected due to multiple blocking factors: bearish market regime conflicts with bullish strategy, portfolio is concentrated in Dow components, and CPI release is within 24 hours.',
+    reasons_for: [],
+    reasons_against: [
+      'Market regime is bearish — conflicts with short put strategy',
+      'Portfolio already overweight in Dow-correlated positions',
+      'CPI release tomorrow — extreme event risk',
+      'Policy evaluation triggered blocking checks',
+    ],
+    key_risks: [
+      'Bearish regime with high conviction — trend continuation likely',
+      'CPI surprise could trigger 3%+ drawdown',
+      'Portfolio max-loss would exceed risk budget if assigned',
+    ],
+    size_guidance: 'none',
+    invalidation_notes: [
+      'Do not re-enter until market regime shifts to neutral or bullish',
+      'Requires portfolio de-risking before Dow-correlated entries',
+    ],
+    monitoring_notes: [],
+    warning_flags: [
+      'market_regime_conflict',
+      'portfolio_concentration_blocking',
+      'event_risk_critical',
+      'policy_block_triggered',
+    ],
+    evidence: { symbol: 'DIA', strategy: 'put_credit_spread' },
+    metadata: { source: 'model', response_version: '1.0' },
+  };
+
+  var insufficientResponse = {
+    response_version: '1.0',
+    generated_at: new Date().toISOString(),
+    status: 'insufficient_data',
+    decision: 'insufficient_data',
+    decision_label: 'Insufficient Data',
+    conviction: 'none',
+    market_alignment: 'unknown',
+    portfolio_fit: 'unknown',
+    policy_alignment: 'unknown',
+    event_risk: 'unknown',
+    time_horizon: '',
+    summary: 'Cannot render a decision — candidate data is missing and market context is unavailable.',
+    reasons_for: [],
+    reasons_against: [],
+    key_risks: [],
+    size_guidance: 'none',
+    invalidation_notes: [],
+    monitoring_notes: [],
+    warning_flags: [
+      'candidate_not_provided',
+      'market_context_unavailable',
+      'placeholder_response',
+    ],
+    evidence: {},
+    metadata: { source: 'placeholder', response_version: '1.0' },
+  };
+
+  // ── Mount cards ───────────────────────────────────────────────────
+
+  var Card = window.BenTradeDecisionCard;
+
+  Card.mount(approveResponse,      document.getElementById('card-approve'));
+  Card.mount(cautiousResponse,     document.getElementById('card-cautious'));
+  Card.mount(watchlistResponse,    document.getElementById('card-watchlist'));
+  Card.mount(rejectResponse,       document.getElementById('card-reject'));
+  Card.mount(insufficientResponse, document.getElementById('card-insufficient'));
+})();
+</script>
+</body>
+</html>

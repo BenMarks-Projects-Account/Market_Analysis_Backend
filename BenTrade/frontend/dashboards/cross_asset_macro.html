@@ -2,7 +2,7 @@
 <div class="view-wrap mod-page">
 
   <!-- ── Module Banner ──────────────────────────────────────────── -->
-  <div class="mod-banner accent-macro">
+  <div class="mod-banner">
     <div class="mod-banner-left">
       <div class="mod-banner-breadcrumb">BenTrade · Market Picture</div>
       <div class="mod-banner-title">Cross-Asset / Macro Confirmation</div>
@@ -11,7 +11,7 @@
     <div class="mod-banner-right">
       <span class="mod-banner-tag">Module 4 of 6</span>
       <span class="mod-last-updated" id="caLastUpdated">Updated: —</span>
-      <button class="mod-refresh-btn" id="caRefreshBtn" title="Refresh cross-asset data">↻</button>
+      <button class="mod-refresh-btn" id="caRefreshBtn" title="Refresh cross-asset data">Refresh</button>
     </div>
   </div>
 
@@ -78,6 +78,37 @@
           <span class="mod-signal-chip" id="caConfidenceChip">—</span>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ══ AI MODEL ANALYSIS ═══════════════════════════════════ -->
+  <div class="mod-card mod-model-card" style="margin-bottom:14px;">
+    <div class="mod-card-header">
+      <span class="mod-card-title">AI Model Analysis</span>
+      <span class="mod-chip mod-chip-llm" title="Powered by local LLM">LLM</span>
+    </div>
+    <div class="mod-card-body">
+      <div class="mod-model-label" id="caModelLabel">—</div>
+      <div class="mod-score-row">
+        <span class="mod-hero-score" id="caModelScore">—</span>
+      </div>
+      <div class="mod-model-summary" id="caModelSummary">
+        <div class="mod-model-cta" id="caModelCta">
+          Run the AI model for a deeper cross-asset analysis.
+          <button class="mod-action-btn" id="caRunModelBtn" type="button">Run Model Analysis</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mod-grid-2" id="caModelDetailsRow" style="display:none;">
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Model — Pillar Analysis</span></div>
+      <div class="mod-card-body" id="caModelPillars"></div>
+    </div>
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Model — Trading Implications</span></div>
+      <div class="mod-card-body" id="caModelImplications"></div>
     </div>
   </div>
 
@@ -200,33 +231,7 @@
     </div>
   </div>
 
-  <!-- ══ AI MODEL ANALYSIS ═══════════════════════════════════ -->
-  <div class="mod-card mod-model-card" style="margin-bottom:14px;">
-    <div class="mod-card-header"><span class="mod-card-title">AI Model Analysis</span></div>
-    <div class="mod-card-body">
-      <div class="mod-model-label" id="caModelLabel">—</div>
-      <div style="text-align:center;">
-        <span class="mod-hero-score" id="caModelScore" style="font-size:28px;">—</span>
-      </div>
-      <div class="mod-model-summary" id="caModelSummary">
-        <div class="mod-model-cta" id="caModelCta">
-          Run the AI model for a deeper cross-asset analysis.
-          <button class="mod-refresh-btn" id="caRunModelBtn" type="button">Analyze with Model</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="mod-grid-2" id="caModelDetailsRow" style="display:none;">
-    <div class="mod-card">
-      <div class="mod-card-header"><span class="mod-card-title">Model — Pillar Analysis</span></div>
-      <div class="mod-card-body" id="caModelPillars"></div>
-    </div>
-    <div class="mod-card">
-      <div class="mod-card-header"><span class="mod-card-title">Model — Trading Implications</span></div>
-      <div class="mod-card-body" id="caModelImplications"></div>
-    </div>
-  </div>
+  <!-- Model analysis section moved to after top row -->
 
   <!-- ══ BOTTOM DETAIL ═══════════════════════════════════════ -->
   <div class="mod-card" style="margin-bottom:14px;">

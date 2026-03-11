@@ -1631,6 +1631,19 @@ def compute_liquidity_conditions_scores(
     sig_quality = _signal_quality(confidence)
     explanation = _build_composite_explanation(composite, full_label, pillars, confidence)
 
+    # ── Diagnostic trace ─────────────────────────────────────────
+    active = [pn for pn, pd in pillars.items() if pd.get("score") is not None]
+    inactive = [pn for pn, pd in pillars.items() if pd.get("score") is None]
+    missing_subs = sum(p.get("missing_count", 0) for p in pillars.values())
+    logger.info(
+        "event=liquidity_composite "
+        "composite=%.2f label=%s confidence=%.1f signal_quality=%s "
+        "active_pillars=%d/%d inactive=%s missing_submetrics=%d penalties=%d",
+        composite, short_label, confidence, sig_quality,
+        len(active), len(pillars), inactive or "none",
+        missing_subs, len(confidence_penalties),
+    )
+
     # ── Aggregate warnings and missing inputs ────────────────────
     all_warnings: list[str] = []
     all_missing: list[str] = []

@@ -85,6 +85,7 @@ window.BenTradePages.initFlowsPositioning = function initFlowsPositioning(rootEl
   var modelScore       = scope.querySelector('#fpModelScore');
   var modelSummary     = scope.querySelector('#fpModelSummary');
   var modelPillars     = scope.querySelector('#fpModelPillars');
+  var modelImplications = scope.querySelector('#fpModelImplications');
 
   // ── Utilities ─────────────────────────────────────────────────
 
@@ -147,6 +148,11 @@ window.BenTradePages.initFlowsPositioning = function initFlowsPositioning(rootEl
   function fmtVal(val, suffix) {
     if (val == null) return '—';
     return Number(val).toFixed(2) + (suffix || '');
+  }
+
+  function fmtProxy(val, suffix) {
+    if (val == null) return '—';
+    return Number(val).toFixed(2) + (suffix || '') + ' \u207F'; // superscript-n as proxy marker
   }
 
   // ── Render ────────────────────────────────────────────────────
@@ -235,22 +241,22 @@ window.BenTradePages.initFlowsPositioning = function initFlowsPositioning(rootEl
     var rawFlow = (er.raw_inputs || {}).flow || {};
 
     // Pillar 1 — Positioning Pressure
-    setText(fpPutCall, fmtVal(rawPos.put_call_ratio));
-    setText(fpVIX, fmtVal(rawPos.vix_level));
-    setText(fpSystematic, fmtVal(rawPos.systematic_allocation, '%'));
-    setText(fpFuturesNet, fmtVal(rawPos.futures_net_long, '%'));
+    setText(fpPutCall, fmtProxy(rawPos.put_call_ratio));
+    setText(fpVIX, fmtVal(rawPos.vix));
+    setText(fpSystematic, fmtProxy(rawPos.systematic_allocation, '%'));
+    setText(fpFuturesNet, fmtProxy(rawPos.futures_net_long_pct, '%'));
     setBar(fpP1Bar, fpP1Score, (er.pillar_scores || {}).positioning_pressure);
 
     // Pillar 2 — Crowding / Stretch
-    setText(fpCrowding, fmtVal(rawCrowd.crowding_level));
-    setText(fpRetailBull, rawCrowd.retail_bull_pct != null ? Math.round(rawCrowd.retail_bull_pct) + '%' : '—');
-    setText(fpRetailBear, rawCrowd.retail_bear_pct != null ? Math.round(rawCrowd.retail_bear_pct) + '%' : '—');
-    setText(fpShortInterest, fmtVal(rawCrowd.short_interest));
+    setText(fpCrowding, fmtProxy(rawCrowd.crowding_level));
+    setText(fpRetailBull, rawCrowd.retail_bull_pct != null ? Math.round(rawCrowd.retail_bull_pct) + '% \u207F' : '—');
+    setText(fpRetailBear, rawCrowd.retail_bear_pct != null ? Math.round(rawCrowd.retail_bear_pct) + '% \u207F' : '—');
+    setText(fpShortInterest, fmtProxy(rawCrowd.short_interest_pct));
     setBar(fpP2Bar, fpP2Score, (er.pillar_scores || {}).crowding_stretch);
 
     // Pillar 3 — Squeeze / Unwind
     setText(fpVIXTerm, fmtVal(rawSqueeze.vix_term_structure));
-    setText(fpAsymmetry, fmtVal(rawSqueeze.positioning_asymmetry));
+    setText(fpAsymmetry, fmtProxy(rawSqueeze.positioning_asymmetry));
     setBar(fpP3Bar, fpP3Score, (er.pillar_scores || {}).squeeze_unwind_risk);
     // Squeeze note from pillar explanation
     if (fpSqueezeNote) {
@@ -259,10 +265,10 @@ window.BenTradePages.initFlowsPositioning = function initFlowsPositioning(rootEl
     }
 
     // Pillar 4 — Flow Direction & Persistence
-    setText(fpFlowDir, fmtVal(rawFlow.flow_direction));
-    setText(fpPersist5d, fmtVal(rawFlow.persistence_5d));
-    setText(fpPersist20d, fmtVal(rawFlow.persistence_20d));
-    setText(fpFollowThru, fmtVal(rawFlow.follow_through));
+    setText(fpFlowDir, fmtProxy(rawFlow.flow_direction_score));
+    setText(fpPersist5d, fmtProxy(rawFlow.flow_persistence_5d));
+    setText(fpPersist20d, fmtProxy(rawFlow.flow_persistence_20d));
+    setText(fpFollowThru, fmtProxy(rawFlow.follow_through_score));
     setBar(fpP4Bar, fpP4Score, (er.pillar_scores || {}).flow_direction_persistence);
 
     // Pillar 5 — Positioning Stability
@@ -275,15 +281,24 @@ window.BenTradePages.initFlowsPositioning = function initFlowsPositioning(rootEl
     // Data quality
     setText(confidenceScoreEl, er.confidence_score != null ? Math.round(er.confidence_score) + '/100' : '—');
 
+    // Data quality footnote — proxy indicator
+    var dqMeta = er.data_quality;
+    if (warningsEl && dqMeta) {
+      var proxyNote = '<div style="opacity:0.6;font-size:9px;margin-top:4px;border-top:1px solid rgba(255,255,255,0.1);padding-top:4px;">' +
+        '\u207F = VIX-derived proxy (' + (dqMeta.proxy_count || 0) + ' of ' +
+        ((dqMeta.proxy_count || 0) + (dqMeta.direct_count || 0)) + ' signals) &mdash; ' +
+        escapeHtml(dqMeta.phase || '') + '</div>';
+    }
+
     // Warnings
     if (warningsEl) {
       var warns = er.warnings || [];
       if (warns.length === 0) {
-        warningsEl.innerHTML = '<div style="opacity:0.5;font-size:10px;">No warnings</div>';
+        warningsEl.innerHTML = '<div style="opacity:0.5;font-size:10px;">No warnings</div>' + (proxyNote || '');
       } else {
         warningsEl.innerHTML = warns.slice(0, 10).map(function(w) {
           return '<div class="mod-warning-item" style="font-size:10px;margin-bottom:2px;">⚠ ' + escapeHtml(w) + '</div>';
-        }).join('');
+        }).join('') + (proxyNote || '');
       }
     }
 
@@ -306,31 +321,167 @@ window.BenTradePages.initFlowsPositioning = function initFlowsPositioning(rootEl
 
   // ── Model Analysis render ─────────────────────────────────────
 
+  function setModelBtnState(loading) {
+    runModelBtn = scope.querySelector('#fpRunModelBtn');
+    if (!runModelBtn) return;
+    runModelBtn.disabled = loading;
+    if (loading) {
+      runModelBtn.classList.add('btn-refreshing');
+      runModelBtn.innerHTML = '<span class="btn-spinner"></span>Analyzing…';
+    } else {
+      runModelBtn.classList.remove('btn-refreshing');
+      runModelBtn.textContent = 'Run Model Analysis';
+    }
+  }
+
+  function renderModelNotRun() {
+    if (modelSummary) {
+      modelSummary.innerHTML =
+        '<div class="mod-model-cta" id="fpModelCta">' +
+        '<p style="opacity:0.6;font-size:12px;margin:0 0 10px;">Model analysis has not been run yet.</p>' +
+        '<button class="mod-action-btn" id="fpRunModelBtn" type="button">Run Model Analysis</button>' +
+        '</div>';
+      var btn = modelSummary.querySelector('#fpRunModelBtn');
+      if (btn) btn.addEventListener('click', function() { triggerModelAnalysis(); });
+    }
+    setText(modelLabel, '—');
+    setText(modelScore, '—');
+    if (modelDetailsRow) modelDetailsRow.style.display = 'none';
+  }
+
+  function renderModelError(errMsg) {
+    console.error('[BenTrade][Flows] Model analysis error:', errMsg);
+    if (modelSummary) {
+      modelSummary.innerHTML =
+        '<div style="color:rgba(255,79,102,0.9);font-size:12px;margin-bottom:8px;">' +
+        escapeHtml(errMsg) + '</div>' +
+        '<button class="mod-action-btn" id="fpRunModelBtn" type="button">Retry Model Analysis</button>';
+      var btn = modelSummary.querySelector('#fpRunModelBtn');
+      if (btn) btn.addEventListener('click', function() { triggerModelAnalysis(); });
+    }
+    setText(modelLabel, 'Error');
+    if (modelLabel) modelLabel.style.color = 'rgba(255,79,102,0.9)';
+    setText(modelScore, '—');
+    if (modelDetailsRow) modelDetailsRow.style.display = 'none';
+  }
+
   function renderModel(model) {
     if (!model) {
-      if (modelCta) modelCta.style.display = '';
-      if (modelDetailsRow) modelDetailsRow.style.display = 'none';
+      renderModelNotRun();
       return;
     }
-    if (modelCta) modelCta.style.display = 'none';
-    if (modelDetailsRow) modelDetailsRow.style.display = '';
+    console.log('[BenTrade][Flows] Rendering model result:', model.label, model.score);
 
-    setText(modelLabel, model.label);
+    // Label & score
+    setText(modelLabel, (model.label || '—').toUpperCase());
     if (modelLabel) modelLabel.style.color = scoreColor(model.score);
-    setText(modelScore, model.score != null ? Math.round(model.score) + '/100' : '—');
+    setText(modelScore, model.score != null ? Math.round(model.score) : '—');
     if (modelScore) modelScore.style.color = scoreColor(model.score);
-    setText(modelSummary, model.summary);
 
-    // Pillar analysis
+    // Summary with confidence/drivers
+    if (modelSummary) {
+      var html = '<div style="font-size:12px;line-height:1.6;margin-bottom:10px;">' +
+        escapeHtml(model.summary || '') + '</div>';
+
+      html += '<div style="font-size:11px;opacity:0.7;margin-bottom:8px;">Confidence: ' +
+        (model.confidence != null ? (model.confidence * 100).toFixed(0) + '%' : '—') + '</div>';
+
+      var fd = model.flows_drivers || {};
+      if (fd.constructive_factors && fd.constructive_factors.length > 0) {
+        html += '<div style="margin-top:6px;"><span style="font-size:10px;opacity:0.6;">CONSTRUCTIVE</span><ul class="mod-contrib-list">';
+        fd.constructive_factors.forEach(function(f) {
+          html += '<li class="mod-contrib-item"><span class="mod-contrib-dot positive"></span>' + escapeHtml(f) + '</li>';
+        });
+        html += '</ul></div>';
+      }
+      if (fd.warning_factors && fd.warning_factors.length > 0) {
+        html += '<div style="margin-top:6px;"><span style="font-size:10px;opacity:0.6;">WARNINGS</span><ul class="mod-contrib-list">';
+        fd.warning_factors.forEach(function(f) {
+          html += '<li class="mod-contrib-item"><span class="mod-contrib-dot negative"></span>' + escapeHtml(f) + '</li>';
+        });
+        html += '</ul></div>';
+      }
+      if (fd.conflicting_factors && fd.conflicting_factors.length > 0) {
+        html += '<div style="margin-top:6px;"><span style="font-size:10px;opacity:0.6;">CONFLICTING</span><ul class="mod-contrib-list">';
+        fd.conflicting_factors.forEach(function(f) {
+          html += '<li class="mod-contrib-item"><span class="mod-contrib-dot conflict"></span>' + escapeHtml(f) + '</li>';
+        });
+        html += '</ul></div>';
+      }
+
+      if (model.trader_takeaway) {
+        html += '<div class="mod-divider"></div>' +
+          '<div style="font-size:11px;font-weight:600;margin-bottom:4px;opacity:0.6;">TRADER TAKEAWAY</div>' +
+          '<div style="font-size:12px;line-height:1.5;">' + escapeHtml(model.trader_takeaway) + '</div>';
+      }
+
+      var uf = model.uncertainty_flags || [];
+      if (uf.length > 0) {
+        html += '<div style="margin-top:8px;">';
+        uf.forEach(function(f) {
+          html += '<div style="font-size:10px;opacity:0.5;">⚠ ' + escapeHtml(f) + '</div>';
+        });
+        html += '</div>';
+      }
+
+      html += '<div style="margin-top:12px;">' +
+        '<button class="mod-action-btn" id="fpRunModelBtn" type="button">Re-run Model Analysis</button></div>';
+
+      modelSummary.innerHTML = html;
+      var btn = modelSummary.querySelector('#fpRunModelBtn');
+      if (btn) btn.addEventListener('click', function() { triggerModelAnalysis(); });
+    }
+
+    // Model detail row — pillar analysis
+    if (modelDetailsRow) modelDetailsRow.style.display = '';
     if (modelPillars) {
       var pa = model.pillar_analysis || {};
-      var html = '';
-      Object.keys(pa).forEach(function(key) {
-        html += '<div style="margin-bottom:4px;"><span style="font-weight:600;font-size:10px;">' +
-          escapeHtml(key.replace(/_/g, ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); })) +
-          ':</span> <span style="font-size:10px;">' + escapeHtml(pa[key]) + '</span></div>';
+      var pillarKeys = ['positioning_pressure', 'crowding_stretch', 'squeeze_unwind', 'flow_persistence', 'positioning_stability'];
+      var pillarLabels = {
+        positioning_pressure: 'Positioning Pressure', crowding_stretch: 'Crowding / Stretch',
+        squeeze_unwind: 'Squeeze / Unwind', flow_persistence: 'Flow Persistence',
+        positioning_stability: 'Positioning Stability'
+      };
+      var pillarsHtml = '';
+      pillarKeys.forEach(function(k) {
+        var val = pa[k];
+        if (val) {
+          pillarsHtml += '<div style="margin-bottom:8px;">' +
+            '<div style="font-size:10px;font-weight:600;opacity:0.6;text-transform:uppercase;">' +
+            escapeHtml(pillarLabels[k] || k) + '</div>' +
+            '<div style="font-size:11px;line-height:1.5;">' + escapeHtml(val) + '</div></div>';
+        }
       });
-      modelPillars.innerHTML = html;
+      if (!pillarsHtml) {
+        Object.keys(pa).forEach(function(k) {
+          pillarsHtml += '<div style="margin-bottom:8px;">' +
+            '<div style="font-size:10px;font-weight:600;opacity:0.6;text-transform:uppercase;">' +
+            escapeHtml(k.replace(/_/g, ' ')) + '</div>' +
+            '<div style="font-size:11px;line-height:1.5;">' + escapeHtml(pa[k]) + '</div></div>';
+        });
+      }
+      modelPillars.innerHTML = pillarsHtml || '<div style="opacity:0.5;font-size:11px;">No pillar analysis available</div>';
+    }
+
+    // Model detail row — trading implications
+    if (modelImplications) {
+      var mi = model.market_implications || {};
+      var implKeys = ['directional_bias', 'position_sizing', 'strategy_recommendation', 'risk_level', 'flow_tilt'];
+      var implLabels = {
+        directional_bias: 'Directional Bias', position_sizing: 'Position Sizing',
+        strategy_recommendation: 'Strategy Recommendation', risk_level: 'Risk Level',
+        flow_tilt: 'Flow Tilt'
+      };
+      var implHtml = '';
+      implKeys.forEach(function(k) {
+        var val = mi[k];
+        if (val) {
+          implHtml += '<div style="margin-bottom:6px;">' +
+            '<span style="font-size:10px;opacity:0.6;">' + escapeHtml(implLabels[k] || k) + ':</span> ' +
+            '<span style="font-size:11px;">' + escapeHtml(val) + '</span></div>';
+        }
+      });
+      modelImplications.innerHTML = implHtml || '<div style="opacity:0.5;font-size:11px;">No implications available</div>';
     }
   }
 
@@ -341,11 +492,11 @@ window.BenTradePages.initFlowsPositioning = function initFlowsPositioning(rootEl
     if (loading) {
       btn.disabled = true;
       btn.classList.add('btn-refreshing');
-      btn.innerHTML = '<span class="btn-spinner"></span> Analyzing…';
+      btn.innerHTML = '<span class="btn-spinner"></span> Refreshing\u2026';
     } else {
       btn.disabled = false;
       btn.classList.remove('btn-refreshing');
-      btn.innerHTML = '↻ Analyze';
+      btn.innerHTML = 'Refresh';
     }
   }
 
@@ -358,7 +509,7 @@ window.BenTradePages.initFlowsPositioning = function initFlowsPositioning(rootEl
       .then(function(payload) {
         if (_destroyed) return;
         render(payload);
-        if (_cache) _cache.setCache(CACHE_KEY, payload);
+        if (_cache) _cache.set(CACHE_KEY, payload);
         setLoading(refreshBtn, false);
       })
       .catch(function(err) {
@@ -367,31 +518,79 @@ window.BenTradePages.initFlowsPositioning = function initFlowsPositioning(rootEl
       });
   }
 
-  function fetchModel(force) {
-    if (runModelBtn) {
-      runModelBtn.disabled = true;
-      runModelBtn.textContent = 'Running…';
+  function triggerModelAnalysis() {
+    if (_destroyed) return;
+    console.log('[BenTrade][Flows] Triggering model analysis…');
+    if (modelSummary) {
+      modelSummary.innerHTML =
+        '<div style="text-align:center;padding:18px 0;">' +
+        '<div style="display:inline-block;width:22px;height:22px;border-radius:50%;' +
+        'border:2px solid rgba(0,234,255,0.15);border-top-color:rgba(0,234,255,0.9);' +
+        'animation:btnInlineSpin 0.8s linear infinite;margin-bottom:8px;"></div>' +
+        '<div style="font-size:11px;opacity:0.7;">Running model analysis… Interpreting flows &amp; positioning.</div></div>';
     }
-
-    fetch(MODEL_URL, { method: 'POST' })
-      .then(function(res) { return res.json(); })
+    setModelBtnState(true);
+    var CLIENT_TIMEOUT = (window.BenTradeApi && window.BenTradeApi.MODEL_TIMEOUT_MS) || 185000;
+    var t0 = performance.now();
+    console.log('[FP_MODEL] request_start', {
+      endpoint: MODEL_URL, method: 'POST',
+      timeout_ms: CLIENT_TIMEOUT,
+      timestamp: new Date().toISOString(),
+    });
+    var controller = new AbortController();
+    var timerFired = false;
+    var timer = setTimeout(function() {
+      timerFired = true;
+      console.warn('[FP_MODEL] abort_timer_fired', {
+        elapsed_ms: Math.round(performance.now() - t0),
+        timeout_ms: CLIENT_TIMEOUT,
+      });
+      controller.abort();
+    }, CLIENT_TIMEOUT);
+    fetch(MODEL_URL, { method: 'POST', signal: controller.signal })
+      .then(function(resp) {
+        console.log('[FP_MODEL] response_headers', {
+          status: resp.status, ok: resp.ok,
+          elapsed_ms: Math.round(performance.now() - t0),
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.json();
+      })
       .then(function(result) {
         if (_destroyed) return;
-        renderModel(result.model_analysis);
-        if (_cache && result.model_analysis) {
-          _cache.setCache(MODEL_CACHE_KEY, result);
-        }
-        if (runModelBtn) {
-          runModelBtn.disabled = false;
-          runModelBtn.textContent = 'Re-run Model';
+        console.log('[FP_MODEL] body_parsed', {
+          hasModel: !!result.model_analysis,
+          elapsed_ms: Math.round(performance.now() - t0),
+        });
+        var modelData = result.model_analysis || null;
+        var errorInfo = result.error || null;
+        if (_cache && modelData) _cache.set(MODEL_CACHE_KEY, modelData);
+        renderModel(modelData);
+        if (!modelData) {
+          var errMsg = (errorInfo && errorInfo.message)
+            ? errorInfo.message
+            : 'Model returned no result — is the local LLM running?';
+          var errKind = (errorInfo && errorInfo.kind) ? ' (' + errorInfo.kind + ')' : '';
+          renderModelError(errMsg + errKind);
         }
       })
       .catch(function(err) {
-        console.error('[BenTrade][Flows] model fetch error', err);
-        if (runModelBtn) {
-          runModelBtn.disabled = false;
-          runModelBtn.textContent = 'Run AI Model';
+        if (_destroyed) return;
+        var elapsed = Math.round(performance.now() - t0);
+        console.error('[FP_MODEL] failure', { error: err.message, name: err.name, elapsed_ms: elapsed, timerFired: timerFired });
+        var msg;
+        if (err.name === 'AbortError') {
+          var timeoutSec = Math.round(CLIENT_TIMEOUT / 1000);
+          msg = 'Model request timed out after ' + timeoutSec + 's. Is the local LLM running?';
+        } else {
+          msg = String(err.message || 'Model analysis failed');
         }
+        renderModelError(msg);
+      })
+      .finally(function() {
+        clearTimeout(timer);
+        setModelBtnState(false);
+        console.log('[FP_MODEL] lifecycle_complete', { total_ms: Math.round(performance.now() - t0) });
       });
   }
 
@@ -400,11 +599,11 @@ window.BenTradePages.initFlowsPositioning = function initFlowsPositioning(rootEl
   // Try cache first
   if (_cache && _cache.hasCache(CACHE_KEY)) {
     console.log('[BenTrade][Flows] cache_rehydrate');
-    render(_cache.getCache(CACHE_KEY));
+    render(_cache.getData(CACHE_KEY));
   }
   if (_cache && _cache.hasCache(MODEL_CACHE_KEY)) {
-    var mc = _cache.getCache(MODEL_CACHE_KEY);
-    if (mc && mc.model_analysis) renderModel(mc.model_analysis);
+    var mc = _cache.getData(MODEL_CACHE_KEY);
+    if (mc) renderModel(mc);
   }
 
   // Always fetch fresh data
@@ -415,7 +614,7 @@ window.BenTradePages.initFlowsPositioning = function initFlowsPositioning(rootEl
     refreshBtn.addEventListener('click', function() { fetchData(true); });
   }
   if (runModelBtn) {
-    runModelBtn.addEventListener('click', function() { fetchModel(true); });
+    runModelBtn.addEventListener('click', function() { triggerModelAnalysis(); });
   }
 
   return function cleanupFlowsPositioning() {

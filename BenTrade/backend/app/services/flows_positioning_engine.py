@@ -651,6 +651,10 @@ def _compute_crowding_stretch(data: dict[str, Any]) -> dict[str, Any]:
     }
     pillar_score, explanation = _aggregate_submetrics(submetrics, sub_weights)
 
+    # Surface the aggregate crowding level for frontend display.
+    # Higher score = less crowded; invert for "crowding level" semantics.
+    raw_inputs["crowding_level"] = round(100 - pillar_score, 1) if pillar_score is not None else None
+
     return {
         "score": pillar_score,
         "submetrics": submetrics,
@@ -798,6 +802,13 @@ def _compute_squeeze_unwind_risk(data: dict[str, Any]) -> dict[str, Any]:
         "asymmetry": 0.20,
     }
     pillar_score, explanation = _aggregate_submetrics(submetrics, sub_weights)
+
+    # Surface positioning asymmetry for frontend display.
+    # Derived from distance_from_balance (abs(futures_net_pct - 50)).
+    if futures_net_pct is not None:
+        raw_inputs["positioning_asymmetry"] = round(abs(futures_net_pct - 50), 1)
+    else:
+        raw_inputs["positioning_asymmetry"] = None
 
     return {
         "score": pillar_score,
@@ -1201,6 +1212,14 @@ def _compute_confidence(
             confidence -= 5
             penalties.append("No direct futures positioning data (-5)")
 
+        # Penalty: single-source dependency — all signals derived from one input
+        unique_sources = source_meta.get("unique_upstream_count", 0)
+        if unique_sources <= 1 and proxy_count >= 6:
+            confidence -= 12
+            penalties.append(
+                f"Single-source dependency: {proxy_count} signals from 1 upstream (-12)"
+            )
+
     return _clamp(round(confidence, 1), 0, 100), penalties
 
 
@@ -1503,6 +1522,22 @@ def compute_flows_positioning_scores(
         "stability": pillars["positioning_stability"].get("raw_inputs", {}),
     }
 
+    # Structured data-quality metadata: which fields are proxy, direct, or unavailable
+    data_quality = {
+        "field_status": {
+            sig_name: {
+                "type": meta.get("type", "unknown"),
+                "source": meta.get("source", "unknown"),
+                "is_proxy": meta.get("type") == "proxy",
+            }
+            for sig_name, meta in SIGNAL_PROVENANCE.items()
+        },
+        "proxy_count": sum(1 for v in SIGNAL_PROVENANCE.values() if v.get("type") == "proxy"),
+        "direct_count": sum(1 for v in SIGNAL_PROVENANCE.values() if v.get("type") == "direct"),
+        "upstream_sources": source_meta.get("unique_upstream_count", 0) if source_meta else 0,
+        "phase": "1 — VIX-proxy only",
+    }
+
     result = {
         "engine": "flows_positioning",
         "as_of": as_of,
@@ -1524,6 +1559,7 @@ def compute_flows_positioning_scores(
         "missing_inputs": all_missing,
         "diagnostics": diagnostics,
         "raw_inputs": raw_inputs,
+        "data_quality": data_quality,
     }
 
     logger.info(

@@ -2,7 +2,7 @@
 <div class="view-wrap mod-page">
 
   <!-- ── Module Banner ──────────────────────────────────────────── -->
-  <div class="mod-banner accent-liquidity">
+  <div class="mod-banner">
     <div class="mod-banner-left">
       <div class="mod-banner-breadcrumb">BenTrade · Market Picture</div>
       <div class="mod-banner-title">Liquidity &amp; Financial Conditions</div>
@@ -11,7 +11,7 @@
     <div class="mod-banner-right">
       <span class="mod-banner-tag">Module 6 of 6</span>
       <span id="lcLastUpdated" class="mod-last-updated">Updated: —</span>
-      <button id="lcRefreshBtn" class="mod-refresh-btn" title="Refresh data">⟳</button>
+      <button id="lcRefreshBtn" class="mod-refresh-btn" title="Refresh data">Refresh</button>
     </div>
   </div>
 
@@ -72,6 +72,37 @@
         <div class="mod-bar-row"><span class="mod-bar-label">Stress Risk</span><div class="mod-bar-track"><div id="lcStressBar" class="mod-bar-fill" style="width:0%;"></div></div><span id="lcStressVal" class="mod-bar-val">—</span></div>
         <div class="mod-bar-row"><span class="mod-bar-label">Fragility</span><div class="mod-bar-track"><div id="lcFragilityBar" class="mod-bar-fill" style="width:0%;"></div></div><span id="lcFragilityVal" class="mod-bar-val">—</span></div>
       </div>
+    </div>
+  </div>
+
+  <!-- ══ AI MODEL ANALYSIS ═══════════════════════════════════ -->
+  <div class="mod-card mod-model-card" style="margin-bottom:14px;">
+    <div class="mod-card-header">
+      <span class="mod-card-title">AI Model Analysis</span>
+      <span class="mod-chip mod-chip-llm" title="Powered by local LLM">LLM</span>
+    </div>
+    <div class="mod-card-body">
+      <div class="mod-model-label" id="lcModelLabel">—</div>
+      <div class="mod-score-row">
+        <span class="mod-hero-score" id="lcModelScore">—</span>
+      </div>
+      <div class="mod-model-summary" id="lcModelSummary">
+        <div class="mod-model-cta" id="lcModelCta">
+          Run the AI model for deeper liquidity &amp; conditions commentary.
+          <button class="mod-action-btn" id="lcRunModelBtn" type="button">Run Model Analysis</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mod-grid-2" id="lcModelDetailsRow" style="display:none;">
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Model — Pillar Analysis</span></div>
+      <div class="mod-card-body" id="lcModelPillars"></div>
+    </div>
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Model — Trading Implications</span></div>
+      <div class="mod-card-body" id="lcModelImplications"></div>
     </div>
   </div>
 
@@ -209,26 +240,6 @@
     </div>
   </div>
 
-  <!-- ══ AI MODEL ANALYSIS ═══════════════════════════════════ -->
-  <div class="mod-card" style="margin-bottom:14px;">
-    <div class="mod-card-header">
-      <span class="mod-card-title">AI Model Analysis</span>
-      <button id="lcRunModelBtn" class="mod-action-btn">Run Model Analysis</button>
-    </div>
-    <div class="mod-card-body">
-      <div id="lcModelCta" class="mod-summary" style="text-align:center;opacity:0.6;">
-        Click "Run Model Analysis" to get an AI-powered interpretation of current conditions.
-      </div>
-      <div id="lcModelDetailsRow" style="display:none;">
-        <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;">
-          <span id="lcModelLabel" class="mod-chip mod-chip-neutral">—</span>
-          <span id="lcModelScore" style="font-size:18px;font-weight:600;">—</span>
-        </div>
-        <div id="lcModelSummary" class="mod-summary"></div>
-        <div class="mod-divider"></div>
-        <div id="lcModelPillars"></div>
-      </div>
-    </div>
-  </div>
+  <!-- Model analysis section moved to after top row -->
 
 </div>

@@ -133,12 +133,13 @@ SIGNAL_PROVENANCE: dict[str, dict[str, str]] = {
                  "declining oil may be supply-driven or demand-destruction.",
     },
     "gold_price": {
-        "source": "FRED GOLDAMGBD228NLBM",
-        "type": "direct",
-        "delay": "1 business day (London PM fixing, EOD)",
-        "unit": "USD/troy ounce",
-        "notes": "Gold Fixing Price London Bullion Market (PM). "
-                 "Daily frequency, published ~1 day delayed.",
+        "source": "FRED NASDAQQGLDI",
+        "type": "proxy",
+        "delay": "1 business day (NASDAQ Gold Price Index, daily)",
+        "unit": "USD (gold spot proxy)",
+        "notes": "NASDAQ Gold FLOWS103 Price Index tracking LBMA Gold Price. "
+                 "Daily frequency. Replaced discontinued GOLDAMGBD228NLBM "
+                 "(London PM Gold Fixing).",
     },
     "copper_price": {
         "source": "FRED PCOPPUSDM",
@@ -477,11 +478,11 @@ def _compute_dollar_commodity(data: dict[str, Any]) -> dict[str, Any]:
 
     # ── gold_level ───────────────────────────────────────────────
     # Gold as safe-haven proxy. High gold = fear = equity bearish (inverse)
-    # Gold typical range: $1500-$2500+
+    # Gold typical range: $2000-$3500+  (updated 2026-03 for current levels)
     # Higher gold → lower score (inverse safe-haven signal)
-    # Formula: score = interpolate(gold, 2500, 1500, 25, 85) — inverse
+    # Formula: score = interpolate(gold, 3500, 2000, 25, 85) — inverse
     if gold is not None:
-        gold_score = _interpolate(gold, 2500, 1500, 25, 85)
+        gold_score = _interpolate(gold, 3500, 2000, 25, 85)
         submetrics.append(_build_submetric("gold_level", gold, gold_score))
     else:
         total_missing += 1
@@ -827,9 +828,9 @@ def _compute_macro_coherence(data: dict[str, Any]) -> dict[str, Any]:
             signal_grades["copper"] = -1.0          # Weak → contraction signal
 
     if gold is not None:
-        if gold < 1900:
+        if gold < 2500:
             signal_grades["gold"] = 1.0             # Low gold → low fear
-        elif gold <= 2300:
+        elif gold <= 3200:
             signal_grades["gold"] = 0.0             # Moderate → neutral
         else:
             signal_grades["gold"] = -1.0            # High gold → safe-haven demand
@@ -980,14 +981,23 @@ def _compute_confidence(
 
     # Penalty for stale FRED sources (especially copper = monthly)
     if source_meta:
+        copper_days = source_meta.get("fred_copper_days_stale")
         fred_copper_date = source_meta.get("fred_copper_date")
-        if fred_copper_date:
-            stale_note = (
-                "Copper (PCOPPUSDM) is a monthly series — may be "
-                "up to 30 days stale (-3)"
+        if copper_days is not None and copper_days > 5:
+            # Scale penalty: 3 for 5-15 days, up to 8 for 30+ days
+            stale_penalty = min(3 + max(0, (copper_days - 15)) * 0.25, 8)
+            stale_penalty = round(stale_penalty, 1)
+            confidence -= stale_penalty
+            penalties.append(
+                f"Copper (PCOPPUSDM) is {copper_days} days stale "
+                f"(obs: {fred_copper_date}) (-{stale_penalty})"
             )
-            confidence -= 3
-            penalties.append(stale_note)
+        elif fred_copper_date:
+            # Copper present but fresh enough — minor note only
+            confidence -= 1
+            penalties.append(
+                "Copper source is monthly FRED series (-1)"
+            )
 
     return _clamp(round(confidence, 1), 0, 100), penalties
 
@@ -1130,6 +1140,19 @@ def compute_cross_asset_scores(
     confidence, confidence_penalties = _compute_confidence(pillars, source_meta)
     sig_quality = _signal_quality(confidence)
     explanation = _build_composite_explanation(composite, full_label, pillars, confidence)
+
+    # ── Diagnostic trace ─────────────────────────────────────────
+    active = [pn for pn, pd in pillars.items() if pd.get("score") is not None]
+    inactive = [pn for pn, pd in pillars.items() if pd.get("score") is None]
+    missing_subs = sum(p.get("missing_count", 0) for p in pillars.values())
+    logger.info(
+        "event=cross_asset_composite "
+        "composite=%.2f label=%s confidence=%.1f signal_quality=%s "
+        "active_pillars=%d/%d inactive=%s missing_submetrics=%d penalties=%d",
+        composite, short_label, confidence, sig_quality,
+        len(active), len(pillars), inactive or "none",
+        missing_subs, len(confidence_penalties),
+    )
 
     # ── Aggregate warnings and missing inputs ────────────────────
     all_warnings: list[str] = []

@@ -6,7 +6,7 @@ and FRED directly for additional series (gold, copper, credit spreads).
 
 Data sources:
   MarketContextService → VIX, 10Y/2Y yields, fed funds, oil, USD, yield curve spread
-  FRED GOLDAMGBD228NLBM → Gold price (London PM fix, EOD)
+  FRED NASDAQQGLDI      → Gold price index (LBMA-based, daily)
   FRED PCOPPUSDM        → Copper price (monthly, LME)
   FRED BAMLC0A0CM       → IG OAS spread (ICE BofA)
   FRED BAMLH0A0HYM2     → HY OAS spread (ICE BofA)
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from app.clients.fred_client import FredClient
@@ -27,7 +28,10 @@ from app.services.market_context_service import MarketContextService
 logger = logging.getLogger(__name__)
 
 # Additional FRED series IDs not in MarketContextService
-_FRED_GOLD = "GOLDAMGBD228NLBM"       # Gold fixing price London PM (USD/troy oz)
+# NOTE: GOLDAMGBD228NLBM (London PM Gold Fixing) was removed from FRED.
+# Replaced with NASDAQQGLDI — NASDAQ Gold FLOWS103 Price Index (daily),
+# which tracks the LBMA Gold Price in USD and provides daily observations.
+_FRED_GOLD = "NASDAQQGLDI"            # NASDAQ Gold Price Index (LBMA-based, daily, USD)
 _FRED_COPPER = "PCOPPUSDM"            # Global copper price (USD/metric ton, monthly)
 _FRED_IG_SPREAD = "BAMLC0A0CM"        # ICE BofA US Corp IG OAS
 _FRED_HY_SPREAD = "BAMLH0A0HYM2"     # ICE BofA US HY OAS
@@ -96,7 +100,25 @@ class CrossAssetMacroDataProvider:
 
         async def _safe_fred(series_id: str, label: str) -> dict[str, Any] | None:
             try:
-                return await self.fred.get_series_with_date(series_id)
+                logger.info(
+                    "event=cross_asset_fred_fetch_start source=%s series_id=%s",
+                    label, series_id,
+                )
+                result = await self.fred.get_series_with_date(series_id)
+                if result is not None:
+                    logger.info(
+                        "event=cross_asset_fred_fetch_ok source=%s series_id=%s "
+                        "value=%s observation_date=%s",
+                        label, series_id, result.get("value"),
+                        result.get("observation_date"),
+                    )
+                else:
+                    logger.warning(
+                        "event=cross_asset_fred_fetch_empty source=%s series_id=%s "
+                        "reason=no_observations_returned",
+                        label, series_id,
+                    )
+                return result
             except Exception as exc:
                 source_errors[label] = str(exc)
                 logger.error(
@@ -197,23 +219,50 @@ class CrossAssetMacroDataProvider:
             "cpi_yoy": cpi_yoy,
         }
 
+        # Compute staleness in days for sources with observation dates
+        def _days_stale(obs_date_str: str | None) -> int | None:
+            if not obs_date_str:
+                return None
+            try:
+                obs = datetime.strptime(obs_date_str, "%Y-%m-%d").replace(
+                    tzinfo=timezone.utc
+                )
+                return (datetime.now(timezone.utc) - obs).days
+            except (ValueError, TypeError):
+                return None
+
+        gold_date = gold_obs.get("observation_date") if gold_obs else None
+        copper_date = copper_obs.get("observation_date") if copper_obs else None
+        copper_days_stale = _days_stale(copper_date)
+
+        if copper_days_stale is not None and copper_days_stale > 5:
+            logger.info(
+                "event=cross_asset_copper_stale days_stale=%d observation_date=%s",
+                copper_days_stale, copper_date,
+            )
+
         # Source metadata for UI freshness display
         source_meta = {
             "market_context_generated_at": market_ctx.get("context_generated_at"),
             "vix_source": market_ctx.get("vix", {}).get("source"),
             "vix_freshness": market_ctx.get("vix", {}).get("freshness"),
-            "fred_gold_date": gold_obs.get("observation_date") if gold_obs else None,
-            "fred_copper_date": copper_obs.get("observation_date") if copper_obs else None,
+            "fred_gold_date": gold_date,
+            "fred_copper_date": copper_date,
+            "fred_copper_days_stale": copper_days_stale,
             "fred_ig_date": ig_obs.get("observation_date") if ig_obs else None,
             "fred_hy_date": hy_obs.get("observation_date") if hy_obs else None,
             # FRED source honesty — frequency and delay metadata
             "fred_source_detail": {
                 _FRED_GOLD: {
                     "series_id": _FRED_GOLD,
-                    "label": "Gold Fixing Price London Bullion Market (PM)",
+                    "label": "NASDAQ Gold FLOWS103 Price Index (LBMA-based)",
                     "frequency": "daily",
                     "typical_delay": "1 business day",
-                    "unit": "USD/troy ounce",
+                    "unit": "USD (gold spot proxy)",
+                    "notes": (
+                        "Tracks LBMA Gold Price via NASDAQ index. "
+                        "Replaced discontinued GOLDAMGBD228NLBM."
+                    ),
                 },
                 _FRED_COPPER: {
                     "series_id": _FRED_COPPER,
@@ -221,6 +270,7 @@ class CrossAssetMacroDataProvider:
                     "frequency": "monthly",
                     "typical_delay": "up to 30 days (monthly average)",
                     "unit": "USD/metric ton",
+                    "days_stale": copper_days_stale,
                     "stale_warning": (
                         "Monthly series — may not reflect recent price "
                         "movements. Treat as slow proxy for growth."

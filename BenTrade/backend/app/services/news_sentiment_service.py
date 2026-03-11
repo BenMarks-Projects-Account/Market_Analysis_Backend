@@ -20,10 +20,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+import time as _time
+
 import httpx
 
 from app.config import Settings
 from app.services.news_sentiment_engine import compute_engine_scores
+from app.services.dashboard_metadata_contract import build_dashboard_metadata
+from app.services.engine_output_contract import normalize_engine_output
 from app.utils.cache import TTLCache
 
 logger = logging.getLogger(__name__)
@@ -134,6 +138,8 @@ class NewsSentimentService:
             if cached is not None:
                 return cached
 
+        t0 = _time.monotonic()
+
         items: list[NormalizedNewsItem] = []
         freshness: list[SourceFreshness] = []
 
@@ -213,6 +219,25 @@ class NewsSentimentService:
             "item_count": len(item_dicts),
         }
 
+        duration = round(_time.monotonic() - t0, 2)
+
+        payload["normalized"] = normalize_engine_output(
+            "news_sentiment", payload
+        )
+        source_freshness_dicts = payload.get("source_freshness", [])
+        # Derive source_errors from freshness for parity with other services
+        source_errors: dict[str, str] = {}
+        for sf in source_freshness_dicts:
+            if sf.get("status") in ("error",) and sf.get("error"):
+                source_errors[sf["source"]] = sf["error"]
+        payload["dashboard_metadata"] = build_dashboard_metadata(
+            "news_sentiment",
+            engine_result=engine_result,
+            source_errors=source_errors or None,
+            source_freshness=source_freshness_dicts,
+            compute_duration_s=duration,
+        )
+
         await self.cache.set(cache_key, payload, NEWS_CACHE_TTL)
         return payload
 
@@ -224,11 +249,14 @@ class NewsSentimentService:
         """Attempt LLM-based news sentiment analysis.
 
         Returns dict with model_analysis (or None) and error info if failed.
+        Attaches ``normalized`` key via model_analysis_contract.
         """
         from common.model_sanitize import classify_model_error, user_facing_error_message
+        from app.services.model_analysis_contract import wrap_service_model_response
         import time as _time
 
         t0 = _time.monotonic()
+        requested_at = datetime.now(timezone.utc).isoformat()
         logger.info(
             "event=news_model_analysis_start items=%d macro_keys=%d",
             len(items), len(macro_context),
@@ -236,13 +264,17 @@ class NewsSentimentService:
 
         if not items:
             logger.warning("event=news_model_analysis_skip reason=no_items")
-            return {
+            outcome = {
                 "model_analysis": None,
                 "error": {
                     "kind": "empty_response",
                     "message": "No news headlines available for model analysis.",
                 },
             }
+            return wrap_service_model_response(
+                "news_sentiment", outcome,
+                requested_at=requested_at, duration_ms=0,
+            )
 
         try:
             from common.model_analysis import analyze_news_sentiment
@@ -252,21 +284,29 @@ class NewsSentimentService:
                 timeout=180,
                 retries=0,
             )
-            elapsed = round(_time.monotonic() - t0, 2)
-            logger.info("event=news_model_analysis_ok score=%s elapsed_s=%.2f", result.get("score"), elapsed)
-            return {"model_analysis": result}
+            duration_ms = int((_time.monotonic() - t0) * 1000)
+            logger.info("event=news_model_analysis_ok score=%s duration_ms=%d", result.get("score"), duration_ms)
+            outcome = {"model_analysis": result}
+            return wrap_service_model_response(
+                "news_sentiment", outcome,
+                requested_at=requested_at, duration_ms=duration_ms,
+            )
         except Exception as exc:
-            elapsed = round(_time.monotonic() - t0, 2)
+            duration_ms = int((_time.monotonic() - t0) * 1000)
             error_kind = classify_model_error(exc)
             error_msg = user_facing_error_message(error_kind)
             logger.warning(
-                "event=news_model_analysis_failed error_kind=%s elapsed_s=%.2f error=%s",
-                error_kind, elapsed, exc,
+                "event=news_model_analysis_failed error_kind=%s duration_ms=%d error=%s",
+                error_kind, duration_ms, exc,
             )
-            return {
+            outcome = {
                 "model_analysis": None,
                 "error": {"kind": error_kind, "message": error_msg},
             }
+            return wrap_service_model_response(
+                "news_sentiment", outcome,
+                requested_at=requested_at, duration_ms=duration_ms,
+            )
 
     async def run_model_analysis(self, *, force: bool = False) -> dict[str, Any]:
         """Run LLM model analysis on demand. Uses cached base payload for inputs.
@@ -304,6 +344,10 @@ class NewsSentimentService:
         # Pass through error info if model failed
         if model_outcome.get("error"):
             result["error"] = model_outcome["error"]
+
+        # Carry normalized contract through for downstream consumers
+        if "normalized" in model_outcome:
+            result["normalized"] = model_outcome["normalized"]
 
         # Only cache successful results — don't cache failures
         if result["model_analysis"] is not None:

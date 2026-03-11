@@ -15,6 +15,13 @@ class LocalModelUnavailableError(RuntimeError):
 
 
 def _extract_json_payload(raw_text: str) -> Any:
+    """Legacy JSON extractor — DEPRECATED.
+
+    Superseded by ``common.json_repair.extract_and_repair_json()`` which
+    covers all stages this function handles (direct parse + block extraction)
+    plus fence stripping, smart-quote repair, trailing-comma fix, and more.
+    Kept for backward compatibility only.
+    """
     text = str(raw_text or "").strip()
     if not text:
         return None
@@ -522,9 +529,6 @@ def analyze_regime(
             # Try robust JSON extraction via repair pipeline first
             from common.json_repair import extract_and_repair_json
             parsed, method = extract_and_repair_json(assistant_text)
-            if parsed is None:
-                parsed = _extract_json_payload(assistant_text)
-                method = "legacy_fallback"
 
             if method:
                 _log.info("[MODEL_REGIME] JSON extracted via method=%s", method)
@@ -673,9 +677,6 @@ def analyze_stock_idea(
             # Try robust JSON extraction via repair pipeline first
             from common.json_repair import extract_and_repair_json
             parsed, method = extract_and_repair_json(assistant_text)
-            if parsed is None:
-                parsed = _extract_json_payload(assistant_text)
-                method = "legacy_fallback"
 
             if method:
                 _log.info("[MODEL_STOCK_IDEA] JSON extracted via method=%s", method)
@@ -1205,6 +1206,33 @@ def _coerce_string_list(val: Any, *, max_items: int = 8) -> list[str] | None:
     return None
 
 
+def _build_plaintext_fallback(raw_text: str, module: str) -> dict[str, Any] | None:
+    """Build a minimal model result from raw text when JSON parsing fails.
+
+    If the model returned useful prose but not valid JSON, we wrap it in the
+    standard schema so the UI can still display something useful instead of
+    showing a "malformed response" error.
+    """
+    text = (raw_text or "").strip()
+    if not text or len(text) < 20:
+        return None
+    # Truncate overly long text
+    summary = text[:1500].strip()
+    if len(text) > 1500:
+        summary += "…"
+    return {
+        "label": "ANALYSIS",
+        "score": None,
+        "confidence": None,
+        "summary": summary,
+        "pillar_analysis": {},
+        "trader_takeaway": "",
+        "uncertainty_flags": ["Model returned plain text instead of structured JSON"],
+        "_plaintext_fallback": True,
+        "_module": module,
+    }
+
+
 def _extract_news_raw_evidence(
     items: list[dict[str, Any]],
     macro_context: dict[str, Any],
@@ -1409,15 +1437,21 @@ def analyze_news_sentiment(
                 response_json = None
 
             assistant_text = None
+            finish_reason = None
             if isinstance(response_json, dict):
                 choices = response_json.get("choices") or []
                 if choices and isinstance(choices, list) and isinstance(choices[0], dict):
                     first = choices[0]
+                    finish_reason = first.get("finish_reason")
                     message = first.get("message")
                     if isinstance(message, dict) and "content" in message:
                         assistant_text = message.get("content")
                     elif "text" in first:
                         assistant_text = first.get("text")
+            if finish_reason:
+                _log.info("[MODEL_NEWS] finish_reason=%s", finish_reason)
+            if finish_reason == "length":
+                _log.warning("[MODEL_NEWS] response TRUNCATED (finish_reason=length) — token budget may be insufficient")
             if assistant_text is None:
                 assistant_text = getattr(response, "text", "")
 
@@ -1430,17 +1464,17 @@ def analyze_news_sentiment(
             # Try robust JSON extraction via repair pipeline first
             from common.json_repair import extract_and_repair_json
             parsed, method = extract_and_repair_json(assistant_text)
-            if parsed is None:
-                # Fallback to legacy extractor
-                parsed = _extract_json_payload(assistant_text)
-                method = "legacy_fallback"
 
             if method:
                 _log.info("[MODEL_NEWS] JSON extracted via method=%s", method)
 
             normalized = _coerce_news_sentiment_model_output(parsed)
             if normalized is None:
-                raise ValueError("Model returned invalid news sentiment payload")
+                # Fallback: wrap raw text as plain-text analysis
+                normalized = _build_plaintext_fallback(assistant_text, "news_sentiment")
+                method = "plaintext_fallback"
+                if normalized is None:
+                    raise ValueError("Model returned invalid news sentiment payload")
 
             # ── 6. Attach trace metadata ────────────────────────
             normalized["_trace"] = {
@@ -1521,7 +1555,8 @@ def _extract_breadth_raw_evidence(engine_result: dict[str, Any]) -> dict[str, An
 def _coerce_breadth_model_output(candidate: Any) -> dict[str, Any] | None:
     """Normalize LLM breadth analysis output into a consistent schema.
 
-    Returns None if candidate is not a valid dict with required fields.
+    Returns None only if candidate is not a dict at all.
+    Provides safe defaults for missing fields so partial responses are usable.
     """
     if not isinstance(candidate, dict):
         return None
@@ -1531,15 +1566,18 @@ def _coerce_breadth_model_output(candidate: Any) -> dict[str, Any] | None:
     confidence = candidate.get("confidence")
     summary = candidate.get("summary")
 
-    if label is None or score is None or summary is None:
-        return None
+    # Provide defaults for missing required fields instead of returning None
+    if label is None:
+        label = "ANALYSIS"
+    if summary is None:
+        summary = "Model did not provide a summary."
 
     # Clamp score 0-100
     try:
         score = float(score)
         score = max(0.0, min(100.0, score))
     except (TypeError, ValueError):
-        return None
+        score = None
 
     # Clamp confidence 0-1
     try:
@@ -1550,7 +1588,7 @@ def _coerce_breadth_model_output(candidate: Any) -> dict[str, Any] | None:
 
     result: dict[str, Any] = {
         "label": str(label).strip().upper(),
-        "score": round(score, 1),
+        "score": round(score, 1) if score is not None else None,
         "confidence": round(confidence, 2),
         "summary": str(summary).strip(),
     }
@@ -1769,16 +1807,17 @@ def analyze_breadth_participation(
             # Try robust JSON extraction
             from common.json_repair import extract_and_repair_json
             parsed, method = extract_and_repair_json(assistant_text)
-            if parsed is None:
-                parsed = _extract_json_payload(assistant_text)
-                method = "legacy_fallback"
 
             if method:
                 _log.info("[MODEL_BREADTH] JSON extracted via method=%s", method)
 
             normalized = _coerce_breadth_model_output(parsed)
             if normalized is None:
-                raise ValueError("Model returned invalid breadth analysis payload")
+                # Fallback: wrap raw text as plain-text analysis
+                normalized = _build_plaintext_fallback(assistant_text, "breadth")
+                method = "plaintext_fallback"
+                if normalized is None:
+                    raise ValueError("Model returned invalid breadth analysis payload")
 
             # ── 6. Attach trace metadata ────────────────────────
             normalized["_trace"] = {
@@ -1874,18 +1913,15 @@ def _coerce_vol_model_output(candidate: Any) -> dict[str, Any] | None:
     if not isinstance(candidate, dict):
         return None
 
-    label = candidate.get("label")
+    label = candidate.get("label") or "ANALYSIS"
     score = candidate.get("score")
     confidence = candidate.get("confidence")
-    summary = candidate.get("summary")
-
-    if label is None or score is None or summary is None:
-        return None
+    summary = candidate.get("summary") or "Model did not provide a summary."
 
     try:
         score = max(0.0, min(100.0, float(score)))
     except (TypeError, ValueError):
-        return None
+        score = None
 
     try:
         confidence = max(0.0, min(1.0, float(confidence) if confidence is not None else 0.5))
@@ -1894,7 +1930,7 @@ def _coerce_vol_model_output(candidate: Any) -> dict[str, Any] | None:
 
     result: dict[str, Any] = {
         "label": str(label).strip().upper(),
-        "score": round(score, 1),
+        "score": round(score, 1) if score is not None else None,
         "confidence": round(confidence, 2),
         "summary": str(summary).strip(),
     }
@@ -2102,16 +2138,16 @@ def analyze_volatility_options(
 
             from common.json_repair import extract_and_repair_json
             parsed, method = extract_and_repair_json(assistant_text)
-            if parsed is None:
-                parsed = _extract_json_payload(assistant_text)
-                method = "legacy_fallback"
 
             if method:
                 _log.info("[MODEL_VOL] JSON extracted via method=%s", method)
 
             normalized = _coerce_vol_model_output(parsed)
             if normalized is None:
-                raise ValueError("Model returned invalid volatility analysis payload")
+                normalized = _build_plaintext_fallback(assistant_text, "volatility")
+                method = "plaintext_fallback"
+                if normalized is None:
+                    raise ValueError("Model returned invalid volatility analysis payload")
 
             normalized["_trace"] = {
                 "input_mode": "raw_only",
@@ -2184,18 +2220,15 @@ def _coerce_cross_asset_model_output(candidate: Any) -> dict[str, Any] | None:
     if not isinstance(candidate, dict):
         return None
 
-    label = candidate.get("label")
+    label = candidate.get("label") or "ANALYSIS"
     score = candidate.get("score")
     confidence = candidate.get("confidence")
-    summary = candidate.get("summary")
-
-    if label is None or score is None or summary is None:
-        return None
+    summary = candidate.get("summary") or "Model did not provide a summary."
 
     try:
         score = max(0.0, min(100.0, float(score)))
     except (TypeError, ValueError):
-        return None
+        score = None
 
     try:
         confidence = max(0.0, min(1.0, float(confidence) if confidence is not None else 0.5))
@@ -2204,7 +2237,7 @@ def _coerce_cross_asset_model_output(candidate: Any) -> dict[str, Any] | None:
 
     result: dict[str, Any] = {
         "label": str(label).strip().upper(),
-        "score": round(score, 1),
+        "score": round(score, 1) if score is not None else None,
         "confidence": round(confidence, 2),
         "summary": str(summary).strip(),
     }
@@ -2400,16 +2433,16 @@ def analyze_cross_asset_macro(
 
             from common.json_repair import extract_and_repair_json
             parsed, method = extract_and_repair_json(assistant_text)
-            if parsed is None:
-                parsed = _extract_json_payload(assistant_text)
-                method = "legacy_fallback"
 
             if method:
                 _log.info("[MODEL_CROSS_ASSET] JSON extracted via method=%s", method)
 
             normalized = _coerce_cross_asset_model_output(parsed)
             if normalized is None:
-                raise ValueError("Model returned invalid cross-asset analysis payload")
+                normalized = _build_plaintext_fallback(assistant_text, "cross_asset")
+                method = "plaintext_fallback"
+                if normalized is None:
+                    raise ValueError("Model returned invalid cross-asset analysis payload")
 
             normalized["_trace"] = {
                 "input_mode": "raw_only",
@@ -2483,18 +2516,15 @@ def _coerce_flows_positioning_model_output(candidate: Any) -> dict[str, Any] | N
     if not isinstance(candidate, dict):
         return None
 
-    label = candidate.get("label")
+    label = candidate.get("label") or "ANALYSIS"
     score = candidate.get("score")
     confidence = candidate.get("confidence")
-    summary = candidate.get("summary")
-
-    if label is None or score is None or summary is None:
-        return None
+    summary = candidate.get("summary") or "Model did not provide a summary."
 
     try:
         score = max(0.0, min(100.0, float(score)))
     except (TypeError, ValueError):
-        return None
+        score = None
 
     try:
         confidence = max(0.0, min(1.0, float(confidence) if confidence is not None else 0.5))
@@ -2503,7 +2533,7 @@ def _coerce_flows_positioning_model_output(candidate: Any) -> dict[str, Any] | N
 
     result: dict[str, Any] = {
         "label": str(label).strip().upper(),
-        "score": round(score, 1),
+        "score": round(score, 1) if score is not None else None,
         "confidence": round(confidence, 2),
         "summary": str(summary).strip(),
     }
@@ -2566,6 +2596,8 @@ def analyze_flows_positioning(
 
     Returns a dict matching the Flows & Positioning model schema.
     """
+    import logging
+
     if model_url is None:
         from app.services.model_router import get_model_endpoint
         model_url = get_model_endpoint()
@@ -2699,16 +2731,16 @@ def analyze_flows_positioning(
 
             from common.json_repair import extract_and_repair_json
             parsed, method = extract_and_repair_json(assistant_text)
-            if parsed is None:
-                parsed = _extract_json_payload(assistant_text)
-                method = "legacy_fallback"
 
             if method:
                 _log.info("[MODEL_FLOWS_POS] JSON extracted via method=%s", method)
 
             normalized = _coerce_flows_positioning_model_output(parsed)
             if normalized is None:
-                raise ValueError("Model returned invalid flows & positioning analysis payload")
+                normalized = _build_plaintext_fallback(assistant_text, "flows_positioning")
+                method = "plaintext_fallback"
+                if normalized is None:
+                    raise ValueError("Model returned invalid flows & positioning analysis payload")
 
             normalized["_trace"] = {
                 "input_mode": "raw_only",
@@ -2781,18 +2813,15 @@ def _coerce_liquidity_conditions_model_output(candidate: Any) -> dict[str, Any] 
     if not isinstance(candidate, dict):
         return None
 
-    label = candidate.get("label")
+    label = candidate.get("label") or "ANALYSIS"
     score = candidate.get("score")
     confidence = candidate.get("confidence")
-    summary = candidate.get("summary")
-
-    if label is None or score is None or summary is None:
-        return None
+    summary = candidate.get("summary") or "Model did not provide a summary."
 
     try:
         score = max(0.0, min(100.0, float(score)))
     except (TypeError, ValueError):
-        return None
+        score = None
 
     try:
         confidence = max(0.0, min(1.0, float(confidence) if confidence is not None else 0.5))
@@ -2801,7 +2830,7 @@ def _coerce_liquidity_conditions_model_output(candidate: Any) -> dict[str, Any] 
 
     result: dict[str, Any] = {
         "label": str(label).strip().upper(),
-        "score": round(score, 1),
+        "score": round(score, 1) if score is not None else None,
         "confidence": round(confidence, 2),
         "summary": str(summary).strip(),
     }
@@ -2881,6 +2910,8 @@ def analyze_liquidity_conditions(
 
     Returns a dict matching the Liquidity Conditions model schema.
     """
+    import logging
+
     if model_url is None:
         from app.services.model_router import get_model_endpoint
         model_url = get_model_endpoint()
@@ -2999,15 +3030,21 @@ def analyze_liquidity_conditions(
                 response_json = None
 
             assistant_text = None
+            finish_reason = None
             if isinstance(response_json, dict):
                 choices = response_json.get("choices") or []
                 if choices and isinstance(choices, list) and isinstance(choices[0], dict):
                     first = choices[0]
+                    finish_reason = first.get("finish_reason")
                     message = first.get("message")
                     if isinstance(message, dict) and "content" in message:
                         assistant_text = message.get("content")
                     elif "text" in first:
                         assistant_text = first.get("text")
+            if finish_reason:
+                _log.info("[MODEL_LIQ_COND] finish_reason=%s", finish_reason)
+            if finish_reason == "length":
+                _log.warning("[MODEL_LIQ_COND] response TRUNCATED (finish_reason=length) — token budget may be insufficient")
             if assistant_text is None:
                 assistant_text = getattr(response, "text", "")
 
@@ -3018,16 +3055,16 @@ def analyze_liquidity_conditions(
 
             from common.json_repair import extract_and_repair_json
             parsed, method = extract_and_repair_json(assistant_text)
-            if parsed is None:
-                parsed = _extract_json_payload(assistant_text)
-                method = "legacy_fallback"
 
             if method:
                 _log.info("[MODEL_LIQ_COND] JSON extracted via method=%s", method)
 
             normalized = _coerce_liquidity_conditions_model_output(parsed)
             if normalized is None:
-                raise ValueError("Model returned invalid liquidity conditions analysis payload")
+                normalized = _build_plaintext_fallback(assistant_text, "liquidity_conditions")
+                method = "plaintext_fallback"
+                if normalized is None:
+                    raise ValueError("Model returned invalid liquidity conditions analysis payload")
 
             normalized["_trace"] = {
                 "input_mode": "raw_only",

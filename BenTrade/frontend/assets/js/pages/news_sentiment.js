@@ -229,7 +229,7 @@ window.BenTradePages.initNewsSentiment = function initNewsSentiment(rootEl) {
       modelSummary.innerHTML =
         '<div class="ns-model-cta" id="nsModelCta">' +
           '<p class="ns-model-cta-text">Model analysis has not been run yet.</p>' +
-          '<button class="btn ns-model-run-btn" id="nsRunModelBtn" type="button">Analyze with Model</button>' +
+          '<button class="mod-action-btn" id="nsRunModelBtn" type="button">Run Model Analysis</button>' +
         '</div>';
       // Rebind button after innerHTML replace
       runModelBtn = modelSummary.querySelector('#nsRunModelBtn');
@@ -248,7 +248,7 @@ window.BenTradePages.initNewsSentiment = function initNewsSentiment(rootEl) {
       modelSummary.innerHTML =
         '<div class="ns-model-cta">' +
           '<p class="ns-model-cta-text" style="color:var(--danger);">' + escapeHtml(errMsg) + '</p>' +
-          '<button class="btn ns-model-run-btn" id="nsRunModelBtn" type="button">Retry Model Analysis</button>' +
+          '<button class="mod-action-btn" id="nsRunModelBtn" type="button">Retry Model Analysis</button>' +
         '</div>';
       runModelBtn = modelSummary.querySelector('#nsRunModelBtn');
       if (runModelBtn) runModelBtn.addEventListener('click', triggerModelAnalysis);
@@ -402,8 +402,8 @@ window.BenTradePages.initNewsSentiment = function initNewsSentiment(rootEl) {
 
       // Always provide re-run option after model completes
       html += '<div style="margin-top:10px;text-align:center;">' +
-              '<button class="btn ns-model-run-btn" id="nsRunModelBtn" type="button" ' +
-              'style="font-size:10px;padding:3px 10px;">Re-run Model</button></div>';
+              '<button class="mod-action-btn" id="nsRunModelBtn" type="button" ' +
+              'style="font-size:10px;padding:3px 10px;">Re-run Model Analysis</button></div>';
       modelSummary.innerHTML = html || '<div class="ns-model-unavailable">No summary</div>';
       runModelBtn = modelSummary.querySelector('#nsRunModelBtn');
       if (runModelBtn) runModelBtn.addEventListener('click', triggerModelAnalysis);
@@ -746,7 +746,7 @@ window.BenTradePages.initNewsSentiment = function initNewsSentiment(rootEl) {
       refreshBtn.disabled = true;
     } else {
       refreshBtn.classList.remove('btn-refreshing');
-      refreshBtn.innerHTML = '\u21BB Refresh';
+      refreshBtn.innerHTML = 'Refresh';
       refreshBtn.disabled = false;
     }
   }

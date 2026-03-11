@@ -83,7 +83,9 @@ window.BenTradePages.initVolatilityOptions = function initVolatilityOptions(root
   var diagPre         = scope.querySelector('#volDiagPre');
   // Model
   var modelLabel      = scope.querySelector('#volModelLabel');
+  var modelScore      = scope.querySelector('#volModelScore');
   var modelSummary    = scope.querySelector('#volModelSummary');
+  var modelCta        = scope.querySelector('#volModelCta');
   var runModelBtn     = scope.querySelector('#volRunModelBtn');
   var modelDetailsRow = scope.querySelector('#volModelDetailsRow');
   var modelPillars    = scope.querySelector('#volModelPillars');
@@ -400,14 +402,15 @@ window.BenTradePages.initVolatilityOptions = function initVolatilityOptions(root
   function renderModelNotRun() {
     if (modelSummary) {
       modelSummary.innerHTML =
-        '<div class="mod-model-cta">' +
+        '<div class="mod-model-cta" id="volModelCta">' +
         '<p style="opacity:0.6;font-size:12px;margin:0 0 10px;">Model analysis has not been run yet.</p>' +
         '<button class="mod-action-btn" id="volRunModelBtn" type="button">Run Model Analysis</button>' +
         '</div>';
       var btn = modelSummary.querySelector('#volRunModelBtn');
       if (btn) btn.addEventListener('click', function() { triggerModelAnalysis(); });
     }
-    setText(modelLabel, 'Not Run');
+    setText(modelLabel, '—');
+    setText(modelScore, '—');
     if (modelDetailsRow) modelDetailsRow.style.display = 'none';
   }
 
@@ -422,22 +425,26 @@ window.BenTradePages.initVolatilityOptions = function initVolatilityOptions(root
     }
     setText(modelLabel, 'Error');
     if (modelLabel) modelLabel.style.color = 'rgba(255,79,102,0.9)';
+    setText(modelScore, '—');
     if (modelDetailsRow) modelDetailsRow.style.display = 'none';
   }
 
   function renderModel(model) {
     if (!model) { renderModelNotRun(); return; }
+    console.log('[BenTrade][Volatility] Rendering model result:', model.label, model.score);
 
+    // Label & score
     setText(modelLabel, (model.label || '—').toUpperCase());
     if (modelLabel) modelLabel.style.color = scoreColor(model.score);
+    setText(modelScore, model.score != null ? Math.round(model.score) : '—');
+    if (modelScore) modelScore.style.color = scoreColor(model.score);
 
     if (modelSummary) {
       var html = '<div style="font-size:12px;line-height:1.6;margin-bottom:10px;">' +
         escapeHtml(model.summary || '') + '</div>';
 
       html += '<div style="font-size:11px;opacity:0.7;margin-bottom:8px;">Confidence: ' +
-        (model.confidence != null ? (model.confidence * 100).toFixed(0) + '%' : '—') +
-        ' · Score: ' + (model.score != null ? Math.round(model.score) : '—') + '/100</div>';
+        (model.confidence != null ? (model.confidence * 100).toFixed(0) + '%' : '—') + '</div>';
 
       var vd = model.vol_drivers || {};
       if (vd.favorable_factors && vd.favorable_factors.length > 0) {
@@ -596,6 +603,19 @@ window.BenTradePages.initVolatilityOptions = function initVolatilityOptions(root
 
   // ── Refresh overlay / error ───────────────────────────────────
 
+  function setRefreshBtnState(refreshing) {
+    if (!refreshBtn) return;
+    if (refreshing) {
+      refreshBtn.classList.add('btn-refreshing');
+      refreshBtn.innerHTML = '<span class="btn-spinner"></span>Refreshing\u2026';
+      refreshBtn.disabled = true;
+    } else {
+      refreshBtn.classList.remove('btn-refreshing');
+      refreshBtn.innerHTML = 'Refresh';
+      refreshBtn.disabled = false;
+    }
+  }
+
   function showRefreshOverlay(show) {
     if (refreshOverlay) refreshOverlay.style.display = show ? '' : 'none';
   }
@@ -639,6 +659,8 @@ window.BenTradePages.initVolatilityOptions = function initVolatilityOptions(root
       showRefreshError(null);
     }
 
+    if (force) setRefreshBtnState(true);
+
     var url = API_URL + (force ? '?force=true' : '');
     if (_cache) _cache.setRefreshing(CACHE_KEY, true);
 
@@ -677,6 +699,7 @@ window.BenTradePages.initVolatilityOptions = function initVolatilityOptions(root
       })
       .finally(function() {
         if (_cache) _cache.setRefreshing(CACHE_KEY, false);
+        setRefreshBtnState(false);
         showRefreshOverlay(false);
       });
   }

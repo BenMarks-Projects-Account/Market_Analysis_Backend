@@ -21,6 +21,8 @@ from typing import Any
 
 from app.services.cross_asset_macro_data_provider import CrossAssetMacroDataProvider
 from app.services.cross_asset_macro_engine import compute_cross_asset_scores
+from app.services.dashboard_metadata_contract import build_dashboard_metadata
+from app.services.engine_output_contract import normalize_engine_output
 from app.utils.cache import TTLCache
 
 logger = logging.getLogger(__name__)
@@ -114,6 +116,15 @@ class CrossAssetMacroService:
                 "compute_duration_s": round(duration, 2),
                 "as_of": engine_result.get("as_of"),
             }
+            payload["normalized"] = normalize_engine_output(
+                "cross_asset_macro", payload
+            )
+            payload["dashboard_metadata"] = build_dashboard_metadata(
+                "cross_asset_macro",
+                engine_result=engine_result,
+                source_errors=source_errors,
+                compute_duration_s=round(duration, 2),
+            )
 
             await self.cache.set(cache_key, payload, self.ttl_seconds)
             logger.info(
@@ -160,6 +171,11 @@ class CrossAssetMacroService:
                 "compute_duration_s": 0,
                 "as_of": datetime.now(timezone.utc).isoformat(),
                 "error": str(exc),
+                "dashboard_metadata": build_dashboard_metadata(
+                    "cross_asset_macro",
+                    is_error_payload=True,
+                    error_stage="compute",
+                ),
             }
 
     # ── Model (LLM) Analysis ────────────────────────────────────
@@ -167,8 +183,16 @@ class CrossAssetMacroService:
     def _run_model_analysis(
         self, engine_result: dict[str, Any]
     ) -> dict[str, Any]:
-        """Attempt LLM-based cross-asset analysis."""
+        """Attempt LLM-based cross-asset analysis.
+
+        Attaches ``normalized`` key via model_analysis_contract.
+        """
         from common.model_sanitize import classify_model_error, user_facing_error_message
+        from app.services.model_analysis_contract import wrap_service_model_response
+        import time as _time
+
+        t0 = _time.monotonic()
+        requested_at = datetime.now(timezone.utc).isoformat()
 
         try:
             from common.model_analysis import analyze_cross_asset_macro
@@ -177,23 +201,33 @@ class CrossAssetMacroService:
                 timeout=180,
                 retries=0,
             )
+            duration_ms = int((_time.monotonic() - t0) * 1000)
             logger.info(
                 "event=cross_asset_model_analysis_ok score=%s label=%s",
                 result.get("score"),
                 result.get("label"),
             )
-            return {"model_analysis": result}
+            outcome = {"model_analysis": result}
+            return wrap_service_model_response(
+                "cross_asset_macro", outcome,
+                requested_at=requested_at, duration_ms=duration_ms,
+            )
         except Exception as exc:
+            duration_ms = int((_time.monotonic() - t0) * 1000)
             error_kind = classify_model_error(exc)
             error_msg = user_facing_error_message(error_kind)
             logger.warning(
                 "event=cross_asset_model_analysis_failed error_kind=%s error=%s",
                 error_kind, exc,
             )
-            return {
+            outcome = {
                 "model_analysis": None,
                 "error": {"kind": error_kind, "message": error_msg},
             }
+            return wrap_service_model_response(
+                "cross_asset_macro", outcome,
+                requested_at=requested_at, duration_ms=duration_ms,
+            )
 
     async def run_model_analysis(
         self, *, force: bool = False
@@ -234,6 +268,10 @@ class CrossAssetMacroService:
 
         if model_outcome.get("error"):
             result["error"] = model_outcome["error"]
+
+        # Carry normalized contract through for downstream consumers
+        if "normalized" in model_outcome:
+            result["normalized"] = model_outcome["normalized"]
 
         if result["model_analysis"] is not None:
             await self.cache.set(model_cache_key, result, self.ttl_seconds)

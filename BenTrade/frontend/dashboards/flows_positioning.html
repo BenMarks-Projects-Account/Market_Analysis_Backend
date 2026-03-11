@@ -2,7 +2,7 @@
 <div class="view-wrap mod-page">
 
   <!-- ── Module Banner ──────────────────────────────────────────── -->
-  <div class="mod-banner accent-flows">
+  <div class="mod-banner">
     <div class="mod-banner-left">
       <div class="mod-banner-breadcrumb">BenTrade · Market Picture</div>
       <div class="mod-banner-title">Flows &amp; Positioning</div>
@@ -11,7 +11,7 @@
     <div class="mod-banner-right">
       <span class="mod-banner-tag">Module 5 of 6</span>
       <span class="mod-last-updated" id="fpLastUpdated">Updated: —</span>
-      <button class="btn btn-sm btn-outline-primary" id="fpRefreshBtn">↻ Analyze</button>
+      <button class="mod-refresh-btn" id="fpRefreshBtn" title="Refresh data">Refresh</button>
     </div>
   </div>
 
@@ -83,6 +83,37 @@
           <span class="mod-bar-val" id="fpBiasFragilityVal">—</span>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ══ AI MODEL ANALYSIS ═══════════════════════════════════ -->
+  <div class="mod-card mod-model-card" style="margin-bottom:14px;">
+    <div class="mod-card-header">
+      <span class="mod-card-title">AI Model Analysis</span>
+      <span class="mod-chip mod-chip-llm" title="Powered by local LLM">LLM</span>
+    </div>
+    <div class="mod-card-body">
+      <div class="mod-model-label" id="fpModelLabel">—</div>
+      <div class="mod-score-row">
+        <span class="mod-hero-score" id="fpModelScore">—</span>
+      </div>
+      <div class="mod-model-summary" id="fpModelSummary">
+        <div class="mod-model-cta" id="fpModelCta">
+          Run the AI model for deeper flows &amp; positioning commentary.
+          <button class="mod-action-btn" id="fpRunModelBtn" type="button">Run Model Analysis</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mod-grid-2" id="fpModelDetailsRow" style="display:none;">
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Model — Pillar Analysis</span></div>
+      <div class="mod-card-body" id="fpModelPillars"></div>
+    </div>
+    <div class="mod-card">
+      <div class="mod-card-header"><span class="mod-card-title">Model — Trading Implications</span></div>
+      <div class="mod-card-body" id="fpModelImplications"></div>
     </div>
   </div>
 
@@ -211,25 +242,6 @@
     </div>
   </div>
 
-  <!-- ══ AI MODEL ANALYSIS ═══════════════════════════════════ -->
-  <div class="mod-card" style="margin-bottom:14px;">
-    <div class="mod-card-header">
-      <span class="mod-card-title">AI Model Analysis</span>
-      <button class="btn btn-sm btn-outline-primary" id="fpRunModelBtn">Run AI Model</button>
-    </div>
-    <div class="mod-card-body">
-      <div id="fpModelCta" style="text-align:center;padding:14px 0;">
-        <div style="font-size:11px;opacity:0.6;">Click "Run AI Model" to generate LLM-powered flows & positioning commentary.</div>
-      </div>
-      <div id="fpModelDetailsRow" style="display:none;">
-        <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;">
-          <span class="mod-hero-label" id="fpModelLabel" style="font-size:14px;">—</span>
-          <span class="mod-hero-score" id="fpModelScore" style="font-size:18px;">—</span>
-        </div>
-        <div class="mod-summary" id="fpModelSummary" style="margin-bottom:8px;">—</div>
-        <div id="fpModelPillars"></div>
-      </div>
-    </div>
-  </div>
+  <!-- Model analysis section moved to after top row -->
 
 </div>

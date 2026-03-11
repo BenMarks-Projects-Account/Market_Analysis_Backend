@@ -236,6 +236,7 @@ class FlowsPositioningDataProvider:
             "proxy_available_count": proxy_avail,
             "has_direct_flow_data": False,  # Phase 1: always False
             "has_futures_positioning": False,  # Phase 1: always False (proxy only)
+            "unique_upstream_count": 1,  # Phase 1: VIX is the only upstream source
             "data_note": (
                 "Phase 1 — all positioning/flow signals are VIX-derived proxies. "
                 "Confidence is reduced accordingly. Future phases will integrate "

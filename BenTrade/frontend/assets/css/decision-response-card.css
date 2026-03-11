@@ -1,0 +1,330 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   BenTrade — Decision Response Card v1
+   Styles for the Final Decision Response UI card / panel.
+   Uses existing BenTrade design tokens from app.css / module-dashboard.css.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Card Container ───────────────────────────────────────────────────────── */
+.dr-card {
+  background: var(--surface-gunmetal, linear-gradient(180deg, rgba(10,14,22,0.92), rgba(6,10,16,0.96)));
+  border: 1px solid var(--panel-border, rgba(0,234,255,0.20));
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+  max-width: 680px;
+}
+.dr-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background: var(--surface-top-sheen, linear-gradient(180deg, rgba(255,255,255,0.03) 0%, transparent 40%));
+  pointer-events: none;
+}
+
+/* ── Decision accent strip (top border colour by decision) ────────────────── */
+.dr-card[data-decision="approve"]          { border-top: 3px solid #00e676; }
+.dr-card[data-decision="cautious_approve"] { border-top: 3px solid #ff9800; }
+.dr-card[data-decision="watchlist"]        { border-top: 3px solid var(--cyan, #00eaff); }
+.dr-card[data-decision="reject"]           { border-top: 3px solid #ff4f66; }
+.dr-card[data-decision="insufficient_data"]{ border-top: 3px solid var(--muted, #93a7b6); }
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+.dr-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid rgba(0,234,255,0.06);
+}
+.dr-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Decision badge */
+.dr-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  padding: 4px 12px;
+  border-radius: 4px;
+}
+.dr-badge-approve          { background: rgba(0,230,118,0.14); color: #00e676; border: 1px solid rgba(0,230,118,0.30); }
+.dr-badge-cautious_approve { background: rgba(255,152,0,0.12); color: #ff9800; border: 1px solid rgba(255,152,0,0.28); }
+.dr-badge-watchlist        { background: rgba(0,234,255,0.10); color: var(--cyan, #00eaff); border: 1px solid rgba(0,234,255,0.22); }
+.dr-badge-reject           { background: rgba(255,79,102,0.14); color: #ff4f66; border: 1px solid rgba(255,79,102,0.30); }
+.dr-badge-insufficient_data{ background: rgba(147,167,182,0.10); color: var(--muted, #93a7b6); border: 1px solid rgba(147,167,182,0.20); }
+
+/* Conviction chip */
+.dr-conviction {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 3px;
+}
+.dr-conviction-high     { background: rgba(0,230,118,0.10); color: #00e676; }
+.dr-conviction-moderate { background: rgba(0,234,255,0.08); color: var(--cyan, #00eaff); }
+.dr-conviction-low      { background: rgba(244,200,95,0.10); color: var(--warn, #f4c85f); }
+.dr-conviction-none     { background: rgba(147,167,182,0.08); color: var(--muted, #93a7b6); }
+
+/* Timestamp */
+.dr-timestamp {
+  font-size: 10px;
+  color: var(--muted, #93a7b6);
+  opacity: 0.7;
+}
+
+/* ── Body ─────────────────────────────────────────────────────────────────── */
+.dr-body { padding: 14px 16px 16px; }
+
+/* ── Alignment Indicators Row ─────────────────────────────────────────────── */
+.dr-indicators {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px 12px;
+  margin-bottom: 14px;
+}
+.dr-indicator {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dr-indicator-label {
+  font-size: 10px;
+  color: var(--muted, #93a7b6);
+  letter-spacing: 0.04em;
+}
+.dr-indicator-value {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+/* Indicator value color states */
+.dr-val-positive { color: #00e676; }
+.dr-val-neutral  { color: var(--cyan, #00eaff); }
+.dr-val-caution  { color: #ff9800; }
+.dr-val-negative { color: #ff4f66; }
+.dr-val-unknown  { color: var(--muted, #93a7b6); opacity: 0.7; }
+
+/* ── Summary ──────────────────────────────────────────────────────────────── */
+.dr-summary {
+  font-size: 12px;
+  color: rgba(170,210,224,0.85);
+  line-height: 1.55;
+  margin-bottom: 14px;
+  padding: 8px 10px;
+  background: rgba(0,234,255,0.015);
+  border-left: 2px solid rgba(0,234,255,0.15);
+  border-radius: 2px;
+}
+
+/* ── Section Titles ───────────────────────────────────────────────────────── */
+.dr-section-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--cyan, #00eaff);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  margin-top: 12px;
+  opacity: 0.7;
+}
+
+/* ── Reasons Lists (for / against) ────────────────────────────────────────── */
+.dr-reasons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+@media (max-width: 520px) {
+  .dr-reasons { grid-template-columns: 1fr; }
+}
+.dr-reasons-col {}
+.dr-reason-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.dr-reason-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 11px;
+  color: rgba(170,210,224,0.82);
+  line-height: 1.45;
+}
+.dr-reason-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+.dr-reason-dot.for     { background: #00e676; box-shadow: 0 0 4px rgba(0,230,118,0.4); }
+.dr-reason-dot.against { background: #ff4f66; box-shadow: 0 0 4px rgba(255,79,102,0.4); }
+
+/* ── Key Risks ────────────────────────────────────────────────────────────── */
+.dr-risk-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+}
+.dr-risk-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 11px;
+  color: rgba(255,152,0,0.85);
+  line-height: 1.4;
+}
+.dr-risk-icon {
+  flex-shrink: 0;
+  font-size: 11px;
+  margin-top: 1px;
+}
+
+/* ── Size Guidance Badge ──────────────────────────────────────────────────── */
+.dr-size-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.dr-size-label {
+  font-size: 10px;
+  color: var(--muted, #93a7b6);
+}
+.dr-size-value {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 4px;
+}
+.dr-size-normal  { background: rgba(0,230,118,0.10); color: #00e676; border: 1px solid rgba(0,230,118,0.2); }
+.dr-size-reduced { background: rgba(255,152,0,0.10); color: #ff9800; border: 1px solid rgba(255,152,0,0.2); }
+.dr-size-minimal { background: rgba(255,79,102,0.10); color: #ff4f66; border: 1px solid rgba(255,79,102,0.2); }
+.dr-size-none    { background: rgba(147,167,182,0.08); color: var(--muted, #93a7b6); border: 1px solid rgba(147,167,182,0.15); }
+
+/* ── Notes (invalidation / monitoring) ────────────────────────────────────── */
+.dr-notes {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 10px;
+}
+.dr-note-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 11px;
+  color: rgba(170,210,224,0.75);
+  line-height: 1.4;
+}
+.dr-note-bullet {
+  flex-shrink: 0;
+  font-size: 10px;
+  margin-top: 1px;
+  opacity: 0.6;
+}
+
+/* ── Warning Flags Banner ─────────────────────────────────────────────────── */
+.dr-warnings {
+  margin-top: 12px;
+  padding: 8px 10px;
+  background: rgba(244,200,95,0.04);
+  border: 1px solid rgba(244,200,95,0.15);
+  border-radius: 6px;
+}
+.dr-warnings-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  color: var(--warn, #f4c85f);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.dr-warning-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.dr-warning-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 11px;
+  color: rgba(244,200,95,0.80);
+  line-height: 1.4;
+}
+.dr-warning-icon {
+  flex-shrink: 0;
+  font-size: 11px;
+  margin-top: 1px;
+}
+
+/* ── Insufficient-data overlay cue ────────────────────────────────────────── */
+.dr-card[data-decision="insufficient_data"] .dr-body {
+  opacity: 0.65;
+}
+.dr-insufficient-banner {
+  display: none;
+  padding: 10px 14px;
+  background: rgba(147,167,182,0.06);
+  border: 1px dashed rgba(147,167,182,0.25);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  text-align: center;
+}
+.dr-card[data-decision="insufficient_data"] .dr-insufficient-banner {
+  display: block;
+}
+.dr-insufficient-text {
+  font-size: 11px;
+  color: var(--muted, #93a7b6);
+  line-height: 1.5;
+}
+
+/* ── Footer (version / source tag) ────────────────────────────────────────── */
+.dr-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-top: 1px solid rgba(0,234,255,0.06);
+  font-size: 10px;
+  color: var(--muted, #93a7b6);
+  opacity: 0.6;
+}
+.dr-footer-tag {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.dr-source-model       { color: var(--cyan, #00eaff); border: 1px solid rgba(0,234,255,0.2); }
+.dr-source-manual      { color: rgba(170,210,224,0.6); border: 1px solid rgba(170,210,224,0.15); }
+.dr-source-placeholder { color: rgba(244,200,95,0.7); border: 1px solid rgba(244,200,95,0.2); }

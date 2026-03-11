@@ -21,6 +21,8 @@ from typing import Any
 
 from app.services.breadth_data_provider import BreadthDataProvider
 from app.services.breadth_engine import compute_breadth_scores
+from app.services.dashboard_metadata_contract import build_dashboard_metadata
+from app.services.engine_output_contract import normalize_engine_output
 from app.utils.cache import TTLCache
 
 logger = logging.getLogger(__name__)
@@ -110,6 +112,14 @@ class BreadthService:
                 "compute_duration_s": round(duration, 2),
                 "as_of": engine_result.get("as_of"),
             }
+            payload["normalized"] = normalize_engine_output(
+                "breadth_participation", payload
+            )
+            payload["dashboard_metadata"] = build_dashboard_metadata(
+                "breadth_participation",
+                engine_result=engine_result,
+                compute_duration_s=round(duration, 2),
+            )
 
             # Step 4: Cache
             await self.cache.set(cache_key, payload, self.ttl_seconds)
@@ -159,6 +169,11 @@ class BreadthService:
                 "compute_duration_s": 0,
                 "as_of": datetime.now(timezone.utc).isoformat(),
                 "error": str(exc),
+                "dashboard_metadata": build_dashboard_metadata(
+                    "breadth_participation",
+                    is_error_payload=True,
+                    error_stage="compute",
+                ),
             }
 
     # ── Model (LLM) Analysis ────────────────────────────────────
@@ -169,8 +184,14 @@ class BreadthService:
         """Attempt LLM-based breadth analysis.
 
         Returns dict with model_analysis (or None) and error info if failed.
+        Attaches ``normalized`` key via model_analysis_contract.
         """
         from common.model_sanitize import classify_model_error, user_facing_error_message
+        from app.services.model_analysis_contract import wrap_service_model_response
+        import time as _time
+
+        t0 = _time.monotonic()
+        requested_at = datetime.now(timezone.utc).isoformat()
 
         try:
             from common.model_analysis import analyze_breadth_participation
@@ -179,23 +200,33 @@ class BreadthService:
                 timeout=180,
                 retries=0,
             )
+            duration_ms = int((_time.monotonic() - t0) * 1000)
             logger.info(
                 "event=breadth_model_analysis_ok score=%s label=%s",
                 result.get("score"),
                 result.get("label"),
             )
-            return {"model_analysis": result}
+            outcome = {"model_analysis": result}
+            return wrap_service_model_response(
+                "breadth_participation", outcome,
+                requested_at=requested_at, duration_ms=duration_ms,
+            )
         except Exception as exc:
+            duration_ms = int((_time.monotonic() - t0) * 1000)
             error_kind = classify_model_error(exc)
             error_msg = user_facing_error_message(error_kind)
             logger.warning(
                 "event=breadth_model_analysis_failed error_kind=%s error=%s",
                 error_kind, exc,
             )
-            return {
+            outcome = {
                 "model_analysis": None,
                 "error": {"kind": error_kind, "message": error_msg},
             }
+            return wrap_service_model_response(
+                "breadth_participation", outcome,
+                requested_at=requested_at, duration_ms=duration_ms,
+            )
 
     async def run_model_analysis(
         self, *, force: bool = False
@@ -242,6 +273,10 @@ class BreadthService:
         # Pass through error info if model failed
         if model_outcome.get("error"):
             result["error"] = model_outcome["error"]
+
+        # Carry normalized contract through for downstream consumers
+        if "normalized" in model_outcome:
+            result["normalized"] = model_outcome["normalized"]
 
         # Only cache successful results — don't cache failures
         if result["model_analysis"] is not None:

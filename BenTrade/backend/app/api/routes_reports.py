@@ -307,12 +307,19 @@ async def model_analyze_regime(payload: dict, request: Request):
 
     Returns engine-derived summary, model-inferred summary (raw-only), and
     a side-by-side comparison with per-row delta indicators.
+    Attaches a ``normalized`` key via model_analysis_contract.
     """
+    import time as _time
+    from datetime import datetime, timezone
+
     regime_data = payload.get("regime")
     if not regime_data or not isinstance(regime_data, dict):
         raise HTTPException(status_code=400, detail='Missing or invalid "regime" in request body')
 
     playbook_data = payload.get("playbook")  # optional enriched playbook
+
+    t0 = _time.monotonic()
+    requested_at = datetime.now(timezone.utc).isoformat()
 
     try:
         from common.model_analysis import (
@@ -322,6 +329,7 @@ async def model_analyze_regime(payload: dict, request: Request):
             compute_regime_deltas,
             extract_engine_regime_summary,
         )
+        from app.services.model_analysis_contract import normalize_model_analysis_response
 
         # ── 1. Extract engine summary (derived labels/scores) ──────
         engine_summary = extract_engine_regime_summary(regime_data)
@@ -378,6 +386,14 @@ async def model_analyze_regime(payload: dict, request: Request):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Regime model analysis failed: {exc}") from exc
 
+    duration_ms = int((_time.monotonic() - t0) * 1000)
+    normalized = normalize_model_analysis_response(
+        "regime",
+        model_result=model_output,
+        requested_at=requested_at,
+        duration_ms=duration_ms,
+    )
+
     return {
         "ok": True,
         "analysis": model_output,
@@ -385,6 +401,7 @@ async def model_analyze_regime(payload: dict, request: Request):
         "model_summary": model_summary,
         "comparison": comparison,
         "regime_comparison_trace": comparison_trace,
+        "normalized": normalized,
     }
 
 

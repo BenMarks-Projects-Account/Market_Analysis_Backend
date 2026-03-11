@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.services.base_data_service import BaseDataService
+from app.services.scanner_candidate_contract import normalize_candidate_output
 from app.utils.trade_key import stock_trade_key, stock_idea_key
 from common.quant_analysis import rsi, simple_moving_average
 
@@ -176,6 +177,10 @@ class PullbackSwingService:
             source_health = self.bds.get_source_health_snapshot()
         except Exception:
             pass
+
+        # Attach normalized candidate contract to each candidate
+        for c in candidates:
+            c["normalized"] = normalize_candidate_output(self.STRATEGY_ID, c)
 
         return {
             "strategy_id": self.STRATEGY_ID,

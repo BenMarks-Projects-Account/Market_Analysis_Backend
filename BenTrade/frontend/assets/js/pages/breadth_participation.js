@@ -530,7 +530,7 @@ window.BenTradePages.initBreadthParticipation = function initBreadthParticipatio
       runModelBtn.innerHTML = '<span class="btn-spinner"></span>Analyzing…';
     } else {
       runModelBtn.classList.remove('btn-refreshing');
-      runModelBtn.textContent = 'Analyze with Model';
+      runModelBtn.textContent = 'Run Model Analysis';
     }
   }
 
@@ -540,7 +540,7 @@ window.BenTradePages.initBreadthParticipation = function initBreadthParticipatio
       modelSummary.innerHTML =
         '<div class="mod-model-cta" id="breadthModelCta">' +
         '<p style="opacity:0.6;font-size:12px;margin:0 0 10px;">Model analysis has not been run yet.</p>' +
-        '<button class="mod-refresh-btn" id="breadthRunModelBtn" type="button">Analyze with Model</button>' +
+        '<button class="mod-action-btn" id="breadthRunModelBtn" type="button">Run Model Analysis</button>' +
         '</div>';
       var btn = modelSummary.querySelector('#breadthRunModelBtn');
       if (btn) btn.addEventListener('click', function() { triggerModelAnalysis(); });
@@ -556,7 +556,7 @@ window.BenTradePages.initBreadthParticipation = function initBreadthParticipatio
       modelSummary.innerHTML =
         '<div style="color:rgba(255,79,102,0.9);font-size:12px;margin-bottom:8px;">' +
         escapeHtml(errMsg) + '</div>' +
-        '<button class="mod-refresh-btn" id="breadthRunModelBtn" type="button">Retry Model Analysis</button>';
+        '<button class="mod-action-btn" id="breadthRunModelBtn" type="button">Retry Model Analysis</button>';
       var btn = modelSummary.querySelector('#breadthRunModelBtn');
       if (btn) btn.addEventListener('click', function() { triggerModelAnalysis(); });
     }
@@ -631,7 +631,7 @@ window.BenTradePages.initBreadthParticipation = function initBreadthParticipatio
 
       // Re-run button
       html += '<div style="margin-top:12px;">' +
-        '<button class="mod-refresh-btn" id="breadthRunModelBtn" type="button">Re-run Model Analysis</button></div>';
+        '<button class="mod-action-btn" id="breadthRunModelBtn" type="button">Re-run Model Analysis</button></div>';
 
       modelSummary.innerHTML = html;
       var btn = modelSummary.querySelector('#breadthRunModelBtn');
@@ -779,6 +779,19 @@ window.BenTradePages.initBreadthParticipation = function initBreadthParticipatio
 
   // ── Fetch ─────────────────────────────────────────────────────
 
+  function setRefreshBtnState(refreshing) {
+    if (!refreshBtn) return;
+    if (refreshing) {
+      refreshBtn.classList.add('btn-refreshing');
+      refreshBtn.innerHTML = '<span class="btn-spinner"></span>Refreshing\u2026';
+      refreshBtn.disabled = true;
+    } else {
+      refreshBtn.classList.remove('btn-refreshing');
+      refreshBtn.innerHTML = 'Refresh';
+      refreshBtn.disabled = false;
+    }
+  }
+
   function renderRefreshOverlay(show) {
     var existing = scope.querySelector('#breadthRefreshOverlay');
     if (!show) {
@@ -875,6 +888,8 @@ window.BenTradePages.initBreadthParticipation = function initBreadthParticipatio
       console.log('[BenTrade][Breadth] first_load_start');
     }
 
+    if (force) setRefreshBtnState(true);
+
     var url = API_URL + (force ? '?force=true' : '');
     if (_cache) _cache.setRefreshing(CACHE_KEY, true);
 
@@ -924,6 +939,7 @@ window.BenTradePages.initBreadthParticipation = function initBreadthParticipatio
       })
       .finally(function() {
         if (_cache) _cache.setRefreshing(CACHE_KEY, false);
+        setRefreshBtnState(false);
         renderRefreshOverlay(false);
       });
   }

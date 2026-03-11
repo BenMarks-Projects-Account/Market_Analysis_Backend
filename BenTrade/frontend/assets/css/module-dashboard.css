@@ -7,50 +7,32 @@
 /* ── Page Layout ──────────────────────────────────────────────────────────── */
 .mod-page { width: 100%; }
 
-/* ── Module Banner ────────────────────────────────────────────────────────── */
+/* ── Module Banner (sticky — matches Home topbar) ─────────────────────────── */
 .mod-banner {
-  position: relative;
+  position: sticky;
+  top: 0;
+  z-index: 120;
   display: flex;
   align-items: stretch;
   justify-content: space-between;
   gap: 16px;
   padding: 14px 20px 13px;
   margin-bottom: 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(0,234,255,0.14);
   background:
-    linear-gradient(135deg, rgba(6,12,22,0.96), rgba(10,16,28,0.94) 50%, rgba(6,10,18,0.97)),
-    var(--surface-gunmetal, #0a0e16);
+    linear-gradient(180deg, rgba(222,240,255,0.08), rgba(222,240,255,0.0) 20%),
+    linear-gradient(180deg, rgba(10,14,22,0.96), rgba(6,10,16,0.98));
+  backdrop-filter: blur(10px);
+  border: none;
+  border-bottom: 1px solid rgba(126,170,200,0.34);
   overflow: hidden;
   box-shadow:
-    0 2px 12px rgba(0,0,0,0.40),
-    inset 0 1px 0 rgba(220,240,255,0.06);
+    0 8px 20px rgba(0,0,0,0.46),
+    inset 0 1px 0 rgba(226,242,255,0.16);
 }
-/* Subtle top-edge sheen */
-.mod-banner::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 1px;
-  background: linear-gradient(90deg,
-    transparent 5%,
-    rgba(0,234,255,0.30) 30%,
-    rgba(0,234,255,0.45) 50%,
-    rgba(0,234,255,0.30) 70%,
-    transparent 95%);
-  pointer-events: none;
-}
-/* Left accent stripe */
+/* Pseudo-elements removed — clean Home-style banner */
+.mod-banner::before,
 .mod-banner::after {
-  content: '';
-  position: absolute;
-  top: 8px; bottom: 8px; left: 0;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--mod-banner-accent, var(--cyan, #00eaff));
-  opacity: 0.7;
-  box-shadow: 0 0 8px var(--mod-banner-accent, rgba(0,234,255,0.3));
-  pointer-events: none;
+  display: none;
 }
 
 .mod-banner-left {
@@ -78,7 +60,7 @@
   font-size: 16px;
   font-weight: 700;
   letter-spacing: 0.10em;
-  color: var(--mod-banner-accent, var(--cyan, #00eaff));
+  color: var(--cyan, #00eaff);
   text-transform: uppercase;
   line-height: 1.2;
 }
@@ -106,45 +88,15 @@
   text-transform: uppercase;
   padding: 3px 10px;
   border-radius: 4px;
-  color: var(--mod-banner-accent, var(--cyan, #00eaff));
+  color: var(--cyan, #00eaff);
   background: rgba(0,234,255,0.06);
   border: 1px solid rgba(0,234,255,0.16);
   white-space: nowrap;
 }
 
-/* ── Banner Accent Variants ───────────────────────────────────────────────── */
-/* News & Sentiment — teal/cyan (default) */
-.mod-banner.accent-sentiment  { --mod-banner-accent: #00eaff; }
-/* Breadth & Participation — green */
-.mod-banner.accent-breadth    { --mod-banner-accent: #00e676; }
-.mod-banner.accent-breadth    { border-color: rgba(0,230,118,0.14); }
-.mod-banner.accent-breadth .mod-banner-tag {
-  background: rgba(0,230,118,0.06); border-color: rgba(0,230,118,0.18);
-}
-/* Volatility — amber/orange */
-.mod-banner.accent-volatility { --mod-banner-accent: #ff9800; }
-.mod-banner.accent-volatility { border-color: rgba(255,152,0,0.14); }
-.mod-banner.accent-volatility .mod-banner-tag {
-  background: rgba(255,152,0,0.06); border-color: rgba(255,152,0,0.18);
-}
-/* Cross-Asset — purple */
-.mod-banner.accent-macro      { --mod-banner-accent: #b388ff; }
-.mod-banner.accent-macro      { border-color: rgba(179,136,255,0.14); }
-.mod-banner.accent-macro .mod-banner-tag {
-  background: rgba(179,136,255,0.06); border-color: rgba(179,136,255,0.18);
-}
-/* Flows & Positioning — warm blue */
-.mod-banner.accent-flows      { --mod-banner-accent: #448aff; }
-.mod-banner.accent-flows      { border-color: rgba(68,138,255,0.14); }
-.mod-banner.accent-flows .mod-banner-tag {
-  background: rgba(68,138,255,0.06); border-color: rgba(68,138,255,0.18);
-}
-/* Liquidity — warm gold */
-.mod-banner.accent-liquidity  { --mod-banner-accent: #ffd740; }
-.mod-banner.accent-liquidity  { border-color: rgba(255,215,64,0.14); }
-.mod-banner.accent-liquidity .mod-banner-tag {
-  background: rgba(255,215,64,0.06); border-color: rgba(255,215,64,0.18);
-}
+/* ── Banner Accent Variants (neutralized — all use unified Home style) ──── */
+/* All accent classes kept for backward compat — no visual difference */
+/* (removed per-module accent overrides — unified Home-style banner) */
 
 /* Responsive: stack on narrow viewports */
 @media (max-width: 600px) {
@@ -633,7 +585,8 @@
 }
 
 /* ── Module Refresh / Action Button ───────────────────────────────────────── */
-.mod-refresh-btn {
+.mod-refresh-btn,
+.mod-action-btn {
   font-family: 'Orbitron', 'Segoe UI', sans-serif;
   font-size: 11px;
   font-weight: 700;
@@ -652,7 +605,8 @@
     inset 0 -1px 0 rgba(0,0,0,0.38);
   transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease, border-color 0.12s ease;
 }
-.mod-refresh-btn:hover {
+.mod-refresh-btn:hover,
+.mod-action-btn:hover {
   transform: translateY(-1px);
   filter: brightness(1.08);
   border-color: rgba(0,234,255,0.50);
@@ -661,18 +615,21 @@
     0 8px 20px rgba(0,0,0,0.42),
     inset 0 1px 0 rgba(236,248,255,0.18);
 }
-.mod-refresh-btn:active {
+.mod-refresh-btn:active,
+.mod-action-btn:active {
   transform: translateY(1px);
   filter: brightness(0.96);
   box-shadow:
     0 2px 8px rgba(0,0,0,0.38),
     inset 0 1px 0 rgba(214,236,255,0.10);
 }
-.mod-refresh-btn:focus {
+.mod-refresh-btn:focus,
+.mod-action-btn:focus {
   outline: none;
   box-shadow: 0 0 0 2px rgba(0,234,255,0.18), 0 4px 12px rgba(0,0,0,0.36);
 }
-.mod-refresh-btn:disabled {
+.mod-refresh-btn:disabled,
+.mod-action-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;

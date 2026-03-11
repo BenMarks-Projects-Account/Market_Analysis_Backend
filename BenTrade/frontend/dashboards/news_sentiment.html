@@ -2,7 +2,7 @@
 <div class="view-wrap">
 
   <!-- ── Module Banner ──────────────────────────────────────────── -->
-  <div class="mod-banner accent-sentiment">
+  <div class="mod-banner">
     <div class="mod-banner-left">
       <div class="mod-banner-breadcrumb">BenTrade · Market Picture</div>
       <div class="mod-banner-title">News &amp; Sentiment</div>
@@ -10,6 +10,8 @@
     </div>
     <div class="mod-banner-right">
       <span class="mod-banner-tag">Module 1 of 6</span>
+      <span class="mod-last-updated" id="nsLastUpdated">Updated: —</span>
+      <button class="mod-refresh-btn" id="nsRefreshBtn" title="Refresh data">Refresh</button>
     </div>
   </div>
 
@@ -47,7 +49,7 @@
         <div class="ns-model-summary" id="nsModelSummary">
           <div class="ns-model-cta" id="nsModelCta">
             <p class="ns-model-cta-text">Model analysis has not been run yet.</p>
-            <button class="btn ns-model-run-btn" id="nsRunModelBtn" type="button">Analyze with Model</button>
+            <button class="mod-action-btn" id="nsRunModelBtn" type="button">Run Model Analysis</button>
           </div>
         </div>
       </div>
@@ -57,8 +59,6 @@
     <section class="stock-card ns-card ns-macro-card">
       <div class="ns-card-header">
         <span class="ns-card-title">Macro Stress Context</span>
-        <span class="ns-last-updated" id="nsLastUpdated" style="font-size:10px;color:var(--muted);margin-right:8px;"></span>
-        <button class="btn ns-refresh-btn" id="nsRefreshBtn" type="button">↻ Refresh</button>
       </div>
       <div class="ns-card-body">
         <div class="ns-macro-grid" id="nsMacroGrid">

@@ -93,6 +93,7 @@ window.BenTradePages.initLiquidityConditions = function initLiquidityConditions(
   var modelScore       = scope.querySelector('#lcModelScore');
   var modelSummary     = scope.querySelector('#lcModelSummary');
   var modelPillars     = scope.querySelector('#lcModelPillars');
+  var modelImplications = scope.querySelector('#lcModelImplications');
 
   // ── Utilities ─────────────────────────────────────────────────
 
@@ -187,6 +188,11 @@ window.BenTradePages.initLiquidityConditions = function initLiquidityConditions(
     if (_destroyed) return;
     var er = payload.engine_result || {};
     var dq = payload.data_quality || {};
+    console.log('[BenTrade][Liquidity] render_start', {
+      score: er.score, label: er.short_label, confidence: er.confidence_score,
+      pillar_count: er.pillar_scores ? Object.keys(er.pillar_scores).length : 0,
+      warnings: (er.warnings || []).length, missing: (er.missing_inputs || []).length,
+    });
 
     // Degraded-state banner
     var sourceErrors = (dq.source_errors && Object.keys(dq.source_errors).length > 0)
@@ -256,10 +262,10 @@ window.BenTradePages.initLiquidityConditions = function initLiquidityConditions(
 
     // Pillar 2 — Financial Conditions
     setText(lcVIX, fmtVal(rawCond.vix));
-    var fciProxy = submetricScore(pillarDetails, 'financial_conditions_tightness', 'financial_conditions_index');
+    var fciProxy = submetricScore(pillarDetails, 'financial_conditions_tightness', 'fci_proxy');
     setText(lcFCI, fciProxy != null ? Math.round(fciProxy) + '/100' : '\u2014');
-    var condTrend = submetricScore(pillarDetails, 'financial_conditions_tightness', 'financial_conditions_trend');
-    setText(lcCondTrend, condTrend != null ? (condTrend >= 60 ? 'Easing' : condTrend >= 40 ? 'Stable' : 'Tightening') : '\u2014');
+    var condTrend = submetricScore(pillarDetails, 'financial_conditions_tightness', 'conditions_supportiveness');
+    setText(lcCondTrend, condTrend != null ? (condTrend >= 60 ? 'Supportive' : condTrend >= 40 ? 'Neutral' : 'Restrictive') : '\u2014');
     var broadTight = submetricScore(pillarDetails, 'financial_conditions_tightness', 'broad_tightness_score');
     setText(lcBroadTight, broadTight != null ? Math.round(broadTight) + '/100' : '\u2014');
     setBar(p2Bar, p2Score, (er.pillar_scores || {}).financial_conditions_tightness);
@@ -275,13 +281,19 @@ window.BenTradePages.initLiquidityConditions = function initLiquidityConditions(
 
     // Pillar 4 — Dollar & Global
     setText(lcDXY, rawDollar.dxy_level != null ? rawDollar.dxy_level.toFixed(1) : '\u2014');
-    var dxyTrendSub = submetricScore(pillarDetails, 'dollar_global_liquidity', 'dxy_trend');
-    setText(lcDXYTrend, dxyTrendSub != null ? (dxyTrendSub >= 60 ? 'Weakening' : dxyTrendSub >= 40 ? 'Stable' : 'Strengthening') : '\u2014');
+    var dxyLevelSub = submetricScore(pillarDetails, 'dollar_global_liquidity', 'dxy_level');
+    setText(lcDXYTrend, dxyLevelSub != null ? (dxyLevelSub >= 65 ? 'Weak $' : dxyLevelSub >= 35 ? 'Moderate' : 'Strong $') : '\u2014');
     var dollarPressSub = submetricScore(pillarDetails, 'dollar_global_liquidity', 'dollar_liquidity_pressure');
     setText(lcDollarPress, dollarPressSub != null ? Math.round(dollarPressSub) + '/100' : '\u2014');
-    var globalHead = submetricScore(pillarDetails, 'dollar_global_liquidity', 'global_liquidity_headwind');
+    var globalHead = submetricScore(pillarDetails, 'dollar_global_liquidity', 'dollar_risk_asset_impact');
     setText(lcGlobalHead, globalHead != null ? (globalHead >= 60 ? 'Minimal' : globalHead >= 35 ? 'Moderate' : 'Significant') : '\u2014');
     setBar(p4Bar, p4Score, (er.pillar_scores || {}).dollar_global_liquidity);
+
+    // Diagnostic: log resolved submetric values for key fields
+    console.log('[BenTrade][Liquidity] submetric_resolution', {
+      fci_proxy: fciProxy, conditions_trend: condTrend, broad_tightness: broadTight,
+      dxy_level: dxyLevelSub, dollar_pressure: dollarPressSub, headwind: globalHead,
+    });
 
     // Pillar 5 — Stability & Fragility
     var stabSub = submetricScore(pillarDetails, 'liquidity_stability_fragility', 'stability_of_conditions');
@@ -354,51 +366,189 @@ window.BenTradePages.initLiquidityConditions = function initLiquidityConditions(
 
   // ── Render Model Analysis ─────────────────────────────────────
 
-  function renderModel(data) {
-    if (_destroyed) return;
-    var ma = data.model_analysis;
-    if (!ma) {
-      if (modelCta) { modelCta.style.display = ''; modelCta.textContent = data.error ? data.error.message : 'Model analysis unavailable.'; }
-      if (modelDetailsRow) modelDetailsRow.style.display = 'none';
+  function setModelBtnState(loading) {
+    runModelBtn = scope.querySelector('#lcRunModelBtn');
+    if (!runModelBtn) return;
+    runModelBtn.disabled = loading;
+    if (loading) {
+      runModelBtn.classList.add('btn-refreshing');
+      runModelBtn.innerHTML = '<span class="btn-spinner"></span>Analyzing…';
+    } else {
+      runModelBtn.classList.remove('btn-refreshing');
+      runModelBtn.textContent = 'Run Model Analysis';
+    }
+  }
+
+  function renderModelNotRun() {
+    if (modelSummary) {
+      modelSummary.innerHTML =
+        '<div class="mod-model-cta" id="lcModelCta">' +
+        '<p style="opacity:0.6;font-size:12px;margin:0 0 10px;">Model analysis has not been run yet.</p>' +
+        '<button class="mod-action-btn" id="lcRunModelBtn" type="button">Run Model Analysis</button>' +
+        '</div>';
+      var btn = modelSummary.querySelector('#lcRunModelBtn');
+      if (btn) btn.addEventListener('click', function() { triggerModelAnalysis(); });
+    }
+    setText(modelLabel, '—');
+    setText(modelScore, '—');
+    if (modelDetailsRow) modelDetailsRow.style.display = 'none';
+  }
+
+  function renderModelError(errMsg) {
+    console.error('[BenTrade][Liquidity] Model analysis error:', errMsg);
+    if (modelSummary) {
+      modelSummary.innerHTML =
+        '<div style="color:rgba(255,79,102,0.9);font-size:12px;margin-bottom:8px;">' +
+        escapeHtml(errMsg) + '</div>' +
+        '<button class="mod-action-btn" id="lcRunModelBtn" type="button">Retry Model Analysis</button>';
+      var btn = modelSummary.querySelector('#lcRunModelBtn');
+      if (btn) btn.addEventListener('click', function() { triggerModelAnalysis(); });
+    }
+    setText(modelLabel, 'Error');
+    if (modelLabel) modelLabel.style.color = 'rgba(255,79,102,0.9)';
+    setText(modelScore, '—');
+    if (modelDetailsRow) modelDetailsRow.style.display = 'none';
+  }
+
+  function renderModel(model) {
+    if (!model) {
+      renderModelNotRun();
       return;
     }
-    if (modelCta) modelCta.style.display = 'none';
-    if (modelDetailsRow) modelDetailsRow.style.display = '';
-    if (modelLabel) { modelLabel.textContent = ma.label || '\u2014'; modelLabel.className = 'mod-chip ' + chipClass(ma.label); }
-    if (modelScore) { modelScore.textContent = ma.score != null ? Math.round(ma.score) : '\u2014'; modelScore.style.color = scoreColor(ma.score); }
-    setText(modelSummary, ma.summary);
+    console.log('[BenTrade][Liquidity] Rendering model result:', model.label, model.score);
 
-    if (modelPillars && ma.pillar_interpretation) {
-      var html = '<div class="mod-section-title" style="margin-top:8px;">Pillar Interpretation</div>';
-      var names = {
+    // Label & score
+    setText(modelLabel, (model.label || '—').toUpperCase());
+    if (modelLabel) modelLabel.style.color = scoreColor(model.score);
+    setText(modelScore, model.score != null ? Math.round(model.score) : '—');
+    if (modelScore) modelScore.style.color = scoreColor(model.score);
+
+    // Summary with confidence/drivers
+    if (modelSummary) {
+      var html = '<div style="font-size:12px;line-height:1.6;margin-bottom:10px;">' +
+        escapeHtml(model.summary || '') + '</div>';
+
+      html += '<div style="font-size:11px;opacity:0.7;margin-bottom:8px;">Confidence: ' +
+        (model.confidence != null ? (model.confidence * 100).toFixed(0) + '%' : '—') + '</div>';
+
+      var ld = model.liquidity_drivers || {};
+      if (ld.constructive_factors && ld.constructive_factors.length > 0) {
+        html += '<div style="margin-top:6px;"><span style="font-size:10px;opacity:0.6;">CONSTRUCTIVE</span><ul class="mod-contrib-list">';
+        ld.constructive_factors.forEach(function(f) {
+          html += '<li class="mod-contrib-item"><span class="mod-contrib-dot positive"></span>' + escapeHtml(f) + '</li>';
+        });
+        html += '</ul></div>';
+      }
+      if (ld.warning_factors && ld.warning_factors.length > 0) {
+        html += '<div style="margin-top:6px;"><span style="font-size:10px;opacity:0.6;">WARNINGS</span><ul class="mod-contrib-list">';
+        ld.warning_factors.forEach(function(f) {
+          html += '<li class="mod-contrib-item"><span class="mod-contrib-dot negative"></span>' + escapeHtml(f) + '</li>';
+        });
+        html += '</ul></div>';
+      }
+      if (ld.conflicting_factors && ld.conflicting_factors.length > 0) {
+        html += '<div style="margin-top:6px;"><span style="font-size:10px;opacity:0.6;">CONFLICTING</span><ul class="mod-contrib-list">';
+        ld.conflicting_factors.forEach(function(f) {
+          html += '<li class="mod-contrib-item"><span class="mod-contrib-dot conflict"></span>' + escapeHtml(f) + '</li>';
+        });
+        html += '</ul></div>';
+      }
+
+      if (model.trader_takeaway) {
+        html += '<div class="mod-divider"></div>' +
+          '<div style="font-size:11px;font-weight:600;margin-bottom:4px;opacity:0.6;">TRADER TAKEAWAY</div>' +
+          '<div style="font-size:12px;line-height:1.5;">' + escapeHtml(model.trader_takeaway) + '</div>';
+      }
+
+      var uf = model.uncertainty_flags || [];
+      if (uf.length > 0) {
+        html += '<div style="margin-top:8px;">';
+        uf.forEach(function(f) {
+          html += '<div style="font-size:10px;opacity:0.5;">⚠ ' + escapeHtml(f) + '</div>';
+        });
+        html += '</div>';
+      }
+
+      html += '<div style="margin-top:12px;">' +
+        '<button class="mod-action-btn" id="lcRunModelBtn" type="button">Re-run Model Analysis</button></div>';
+
+      modelSummary.innerHTML = html;
+      var btn = modelSummary.querySelector('#lcRunModelBtn');
+      if (btn) btn.addEventListener('click', function() { triggerModelAnalysis(); });
+    }
+
+    // Model detail row — pillar analysis
+    if (modelDetailsRow) modelDetailsRow.style.display = '';
+    if (modelPillars) {
+      var pa = model.pillar_analysis || model.pillar_interpretation || {};
+      var pillarKeys = ['rates_policy_pressure', 'financial_conditions_tightness', 'credit_funding_stress', 'dollar_global_liquidity', 'liquidity_stability_fragility'];
+      var pillarLabels = {
         rates_policy_pressure: 'Rates & Policy',
         financial_conditions_tightness: 'Financial Conditions',
         credit_funding_stress: 'Credit & Funding',
         dollar_global_liquidity: 'Dollar / Global',
         liquidity_stability_fragility: 'Stability / Fragility'
       };
-      Object.keys(names).forEach(function(key) {
-        var v = ma.pillar_interpretation[key];
-        if (v) html += '<div style="margin-bottom:4px;"><strong>' + escapeHtml(names[key]) + ':</strong> ' + escapeHtml(v) + '</div>';
+      var pillarsHtml = '';
+      pillarKeys.forEach(function(k) {
+        var val = pa[k];
+        if (val) {
+          pillarsHtml += '<div style="margin-bottom:8px;">' +
+            '<div style="font-size:10px;font-weight:600;opacity:0.6;text-transform:uppercase;">' +
+            escapeHtml(pillarLabels[k] || k) + '</div>' +
+            '<div style="font-size:11px;line-height:1.5;">' + escapeHtml(val) + '</div></div>';
+        }
       });
-      if (ma.trader_takeaway) {
-        html += '<div class="mod-divider"></div><div class="mod-section-title">AI Takeaway</div><div>' + escapeHtml(ma.trader_takeaway) + '</div>';
-      }
-      modelPillars.innerHTML = html;
+      modelPillars.innerHTML = pillarsHtml || '<div style="opacity:0.5;font-size:11px;">No pillar analysis available</div>';
+    }
+
+    // Model detail row — trading implications
+    if (modelImplications) {
+      var mi = model.market_implications || {};
+      var implKeys = ['directional_bias', 'position_sizing', 'strategy_recommendation', 'risk_level', 'liquidity_tilt'];
+      var implLabels = {
+        directional_bias: 'Directional Bias', position_sizing: 'Position Sizing',
+        strategy_recommendation: 'Strategy Recommendation', risk_level: 'Risk Level',
+        liquidity_tilt: 'Liquidity Tilt'
+      };
+      var implHtml = '';
+      implKeys.forEach(function(k) {
+        var val = mi[k];
+        if (val) {
+          implHtml += '<div style="margin-bottom:6px;">' +
+            '<span style="font-size:10px;opacity:0.6;">' + escapeHtml(implLabels[k] || k) + ':</span> ' +
+            '<span style="font-size:11px;">' + escapeHtml(val) + '</span></div>';
+        }
+      });
+      modelImplications.innerHTML = implHtml || '<div style="opacity:0.5;font-size:11px;">No implications available</div>';
     }
   }
 
   // ── Fetch Logic ───────────────────────────────────────────────
 
+  function setRefreshBtnState(refreshing) {
+    if (!refreshBtn) return;
+    if (refreshing) {
+      refreshBtn.classList.add('btn-refreshing');
+      refreshBtn.innerHTML = '<span class="btn-spinner"></span>Refreshing\u2026';
+      refreshBtn.disabled = true;
+    } else {
+      refreshBtn.classList.remove('btn-refreshing');
+      refreshBtn.innerHTML = 'Refresh';
+      refreshBtn.disabled = false;
+    }
+  }
+
   function fetchData(force) {
     var url = API_URL + (force ? '?force=true' : '');
     console.log('[BenTrade][Liquidity] fetch', url);
+    if (force) setRefreshBtnState(true);
     fetch(url)
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (_destroyed) return;
         render(data);
-        if (_cache) _cache.setCache(CACHE_KEY, data);
+        if (_cache) _cache.set(CACHE_KEY, data);
       })
       .catch(function(err) {
         console.error('[BenTrade][Liquidity] fetch_error', err);
@@ -406,24 +556,85 @@ window.BenTradePages.initLiquidityConditions = function initLiquidityConditions(
           degradedBanner.innerHTML = '&#9888; Failed to load liquidity data.';
           degradedBanner.style.display = '';
         }
+      })
+      .finally(function() {
+        setRefreshBtnState(false);
       });
   }
 
-  function fetchModel(force) {
-    if (runModelBtn) runModelBtn.disabled = true;
-    if (modelCta) { modelCta.style.display = ''; modelCta.textContent = 'Running model analysis\u2026'; }
-    fetch(MODEL_URL + (force ? '?force=true' : ''), { method: 'POST' })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
+  function triggerModelAnalysis() {
+    if (_destroyed) return;
+    console.log('[BenTrade][Liquidity] Triggering model analysis…');
+    if (modelSummary) {
+      modelSummary.innerHTML =
+        '<div style="text-align:center;padding:18px 0;">' +
+        '<div style="display:inline-block;width:22px;height:22px;border-radius:50%;' +
+        'border:2px solid rgba(0,234,255,0.15);border-top-color:rgba(0,234,255,0.9);' +
+        'animation:btnInlineSpin 0.8s linear infinite;margin-bottom:8px;"></div>' +
+        '<div style="font-size:11px;opacity:0.7;">Running model analysis… Interpreting liquidity conditions.</div></div>';
+    }
+    setModelBtnState(true);
+    var CLIENT_TIMEOUT = (window.BenTradeApi && window.BenTradeApi.MODEL_TIMEOUT_MS) || 185000;
+    var t0 = performance.now();
+    console.log('[LIQ_MODEL] request_start', {
+      endpoint: MODEL_URL, method: 'POST',
+      timeout_ms: CLIENT_TIMEOUT,
+      timestamp: new Date().toISOString(),
+    });
+    var controller = new AbortController();
+    var timerFired = false;
+    var timer = setTimeout(function() {
+      timerFired = true;
+      console.warn('[LIQ_MODEL] abort_timer_fired', {
+        elapsed_ms: Math.round(performance.now() - t0),
+        timeout_ms: CLIENT_TIMEOUT,
+      });
+      controller.abort();
+    }, CLIENT_TIMEOUT);
+    fetch(MODEL_URL, { method: 'POST', signal: controller.signal })
+      .then(function(resp) {
+        console.log('[LIQ_MODEL] response_headers', {
+          status: resp.status, ok: resp.ok,
+          elapsed_ms: Math.round(performance.now() - t0),
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.json();
+      })
+      .then(function(result) {
         if (_destroyed) return;
-        renderModel(data);
-        if (_cache) _cache.setCache(MODEL_CACHE_KEY, data);
-        if (runModelBtn) runModelBtn.disabled = false;
+        console.log('[LIQ_MODEL] body_parsed', {
+          hasModel: !!result.model_analysis,
+          elapsed_ms: Math.round(performance.now() - t0),
+        });
+        var modelData = result.model_analysis || null;
+        var errorInfo = result.error || null;
+        if (_cache && modelData) _cache.set(MODEL_CACHE_KEY, modelData);
+        renderModel(modelData);
+        if (!modelData) {
+          var errMsg = (errorInfo && errorInfo.message)
+            ? errorInfo.message
+            : 'Model returned no result — is the local LLM running?';
+          var errKind = (errorInfo && errorInfo.kind) ? ' (' + errorInfo.kind + ')' : '';
+          renderModelError(errMsg + errKind);
+        }
       })
       .catch(function(err) {
-        console.error('[BenTrade][Liquidity] model_error', err);
-        if (modelCta) { modelCta.style.display = ''; modelCta.textContent = 'Model analysis failed.'; }
-        if (runModelBtn) runModelBtn.disabled = false;
+        if (_destroyed) return;
+        var elapsed = Math.round(performance.now() - t0);
+        console.error('[LIQ_MODEL] failure', { error: err.message, name: err.name, elapsed_ms: elapsed, timerFired: timerFired });
+        var msg;
+        if (err.name === 'AbortError') {
+          var timeoutSec = Math.round(CLIENT_TIMEOUT / 1000);
+          msg = 'Model request timed out after ' + timeoutSec + 's. Is the local LLM running?';
+        } else {
+          msg = String(err.message || 'Model analysis failed');
+        }
+        renderModelError(msg);
+      })
+      .finally(function() {
+        clearTimeout(timer);
+        setModelBtnState(false);
+        console.log('[LIQ_MODEL] lifecycle_complete', { total_ms: Math.round(performance.now() - t0) });
       });
   }
 
@@ -433,16 +644,16 @@ window.BenTradePages.initLiquidityConditions = function initLiquidityConditions(
     refreshBtn.addEventListener('click', function() { fetchData(true); });
   }
   if (runModelBtn) {
-    runModelBtn.addEventListener('click', function() { fetchModel(true); });
+    runModelBtn.addEventListener('click', function() { triggerModelAnalysis(); });
   }
 
   // ── Init ──────────────────────────────────────────────────────
 
   if (_cache && _cache.hasCache(CACHE_KEY)) {
     console.log('[BenTrade][Liquidity] cache_rehydrate route_entry');
-    render(_cache.getCache(CACHE_KEY));
+    render(_cache.getData(CACHE_KEY));
     if (_cache.hasCache(MODEL_CACHE_KEY)) {
-      renderModel(_cache.getCache(MODEL_CACHE_KEY));
+      renderModel(_cache.getData(MODEL_CACHE_KEY));
     }
   } else {
     fetchData(false);

@@ -23,6 +23,7 @@ from app.services.validation_events import ValidationEventsService
 from app.utils.computed_metrics import apply_metrics_contract
 from app.utils.dates import dte_ceil
 from app.utils.expected_fill import build_fill_trace
+from app.services.scanner_candidate_contract import normalize_candidate_output
 from app.utils.normalize import normalize_trade
 from app.utils.report_conformance import validate_report_file
 from app.utils.snapshot import SnapshotChainSource
@@ -1102,6 +1103,10 @@ class StrategyService:
                 )
             except Exception:
                 pass
+
+        # Attach normalized candidate contract
+        scanner_key = normalized.get("strategy_id") or strategy_id
+        normalized["normalized"] = normalize_candidate_output(scanner_key, normalized)
 
         return normalized
 
