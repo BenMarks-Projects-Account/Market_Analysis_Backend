@@ -62,6 +62,13 @@ from __future__ import annotations
 import datetime as _dt
 from typing import Any
 
+from app.services.confidence_framework import (
+    CONFLICT_PENALTIES,
+    FRESHNESS_PENALTIES,
+    QUALITY_PENALTIES,
+    build_confidence_assessment,
+    make_impact,
+)
 from app.utils.time_horizon import HORIZON_ORDER, horizon_rank
 from app.utils.tone_classification import (
     classify_label as _classify_label,
@@ -87,30 +94,11 @@ _QUALITY_RANK = {
     "acceptable": 3, "good": 4, "unknown": -1,
 }
 
-# Confidence penalties for quality & freshness degradation
-_QUALITY_PENALTY = {
-    "unavailable": 0.40,
-    "poor": 0.30,
-    "degraded": 0.15,
-    "acceptable": 0.0,
-    "good": 0.0,
-    "unknown": 0.10,
-}
-_FRESHNESS_PENALTY = {
-    "very_stale": 0.25,
-    "stale": 0.10,
-    "unknown": 0.05,
-    "recent": 0.0,
-    "live": 0.0,
-}
-
-# Conflict severity → confidence penalty
-_CONFLICT_SEVERITY_PENALTY = {
-    "none": 0.0,
-    "low": 0.05,
-    "moderate": 0.15,
-    "high": 0.30,
-}
+# Confidence penalties sourced from the shared confidence_framework.
+# Aliases preserve existing lookup patterns throughout this module.
+_QUALITY_PENALTY = QUALITY_PENALTIES
+_FRESHNESS_PENALTY = FRESHNESS_PENALTIES
+_CONFLICT_SEVERITY_PENALTY = CONFLICT_PENALTIES
 
 
 # ── Public API ───────────────────────────────────────────────────────
@@ -182,6 +170,40 @@ def build_market_composite(
 
     confidence = round(max(0.0, min(1.0, confidence)), 2)
 
+    # ── Step 6b — structured confidence assessment (framework v1.1) ──
+    # Build from the pre-penalty base confidence + the same inputs the
+    # adjustments used, so the assessment captures reasons/uncertainty.
+    _extra_impacts: list[dict[str, Any]] = []
+    if quality_adj:
+        d_pen = quality_adj.get("degraded_penalty", 0.0)
+        if d_pen > 0:
+            _extra_impacts.append(make_impact(
+                "coverage", d_pen,
+                f"{quality_adj.get('degraded_count', 0)} engines degraded",
+                source="market_composite",
+            ))
+    if horizon_adj:
+        h_pen = horizon_adj.get("confidence_penalty", 0.0)
+        if h_pen > 0:
+            _extra_impacts.append(make_impact(
+                "data_gap", h_pen,
+                "wide horizon span across engines",
+                source="market_composite",
+            ))
+
+    _base_confidence = _compute_base_confidence(tone_counts, engines_used)
+    _conf_assessment = build_confidence_assessment(
+        base_score=_base_confidence,
+        quality_status=quality_sum.get("overall_quality", "unknown"),
+        freshness_status=freshness_sum.get("overall_freshness", "unknown"),
+        conflict_severity=(
+            conflict_report.get("conflict_severity", "none")
+            if conflict_report else "none"
+        ),
+        extra_impacts=_extra_impacts or None,
+        source="market_composite",
+    )
+
     # Apply state downgrades from adjustments
     if conflict_adj and conflict_adj.get("stability_downgrade"):
         stability_state = conflict_adj["stability_downgrade"]
@@ -223,6 +245,7 @@ def build_market_composite(
         "support_state": support_state,
         "stability_state": stability_state,
         "confidence": confidence,
+        "confidence_assessment": _conf_assessment,
         "evidence": {
             "market_state": market_evidence,
             "support_state": support_evidence,
@@ -260,6 +283,11 @@ def _empty_output() -> dict[str, Any]:
         "support_state": "fragile",
         "stability_state": "unstable",
         "confidence": 0.0,
+        "confidence_assessment": build_confidence_assessment(
+            base_score=0.0,
+            quality_status="unavailable",
+            source="market_composite",
+        ),
         "evidence": {
             "market_state": {},
             "support_state": {},

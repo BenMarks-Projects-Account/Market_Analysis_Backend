@@ -1,11 +1,26 @@
-"""Model-vs-Engine Disagreement Tracking v1.
+"""Model-vs-Engine Disagreement Tracking v1.1.
 
 Measures and summarises where deterministic engine / context / policy
-outputs and model-driven decision outputs diverge.  Lays safe
-groundwork for future adaptive-weighting refinement.
+outputs and model-driven decision outputs diverge.
 
-This module is **tracking / diagnostic only** — it does NOT
-automatically change live weights, decisions, or policy thresholds.
+This module is **diagnostic / review only** — it does NOT automatically
+change live weights, decisions, or policy thresholds.
+
+Role boundary
+-------------
+This module:
+- Detects and classifies disagreement between model decisions and
+  engine/policy/market context.
+- Tracks outcome statistics for disagreement categories.
+- Reports persistent override patterns descriptively.
+- Provides low-sample-aware diagnostics suitable for review.
+
+This module does NOT:
+- Implement live adaptive weighting.
+- Auto-retune decision logic or thresholds.
+- Modify policy rules or engine parameters.
+- Turn observed patterns into automatic recommendations.
+- Pretend small samples justify confident conclusions.
 
 Public API
 ----------
@@ -16,12 +31,15 @@ build_disagreement_record(response, policy, composite, conflict_report,
 
 build_tracking_report(records, *, low_sample_threshold=5)
     Aggregate many feedback records into a full disagreement-tracking
-    report with rates, grouping, and weighting diagnostics.
+    report with rates, grouping, and diagnostics.
 
 validate_tracking_report(report)
     Schema check → (ok, errors).
 
-Output version: 1.0
+report_summary(report)
+    Compact overview dict for UI / logging.
+
+Output version: 1.1
 """
 
 from __future__ import annotations
@@ -32,10 +50,19 @@ from datetime import datetime, timezone
 from typing import Any
 
 # ── Version lock ────────────────────────────────────────────────────────
-_TRACKING_VERSION = "1.0"
+_TRACKING_VERSION = "1.1"
+_COMPATIBLE_VERSIONS = frozenset({"1.0", "1.1"})
+
+# ── Module role ─────────────────────────────────────────────────────────
+# This module is diagnostic/review-only.  It does NOT modify weights,
+# decisions, policy thresholds, or any live trading behaviour.
+_MODULE_ROLE = "diagnostic"
 
 # ── Low-sample default ──────────────────────────────────────────────────
 _DEFAULT_LOW_SAMPLE_THRESHOLD = 5
+
+# ── Outcome classifications ─────────────────────────────────────────────
+VALID_OUTCOME_CLASSIFICATIONS = frozenset({"win", "loss", "breakeven", "unknown"})
 
 # ── Disagreement categories ────────────────────────────────────────────
 VALID_CATEGORIES = frozenset({
@@ -46,6 +73,7 @@ VALID_CATEGORIES = frozenset({
     "confidence_uncertainty",
     "model_vs_policy",
     "model_vs_market_composite",
+    "model_vs_portfolio_fit",
 })
 
 # ── Disagreement severities ────────────────────────────────────────────
@@ -64,6 +92,7 @@ _REQUIRED_REPORT_KEYS = frozenset({
     "disagreement_by_regime",
     "disagreement_by_strategy",
     "disagreement_by_policy_state",
+    "override_patterns",
     "weighting_diagnostics",
     "warning_flags",
     "evidence",
@@ -234,7 +263,12 @@ def build_disagreement_record(
         out_snap = _snap(feedback_record, "outcome_snapshot")
         pnl = out_snap.get("realized_pnl")
         if isinstance(pnl, (int, float)):
-            outcome = "win" if pnl > 0 else "loss"
+            if pnl > 0:
+                outcome = "win"
+            elif pnl == 0:
+                outcome = "breakeven"
+            else:
+                outcome = "loss"
 
     disagreements: list[dict[str, Any]] = []
     idx = 0
@@ -494,6 +528,32 @@ def build_disagreement_record(
                 ),
             })
 
+    # ─── 7. Portfolio-fit disagreement ────────────────────────────────
+    # Model approves despite its own portfolio_fit assessment being "poor".
+    # portfolio_fit is a model-set field in response_snapshot (v1.1).
+    portfolio_fit = resp.get("portfolio_fit", "")
+    if model_decision and portfolio_fit:
+        md_rank = _DECISION_RANK.get(model_decision, -1)
+        if md_rank >= 3 and portfolio_fit == "poor":
+            idx += 1
+            disagreements.append({
+                "record_id": f"d-{idx:03d}",
+                "category": "model_vs_portfolio_fit",
+                "severity": "moderate",
+                "model_position": model_decision,
+                "engine_position": portfolio_fit,
+                "policy_position": policy_decision or None,
+                "context": {
+                    "portfolio_fit": portfolio_fit,
+                    "model_decision": model_decision,
+                },
+                "outcome": outcome,
+                "notes": (
+                    f"Model '{model_decision}' despite portfolio fit "
+                    f"'{portfolio_fit}'"
+                ),
+            })
+
     return disagreements
 
 
@@ -518,24 +578,42 @@ def _extract_disagreements_from_feedback(
 
 def _compute_outcome_stats(
     outcomes: list[str | None],
+    low_sample_threshold: int = _DEFAULT_LOW_SAMPLE_THRESHOLD,
 ) -> dict[str, Any]:
-    """Compute win/loss/unknown aggregates from outcome labels.
+    """Compute win/loss/breakeven/unknown aggregates from outcome labels.
 
     Derived fields:
     - win_count: outcomes == "win"
     - loss_count: outcomes == "loss"
-    - unknown_count: outcomes not in ("win", "loss")
-    - win_rate: win_count / (win_count + loss_count) if denominator > 0
+    - breakeven_count: outcomes == "breakeven"
+    - unknown_count: outcomes not in ("win", "loss", "breakeven")
+    - decided_count: win_count + loss_count  (excludes breakeven/unknown)
+    - win_rate: win_count / decided_count if decided_count > 0
+    - confidence_state: "insufficient" if decided==0,
+                        "low" if decided < low_sample_threshold,
+                        "adequate" otherwise
     """
     wins = sum(1 for o in outcomes if o == "win")
     losses = sum(1 for o in outcomes if o == "loss")
-    unknowns = len(outcomes) - wins - losses
+    breakevens = sum(1 for o in outcomes if o == "breakeven")
+    unknowns = len(outcomes) - wins - losses - breakevens
     decided = wins + losses
+
+    if decided == 0:
+        confidence_state = "insufficient"
+    elif decided < low_sample_threshold:
+        confidence_state = "low"
+    else:
+        confidence_state = "adequate"
+
     return {
         "win_count": wins,
         "loss_count": losses,
+        "breakeven_count": breakevens,
         "unknown_count": unknowns,
+        "decided_count": decided,
         "win_rate": round(wins / decided, 4) if decided > 0 else None,
+        "confidence_state": confidence_state,
     }
 
 
@@ -561,7 +639,7 @@ def _build_disagreement_summary(
             sev_dist[item.get("severity", "unknown")] += 1
             outcomes.append(item.get("outcome"))
         n = len(items)
-        ostats = _compute_outcome_stats(outcomes)
+        ostats = _compute_outcome_stats(outcomes, low_sample_threshold)
         low = n < low_sample_threshold
         note_parts = [f"{n} disagreement(s)"]
         if ostats["win_rate"] is not None:
@@ -644,7 +722,12 @@ def _group_by_dimension(
         out_snap = _snap(rec, "outcome_snapshot")
         pnl = out_snap.get("realized_pnl") if isinstance(out_snap, dict) else None
         if isinstance(pnl, (int, float)):
-            grp["outcomes"].append("win" if pnl > 0 else "loss")
+            if pnl > 0:
+                grp["outcomes"].append("win")
+            elif pnl == 0:
+                grp["outcomes"].append("breakeven")
+            else:
+                grp["outcomes"].append("loss")
         else:
             grp["outcomes"].append(None)
 
@@ -655,7 +738,7 @@ def _group_by_dimension(
         cat_counts: dict[str, int] = defaultdict(int)
         for d in grp["disagreements"]:
             cat_counts[d.get("category", "unknown")] += 1
-        ostats = _compute_outcome_stats(grp["outcomes"])
+        ostats = _compute_outcome_stats(grp["outcomes"], low_sample_threshold)
         low = total < low_sample_threshold
         results.append({
             field: val,
@@ -704,7 +787,7 @@ def _build_weighting_diagnostics(
                 f"All diagnostics below are preliminary."
             ),
             "confidence_note": "very low — insufficient data",
-            "recommendation": "Collect more closed feedback records before acting.",
+            "recommendation": "Collect more closed feedback records before drawing any conclusions.",
             "evidence": {"total_records": total_records},
         })
         return diagnostics
@@ -728,8 +811,9 @@ def _build_weighting_diagnostics(
                     "low" if mvp.get("low_sample_warning") else "moderate"
                 ),
                 "recommendation": (
-                    "Model tends to be over-aggressive when policy is restrictive. "
-                    "Consider higher caution weight for policy-restricted trades."
+                    "Pattern observed: model tends to override restrictive policy "
+                    "with weak outcomes. Worth reviewing if policy alignment "
+                    "deserves more weight in these contexts."
                 ),
                 "evidence": {
                     "override_count": mvp["count"],
@@ -749,8 +833,9 @@ def _build_weighting_diagnostics(
                     "low" if mvp.get("low_sample_warning") else "moderate"
                 ),
                 "recommendation": (
-                    "Policy-aligned decisions may be overly conservative. "
-                    "Review policy thresholds for potential loosening."
+                    "Observed: model overrides correlate with acceptable outcomes. "
+                    "Policy strictness may be worth reviewing, but sample "
+                    "size should inform confidence."
                 ),
                 "evidence": {
                     "override_count": mvp["count"],
@@ -786,7 +871,7 @@ def _build_weighting_diagnostics(
                 l = os.get("loss_count", 0)
                 combined_outcomes.extend(["win"] * w)
                 combined_outcomes.extend(["loss"] * l)
-        ostats = _compute_outcome_stats(combined_outcomes)
+        ostats = _compute_outcome_stats(combined_outcomes, low_sample_threshold)
         wr = ostats.get("win_rate")
         idx += 1
         obs = (
@@ -795,10 +880,10 @@ def _build_weighting_diagnostics(
         if wr is not None:
             obs += f" Win rate after disagreement: {wr:.0%}."
         rec_text = (
-            "Model disagreement with unstable/fragile market states "
-            "has weak outcomes. Consider increased caution."
+            "Observed: model disagreement with unstable/fragile market states "
+            "has weak outcome correlation."
             if wr is not None and wr < 0.5
-            else "Monitor market-composite disagreement trends."
+            else "Market-composite disagreement observed. Monitor trend."
         )
         diagnostics.append({
             "diagnostic_id": f"w-{idx:03d}",
@@ -830,6 +915,7 @@ def _build_weighting_diagnostics(
                 "low" if cu.get("low_sample_warning") else "moderate"
             ),
             "recommendation": (
+                "Observed pattern: conviction exceeds data confidence. "
                 "Review whether conviction is well-supported by data quality."
             ),
             "evidence": {
@@ -855,8 +941,9 @@ def _build_weighting_diagnostics(
                 ),
                 "confidence_note": "moderate",
                 "recommendation": (
-                    f"Review model behaviour in '{regime}' regime for "
-                    f"potential calibration."
+                    f"Elevated disagreement in '{regime}' regime. "
+                    f"Worth investigating whether model/engine friction "
+                    f"is regime-specific."
                 ),
                 "evidence": {
                     "regime": regime,
@@ -897,6 +984,7 @@ def _build_sample_size(
     - total_records
     - closed_records: status == "closed"
     - with_outcome: outcome_snapshot has realized_pnl
+    - with_decided: outcome_snapshot has pnl != 0  (wins + losses only)
     - records_with_disagreement
     - total_disagreements
     """
@@ -907,10 +995,17 @@ def _build_sample_size(
         if isinstance(r.get("outcome_snapshot"), dict)
         and isinstance(r["outcome_snapshot"].get("realized_pnl"), (int, float))
     )
+    with_decided = sum(
+        1 for r in records
+        if isinstance(r.get("outcome_snapshot"), dict)
+        and isinstance(r["outcome_snapshot"].get("realized_pnl"), (int, float))
+        and r["outcome_snapshot"]["realized_pnl"] != 0
+    )
     return {
         "total_records": total,
         "closed_records": closed,
         "with_outcome": with_outcome,
+        "with_decided": with_decided,
         "records_with_disagreement": records_with_disagreement,
         "total_disagreements": len(all_disagreements),
     }
@@ -1006,6 +1101,87 @@ def _collect_warning_flags(
 
 
 # =====================================================================
+#  Override patterns  (descriptive, not prescriptive)
+# =====================================================================
+
+def _build_override_patterns(
+    records_with_disags: list[tuple[dict, list[dict]]],
+    low_sample_threshold: int,
+) -> list[dict[str, Any]]:
+    """Identify recurring model-override patterns by regime × strategy.
+
+    Groups by (regime_label, strategy) where model_vs_policy
+    disagreements occur repeatedly.  Reports observed patterns
+    descriptively — no weighting recommendations.
+
+    Each pattern entry has:
+    - regime_label, strategy: grouping keys
+    - override_count: how many model_vs_policy disagreements in group
+    - total_records: how many records in the group overall
+    - override_rate: override_count / total_records
+    - outcome_stats: win/loss/breakeven/unknown after overrides
+    - low_sample_warning: bool
+    - confidence_state: str
+    - notes: human-readable summary
+    """
+    groups: dict[tuple[str, str], dict[str, Any]] = defaultdict(lambda: {
+        "total_records": 0,
+        "overrides": 0,
+        "outcomes": [],
+    })
+
+    for rec, disags in records_with_disags:
+        ms = _snap(rec, "market_snapshot")
+        cs = _snap(rec, "candidate_snapshot")
+        regime = str(ms.get("regime_label", "unknown")) if isinstance(ms, dict) else "unknown"
+        strategy = str(cs.get("strategy", "unknown")) if isinstance(cs, dict) else "unknown"
+        key = (regime, strategy)
+        grp = groups[key]
+        grp["total_records"] += 1
+
+        policy_disags = [d for d in disags if d.get("category") == "model_vs_policy"]
+        if policy_disags:
+            grp["overrides"] += 1
+            for d in policy_disags:
+                grp["outcomes"].append(d.get("outcome"))
+
+    # Only report groups with >= 2 overrides (pattern requires repetition)
+    results: list[dict[str, Any]] = []
+    for (regime, strategy), grp in sorted(groups.items()):
+        if grp["overrides"] < 2:
+            continue
+        total = grp["total_records"]
+        overrides = grp["overrides"]
+        rate = round(overrides / total, 4) if total > 0 else None
+        ostats = _compute_outcome_stats(grp["outcomes"], low_sample_threshold)
+        low = overrides < low_sample_threshold
+
+        note_parts = [
+            f"{overrides} policy override(s) in {total} record(s)",
+        ]
+        wr = ostats.get("win_rate")
+        if wr is not None:
+            note_parts.append(f"win rate after override: {wr:.0%}")
+        if low:
+            note_parts.append("low sample — pattern may not be stable")
+
+        results.append({
+            "regime_label": regime,
+            "strategy": strategy,
+            "override_count": overrides,
+            "total_records": total,
+            "override_rate": rate,
+            "outcome_stats": ostats,
+            "low_sample_warning": low,
+            "confidence_state": ostats.get("confidence_state", "insufficient"),
+            "notes": "; ".join(note_parts),
+        })
+
+    results.sort(key=lambda x: x["override_count"], reverse=True)
+    return results
+
+
+# =====================================================================
 #  Main entry point
 # =====================================================================
 
@@ -1082,6 +1258,11 @@ def build_tracking_report(
         len(valid), low_sample_threshold,
     )
 
+    # Override patterns  (descriptive only)
+    override_patterns = _build_override_patterns(
+        records_with_disags, low_sample_threshold,
+    )
+
     # Status & warnings
     status = _derive_status(sample_size, low_sample_threshold)
     warning_flags = _collect_warning_flags(
@@ -1101,6 +1282,7 @@ def build_tracking_report(
         "disagreement_by_regime": by_regime,
         "disagreement_by_strategy": by_strategy,
         "disagreement_by_policy_state": by_policy,
+        "override_patterns": override_patterns,
         "weighting_diagnostics": weighting_diagnostics,
         "warning_flags": warning_flags,
         "evidence": {
@@ -1135,9 +1317,10 @@ def validate_tracking_report(
         if key not in report:
             errors.append(f"missing required key: {key}")
 
-    if report.get("tracking_version") != _TRACKING_VERSION:
+    if report.get("tracking_version") not in _COMPATIBLE_VERSIONS:
         errors.append(
-            f"tracking_version mismatch: expected {_TRACKING_VERSION}, "
+            f"tracking_version mismatch: expected one of "
+            f"{sorted(_COMPATIBLE_VERSIONS)}, "
             f"got {report.get('tracking_version')}"
         )
 
@@ -1150,7 +1333,8 @@ def validate_tracking_report(
         errors.append("sample_size must be a dict")
     else:
         for k in ("total_records", "closed_records", "with_outcome",
-                   "records_with_disagreement", "total_disagreements"):
+                   "with_decided", "records_with_disagreement",
+                   "total_disagreements"):
             if k not in ss:
                 errors.append(f"sample_size missing key: {k}")
 
@@ -1164,7 +1348,7 @@ def validate_tracking_report(
         errors.append("disagreement_rates must be a dict")
 
     for section in ("disagreement_by_regime", "disagreement_by_strategy",
-                    "disagreement_by_policy_state"):
+                    "disagreement_by_policy_state", "override_patterns"):
         if not isinstance(report.get(section), list):
             errors.append(f"{section} must be a list")
 
@@ -1175,3 +1359,43 @@ def validate_tracking_report(
         errors.append("warning_flags must be a list")
 
     return (len(errors) == 0, errors)
+
+
+# =====================================================================
+#  Compact report summary (for UI / logging)
+# =====================================================================
+
+def report_summary(report: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact overview of a tracking report.
+
+    Designed for UI dashboards and log outputs — this is a *read-only*
+    digest; it does NOT alter or retune anything.
+
+    Output keys:
+    - tracking_version: str
+    - status: str
+    - total_records: int
+    - records_with_disagreement: int
+    - disagreement_rate: float | None
+    - categories_detected: list[str]
+    - override_pattern_count: int
+    - warning_count: int
+    - module_role: str   (always "diagnostic")
+    """
+    ss = report.get("sample_size") or {}
+    rates = report.get("disagreement_rates") or {}
+    evidence = report.get("evidence") or {}
+    warnings = report.get("warning_flags") or []
+    overrides = report.get("override_patterns") or []
+
+    return {
+        "tracking_version": report.get("tracking_version", "unknown"),
+        "status": report.get("status", "unknown"),
+        "total_records": ss.get("total_records", 0),
+        "records_with_disagreement": ss.get("records_with_disagreement", 0),
+        "disagreement_rate": rates.get("disagreement_rate"),
+        "categories_detected": evidence.get("categories_detected", []),
+        "override_pattern_count": len(overrides),
+        "warning_count": len(warnings),
+        "module_role": _MODULE_ROLE,
+    }

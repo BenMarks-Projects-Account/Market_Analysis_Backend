@@ -175,6 +175,7 @@
   const routeMeta = {
     "home": { title: "Home Dashboard", group: "Home", subgroup: "Market Overview", description: "Command center" },
     "news-sentiment": { title: "News & Sentiment", group: "Home", subgroup: "Market Intelligence", description: "Macro & headline intelligence" },
+    "trade-building-pipeline": { title: "Trade Building Pipeline", group: "Home", subgroup: "Workflow", description: "Execution-focused pipeline DAG" },
     "credit-spread": { title: "Credit Spread Analysis", group: "Analysis", subgroup: "Options", description: "Credit Spreads" },
     "strategy-iron-condor": { title: "Strategy Dashboard • Iron Condor", group: "Analysis", subgroup: "Options → Premium Selling", description: "Iron Condor" },
     "iron-condor": { title: "Iron Condor Analysis", group: "Analysis", subgroup: "Options → Premium Selling", description: "Iron Condor" },
@@ -197,6 +198,7 @@
     "admin-data-health": { title: "Data Health", group: "Admin", subgroup: "Operations", description: "Provider + validation health" },
     "admin/data-workbench": { title: "Data Workbench", group: "Admin", subgroup: "Operations", description: "Trade JSON + card inspection" },
     "admin/tooltip-test": { title: "Tooltip Test", group: "Admin", subgroup: "Dev", description: "Tooltip regression sandbox" },
+    "admin/pipeline-monitor": { title: "Pipeline Monitor", group: "Admin", subgroup: "Operations", description: "Pipeline run inspector" },
     "market/breadth": { title: "Breadth & Participation", group: "Market Picture", subgroup: "Internals", description: "Market breadth & participation depth" },
     "market/volatility": { title: "Volatility & Options Structure", group: "Market Picture", subgroup: "Volatility", description: "Vol regime & options posture" },
     "market/cross-asset": { title: "Cross-Asset / Macro", group: "Market Picture", subgroup: "Macro", description: "Cross-asset confirmation signals" },
@@ -214,6 +216,11 @@
       view: "dashboards/news_sentiment.html",
       init: () => window.BenTradePages?.initNewsSentiment?.(document.getElementById('view')),
       title: routeMeta["news-sentiment"].title
+    },
+    "trade-building-pipeline": {
+      view: "dashboards/trade_building_pipeline.html",
+      init: () => window.BenTradePages?.initTradeBuildingPipeline?.(document.getElementById('view')),
+      title: routeMeta["trade-building-pipeline"].title
     },
     "credit-spread": {
       view: "dashboards/credit-spread.view.html",
@@ -324,6 +331,11 @@
       view: "dashboards/tooltip_test.html",
       init: () => {},
       title: routeMeta["admin/tooltip-test"].title
+    },
+    "admin/pipeline-monitor": {
+      view: "dashboards/pipeline_monitor.html",
+      init: () => window.BenTradePages?.initPipelineMonitor?.(document.getElementById('view')),
+      title: routeMeta["admin/pipeline-monitor"].title
     },
     "market/breadth": {
       view: "dashboards/breadth_participation.html",

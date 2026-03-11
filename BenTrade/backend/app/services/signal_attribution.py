@@ -1,12 +1,21 @@
-"""Signal Attribution and Regime Calibration v1.
+"""Signal Attribution and Regime Calibration v1.1.
 
 Consumes closed feedback records (from feedback_loop.py) and produces
 structured calibration outputs showing which signals, strategies,
 policy flags, conflict patterns, and event states were associated with
 stronger or weaker outcomes under different market regimes.
 
-This module is **read-only / summary-only** — it does NOT automate
-policy changes, retrain models, or mutate any upstream state.
+Role boundary
+-------------
+This module is **summary / review only**.  It produces descriptive,
+retrospective statistics.  It does NOT:
+
+*  automate policy changes or threshold tuning
+*  retrain models or adjust upstream weights
+*  override decisions or inject live feedback loops
+*  mutate any upstream state
+
+Downstream consumers own any action taken on these summaries.
 
 Public API
 ----------
@@ -15,12 +24,15 @@ build_calibration_report(records, *, low_sample_threshold=5)
     full calibration report dict.
 
 classify_outcome(record)
-    Classify a single feedback record → "win" / "loss" / "unknown".
+    Classify a single feedback record → "win" / "loss" / "breakeven" / "unknown".
 
 validate_calibration_report(report)
     Schema check → (ok, errors).
 
-Output version: 1.0
+report_summary(report)
+    Compact overview of a calibration report for UI/logging.
+
+Output version: 1.1
 """
 
 from __future__ import annotations
@@ -30,11 +42,20 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
+# ── Module role ─────────────────────────────────────────────────────────
+# This module produces descriptive retrospective summaries.  It does NOT
+# adjust weights, retune thresholds, or override decisions.
+_MODULE_ROLE = "summary"
+
 # ── Version lock ────────────────────────────────────────────────────────
-_CALIBRATION_VERSION = "1.0"
+_CALIBRATION_VERSION = "1.1"
+_COMPATIBLE_VERSIONS = frozenset({"1.0", "1.1"})
 
 # ── Low-sample default ──────────────────────────────────────────────────
 _DEFAULT_LOW_SAMPLE_THRESHOLD = 5
+
+# ── Outcome classification values ───────────────────────────────────────
+VALID_OUTCOME_CLASSIFICATIONS = frozenset({"win", "loss", "breakeven", "unknown"})
 
 # ── Required top-level keys (for validation) ────────────────────────────
 _REQUIRED_REPORT_KEYS = frozenset({
@@ -50,6 +71,7 @@ _REQUIRED_REPORT_KEYS = frozenset({
     "conflict_attribution",
     "event_attribution",
     "conviction_attribution",
+    "alignment_attribution",
     "warning_flags",
     "metadata",
 })
@@ -60,13 +82,23 @@ _REQUIRED_REPORT_KEYS = frozenset({
 # =====================================================================
 
 def classify_outcome(record: dict[str, Any]) -> str:
-    """Classify a feedback record outcome as 'win', 'loss', or 'unknown'.
+    """Classify a feedback record outcome.
 
-    Classification rules (in order):
-    1. If outcome_snapshot.realized_pnl is a number:
-       - > 0 → "win"
-       - <= 0 → "loss"
-    2. Otherwise → "unknown"
+    Returns one of VALID_OUTCOME_CLASSIFICATIONS:
+
+    Classification rules (deterministic, in order):
+    1. If outcome_snapshot is missing or not a dict → ``"unknown"``
+    2. If outcome_snapshot.realized_pnl is missing or non-numeric → ``"unknown"``
+    3. If realized_pnl > 0 → ``"win"``
+    4. If realized_pnl == 0.0 → ``"breakeven"``
+       (Explicitly separated from loss — a breakeven trade is neither
+       positive nor negative.  Grouping it with loss would overstate
+       losing patterns in summary data.)
+    5. If realized_pnl < 0 → ``"loss"``
+
+    Open/incomplete outcomes (no realized_pnl) are ``"unknown"`` and
+    are excluded from win-rate denominators.  This prevents blurring
+    open positions with closed realized results.
 
     Input fields: outcome_snapshot.realized_pnl
     """
@@ -76,7 +108,11 @@ def classify_outcome(record: dict[str, Any]) -> str:
     pnl = outcome.get("realized_pnl")
     if pnl is None or not isinstance(pnl, (int, float)):
         return "unknown"
-    return "win" if pnl > 0 else "loss"
+    if pnl > 0:
+        return "win"
+    if pnl == 0.0:
+        return "breakeven"
+    return "loss"
 
 
 # =====================================================================
@@ -95,21 +131,28 @@ def _compute_stats(
     outcomes: list[dict[str, Any]],
     low_sample_threshold: int,
 ) -> dict[str, Any]:
-    """Compute win/loss/pnl stats for a group of classified outcomes.
+    """Compute win/loss/breakeven/pnl stats for a group of classified outcomes.
 
     Each entry in ``outcomes`` must have keys: "classification", "pnl".
 
     Derived fields and formulas:
     - win_count = count where classification == "win"
     - loss_count = count where classification == "loss"
+    - breakeven_count = count where classification == "breakeven"
     - unknown_count = count where classification == "unknown"
-    - win_rate = win_count / (win_count + loss_count) if denominator > 0
+    - decided_count = win_count + loss_count (breakeven excluded from win-rate)
+    - win_rate = win_count / decided_count if decided_count > 0
     - avg_pnl = mean(pnl values) where pnl is not None
     - median_pnl = median(pnl values) where pnl is not None
     - total_pnl = sum(pnl values) where pnl is not None
+    - confidence_state:
+        "insufficient" if decided_count == 0
+        "low" if decided_count < low_sample_threshold
+        "adequate" if decided_count >= low_sample_threshold
     """
     wins = sum(1 for o in outcomes if o["classification"] == "win")
     losses = sum(1 for o in outcomes if o["classification"] == "loss")
+    breakevens = sum(1 for o in outcomes if o["classification"] == "breakeven")
     unknowns = sum(1 for o in outcomes if o["classification"] == "unknown")
     pnl_values = [o["pnl"] for o in outcomes if o["pnl"] is not None]
 
@@ -122,16 +165,27 @@ def _compute_stats(
     sample = len(outcomes)
     low_sample = sample < low_sample_threshold
 
+    # Confidence state based on decided outcomes, not raw sample size
+    if decided == 0:
+        confidence_state = "insufficient"
+    elif decided < low_sample_threshold:
+        confidence_state = "low"
+    else:
+        confidence_state = "adequate"
+
     return {
         "sample_count": sample,
         "win_count": wins,
         "loss_count": losses,
+        "breakeven_count": breakevens,
         "unknown_count": unknowns,
+        "decided_count": decided,
         "win_rate": round(win_rate, 4) if win_rate is not None else None,
         "avg_pnl": round(avg_pnl, 4) if avg_pnl is not None else None,
         "median_pnl": round(median_pnl, 4) if median_pnl is not None else None,
         "total_pnl": round(total_pnl, 4) if total_pnl is not None else None,
         "low_sample_warning": low_sample,
+        "confidence_state": confidence_state,
     }
 
 
@@ -159,6 +213,9 @@ def _build_group_note(stats: dict[str, Any]) -> str:
     avg = stats["avg_pnl"]
     if avg is not None:
         parts.append(f"Avg P&L ${avg:+.2f}")
+    be = stats.get("breakeven_count", 0)
+    if be > 0:
+        parts.append(f"{be} breakeven")
     return "; ".join(parts) if parts else "No outcome data"
 
 
@@ -431,6 +488,45 @@ def _build_conviction_attribution(
 
 
 # =====================================================================
+#  Alignment attribution  (market_alignment × portfolio_fit)
+# =====================================================================
+
+def _build_alignment_attribution(
+    records: list[dict[str, Any]],
+    low_sample_threshold: int,
+) -> list[dict[str, Any]]:
+    """Group by (market_alignment, portfolio_fit) → stats.
+
+    Input fields:
+    - response_snapshot.market_alignment
+    - response_snapshot.portfolio_fit
+    - outcome_snapshot.realized_pnl
+
+    These fields are present in feedback v1.1 records that include
+    the full response_snapshot.  Missing values default to "unknown".
+    """
+    groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for rec in records:
+        alignment = _safe_get(rec, "response_snapshot", "market_alignment", "unknown")
+        fit = _safe_get(rec, "response_snapshot", "portfolio_fit", "unknown")
+        key = (str(alignment), str(fit))
+        groups[key].append(_classify_record(rec))
+
+    results: list[dict[str, Any]] = []
+    for (alignment, fit), outcomes in sorted(groups.items()):
+        stats = _compute_stats(outcomes, low_sample_threshold)
+        results.append({
+            "market_alignment": alignment,
+            "portfolio_fit": fit,
+            **stats,
+            "notes": _build_group_note(stats),
+        })
+
+    results.sort(key=lambda x: x["sample_count"], reverse=True)
+    return results
+
+
+# =====================================================================
 #  Sample-size summary
 # =====================================================================
 
@@ -454,11 +550,20 @@ def _build_sample_size(records: list[dict[str, Any]]) -> dict[str, int]:
         if isinstance(r.get("outcome_snapshot"), dict)
         and isinstance(r["outcome_snapshot"].get("realized_pnl"), (int, float))
     )
+    # with_decided: records that classify as "win" or "loss" (not breakeven/unknown).
+    # This counts records where a pnl exists and pnl != 0.
+    with_decided = sum(
+        1 for r in records
+        if isinstance(r.get("outcome_snapshot"), dict)
+        and isinstance(r["outcome_snapshot"].get("realized_pnl"), (int, float))
+        and r["outcome_snapshot"]["realized_pnl"] != 0
+    )
     return {
         "total_records": total,
         "closed_records": closed,
         "with_outcome": with_outcome,
         "with_pnl": with_pnl,
+        "with_decided": with_decided,
     }
 
 
@@ -602,6 +707,7 @@ def build_calibration_report(
     conflict_attribution = _build_conflict_attribution(valid, low_sample_threshold)
     event_attribution = _build_event_attribution(valid, low_sample_threshold)
     conviction_attribution = _build_conviction_attribution(valid, low_sample_threshold)
+    alignment_attribution = _build_alignment_attribution(valid, low_sample_threshold)
 
     # Status & summary
     status = _derive_status(sample_size, low_sample_threshold)
@@ -624,6 +730,7 @@ def build_calibration_report(
         "conflict_attribution": conflict_attribution,
         "event_attribution": event_attribution,
         "conviction_attribution": conviction_attribution,
+        "alignment_attribution": alignment_attribution,
         "warning_flags": warning_flags,
         "metadata": {
             "calibration_version": _CALIBRATION_VERSION,
@@ -654,11 +761,12 @@ def validate_calibration_report(
         if key not in report:
             errors.append(f"missing required key: {key}")
 
-    # Version
-    if report.get("calibration_version") != _CALIBRATION_VERSION:
+    # Version — accept any version in _COMPATIBLE_VERSIONS
+    rv = report.get("calibration_version")
+    if rv not in _COMPATIBLE_VERSIONS:
         errors.append(
-            f"calibration_version mismatch: expected {_CALIBRATION_VERSION}, "
-            f"got {report.get('calibration_version')}"
+            f"calibration_version mismatch: expected one of {sorted(_COMPATIBLE_VERSIONS)}, "
+            f"got {rv}"
         )
 
     # Status
@@ -671,7 +779,7 @@ def validate_calibration_report(
     if not isinstance(ss, dict):
         errors.append("sample_size must be a dict")
     else:
-        for k in ("total_records", "closed_records", "with_outcome", "with_pnl"):
+        for k in ("total_records", "closed_records", "with_outcome", "with_pnl", "with_decided"):
             if k not in ss:
                 errors.append(f"sample_size missing key: {k}")
 
@@ -679,7 +787,7 @@ def validate_calibration_report(
     for section in (
         "regime_calibration", "signal_attribution", "strategy_attribution",
         "policy_attribution", "conflict_attribution", "event_attribution",
-        "conviction_attribution",
+        "conviction_attribution", "alignment_attribution",
     ):
         val = report.get(section)
         if not isinstance(val, list):
@@ -691,3 +799,46 @@ def validate_calibration_report(
         errors.append("warning_flags must be a list")
 
     return (len(errors) == 0, errors)
+
+
+# =====================================================================
+#  Compact report summary (for UI / logging)
+# =====================================================================
+
+def report_summary(report: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact overview of a calibration report.
+
+    Designed for UI dashboards and log outputs — this is a *read-only*
+    digest; it does NOT alter or retune anything.
+
+    Output keys:
+    - calibration_version: str
+    - status: str
+    - total_records: int
+    - with_pnl: int
+    - with_decided: int   (win + loss, excludes breakeven/unknown)
+    - regime_count: int
+    - warning_count: int
+    - top_regime: str | None   (regime_label with most samples, if any)
+    - module_role: str          (always "summary")
+    """
+    ss = report.get("sample_size") or {}
+    regimes = report.get("regime_calibration") or []
+    warnings = report.get("warning_flags") or []
+
+    top_regime = None
+    if regimes:
+        top = max(regimes, key=lambda r: r.get("sample_count", 0))
+        top_regime = top.get("regime_label")
+
+    return {
+        "calibration_version": report.get("calibration_version", "unknown"),
+        "status": report.get("status", "unknown"),
+        "total_records": ss.get("total_records", 0),
+        "with_pnl": ss.get("with_pnl", 0),
+        "with_decided": ss.get("with_decided", 0),
+        "regime_count": len(regimes),
+        "warning_count": len(warnings),
+        "top_regime": top_regime,
+        "module_role": _MODULE_ROLE,
+    }

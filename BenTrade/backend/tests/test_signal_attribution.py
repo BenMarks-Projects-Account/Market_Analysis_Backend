@@ -1,4 +1,4 @@
-"""Tests for Signal Attribution and Regime Calibration v1.
+"""Tests for Signal Attribution and Regime Calibration v1.1.
 
 Coverage targets:
 ─── Contract-level tests
@@ -6,14 +6,15 @@ Coverage targets:
     - required keys present
     - version string
     - status enum values
-    - sample_size structure
+    - sample_size structure (incl. with_decided)
 ─── Outcome classification tests
     - positive pnl → win
-    - zero pnl → loss
+    - zero pnl → breakeven
     - negative pnl → loss
     - missing outcome → unknown
     - missing pnl → unknown
     - non-numeric pnl → unknown
+    - VALID_OUTCOME_CLASSIFICATIONS constant
 ─── Regime calibration tests
     - single regime group
     - multiple regime groups
@@ -38,11 +39,17 @@ Coverage targets:
     - unknown fallback
 ─── Conviction attribution tests
     - group by conviction + decision
+─── Alignment attribution tests (v1.1)
+    - group by market_alignment + portfolio_fit
+    - missing response_snapshot → unknown
 ─── Stats computation tests
-    - win_rate calculation
+    - win_rate calculation (excludes breakeven from denominator)
     - avg/median/total pnl
     - low_sample_warning threshold
     - all-unknown outcomes → win_rate=None
+    - breakeven_count field
+    - decided_count field
+    - confidence_state field
 ─── Status derivation tests
     - 0 pnl records → insufficient
     - sparse pnl records → sparse
@@ -71,6 +78,10 @@ Coverage targets:
     - missing keys detected
     - wrong version detected
     - invalid status detected
+    - compatible versions accepted
+─── Report summary tests (v1.1)
+    - compact digest output
+    - module_role field
 ─── Integration tests
     - realistic multi-record scenario
 """
@@ -80,10 +91,13 @@ import pytest
 
 from app.services.signal_attribution import (
     _CALIBRATION_VERSION,
+    _COMPATIBLE_VERSIONS,
     _DEFAULT_LOW_SAMPLE_THRESHOLD,
     _REQUIRED_REPORT_KEYS,
+    VALID_OUTCOME_CLASSIFICATIONS,
     build_calibration_report,
     classify_outcome,
+    report_summary,
     validate_calibration_report,
 )
 
@@ -228,7 +242,7 @@ class TestReportContract:
         for section in (
             "regime_calibration", "signal_attribution", "strategy_attribution",
             "policy_attribution", "conflict_attribution", "event_attribution",
-            "conviction_attribution",
+            "conviction_attribution", "alignment_attribution",
         ):
             assert isinstance(report[section], list), f"{section} must be a list"
 
@@ -246,7 +260,7 @@ class TestReportContract:
         report = build_calibration_report(records)
         ss = report["sample_size"]
         assert isinstance(ss, dict)
-        for k in ("total_records", "closed_records", "with_outcome", "with_pnl"):
+        for k in ("total_records", "closed_records", "with_outcome", "with_pnl", "with_decided"):
             assert k in ss
             assert isinstance(ss[k], int)
 
@@ -262,9 +276,9 @@ class TestClassifyOutcome:
         rec = _make_record(realized_pnl=100.0)
         assert classify_outcome(rec) == "win"
 
-    def test_zero_pnl_is_loss(self):
+    def test_zero_pnl_is_breakeven(self):
         rec = _make_record(realized_pnl=0.0)
-        assert classify_outcome(rec) == "loss"
+        assert classify_outcome(rec) == "breakeven"
 
     def test_negative_pnl_is_loss(self):
         rec = _make_record(realized_pnl=-50.0)
@@ -302,6 +316,15 @@ class TestClassifyOutcome:
         rec = _make_record()
         del rec["outcome_snapshot"]
         assert classify_outcome(rec) == "unknown"
+
+    def test_valid_outcome_classifications_constant(self):
+        """VALID_OUTCOME_CLASSIFICATIONS must match classify_outcome outputs."""
+        assert VALID_OUTCOME_CLASSIFICATIONS == frozenset({"win", "loss", "breakeven", "unknown"})
+
+    def test_integer_zero_is_breakeven(self):
+        rec = _make_record()
+        rec["outcome_snapshot"]["realized_pnl"] = 0
+        assert classify_outcome(rec) == "breakeven"
 
 
 # =====================================================================
@@ -655,6 +678,84 @@ class TestConvictionAttribution:
 
 
 # =====================================================================
+#  Alignment attribution tests (v1.1)
+# =====================================================================
+
+class TestAlignmentAttribution:
+    """Test alignment_attribution grouping by market_alignment × portfolio_fit."""
+
+    def test_single_alignment_group(self):
+        rec = _make_record(realized_pnl=50.0)
+        rec["response_snapshot"]["market_alignment"] = "aligned"
+        rec["response_snapshot"]["portfolio_fit"] = "good"
+        report = build_calibration_report([rec])
+        al = report["alignment_attribution"]
+        assert len(al) == 1
+        assert al[0]["market_alignment"] == "aligned"
+        assert al[0]["portfolio_fit"] == "good"
+
+    def test_multiple_alignment_groups(self):
+        r1 = _make_record(realized_pnl=50.0)
+        r1["response_snapshot"]["market_alignment"] = "aligned"
+        r1["response_snapshot"]["portfolio_fit"] = "good"
+        r2 = _make_record(realized_pnl=-20.0)
+        r2["response_snapshot"]["market_alignment"] = "misaligned"
+        r2["response_snapshot"]["portfolio_fit"] = "poor"
+        report = build_calibration_report([r1, r2])
+        al = report["alignment_attribution"]
+        assert len(al) == 2
+        alignments = {a["market_alignment"] for a in al}
+        assert "aligned" in alignments
+        assert "misaligned" in alignments
+
+    def test_missing_response_uses_unknown(self):
+        rec = _make_record(realized_pnl=50.0)
+        rec["response_snapshot"] = None
+        report = build_calibration_report([rec])
+        al = report["alignment_attribution"]
+        assert al[0]["market_alignment"] == "unknown"
+        assert al[0]["portfolio_fit"] == "unknown"
+
+    def test_partial_fields_default_unknown(self):
+        rec = _make_record(realized_pnl=50.0)
+        rec["response_snapshot"]["market_alignment"] = "aligned"
+        # portfolio_fit not set → should default to unknown
+        report = build_calibration_report([rec])
+        al = report["alignment_attribution"]
+        assert al[0]["market_alignment"] == "aligned"
+        assert al[0]["portfolio_fit"] == "unknown"
+
+    def test_alignment_stats_present(self):
+        rec = _make_record(realized_pnl=50.0)
+        rec["response_snapshot"]["market_alignment"] = "aligned"
+        rec["response_snapshot"]["portfolio_fit"] = "good"
+        report = build_calibration_report([rec])
+        al = report["alignment_attribution"][0]
+        assert "sample_count" in al
+        assert "win_count" in al
+        assert "decided_count" in al
+        assert "confidence_state" in al
+
+    def test_alignment_in_required_keys(self):
+        assert "alignment_attribution" in _REQUIRED_REPORT_KEYS
+
+    def test_alignment_sorted_by_sample_count(self):
+        recs = []
+        for _ in range(3):
+            r = _make_record(realized_pnl=50.0)
+            r["response_snapshot"]["market_alignment"] = "aligned"
+            r["response_snapshot"]["portfolio_fit"] = "good"
+            recs.append(r)
+        r = _make_record(realized_pnl=-10.0)
+        r["response_snapshot"]["market_alignment"] = "neutral"
+        r["response_snapshot"]["portfolio_fit"] = "fair"
+        recs.append(r)
+        report = build_calibration_report(recs)
+        al = report["alignment_attribution"]
+        assert al[0]["sample_count"] >= al[-1]["sample_count"]
+
+
+# =====================================================================
 #  Stats computation tests
 # =====================================================================
 
@@ -724,6 +825,85 @@ class TestStatsComputation:
         rc = report["regime_calibration"]
         assert isinstance(rc[0]["notes"], str)
         assert len(rc[0]["notes"]) > 0
+
+    def test_breakeven_count_tracked(self):
+        records = [
+            _make_record(realized_pnl=50.0),
+            _make_record(realized_pnl=0.0),
+            _make_record(realized_pnl=-10.0),
+        ]
+        report = build_calibration_report(records)
+        rc = report["regime_calibration"]
+        grp = rc[0]
+        assert grp["breakeven_count"] == 1
+        assert grp["win_count"] == 1
+        assert grp["loss_count"] == 1
+
+    def test_decided_count_excludes_breakeven(self):
+        records = [
+            _make_record(realized_pnl=50.0),
+            _make_record(realized_pnl=0.0),
+            _make_record(realized_pnl=-10.0),
+        ]
+        report = build_calibration_report(records)
+        rc = report["regime_calibration"]
+        grp = rc[0]
+        # decided = wins + losses = 1 + 1 = 2 (breakeven excluded)
+        assert grp["decided_count"] == 2
+
+    def test_decided_count_excludes_unknown(self):
+        records = [
+            _make_record(realized_pnl=50.0),
+            _make_record(realized_pnl=None),
+        ]
+        report = build_calibration_report(records)
+        rc = report["regime_calibration"]
+        grp = rc[0]
+        assert grp["decided_count"] == 1
+        assert grp["unknown_count"] == 1
+
+    def test_win_rate_excludes_breakeven_from_denominator(self):
+        """Win rate = wins / (wins + losses), breakeven not in denominator."""
+        records = [
+            _make_record(realized_pnl=50.0),
+            _make_record(realized_pnl=0.0),
+        ]
+        report = build_calibration_report(records)
+        rc = report["regime_calibration"]
+        grp = rc[0]
+        # win_rate = 1 / 1 = 1.0 (breakeven excluded from denominator)
+        assert grp["win_rate"] == 1.0
+
+    def test_confidence_state_insufficient(self):
+        records = [_make_record(realized_pnl=None)] * 3
+        report = build_calibration_report(records)
+        rc = report["regime_calibration"]
+        assert rc[0]["confidence_state"] == "insufficient"
+
+    def test_confidence_state_low(self):
+        records = [_make_record(realized_pnl=50.0)] * 3
+        report = build_calibration_report(records)
+        rc = report["regime_calibration"]
+        assert rc[0]["confidence_state"] == "low"
+
+    def test_confidence_state_adequate(self):
+        records = [_make_record(realized_pnl=50.0)] * 6
+        report = build_calibration_report(records)
+        rc = report["regime_calibration"]
+        assert rc[0]["confidence_state"] == "adequate"
+
+    def test_confidence_state_breakeven_only_insufficient(self):
+        """All-breakeven means decided_count=0 → insufficient."""
+        records = [_make_record(realized_pnl=0.0)] * 3
+        report = build_calibration_report(records)
+        rc = report["regime_calibration"]
+        assert rc[0]["confidence_state"] == "insufficient"
+
+    def test_notes_include_breakeven(self):
+        records = [_make_record(realized_pnl=0.0)]
+        report = build_calibration_report(records)
+        rc = report["regime_calibration"]
+        assert "breakeven" in rc[0]["notes"].lower()
 
 
 # =====================================================================
@@ -1005,6 +1185,30 @@ class TestValidation:
         ok, errors = validate_calibration_report(report)
         assert ok is False
 
+    def test_compatible_versions_accepted(self):
+        """Both 1.0 and 1.1 version strings should be accepted."""
+        report = build_calibration_report([])
+        for v in _COMPATIBLE_VERSIONS:
+            r = dict(report, calibration_version=v)
+            r["metadata"] = dict(report["metadata"], calibration_version=v)
+            ok, errors = validate_calibration_report(r)
+            version_errors = [e for e in errors if "version" in e]
+            assert not version_errors, f"Version {v} rejected: {version_errors}"
+
+    def test_incompatible_version_rejected(self):
+        report = build_calibration_report([])
+        report["calibration_version"] = "99.9"
+        ok, errors = validate_calibration_report(report)
+        assert ok is False
+        assert any("version" in e for e in errors)
+
+    def test_alignment_attribution_validated(self):
+        report = build_calibration_report([])
+        report["alignment_attribution"] = "not_a_list"
+        ok, errors = validate_calibration_report(report)
+        assert ok is False
+        assert any("alignment_attribution" in e for e in errors)
+
 
 # =====================================================================
 #  Sample size tests
@@ -1044,6 +1248,72 @@ class TestSampleSize:
         ]
         report = build_calibration_report(records)
         assert report["sample_size"]["with_pnl"] == 2
+
+    def test_with_decided_count(self):
+        records = [
+            _make_record(realized_pnl=50.0),    # win → decided
+            _make_record(realized_pnl=-20.0),   # loss → decided
+            _make_record(realized_pnl=0.0),     # breakeven → NOT decided
+            _make_record(realized_pnl=None),    # unknown → NOT decided
+        ]
+        report = build_calibration_report(records)
+        assert report["sample_size"]["with_decided"] == 2
+
+    def test_with_decided_zero_when_all_breakeven(self):
+        records = [_make_record(realized_pnl=0.0)] * 3
+        report = build_calibration_report(records)
+        assert report["sample_size"]["with_decided"] == 0
+
+
+# =====================================================================
+#  Report summary tests (v1.1)
+# =====================================================================
+
+class TestReportSummary:
+    """Test report_summary compact digest."""
+
+    def test_summary_keys(self):
+        report = build_calibration_report([_make_record(realized_pnl=50.0)])
+        s = report_summary(report)
+        expected_keys = {
+            "calibration_version", "status", "total_records", "with_pnl",
+            "with_decided", "regime_count", "warning_count", "top_regime",
+            "module_role",
+        }
+        assert set(s.keys()) == expected_keys
+
+    def test_summary_module_role(self):
+        report = build_calibration_report([])
+        s = report_summary(report)
+        assert s["module_role"] == "summary"
+
+    def test_summary_with_data(self):
+        records = [_make_record(realized_pnl=50.0)] * 6
+        report = build_calibration_report(records)
+        s = report_summary(report)
+        assert s["total_records"] == 6
+        assert s["with_pnl"] == 6
+        assert s["status"] == "sufficient"
+        assert s["top_regime"] == "neutral"
+        assert s["regime_count"] >= 1
+
+    def test_summary_empty_report(self):
+        report = build_calibration_report([])
+        s = report_summary(report)
+        assert s["total_records"] == 0
+        assert s["top_regime"] is None
+        assert s["status"] == "insufficient"
+
+    def test_summary_version_matches_report(self):
+        report = build_calibration_report([])
+        s = report_summary(report)
+        assert s["calibration_version"] == report["calibration_version"]
+
+    def test_summary_warning_count(self):
+        records = [_make_record(realized_pnl=50.0)]
+        report = build_calibration_report(records)
+        s = report_summary(report)
+        assert s["warning_count"] == len(report["warning_flags"])
 
 
 # =====================================================================
@@ -1121,6 +1391,7 @@ class TestIntegration:
         assert len(report["conflict_attribution"]) > 0
         assert len(report["event_attribution"]) > 0
         assert len(report["conviction_attribution"]) > 0
+        assert len(report["alignment_attribution"]) > 0
 
     def test_pnl_sanity_all_groups(self):
         """Total pnl should be consistent across groups that partition all records."""

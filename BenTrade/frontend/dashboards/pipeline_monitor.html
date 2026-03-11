@@ -1,0 +1,133 @@
+<div class="view-wrap pipeline-monitor-view">
+
+  <!-- ── TOOLBAR ─────────────────────────────────────────────── -->
+  <div class="pm-toolbar">
+    <div class="pm-toolbar-left">
+      <h2 class="pm-title">Pipeline Monitor</h2>
+      <span class="pm-run-count" id="pmRunCount"></span>
+    </div>
+    <div class="pm-toolbar-right">
+      <button class="btn pm-btn" id="pmDemoRunBtn" type="button">Run Demo Pipeline</button>
+      <button class="btn pm-btn" id="pmRefreshBtn" type="button">Refresh</button>
+    </div>
+  </div>
+
+  <!-- ── ERROR BANNER ────────────────────────────────────────── -->
+  <div class="pm-error-banner" id="pmErrorBanner" style="display:none;"></div>
+
+  <!-- ── LOADING STATE ───────────────────────────────────────── -->
+  <div class="pm-loading" id="pmLoading" style="display:none;">
+    <div class="pm-loading-spinner"></div>
+    <span>Loading pipeline data…</span>
+  </div>
+
+  <!-- ── EMPTY STATE ─────────────────────────────────────────── -->
+  <div class="pm-empty" id="pmEmpty" style="display:none;">
+    <div class="pm-empty-icon">⟐</div>
+    <h3>No Pipeline Runs</h3>
+    <p>No pipeline runs have been recorded yet. Click <strong>Run Demo Pipeline</strong> to generate a test run.</p>
+  </div>
+
+  <!-- ── RUN LIST ────────────────────────────────────────────── -->
+  <div class="pm-run-list" id="pmRunList" style="display:none;">
+    <div class="stock-card pm-section-card">
+      <div class="stock-card-title">Recent Runs</div>
+      <div class="pm-run-table-wrap">
+        <table class="risk-table pm-run-table">
+          <thead>
+            <tr>
+              <th>Run ID</th>
+              <th>Status</th>
+              <th>Trigger</th>
+              <th>Started</th>
+              <th>Duration</th>
+              <th>Stages</th>
+              <th>Errors</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="pmRunRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── RUN DETAIL (hidden until a run is selected) ─────────── -->
+  <div class="pm-run-detail" id="pmRunDetail" style="display:none;">
+
+    <!-- Back button -->
+    <button class="btn pm-btn pm-back-btn" id="pmBackToList" type="button">← Back to Run List</button>
+
+    <!-- ── RUN HEADER ──────────────────────────────────────── -->
+    <div class="stock-card pm-section-card pm-run-header-card" id="pmRunHeader">
+      <div class="stock-card-title">Run Summary</div>
+      <div class="pm-run-header-grid" id="pmRunHeaderGrid"></div>
+    </div>
+
+    <!-- ── STAGE TRACKER ───────────────────────────────────── -->
+    <div class="stock-card pm-section-card">
+      <div class="stock-card-title">Stage Tracker</div>
+      <div class="pm-stage-tracker" id="pmStageTracker"></div>
+    </div>
+
+    <!-- ── CANDIDATE RESULTS TABLE ─────────────────────────── -->
+    <div class="stock-card pm-section-card" id="pmLedgerSection" style="display:none;">
+      <div class="stock-card-title">Candidate Decision Ledger</div>
+      <div class="pm-ledger-table-wrap">
+        <table class="risk-table pm-ledger-table">
+          <thead>
+            <tr>
+              <th>Candidate</th>
+              <th>Symbol</th>
+              <th>Action</th>
+              <th>Conviction</th>
+              <th>Policy</th>
+              <th>Status</th>
+              <th>Provider</th>
+              <th>Usable</th>
+            </tr>
+          </thead>
+          <tbody id="pmLedgerRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── EVENTS / LOG PANE ───────────────────────────────── -->
+    <div class="stock-card pm-section-card">
+      <div class="stock-card-title pm-events-title">
+        <span>Events &amp; Logs</span>
+        <div class="pm-event-filters">
+          <select id="pmEventLevelFilter" class="pm-select">
+            <option value="">All Levels</option>
+            <option value="info">Info</option>
+            <option value="warning">Warning</option>
+            <option value="error">Error</option>
+          </select>
+          <select id="pmEventStageFilter" class="pm-select">
+            <option value="">All Stages</option>
+          </select>
+        </div>
+      </div>
+      <div class="pm-event-list" id="pmEventList">
+        <div class="pm-event-empty">No events recorded for this run.</div>
+      </div>
+    </div>
+
+    <!-- ── ARTIFACT INSPECTOR ──────────────────────────────── -->
+    <div class="stock-card pm-section-card">
+      <div class="stock-card-title">Artifact Inspector</div>
+      <div class="pm-artifact-grid" id="pmArtifactGrid">
+        <div class="pm-artifact-empty">No artifacts in this run.</div>
+      </div>
+      <!-- Detail panel (shown when artifact is selected) -->
+      <div class="pm-artifact-detail" id="pmArtifactDetail" style="display:none;">
+        <div class="pm-artifact-detail-header">
+          <span id="pmArtifactDetailTitle"></span>
+          <button class="btn pm-btn pm-btn-sm" id="pmArtifactClose" type="button">Close</button>
+        </div>
+        <pre class="pm-artifact-json" id="pmArtifactJson"></pre>
+      </div>
+    </div>
+
+  </div>
+</div>

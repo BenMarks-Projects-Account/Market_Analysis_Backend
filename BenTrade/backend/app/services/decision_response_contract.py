@@ -1,5 +1,5 @@
 """
-Final Decision Response Contract v1.
+Final Decision Response Contract v1.1.
 
 Defines the stable output shape for higher-order trade decision results.
 Provides builders, validators, and placeholder generators so that
@@ -21,6 +21,17 @@ cautious_approve   – positive with caveats; proceed with reduced size
 watchlist           – interesting but not actionable now; monitor
 reject             – does not meet criteria; skip
 insufficient_data  – cannot determine; data too incomplete
+
+Changelog
+---------
+v1.1  - Non-actionable decisions (insufficient_data, reject, watchlist)
+        now enforce size_guidance="none".  Cannot suggest sizing when
+        the decision is not to trade.
+      - Normalizer applies same size_guidance enforcement.
+      - Added _STABLE_EVIDENCE_KEYS documenting known-stable evidence
+        fields without making them hard-required.
+      - Added _NON_ACTIONABLE_DECISIONS constant.
+      - Added _INTEGRATION_STATUS = "deferred" for future wiring prep.
 """
 
 from __future__ import annotations
@@ -30,7 +41,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 # ── version lock ──────────────────────────────────────────────────────────
-_RESPONSE_VERSION = "1.0"
+_RESPONSE_VERSION = "1.1"
 
 # ── allowed enum values ──────────────────────────────────────────────────
 VALID_DECISIONS = frozenset({
@@ -84,6 +95,25 @@ VALID_SIZE_GUIDANCE = frozenset({
     "minimal",
     "none",
 })
+
+# ── non-actionable decisions — size_guidance forced to "none" ────────────
+_NON_ACTIONABLE_DECISIONS = frozenset({
+    "insufficient_data",
+    "reject",
+    "watchlist",
+})
+
+# ── stable evidence keys — consistently important, not hard-required ────
+# Downstream consumers (UI card, logs) can rely on these being present
+# when evidence is meaningfully populated.  They are NOT validated as
+# required because evidence remains an open dict for flexibility.
+_STABLE_EVIDENCE_KEYS = frozenset({
+    "symbol",       # underlying symbol — always relevant
+    "strategy",     # strategy family or setup type
+})
+
+# ── integration status — live wiring explicitly deferred ────────────────
+_INTEGRATION_STATUS = "deferred"  # orchestrator→model→response not wired yet
 
 # ── human-readable decision labels ──────────────────────────────────────
 _DECISION_LABELS: dict[str, str] = {
@@ -249,6 +279,11 @@ def build_decision_response(
     # conviction when the decision is indeterminate.
     if decision == "insufficient_data":
         conviction = "none"
+
+    # Non-actionable decisions force size_guidance to "none" — cannot
+    # suggest sizing when the decision is not to trade.
+    if decision in _NON_ACTIONABLE_DECISIONS:
+        size_guidance = "none"
 
     # Derive status
     status = _derive_status(decision, warning_flags)
@@ -483,6 +518,14 @@ def normalize_decision_response(response: Any) -> dict[str, Any]:
     response["size_guidance"] = _normalise_enum(
         response["size_guidance"], VALID_SIZE_GUIDANCE, "normal"
     )
+
+    # Enforce insufficient_data guardrails
+    if response["decision"] == "insufficient_data":
+        response["conviction"] = "none"
+
+    # Non-actionable decisions force size_guidance to "none"
+    if response["decision"] in _NON_ACTIONABLE_DECISIONS:
+        response["size_guidance"] = "none"
 
     # Derive status + label
     response["status"] = _derive_status(

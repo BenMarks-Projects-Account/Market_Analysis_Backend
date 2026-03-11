@@ -1,5 +1,4 @@
-"""
-Uncertainty / Confidence Framework v1.
+"""Uncertainty / Confidence Framework v1.1
 
 Centralises confidence normalisation, label derivation, uncertainty
 assessment, and impact-based penalty handling for every BenTrade
@@ -13,8 +12,19 @@ Design principles
 3. **Structured impacts** — freshness, quality, conflict, coverage,
    fallback each contribute named penalty records with reasons.
 4. **Uncertainty ≠ confidence ≠ conviction** — three distinct dimensions.
+   - *confidence* = how trustworthy / well-supported an assessment is
+   - *uncertainty* = why confidence is limited or what weakens it
+   - *conviction* = action-oriented strength of the final decision output
 5. **Backward-compatible** — layers can adopt incrementally; legacy
    fields remain readable.
+
+Changelog
+---------
+v1.1 – expanded downstream adoption
+    - PENALTY_TABLES consolidated export for inspectability.
+    - market_composite now imports penalty tables from this module.
+    - decision_prompt_payload fallback path gets structured assessment.
+    - Version bump from 1.0 → 1.1.
 
 Public API
 ----------
@@ -50,7 +60,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 # ── Version lock ─────────────────────────────────────────────────────────
-_FRAMEWORK_VERSION = "1.0"
+_FRAMEWORK_VERSION = "1.1"
 
 # ── Confidence label thresholds (applied to 0.0–1.0 normalised score) ───
 # ≥ 0.80 → high
@@ -136,6 +146,14 @@ COVERAGE_PENALTIES: dict[str, float] = {
     "minimal": 0.25,
     "none":    0.40,
     "sparse":  0.15,
+}
+
+# Consolidated export for external inspectability / calibration audit.
+PENALTY_TABLES: dict[str, dict[str, float]] = {
+    "quality":   QUALITY_PENALTIES,
+    "freshness": FRESHNESS_PENALTIES,
+    "conflict":  CONFLICT_PENALTIES,
+    "coverage":  COVERAGE_PENALTIES,
 }
 
 

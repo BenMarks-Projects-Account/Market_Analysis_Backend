@@ -1,7 +1,20 @@
-"""Post-Trade Feedback Loop v1.
+"""Post-Trade Feedback Loop v1.1.
 
 Captures and normalises the full context surrounding a trade decision so
-that the system (and the user) can later review, compare, and calibrate.
+that the system (and the user) can later review and compare decisions
+against outcomes.
+
+Role boundary
+-------------
+This module is **capture-only**.  It records what happened and what was
+known at decision time.  It does NOT:
+
+*  score correctness or attribution
+*  adjust future weights or thresholds
+*  run calibration or performance analysis
+
+Those responsibilities belong to downstream consumers
+(e.g. signal_attribution, disagreement_tracking).
 
 A **feedback record** preserves:
 
@@ -11,10 +24,8 @@ A **feedback record** preserves:
 *  what the user actually did  (taken / skipped / modified / exited)
 *  optional execution snapshot  (fill data, if available)
 *  optional outcome snapshot  (P&L, status, close reason)
+*  optional trade_key for lifecycle correlation
 *  review notes and warning flags
-
-This module is **capture-only** — it does NOT score correctness, run
-attribution, or adjust future weights.  Those come later.
 
 Public API
 ----------
@@ -36,18 +47,37 @@ validate_feedback_record(record)
 snapshot_from_decision_packet(packet)
     Extract compact decision-time snapshots from a full decision packet.
 
-Output version: 1.0
+record_to_serializable(record)
+    Return a JSON-safe copy of a feedback record.
+
+record_from_serializable(data)
+    Reconstruct a feedback record from serialized data (migration hook).
+
+record_summary(record)
+    Compact human-readable overview of a feedback record.
+
+snapshot_coverage(record)
+    Which snapshots are populated vs None.
+
+Output version: 1.1
 """
 
 from __future__ import annotations
 
 import copy
 import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Any
 
+# ── Module role ─────────────────────────────────────────────────────────
+# This module captures decision context — it does NOT score, calibrate,
+# or adjust.  Downstream consumers own attribution and learning.
+_MODULE_ROLE = "capture"
+
 # ── Version lock ────────────────────────────────────────────────────────
-_FEEDBACK_VERSION = "1.0"
+_FEEDBACK_VERSION = "1.1"
+_COMPATIBLE_VERSIONS = frozenset({"1.0", "1.1"})
 
 # ── Valid enumerations ──────────────────────────────────────────────────
 VALID_TRADE_ACTIONS = frozenset({
@@ -63,6 +93,20 @@ VALID_STATUSES = frozenset({
     "partial",
     "closed",
     "invalid",
+})
+
+# ── Execution source / fill quality (honest provenance tagging) ─────────
+VALID_EXECUTION_SOURCES = frozenset({
+    "live_broker",      # Real broker fill (Tradier live account)
+    "paper_sim",        # Paper/simulated fill
+    "manual_entry",     # User-entered fill data
+    "unknown",          # Source not specified
+})
+
+VALID_FILL_QUALITIES = frozenset({
+    "confirmed",        # Broker-verified fill
+    "estimated",        # Simulated or paper-mode fill
+    "unverified",       # Manual entry, no verification
 })
 
 # ── Required top-level keys (for validation) ────────────────────────────
@@ -190,6 +234,12 @@ def normalise_execution_snapshot(
     Accepts whatever execution data is available (fill price, quantity,
     broker order id, status, timestamps) and returns a clean dict.
     Does not fabricate missing fields.
+
+    Provenance tagging (v1.1):
+    - ``execution_source``: one of VALID_EXECUTION_SOURCES — tags where
+      the fill data originated.  Defaults to ``"unknown"`` if absent.
+    - ``fill_quality``: one of VALID_FILL_QUALITIES — tags verification
+      level.  Defaults to ``"unverified"`` if absent.
     """
     if not execution or not isinstance(execution, dict):
         return None
@@ -213,6 +263,13 @@ def normalise_execution_snapshot(
     for k, v in execution.items():
         if k not in snap:
             snap[k] = copy.deepcopy(v) if isinstance(v, (dict, list)) else v
+
+    # ── Provenance tagging (v1.1) ───────────────────────────────────
+    src = str(snap.get("execution_source", "")).lower().strip()
+    snap["execution_source"] = src if src in VALID_EXECUTION_SOURCES else "unknown"
+
+    qual = str(snap.get("fill_quality", "")).lower().strip()
+    snap["fill_quality"] = qual if qual in VALID_FILL_QUALITIES else "unverified"
 
     return snap if snap else None
 
@@ -309,6 +366,8 @@ def build_feedback_record(
     # Post-decision
     execution_snapshot: dict[str, Any] | None = None,
     outcome_snapshot: dict[str, Any] | None = None,
+    # Lifecycle correlation (v1.1)
+    trade_key: str | None = None,
     # Annotations
     review_notes: list[str] | None = None,
     warning_flags: list[str] | None = None,
@@ -335,6 +394,9 @@ def build_feedback_record(
         Fill / order data.  May be None for skipped trades.
     outcome_snapshot : dict | None
         Realized / unrealized result data.  May be None.
+    trade_key : str | None
+        Lifecycle correlation key (e.g. "SPY|2026-03-20|put_credit_spread|510|505|10").
+        Links this feedback record to trade_lifecycle_service events.
     review_notes : list[str] | None
         User or system notes for later review.
     warning_flags : list[str] | None
@@ -383,7 +445,10 @@ def build_feedback_record(
     status = _derive_status(action, cand, dec_snap, resp_snap, exec_snap, out_snap)
 
     # Generate deterministic feedback_id
-    feedback_id = _generate_feedback_id(now_iso, action, cand, source)
+    feedback_id = _generate_feedback_id(now_iso, action, cand, source, trade_key)
+
+    # Normalise trade_key
+    tk = str(trade_key).strip() if trade_key else None
 
     # Build metadata
     base_meta: dict[str, Any] = {
@@ -400,6 +465,7 @@ def build_feedback_record(
         "recorded_at": now_iso,
         "status": status,
         "trade_action": action,
+        "trade_key": tk,
         "decision_snapshot": dec_snap,
         "candidate_snapshot": cand,
         "market_snapshot": mkt,
@@ -542,15 +608,20 @@ def validate_feedback_record(
     if status and status not in VALID_STATUSES:
         errors.append(f"invalid status: {status}")
 
-    # version check
+    # version check (accept any compatible version)
     ver = record.get("feedback_version")
-    if ver != _FEEDBACK_VERSION:
-        errors.append(f"unexpected feedback_version: {ver} (expected {_FEEDBACK_VERSION})")
+    if ver not in _COMPATIBLE_VERSIONS:
+        errors.append(f"unexpected feedback_version: {ver} (expected one of {sorted(_COMPATIBLE_VERSIONS)})")
 
     # feedback_id presence
     fid = record.get("feedback_id")
     if not fid or not isinstance(fid, str):
         errors.append("feedback_id must be a non-empty string")
+
+    # trade_key type check (optional, but must be str or None if present)
+    tk = record.get("trade_key")
+    if tk is not None and not isinstance(tk, str):
+        errors.append(f"trade_key must be str or None, got {type(tk).__name__}")
 
     # Snapshot type checks (if present, must be dict or None)
     for snap_key in [
@@ -562,6 +633,16 @@ def validate_feedback_record(
         val = record.get(snap_key)
         if val is not None and not isinstance(val, dict):
             errors.append(f"{snap_key} must be dict or None, got {type(val).__name__}")
+
+    # Execution provenance checks (if execution_snapshot present)
+    exec_snap = record.get("execution_snapshot")
+    if isinstance(exec_snap, dict):
+        esrc = exec_snap.get("execution_source")
+        if esrc is not None and esrc not in VALID_EXECUTION_SOURCES:
+            errors.append(f"invalid execution_source: {esrc}")
+        fq = exec_snap.get("fill_quality")
+        if fq is not None and fq not in VALID_FILL_QUALITIES:
+            errors.append(f"invalid fill_quality: {fq}")
 
     # List-type checks
     for list_key in ["review_notes", "warning_flags"]:
@@ -638,16 +719,18 @@ def _generate_feedback_id(
     action: str,
     candidate: dict | None,
     source: str,
+    trade_key: str | None = None,
 ) -> str:
     """Generate a deterministic feedback ID.
 
-    Uses a hash of timestamp + action + symbol + source to avoid
-    collisions while remaining reproducible.
+    Uses a hash of timestamp + action + symbol + source + trade_key
+    to avoid collisions while remaining reproducible.
     """
     symbol = ""
     if candidate and isinstance(candidate, dict):
         symbol = str(candidate.get("symbol") or candidate.get("underlying") or "")
-    raw = f"{timestamp}|{action}|{symbol}|{source}"
+    tk = str(trade_key) if trade_key else ""
+    raw = f"{timestamp}|{action}|{symbol}|{source}|{tk}"
     h = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
     return f"fb-{h}"
 
@@ -659,3 +742,108 @@ def _safe_str_list(val: Any) -> list[str]:
     if isinstance(val, list):
         return [str(x) for x in val if x is not None]
     return []
+
+
+# =====================================================================
+#  Serialization helpers (persistence-readiness, v1.1)
+# =====================================================================
+
+def record_to_serializable(record: dict[str, Any]) -> dict[str, Any]:
+    """Return a JSON-safe deep copy of a feedback record.
+
+    All values produced by build_feedback_record() are already JSON-safe
+    (strings, numbers, bools, None, lists, dicts).  This function exists
+    as a formal contract: callers can rely on the output being safe to
+    pass to ``json.dumps()`` without custom encoders.
+
+    Also serves as the future hook for any pre-serialization transforms
+    (e.g. datetime object → ISO string) if upstream data changes.
+    """
+    if not isinstance(record, dict):
+        raise ValueError("record must be a dict")
+    out = copy.deepcopy(record)
+    # Round-trip through json to verify safety (catches stray objects)
+    json.dumps(out, default=str)
+    return out
+
+
+def record_from_serializable(data: dict[str, Any]) -> dict[str, Any]:
+    """Reconstruct a feedback record from serialized (JSON-parsed) data.
+
+    Currently identity — returns a deep copy.  Exists as the migration
+    hook: future versions can detect ``feedback_version`` and upgrade
+    old records to the current schema.
+    """
+    if not isinstance(data, dict):
+        raise ValueError("data must be a dict")
+    out = copy.deepcopy(data)
+    ver = out.get("feedback_version")
+    if ver and ver not in _COMPATIBLE_VERSIONS:
+        raise ValueError(
+            f"unsupported feedback_version: {ver} "
+            f"(compatible: {sorted(_COMPATIBLE_VERSIONS)})"
+        )
+    # v1.0 → v1.1 migration: add trade_key if missing
+    if "trade_key" not in out:
+        out["trade_key"] = None
+    return out
+
+
+# =====================================================================
+#  Inspectability helpers (v1.1)
+# =====================================================================
+
+_SNAPSHOT_KEYS = [
+    "decision_snapshot", "candidate_snapshot", "market_snapshot",
+    "portfolio_snapshot", "policy_snapshot", "event_snapshot",
+    "conflict_snapshot", "response_snapshot",
+    "execution_snapshot", "outcome_snapshot",
+]
+
+
+def snapshot_coverage(record: dict[str, Any]) -> dict[str, bool]:
+    """Return which snapshot slots are populated (non-None, non-empty).
+
+    Useful for quick inspectability — shows what context was captured.
+    """
+    if not isinstance(record, dict):
+        return {}
+    return {
+        k: record.get(k) is not None and bool(record.get(k))
+        for k in _SNAPSHOT_KEYS
+    }
+
+
+def record_summary(record: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact human-readable overview of a feedback record.
+
+    Includes: version, id, status, trade_action, trade_key, symbol,
+    key timestamps, snapshot coverage count, warning count.
+    """
+    if not isinstance(record, dict):
+        return {"error": "not a dict"}
+
+    cand = record.get("candidate_snapshot") or {}
+    meta = record.get("metadata") or {}
+    cov = snapshot_coverage(record)
+    wf = record.get("warning_flags") or []
+
+    return {
+        "feedback_version": record.get("feedback_version"),
+        "feedback_id": record.get("feedback_id"),
+        "status": record.get("status"),
+        "trade_action": record.get("trade_action"),
+        "trade_key": record.get("trade_key"),
+        "symbol": cand.get("symbol") or cand.get("underlying"),
+        "recorded_at": record.get("recorded_at"),
+        "source": meta.get("source"),
+        "snapshots_present": sum(1 for v in cov.values() if v),
+        "snapshots_total": len(cov),
+        "warning_count": len(wf),
+        "timestamps": {
+            "generated_at": meta.get("generated_at"),
+            "execution_updated_at": meta.get("execution_updated_at"),
+            "outcome_updated_at": meta.get("outcome_updated_at"),
+            "closed_at": meta.get("closed_at"),
+        },
+    }

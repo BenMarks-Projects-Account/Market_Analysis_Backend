@@ -1,5 +1,5 @@
 """
-Tests for Final Decision Response Contract v1.
+Tests for Final Decision Response Contract v1.1.
 
 Covers:
 - contract shape and top-level schema
@@ -12,6 +12,10 @@ Covers:
 - warning flag propagation
 - metadata and evidence preservation
 - UI-integration readiness (card-renderable shapes)
+- size_guidance enforcement for non-actionable decisions (v1.1)
+- stable evidence key documentation (v1.1)
+- insufficient_data guardrails (v1.1)
+- messy/asymmetric input resilience
 """
 
 import copy
@@ -20,6 +24,9 @@ from datetime import datetime, timezone
 
 from app.services.decision_response_contract import (
     _RESPONSE_VERSION,
+    _NON_ACTIONABLE_DECISIONS,
+    _STABLE_EVIDENCE_KEYS,
+    _INTEGRATION_STATUS,
     VALID_DECISIONS,
     VALID_CONVICTION_LEVELS,
     VALID_ALIGNMENTS,
@@ -714,3 +721,322 @@ class TestUICardCompatibility:
             # Must be a clean string value usable as HTML attribute
             assert r["decision"] == decision
             assert " " not in r["decision"]
+
+
+# =====================================================================
+#  12. Size Guidance Enforcement (v1.1)
+# =====================================================================
+
+class TestSizeGuidanceEnforcement:
+    """Non-actionable decisions enforce size_guidance='none'."""
+
+    def test_insufficient_data_forces_none(self):
+        """Cannot suggest sizing when decision is indeterminate."""
+        r = build_decision_response(
+            decision="insufficient_data",
+            size_guidance="normal",
+        )
+        assert r["size_guidance"] == "none"
+
+    def test_reject_forces_none(self):
+        """Cannot suggest sizing when trade is rejected."""
+        r = build_decision_response(
+            decision="reject",
+            size_guidance="normal",
+        )
+        assert r["size_guidance"] == "none"
+
+    def test_watchlist_forces_none(self):
+        """Cannot suggest sizing when trade is watchlisted."""
+        r = build_decision_response(
+            decision="watchlist",
+            size_guidance="reduced",
+        )
+        assert r["size_guidance"] == "none"
+
+    def test_approve_preserves_normal(self):
+        """Actionable decision preserves caller's size guidance."""
+        r = build_decision_response(
+            decision="approve",
+            size_guidance="normal",
+        )
+        assert r["size_guidance"] == "normal"
+
+    def test_cautious_approve_preserves_reduced(self):
+        """Cautious approve preserves reduced sizing."""
+        r = build_decision_response(
+            decision="cautious_approve",
+            size_guidance="reduced",
+        )
+        assert r["size_guidance"] == "reduced"
+
+    def test_approve_preserves_minimal(self):
+        """Approve with minimal sizing is allowed."""
+        r = build_decision_response(
+            decision="approve",
+            size_guidance="minimal",
+        )
+        assert r["size_guidance"] == "minimal"
+
+    @pytest.mark.parametrize("decision", sorted(_NON_ACTIONABLE_DECISIONS))
+    def test_all_non_actionable_force_none(self, decision):
+        """Every non-actionable decision forces size_guidance='none'."""
+        r = build_decision_response(
+            decision=decision,
+            size_guidance="normal",
+        )
+        assert r["size_guidance"] == "none"
+
+    def test_normalizer_enforces_for_reject(self):
+        """Normalizer also tightens size_guidance for reject."""
+        r = normalize_decision_response({
+            "decision": "reject",
+            "size_guidance": "normal",
+        })
+        assert r["size_guidance"] == "none"
+
+    def test_normalizer_enforces_for_watchlist(self):
+        """Normalizer tightens size_guidance for watchlist."""
+        r = normalize_decision_response({
+            "decision": "watchlist",
+            "size_guidance": "reduced",
+        })
+        assert r["size_guidance"] == "none"
+
+    def test_normalizer_enforces_for_insufficient(self):
+        """Normalizer tightens size_guidance for insufficient_data."""
+        r = normalize_decision_response({
+            "decision": "insufficient_data",
+            "size_guidance": "normal",
+        })
+        assert r["size_guidance"] == "none"
+        assert r["conviction"] == "none"
+
+    def test_normalizer_preserves_for_approve(self):
+        """Normalizer does not tighten size_guidance for approve."""
+        r = normalize_decision_response({
+            "decision": "approve",
+            "size_guidance": "normal",
+        })
+        assert r["size_guidance"] == "normal"
+
+
+# =====================================================================
+#  13. Insufficient Data Guardrails (v1.1)
+# =====================================================================
+
+class TestInsufficientDataGuardrails:
+    """Insufficient data responses cannot masquerade as actionable."""
+
+    def test_conviction_forced_to_none(self):
+        r = build_decision_response(
+            decision="insufficient_data",
+            conviction="high",
+        )
+        assert r["conviction"] == "none"
+
+    def test_size_guidance_forced_to_none(self):
+        r = build_decision_response(
+            decision="insufficient_data",
+            size_guidance="normal",
+        )
+        assert r["size_guidance"] == "none"
+
+    def test_status_always_insufficient(self):
+        r = build_decision_response(
+            decision="insufficient_data",
+            warning_flags=["something"],
+        )
+        assert r["status"] == "insufficient_data"
+
+    def test_combined_guardrails(self):
+        """All guardrails apply together."""
+        r = build_decision_response(
+            decision="insufficient_data",
+            conviction="high",
+            size_guidance="normal",
+            market_alignment="aligned",
+            portfolio_fit="good",
+        )
+        assert r["conviction"] == "none"
+        assert r["size_guidance"] == "none"
+        assert r["status"] == "insufficient_data"
+        # Alignment fields pass through — they describe upstream, not the decision
+        assert r["market_alignment"] == "aligned"
+        assert r["portfolio_fit"] == "good"
+
+    def test_normalizer_applies_all_guardrails(self):
+        """Normalizer applies conviction + size_guidance + status guardrails."""
+        r = normalize_decision_response({
+            "decision": "insufficient_data",
+            "conviction": "high",
+            "size_guidance": "normal",
+        })
+        assert r["conviction"] == "none"
+        assert r["size_guidance"] == "none"
+        assert r["status"] == "insufficient_data"
+
+    def test_validates_after_enforcement(self):
+        """Response with enforced guardrails still passes validation."""
+        r = build_decision_response(
+            decision="insufficient_data",
+            conviction="high",
+            size_guidance="normal",
+        )
+        ok, errors = validate_decision_response(r)
+        assert ok is True, f"Guardrailed response failed validation: {errors}"
+
+
+# =====================================================================
+#  14. Stable Evidence Keys (v1.1)
+# =====================================================================
+
+class TestStableEvidenceKeys:
+    """Document and verify stable evidence key expectations."""
+
+    def test_stable_keys_are_frozenset(self):
+        assert isinstance(_STABLE_EVIDENCE_KEYS, frozenset)
+
+    def test_symbol_is_stable(self):
+        assert "symbol" in _STABLE_EVIDENCE_KEYS
+
+    def test_strategy_is_stable(self):
+        assert "strategy" in _STABLE_EVIDENCE_KEYS
+
+    def test_placeholder_includes_stable_keys(self):
+        """Placeholder responses include all stable evidence keys."""
+        r = build_placeholder_response(symbol="SPY", strategy="credit_spread")
+        for key in _STABLE_EVIDENCE_KEYS:
+            assert key in r["evidence"], f"Placeholder missing stable key: {key}"
+
+    def test_evidence_still_accepts_arbitrary_keys(self):
+        """Evidence remains an open dict — custom keys are preserved."""
+        r = build_decision_response(
+            decision="approve",
+            evidence={"symbol": "SPY", "custom_metric": 0.42},
+        )
+        assert r["evidence"]["custom_metric"] == 0.42
+
+    def test_stable_keys_not_validated_as_required(self):
+        """Validation does not enforce stable evidence keys — they are
+        documentation, not hard requirements."""
+        r = _full_approve()
+        r["evidence"] = {}  # no stable keys
+        ok, errors = validate_decision_response(r)
+        assert ok is True
+
+
+# =====================================================================
+#  15. Integration Status (v1.1)
+# =====================================================================
+
+class TestIntegrationStatus:
+    """Verify integration deferral is explicitly documented."""
+
+    def test_integration_status_is_deferred(self):
+        assert _INTEGRATION_STATUS == "deferred"
+
+    def test_non_actionable_decisions_constant(self):
+        assert _NON_ACTIONABLE_DECISIONS == frozenset({
+            "insufficient_data", "reject", "watchlist",
+        })
+
+
+# =====================================================================
+#  16. Messy Input Resilience (v1.1)
+# =====================================================================
+
+class TestMessyInputResilience:
+    """Structurally complete but substantively weak inputs."""
+
+    def test_reject_with_approve_evidence(self):
+        """Reject decision with evidence that looks positive — decision wins."""
+        r = build_decision_response(
+            decision="reject",
+            conviction="high",
+            market_alignment="aligned",
+            portfolio_fit="good",
+            evidence={"symbol": "SPY", "iv_rank": 0.9},
+            summary="Rejected despite positive signals — policy block.",
+            size_guidance="normal",  # caller wants normal, but contract says no
+        )
+        assert r["decision"] == "reject"
+        assert r["size_guidance"] == "none"  # enforced
+        assert r["conviction"] == "high"  # conviction for reject is ok — high confidence in rejection
+
+    def test_watchlist_with_strong_conviction(self):
+        """Watchlist with high conviction but not actionable."""
+        r = build_decision_response(
+            decision="watchlist",
+            conviction="high",
+            market_alignment="aligned",
+            size_guidance="reduced",
+        )
+        assert r["decision"] == "watchlist"
+        assert r["size_guidance"] == "none"  # enforced
+        assert r["conviction"] == "high"  # high conviction that this should be watched
+
+    def test_insufficient_with_full_alignment_fields(self):
+        """Insufficient data but upstream alignment fields present."""
+        r = build_decision_response(
+            decision="insufficient_data",
+            market_alignment="aligned",
+            portfolio_fit="good",
+            policy_alignment="clear",
+            event_risk="low",
+            conviction="high",
+            size_guidance="normal",
+        )
+        assert r["conviction"] == "none"  # forced
+        assert r["size_guidance"] == "none"  # forced
+        assert r["market_alignment"] == "aligned"  # upstream fields preserved
+        assert r["status"] == "insufficient_data"
+
+    def test_normalizer_with_mixed_valid_invalid(self):
+        """Some fields valid, some garbage — normalizer produces valid shape."""
+        r = normalize_decision_response({
+            "decision": "reject",
+            "conviction": "INVALID",
+            "market_alignment": "aligned",
+            "size_guidance": "reduced",  # will be overridden for reject
+            "evidence": {"symbol": "QQQ"},
+            "reasons_for": 42,  # wrong type
+        })
+        ok, errors = validate_decision_response(r)
+        assert ok is True
+        assert r["decision"] == "reject"
+        assert r["conviction"] == "none"  # invalid → fallback
+        assert r["size_guidance"] == "none"  # enforced for reject
+        assert r["market_alignment"] == "aligned"  # preserved
+        assert r["reasons_for"] == []  # coerced from wrong type
+
+    def test_approve_with_degraded_indicators(self):
+        """Approve with degraded upstream — warnings present but actionable."""
+        r = build_decision_response(
+            decision="approve",
+            conviction="low",
+            market_alignment="unknown",
+            portfolio_fit="unknown",
+            size_guidance="minimal",
+            warning_flags=["market_degraded", "portfolio_unavailable"],
+        )
+        assert r["status"] == "partial"
+        assert r["size_guidance"] == "minimal"  # approve allows minimal
+        assert r["conviction"] == "low"
+
+    def test_cautious_approve_all_unknowns(self):
+        """Cautious approve where everything is unknown — still valid."""
+        r = build_decision_response(
+            decision="cautious_approve",
+            conviction="low",
+            market_alignment="unknown",
+            portfolio_fit="unknown",
+            policy_alignment="unknown",
+            event_risk="unknown",
+            size_guidance="minimal",
+            warning_flags=["everything_degraded"],
+        )
+        ok, errors = validate_decision_response(r)
+        assert ok is True
+        assert r["size_guidance"] == "minimal"
+        assert r["status"] == "partial"

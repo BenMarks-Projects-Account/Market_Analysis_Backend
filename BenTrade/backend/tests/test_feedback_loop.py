@@ -1,8 +1,8 @@
-"""Tests for Post-Trade Feedback Loop v1.
+"""Tests for Post-Trade Feedback Loop v1.1.
 
 Coverage targets:
 ─── Contract-level tests
-    - top-level shape
+    - top-level shape (19 keys including trade_key)
     - trade_action enum handling
     - status enum handling
     - feedback_id generation
@@ -16,6 +16,7 @@ Coverage targets:
     - skipped trade without execution/outcome
     - exited trade with outcome snapshot
     - partial execution/outcome data
+    - execution provenance tagging (v1.1)
 ─── Status derivation tests
     - minimal → partial
     - candidate present → recorded
@@ -29,6 +30,15 @@ Coverage targets:
     - metadata captures source/versioning
 ─── Validation tests
     - validate_feedback_record
+    - v1.0 backward compatibility
+─── Lifecycle correlation tests (v1.1)
+    - trade_key field
+─── Serialization tests (v1.1)
+    - record_to_serializable / record_from_serializable
+─── Inspectability tests (v1.1)
+    - record_summary / snapshot_coverage
+─── Role boundary tests (v1.1)
+    - module role constant
 ─── Integration tests
     - with decision_packet from orchestrator
     - with decision_response from response contract
@@ -36,15 +46,25 @@ Coverage targets:
 """
 
 import copy
+import json
 import pytest
 
 from app.services.feedback_loop import (
+    VALID_EXECUTION_SOURCES,
+    VALID_FILL_QUALITIES,
     VALID_STATUSES,
     VALID_TRADE_ACTIONS,
+    _COMPATIBLE_VERSIONS,
+    _FEEDBACK_VERSION,
+    _MODULE_ROLE,
     build_feedback_record,
     close_feedback_record,
     normalise_execution_snapshot,
     normalise_outcome_snapshot,
+    record_from_serializable,
+    record_summary,
+    record_to_serializable,
+    snapshot_coverage,
     snapshot_from_decision_packet,
     update_feedback_execution,
     update_feedback_outcome,
@@ -199,7 +219,7 @@ class TestFeedbackRecordShape:
 
     EXPECTED_KEYS = {
         "feedback_version", "feedback_id", "recorded_at", "status",
-        "trade_action",
+        "trade_action", "trade_key",
         "decision_snapshot", "candidate_snapshot", "market_snapshot",
         "portfolio_snapshot", "policy_snapshot", "event_snapshot",
         "conflict_snapshot", "response_snapshot",
@@ -211,9 +231,9 @@ class TestFeedbackRecordShape:
         r = build_feedback_record()
         assert self.EXPECTED_KEYS == set(r.keys())
 
-    def test_version_is_1_0(self):
+    def test_version_is_current(self):
         r = build_feedback_record()
-        assert r["feedback_version"] == "1.0"
+        assert r["feedback_version"] == _FEEDBACK_VERSION
 
     def test_feedback_id_is_string(self):
         r = build_feedback_record()
@@ -234,7 +254,7 @@ class TestFeedbackRecordShape:
 
     def test_metadata_has_version(self):
         r = build_feedback_record()
-        assert r["metadata"]["feedback_version"] == "1.0"
+        assert r["metadata"]["feedback_version"] == _FEEDBACK_VERSION
 
     def test_full_record_has_all_keys(self):
         r = build_feedback_record(
@@ -806,7 +826,7 @@ class TestMetadata:
 
     def test_version_in_metadata(self):
         r = build_feedback_record()
-        assert r["metadata"]["feedback_version"] == "1.0"
+        assert r["metadata"]["feedback_version"] == _FEEDBACK_VERSION
 
 
 # =====================================================================
@@ -969,6 +989,361 @@ class TestEndToEndWorkflow:
         # Validate final record
         ok, errs = validate_feedback_record(r4)
         assert ok is True, errs
+
+
+# =====================================================================
+#  Module role boundary tests (v1.1)
+# =====================================================================
+
+class TestModuleRole:
+    """Verify the capture-only role boundary."""
+
+    def test_module_role_is_capture(self):
+        assert _MODULE_ROLE == "capture"
+
+    def test_version_is_1_1(self):
+        assert _FEEDBACK_VERSION == "1.1"
+
+    def test_compatible_versions_include_1_0(self):
+        assert "1.0" in _COMPATIBLE_VERSIONS
+        assert "1.1" in _COMPATIBLE_VERSIONS
+
+
+# =====================================================================
+#  Execution provenance tagging tests (v1.1)
+# =====================================================================
+
+class TestExecutionProvenanceTagging:
+    """Verify execution_source and fill_quality tagging."""
+
+    def test_paper_sim_tagged(self):
+        ex = normalise_execution_snapshot({
+            "fill_price": 1.18,
+            "execution_source": "paper_sim",
+            "fill_quality": "estimated",
+        })
+        assert ex["execution_source"] == "paper_sim"
+        assert ex["fill_quality"] == "estimated"
+
+    def test_live_broker_tagged(self):
+        ex = normalise_execution_snapshot({
+            "fill_price": 1.18,
+            "execution_source": "live_broker",
+            "fill_quality": "confirmed",
+        })
+        assert ex["execution_source"] == "live_broker"
+        assert ex["fill_quality"] == "confirmed"
+
+    def test_manual_entry_tagged(self):
+        ex = normalise_execution_snapshot({
+            "fill_price": 1.18,
+            "execution_source": "manual_entry",
+            "fill_quality": "unverified",
+        })
+        assert ex["execution_source"] == "manual_entry"
+        assert ex["fill_quality"] == "unverified"
+
+    def test_missing_source_defaults_unknown(self):
+        ex = normalise_execution_snapshot({"fill_price": 1.18})
+        assert ex["execution_source"] == "unknown"
+        assert ex["fill_quality"] == "unverified"
+
+    def test_invalid_source_defaults_unknown(self):
+        ex = normalise_execution_snapshot({
+            "fill_price": 1.0,
+            "execution_source": "INVALID",
+            "fill_quality": "INVALID",
+        })
+        assert ex["execution_source"] == "unknown"
+        assert ex["fill_quality"] == "unverified"
+
+    def test_valid_execution_sources_enum(self):
+        assert VALID_EXECUTION_SOURCES == {
+            "live_broker", "paper_sim", "manual_entry", "unknown",
+        }
+
+    def test_valid_fill_qualities_enum(self):
+        assert VALID_FILL_QUALITIES == {
+            "confirmed", "estimated", "unverified",
+        }
+
+    def test_provenance_in_full_record(self):
+        r = build_feedback_record(
+            trade_action="taken",
+            candidate_snapshot=_candidate(),
+            execution_snapshot={
+                "fill_price": 1.18,
+                "execution_source": "live_broker",
+                "fill_quality": "confirmed",
+            },
+        )
+        ex = r["execution_snapshot"]
+        assert ex["execution_source"] == "live_broker"
+        assert ex["fill_quality"] == "confirmed"
+
+    def test_provenance_validates_in_record(self):
+        r = build_feedback_record(
+            trade_action="taken",
+            candidate_snapshot=_candidate(),
+            execution_snapshot={"fill_price": 1.18},
+        )
+        ok, errs = validate_feedback_record(r)
+        assert ok is True, errs
+
+
+# =====================================================================
+#  Trade key correlation tests (v1.1)
+# =====================================================================
+
+class TestTradeKeyCorrelation:
+    """Verify trade_key lifecycle correlation field."""
+
+    def test_trade_key_in_record(self):
+        tk = "SPY|2026-03-20|put_credit_spread|510|505|10"
+        r = build_feedback_record(
+            trade_action="taken",
+            candidate_snapshot=_candidate(),
+            trade_key=tk,
+        )
+        assert r["trade_key"] == tk
+
+    def test_trade_key_default_none(self):
+        r = build_feedback_record()
+        assert r["trade_key"] is None
+
+    def test_trade_key_in_expected_keys(self):
+        r = build_feedback_record()
+        assert "trade_key" in r
+
+    def test_trade_key_validated_type(self):
+        r = build_feedback_record(trade_key="abc")
+        r["trade_key"] = 123  # Invalid type
+        ok, errs = validate_feedback_record(r)
+        assert ok is False
+        assert any("trade_key" in e for e in errs)
+
+    def test_trade_key_none_validates(self):
+        r = build_feedback_record()
+        ok, errs = validate_feedback_record(r)
+        assert ok is True, errs
+
+    def test_trade_key_affects_feedback_id(self):
+        """Different trade_keys produce different feedback IDs."""
+        r1 = build_feedback_record(trade_key="KEY_A")
+        r2 = build_feedback_record(trade_key="KEY_B")
+        # IDs differ because different trade_keys + different timestamps
+        assert r1["feedback_id"] != r2["feedback_id"]
+
+    def test_trade_key_stripped(self):
+        r = build_feedback_record(trade_key="  SPY|test  ")
+        assert r["trade_key"] == "SPY|test"
+
+
+# =====================================================================
+#  Serialization readiness tests (v1.1)
+# =====================================================================
+
+class TestSerializationReadiness:
+    """Verify record_to_serializable / record_from_serializable."""
+
+    def test_to_serializable_returns_json_safe(self):
+        r = build_feedback_record(
+            trade_action="taken",
+            candidate_snapshot=_candidate(),
+            execution_snapshot=_execution(),
+            outcome_snapshot=_outcome(),
+            trade_key="SPY|test",
+        )
+        s = record_to_serializable(r)
+        # Must not raise
+        json_str = json.dumps(s)
+        assert isinstance(json_str, str)
+        assert len(json_str) > 0
+
+    def test_to_serializable_deep_copies(self):
+        r = build_feedback_record(candidate_snapshot=_candidate())
+        s = record_to_serializable(r)
+        s["candidate_snapshot"]["symbol"] = "CHANGED"
+        assert r["candidate_snapshot"]["symbol"] != "CHANGED"
+
+    def test_to_serializable_rejects_non_dict(self):
+        with pytest.raises(ValueError):
+            record_to_serializable("not_a_dict")
+
+    def test_from_serializable_round_trip(self):
+        r = build_feedback_record(
+            trade_action="taken",
+            candidate_snapshot=_candidate(),
+            trade_key="SPY|round_trip",
+        )
+        s = record_to_serializable(r)
+        r2 = record_from_serializable(s)
+        assert r2["trade_action"] == "taken"
+        assert r2["trade_key"] == "SPY|round_trip"
+        assert r2["feedback_version"] == _FEEDBACK_VERSION
+
+    def test_from_serializable_adds_trade_key_for_v1_0(self):
+        """v1.0 records without trade_key get it added."""
+        old_record = {
+            "feedback_version": "1.0",
+            "feedback_id": "fb-test",
+            "recorded_at": "2026-01-01T00:00:00Z",
+            "status": "recorded",
+            "trade_action": "taken",
+        }
+        r = record_from_serializable(old_record)
+        assert r["trade_key"] is None
+
+    def test_from_serializable_rejects_unknown_version(self):
+        with pytest.raises(ValueError, match="unsupported"):
+            record_from_serializable({"feedback_version": "99.0"})
+
+    def test_from_serializable_rejects_non_dict(self):
+        with pytest.raises(ValueError):
+            record_from_serializable("not_a_dict")
+
+
+# =====================================================================
+#  Snapshot coverage tests (v1.1)
+# =====================================================================
+
+class TestSnapshotCoverage:
+    """Verify snapshot_coverage() inspectability."""
+
+    def test_empty_record_all_false(self):
+        r = build_feedback_record()
+        cov = snapshot_coverage(r)
+        assert all(v is False for v in cov.values())
+        assert len(cov) == 10
+
+    def test_full_record_counts(self):
+        r = build_feedback_record(
+            trade_action="taken",
+            decision_packet=_decision_packet(),
+            decision_response=_decision_response(),
+            execution_snapshot=_execution(),
+            outcome_snapshot=_outcome(),
+        )
+        cov = snapshot_coverage(r)
+        present = sum(1 for v in cov.values() if v)
+        assert present >= 8  # decision, candidate, market, portfolio, policy, events, conflicts, response, execution, outcome
+
+    def test_partial_coverage(self):
+        r = build_feedback_record(
+            trade_action="taken",
+            candidate_snapshot=_candidate(),
+            execution_snapshot=_execution(),
+        )
+        cov = snapshot_coverage(r)
+        assert cov["candidate_snapshot"] is True
+        assert cov["execution_snapshot"] is True
+        assert cov["market_snapshot"] is False
+        assert cov["outcome_snapshot"] is False
+
+    def test_non_dict_returns_empty(self):
+        assert snapshot_coverage("not_a_dict") == {}
+
+
+# =====================================================================
+#  Record summary tests (v1.1)
+# =====================================================================
+
+class TestRecordSummary:
+    """Verify record_summary() inspectability."""
+
+    def test_summary_has_expected_keys(self):
+        r = build_feedback_record(
+            trade_action="taken",
+            candidate_snapshot=_candidate(),
+            trade_key="SPY|summary_test",
+            source="scanner",
+        )
+        s = record_summary(r)
+        assert s["feedback_version"] == _FEEDBACK_VERSION
+        assert s["status"] == "recorded"
+        assert s["trade_action"] == "taken"
+        assert s["trade_key"] == "SPY|summary_test"
+        assert s["symbol"] == "SPY260320P00510000"
+        assert s["source"] == "scanner"
+        assert isinstance(s["snapshots_present"], int)
+        assert isinstance(s["snapshots_total"], int)
+        assert isinstance(s["warning_count"], int)
+        assert "timestamps" in s
+
+    def test_summary_snapshot_counts(self):
+        r = build_feedback_record(
+            trade_action="taken",
+            candidate_snapshot=_candidate(),
+            market_snapshot=_market(),
+        )
+        s = record_summary(r)
+        assert s["snapshots_present"] == 2
+        assert s["snapshots_total"] == 10
+
+    def test_summary_timestamps(self):
+        r = build_feedback_record()
+        s = record_summary(r)
+        ts = s["timestamps"]
+        assert ts["generated_at"] is not None
+        assert ts["execution_updated_at"] is None
+        assert ts["outcome_updated_at"] is None
+        assert ts["closed_at"] is None
+
+    def test_summary_after_lifecycle(self):
+        r = build_feedback_record(
+            trade_action="taken",
+            candidate_snapshot=_candidate(),
+        )
+        r2 = update_feedback_execution(r, _execution())
+        r3 = update_feedback_outcome(r2, _outcome())
+        r4 = close_feedback_record(r3)
+        s = record_summary(r4)
+        ts = s["timestamps"]
+        assert ts["execution_updated_at"] is not None
+        assert ts["outcome_updated_at"] is not None
+        assert ts["closed_at"] is not None
+
+    def test_summary_non_dict(self):
+        s = record_summary("not_a_dict")
+        assert s["error"] == "not a dict"
+
+
+# =====================================================================
+#  Backward compatibility tests (v1.1)
+# =====================================================================
+
+class TestBackwardCompatV1:
+    """Verify v1.0 records still validate and can be deserialized."""
+
+    def test_v1_0_record_validates(self):
+        """A record with version 1.0 should still pass validation."""
+        r = build_feedback_record(candidate_snapshot=_candidate())
+        r["feedback_version"] = "1.0"
+        ok, errs = validate_feedback_record(r)
+        assert ok is True, errs
+
+    def test_v1_0_record_deserializes(self):
+        old = {
+            "feedback_version": "1.0",
+            "feedback_id": "fb-oldrecord12345",
+            "recorded_at": "2026-01-01T00:00:00Z",
+            "status": "recorded",
+            "trade_action": "taken",
+            "candidate_snapshot": {"symbol": "SPY"},
+        }
+        r = record_from_serializable(old)
+        assert r["feedback_version"] == "1.0"
+        assert r["trade_key"] is None  # Added by migration
+
+    def test_invalid_version_fails_validation(self):
+        r = build_feedback_record()
+        r["feedback_version"] = "99.0"
+        ok, errs = validate_feedback_record(r)
+        assert ok is False
+        assert any("unexpected" in e for e in errs)
+
+    def test_compatible_versions_constant(self):
+        assert _COMPATIBLE_VERSIONS == frozenset({"1.0", "1.1"})
 
 
 # =====================================================================

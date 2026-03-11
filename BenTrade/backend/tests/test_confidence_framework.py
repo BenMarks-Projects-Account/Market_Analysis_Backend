@@ -1,4 +1,4 @@
-"""Tests for confidence_framework v1.
+"""Tests for confidence_framework v1.1.
 
 Coverage targets:
 - normalize_confidence (scale conversion, edge cases)
@@ -9,6 +9,14 @@ Coverage targets:
 - build_uncertainty_summary
 - quick_assess
 - Integration: orchestrator, prompt_payload, decision_response_contract
+
+v1.1 additions:
+- PENALTY_TABLES consolidated export inspectability
+- Market composite confidence_assessment integration
+- Payload fallback confidence_assessment
+- Confidence ≠ conviction semantic boundary tests
+- Degraded/stale/conflicted scenario coverage
+- Structured uncertainty reasons preservation
 """
 
 import math
@@ -18,8 +26,10 @@ from app.services.confidence_framework import (
     CONFLICT_PENALTIES,
     COVERAGE_PENALTIES,
     FRESHNESS_PENALTIES,
+    PENALTY_TABLES,
     QUALITY_PENALTIES,
     VALID_IMPACT_CATEGORIES,
+    _FRAMEWORK_VERSION,
     aggregate_impacts,
     apply_impacts,
     build_confidence_assessment,
@@ -462,7 +472,7 @@ class TestBuildConfidenceAssessment:
 
     def test_framework_version(self):
         result = build_confidence_assessment(raw_confidence=0.80)
-        assert result["framework_version"] == "1.0"
+        assert result["framework_version"] == _FRAMEWORK_VERSION
 
     def test_confidence_reasons_present(self):
         result = build_confidence_assessment(raw_confidence=0.90)
@@ -572,7 +582,7 @@ class TestOrchestratorIntegration:
         assert "confidence_assessment" in qo
         assert "uncertainty_summary" in qo
         ca = qo["confidence_assessment"]
-        assert ca["framework_version"] == "1.0"
+        assert ca["framework_version"] == _FRAMEWORK_VERSION
         assert ca["source"] == "trade_decision_orchestrator"
 
     def test_full_packet_high_confidence(self):
@@ -625,7 +635,7 @@ class TestPayloadIntegration:
         payload = build_prompt_payload(decision_packet=pkt)
         qb = payload["quality_block"]
         assert "confidence_assessment" in qb
-        assert qb["confidence_assessment"]["framework_version"] == "1.0"
+        assert qb["confidence_assessment"]["framework_version"] == _FRAMEWORK_VERSION
 
     def test_uncertainty_propagated_from_packet(self):
         from app.services.trade_decision_orchestrator import build_decision_packet
@@ -635,14 +645,17 @@ class TestPayloadIntegration:
         qb = payload["quality_block"]
         assert "uncertainty_summary" in qb
 
-    def test_no_packet_no_assessment(self):
+    def test_no_packet_fallback_has_assessment(self):
+        """Fallback path now includes a confidence_assessment (v1.1)."""
         from app.services.decision_prompt_payload import build_prompt_payload
         payload = build_prompt_payload(
             candidate={"symbol": "SPY"},
         )
         qb = payload["quality_block"]
-        # Fallback path doesn't have confidence_assessment (no packet)
-        assert "confidence_assessment" not in qb
+        assert "confidence_assessment" in qb
+        ca = qb["confidence_assessment"]
+        assert ca["source"] == "decision_prompt_payload_fallback"
+        assert ca["framework_version"] == _FRAMEWORK_VERSION
 
 
 # =====================================================================
@@ -658,7 +671,7 @@ class TestResponseContractIntegration:
         ca = resp.get("confidence_assessment")
         assert ca is not None
         assert ca["confidence_label"] == "high"
-        assert ca["framework_version"] == "1.0"
+        assert ca["framework_version"] == _FRAMEWORK_VERSION
 
     def test_insufficient_data_low_confidence(self):
         from app.services.decision_response_contract import build_decision_response
@@ -702,7 +715,7 @@ class TestResponseContractIntegration:
         from app.services.decision_response_contract import build_placeholder_response
         resp = build_placeholder_response()
         assert "confidence_assessment" in resp
-        assert resp["confidence_assessment"]["framework_version"] == "1.0"
+        assert resp["confidence_assessment"]["framework_version"] == _FRAMEWORK_VERSION
 
     def test_conviction_none_base_score(self):
         from app.services.decision_response_contract import build_decision_response
@@ -755,3 +768,436 @@ class TestPenaltyTables:
 
     def test_valid_categories_non_empty(self):
         assert len(VALID_IMPACT_CATEGORIES) >= 6
+
+
+# =====================================================================
+#  PENALTY_TABLES consolidated export (v1.1)
+# =====================================================================
+
+class TestPenaltyTablesExport:
+    """PENALTY_TABLES provides unified inspection of all penalty tables."""
+
+    def test_penalty_tables_has_all_categories(self):
+        assert set(PENALTY_TABLES.keys()) == {"quality", "freshness", "conflict", "coverage"}
+
+    def test_tables_reference_same_objects(self):
+        """Exported tables are the same objects, not copies."""
+        assert PENALTY_TABLES["quality"] is QUALITY_PENALTIES
+        assert PENALTY_TABLES["freshness"] is FRESHNESS_PENALTIES
+        assert PENALTY_TABLES["conflict"] is CONFLICT_PENALTIES
+        assert PENALTY_TABLES["coverage"] is COVERAGE_PENALTIES
+
+    def test_all_table_values_are_floats(self):
+        for name, table in PENALTY_TABLES.items():
+            for key, val in table.items():
+                assert isinstance(val, (int, float)), \
+                    f"{name}.{key} = {val!r} is not numeric"
+
+    def test_all_table_values_in_range(self):
+        for name, table in PENALTY_TABLES.items():
+            for key, val in table.items():
+                assert 0.0 <= val <= 1.0, \
+                    f"{name}.{key} = {val} outside [0, 1]"
+
+
+# =====================================================================
+#  Market composite confidence_assessment integration (v1.1)
+# =====================================================================
+
+class TestMarketCompositeConfidenceIntegration:
+    """Verify market_composite emits structured confidence_assessment."""
+
+    def test_empty_composite_has_assessment(self):
+        from app.services.market_composite import build_market_composite
+        result = build_market_composite({})
+        assert "confidence_assessment" in result
+        ca = result["confidence_assessment"]
+        assert ca["framework_version"] == _FRAMEWORK_VERSION
+        assert ca["source"] == "market_composite"
+
+    def test_composite_assessment_label_matches_confidence(self):
+        """Assessment's confidence_label is consistent with the confidence float."""
+        from app.services.market_composite import build_market_composite
+        assembled = {
+            "market_context": {
+                "engine_a": {
+                    "normalized": {"label": "bullish", "confidence": 85.0},
+                    "source": "test",
+                },
+                "engine_b": {
+                    "normalized": {"label": "bullish", "confidence": 80.0},
+                    "source": "test",
+                },
+                "engine_c": {
+                    "normalized": {"label": "neutral", "confidence": 70.0},
+                    "source": "test",
+                },
+            },
+            "quality_summary": {"overall_quality": "good", "degraded_count": 0},
+            "freshness_summary": {"overall_freshness": "live"},
+            "horizon_summary": {},
+        }
+        result = build_market_composite(assembled)
+        ca = result["confidence_assessment"]
+        # Assessment should have reasonable labels
+        assert ca["confidence_label"] in ("high", "moderate", "low", "none")
+        assert ca["uncertainty_level"] in ("low", "moderate", "high", "very_high")
+
+    def test_composite_degraded_quality_reduces_assessment(self):
+        """Degraded quality should appear as an impact in the assessment."""
+        from app.services.market_composite import build_market_composite
+        assembled = {
+            "market_context": {
+                "engine_a": {
+                    "normalized": {"label": "bullish", "confidence": 90.0},
+                    "source": "test",
+                },
+            },
+            "quality_summary": {"overall_quality": "poor", "degraded_count": 0},
+            "freshness_summary": {"overall_freshness": "live"},
+            "horizon_summary": {},
+        }
+        result = build_market_composite(assembled)
+        ca = result["confidence_assessment"]
+        assert ca["total_penalty"] > 0
+        assert any("quality" in r for r in ca["uncertainty_reasons"])
+
+    def test_composite_assessment_has_uncertainty_reasons(self):
+        """Assessment includes uncertainty_reasons explaining degradation."""
+        from app.services.market_composite import build_market_composite
+        assembled = {
+            "market_context": {
+                "engine_a": {
+                    "normalized": {"label": "bullish", "confidence": 80.0},
+                    "source": "test",
+                },
+            },
+            "quality_summary": {"overall_quality": "good", "degraded_count": 0},
+            "freshness_summary": {"overall_freshness": "very_stale"},
+            "horizon_summary": {},
+        }
+        result = build_market_composite(assembled)
+        ca = result["confidence_assessment"]
+        assert isinstance(ca["uncertainty_reasons"], list)
+        assert any("freshness" in r for r in ca["uncertainty_reasons"])
+
+    def test_composite_backward_compat_confidence_float(self):
+        """The legacy confidence float is still present and valid."""
+        from app.services.market_composite import build_market_composite
+        result = build_market_composite({})
+        assert isinstance(result["confidence"], float)
+        assert 0.0 <= result["confidence"] <= 1.0
+
+
+# =====================================================================
+#  Payload fallback confidence_assessment (v1.1)
+# =====================================================================
+
+class TestPayloadFallbackConfidence:
+    """Verify fallback quality block now always gets a confidence_assessment."""
+
+    def test_fallback_has_assessment(self):
+        from app.services.decision_prompt_payload import build_prompt_payload
+        payload = build_prompt_payload(candidate={"symbol": "SPY"})
+        qb = payload["quality_block"]
+        assert "confidence_assessment" in qb
+        ca = qb["confidence_assessment"]
+        assert ca["source"] == "decision_prompt_payload_fallback"
+
+    def test_fallback_assessment_reflects_coverage(self):
+        """Low coverage → low confidence in fallback assessment."""
+        from app.services.decision_prompt_payload import build_prompt_payload
+        payload = build_prompt_payload(candidate={"symbol": "SPY"})
+        qb = payload["quality_block"]
+        ca = qb["confidence_assessment"]
+        # Only candidate present → low coverage → low confidence
+        assert ca["adjusted_score"] < 0.50
+
+    def test_packet_path_still_works(self):
+        """Packet-sourced assessment still propagates correctly."""
+        from app.services.trade_decision_orchestrator import build_decision_packet
+        from app.services.decision_prompt_payload import build_prompt_payload
+        pkt = build_decision_packet(
+            candidate={"symbol": "SPY", "strategy": "iron_condor"},
+            market={"overall_bias": "bullish"},
+        )
+        payload = build_prompt_payload(decision_packet=pkt)
+        qb = payload["quality_block"]
+        assert "confidence_assessment" in qb
+        # Should come from orchestrator, not fallback
+        assert qb["confidence_assessment"]["source"] == "trade_decision_orchestrator"
+
+
+# =====================================================================
+#  Confidence ≠ Conviction semantic boundary (v1.1)
+# =====================================================================
+
+class TestConfidenceConvictionBoundary:
+    """Verify confidence and conviction remain semantically distinct.
+
+    Confidence = how trustworthy / well-supported an assessment is.
+    Conviction = action-oriented strength of the final decision.
+    These must not collapse into one field or one vague score.
+    """
+
+    def test_low_confidence_independent_of_conviction(self):
+        """Confidence can be low even when conviction is not in play."""
+        # Pure data quality assessment — no conviction involved at all
+        assessment = build_confidence_assessment(
+            raw_confidence=0.30,
+            quality_status="poor",
+            freshness_status="very_stale",
+            source="test_pure_assessment",
+        )
+        assert assessment["confidence_label"] == "none"
+        # Conviction doesn't exist in framework assessments
+        assert "conviction" not in assessment
+
+    def test_high_data_confidence_with_none_conviction(self):
+        """High data quality doesn't imply high conviction about a decision."""
+        from app.services.decision_response_contract import build_decision_response
+        resp = build_decision_response(
+            decision="insufficient_data",
+            conviction="none",
+            market_alignment="aligned",
+            portfolio_fit="good",
+        )
+        ca = resp["confidence_assessment"]
+        # conviction=none → low base score → low confidence
+        assert ca["base_score"] == 0.15
+        # But the data quality is fine — conviction is about decision, not data
+        assert resp["conviction"] == "none"
+        assert resp["market_alignment"] == "aligned"
+
+    def test_high_conviction_low_confidence(self):
+        """High conviction with poor data → high conviction, low confidence."""
+        from app.services.decision_response_contract import build_decision_response
+        resp = build_decision_response(
+            decision="approve",
+            conviction="high",
+            market_alignment="misaligned",
+            policy_alignment="blocked",
+            event_risk="high",
+            warning_flags=["a", "b", "c", "d", "e"],
+        )
+        ca = resp["confidence_assessment"]
+        # Many penalties → reduced confidence
+        assert ca["adjusted_score"] < 0.80
+        # But conviction is still high — it's a different dimension
+        assert resp["conviction"] == "high"
+
+    def test_orchestrator_confidence_has_no_conviction(self):
+        """Orchestrator confidence is about data completeness, not decisions."""
+        from app.services.trade_decision_orchestrator import build_decision_packet
+        pkt = build_decision_packet(candidate={"symbol": "SPY"})
+        ca = pkt["quality_overview"]["confidence_assessment"]
+        # No conviction in orchestrator's assessment
+        assert "conviction" not in ca
+        # It's about coverage/quality, not about making a decision
+        assert ca["source"] == "trade_decision_orchestrator"
+
+    def test_response_conviction_is_separate_from_assessment_label(self):
+        """Response conviction field and assessment confidence_label are independent."""
+        from app.services.decision_response_contract import build_decision_response
+        resp = build_decision_response(
+            decision="cautious_approve",
+            conviction="moderate",
+            market_alignment="aligned",
+        )
+        # conviction is a response-level enum
+        assert resp["conviction"] == "moderate"
+        # confidence_label is derived from base_score + penalties
+        ca = resp["confidence_assessment"]
+        assert ca["confidence_label"] in ("high", "moderate", "low", "none")
+        # They can differ — conviction="moderate" doesn't mean confidence_label="moderate"
+
+
+# =====================================================================
+#  Degraded / stale / conflicted scenarios (v1.1)
+# =====================================================================
+
+class TestDegradedScenarios:
+    """Verify framework handles degraded, stale, and conflicted inputs."""
+
+    def test_all_degraded(self):
+        """All axes degraded → very low confidence, high uncertainty."""
+        result = build_confidence_assessment(
+            raw_confidence=0.80,
+            quality_status="unavailable",
+            freshness_status="very_stale",
+            conflict_severity="high",
+            coverage_level="none",
+        )
+        assert result["adjusted_score"] == 0.0
+        assert result["confidence_label"] == "none"
+        assert result["uncertainty_level"] == "very_high"
+        assert len(result["impacts"]) == 4
+
+    def test_stale_but_high_quality(self):
+        """Stale data with good quality → moderate confidence hit."""
+        result = build_confidence_assessment(
+            raw_confidence=0.90,
+            quality_status="good",
+            freshness_status="stale",
+        )
+        assert result["adjusted_score"] == 0.80
+        assert result["confidence_label"] == "high"
+        assert any("freshness" in r for r in result["uncertainty_reasons"])
+
+    def test_conflicted_signals(self):
+        """High conflict severity reduces confidence."""
+        clean = build_confidence_assessment(
+            raw_confidence=0.80, conflict_severity="none",
+        )
+        conflicted = build_confidence_assessment(
+            raw_confidence=0.80, conflict_severity="high",
+        )
+        assert conflicted["adjusted_score"] < clean["adjusted_score"]
+        assert any("conflict" in r for r in conflicted["uncertainty_reasons"])
+
+    def test_partial_coverage(self):
+        """Partial coverage has moderate penalty."""
+        full = build_confidence_assessment(raw_confidence=0.80, coverage_level="full")
+        partial = build_confidence_assessment(raw_confidence=0.80, coverage_level="partial")
+        assert partial["adjusted_score"] < full["adjusted_score"]
+
+    def test_multiple_degradations_stack(self):
+        """Multiple medium degradations stack to significant penalty."""
+        result = build_confidence_assessment(
+            raw_confidence=0.90,
+            quality_status="degraded",   # 0.15
+            freshness_status="stale",    # 0.10
+            conflict_severity="moderate",  # 0.15
+            coverage_level="partial",    # 0.10
+        )
+        # 0.15+0.10+0.15+0.10 = 0.50 penalty
+        assert result["total_penalty"] == pytest.approx(0.50, abs=0.01)
+        assert result["adjusted_score"] == pytest.approx(0.40, abs=0.01)
+
+    def test_uncertainty_reasons_list_all_degradations(self):
+        """Each degradation produces a separate uncertainty reason."""
+        result = build_confidence_assessment(
+            raw_confidence=0.90,
+            quality_status="degraded",
+            freshness_status="stale",
+            conflict_severity="moderate",
+        )
+        reasons = result["uncertainty_reasons"]
+        assert any("quality" in r for r in reasons)
+        assert any("freshness" in r for r in reasons)
+        assert any("conflict" in r for r in reasons)
+
+
+# =====================================================================
+#  Structured uncertainty reasons (v1.1)
+# =====================================================================
+
+class TestUncertaintyReasons:
+    """Verify uncertainty reasons are structured and preservable."""
+
+    def test_healthy_assessment_has_reasons(self):
+        """Even healthy assessments explain why uncertainty is low."""
+        result = build_confidence_assessment(raw_confidence=0.90)
+        assert len(result["uncertainty_reasons"]) > 0
+        assert any("healthy" in r or "low uncertainty" in r
+                    for r in result["uncertainty_reasons"])
+
+    def test_degraded_assessment_reasons_are_specific(self):
+        """Degraded assessments cite specific categories."""
+        result = build_confidence_assessment(
+            raw_confidence=0.80,
+            quality_status="poor",
+            freshness_status="very_stale",
+        )
+        reasons = result["uncertainty_reasons"]
+        assert any("quality" in r and "poor" in r for r in reasons)
+        assert any("freshness" in r and "very_stale" in r for r in reasons)
+
+    def test_confidence_reasons_complement_uncertainty(self):
+        """Confidence reasons and uncertainty reasons are both populated."""
+        result = build_confidence_assessment(
+            raw_confidence=0.70,
+            quality_status="degraded",
+        )
+        assert len(result["confidence_reasons"]) > 0
+        assert len(result["uncertainty_reasons"]) > 0
+
+    def test_uncertainty_summary_preserves_reasons(self):
+        """build_uncertainty_summary carries through uncertainty_reasons."""
+        assessment = build_confidence_assessment(
+            raw_confidence=0.80,
+            quality_status="degraded",
+        )
+        summary = build_uncertainty_summary(assessment)
+        assert summary["uncertainty_reasons"] == assessment["uncertainty_reasons"]
+        assert summary["uncertainty_level"] == assessment["uncertainty_level"]
+
+    def test_market_composite_assessment_has_uncertainty_reasons(self):
+        """Composite's assessment preserves structured reasons."""
+        from app.services.market_composite import build_market_composite
+        assembled = {
+            "market_context": {
+                "eng": {
+                    "normalized": {"label": "bullish", "confidence": 80.0},
+                    "source": "test",
+                },
+            },
+            "quality_summary": {"overall_quality": "degraded", "degraded_count": 0},
+            "freshness_summary": {"overall_freshness": "live"},
+            "horizon_summary": {},
+        }
+        result = build_market_composite(assembled)
+        ca = result["confidence_assessment"]
+        assert isinstance(ca["uncertainty_reasons"], list)
+        assert any("quality" in r for r in ca["uncertainty_reasons"])
+
+
+# =====================================================================
+#  Backward compatibility (v1.1)
+# =====================================================================
+
+class TestBackwardCompatibility:
+    """Ensure legacy fields and consumers still work after v1.1 expansion."""
+
+    def test_framework_version_is_1_1(self):
+        assert _FRAMEWORK_VERSION == "1.1"
+
+    def test_legacy_confidence_float_in_composite(self):
+        """market_composite still exposes the legacy confidence float."""
+        from app.services.market_composite import build_market_composite
+        result = build_market_composite({})
+        assert "confidence" in result
+        assert isinstance(result["confidence"], float)
+
+    def test_legacy_and_assessment_coexist(self):
+        """Both confidence (float) and confidence_assessment (dict) exist."""
+        from app.services.market_composite import build_market_composite
+        result = build_market_composite({})
+        assert "confidence" in result
+        assert "confidence_assessment" in result
+        assert isinstance(result["confidence"], float)
+        assert isinstance(result["confidence_assessment"], dict)
+
+    def test_payload_assessment_in_both_paths(self):
+        """Quality block has confidence_assessment in both packet and fallback paths."""
+        from app.services.decision_prompt_payload import build_prompt_payload
+        from app.services.trade_decision_orchestrator import build_decision_packet
+
+        # Packet path
+        pkt = build_decision_packet(candidate={"symbol": "SPY"})
+        payload = build_prompt_payload(decision_packet=pkt)
+        assert "confidence_assessment" in payload["quality_block"]
+
+        # Fallback path
+        payload2 = build_prompt_payload(candidate={"symbol": "QQQ"})
+        assert "confidence_assessment" in payload2["quality_block"]
+
+    def test_orchestrator_quality_overview_unchanged(self):
+        """Orchestrator still has confidence_assessment + uncertainty_summary."""
+        from app.services.trade_decision_orchestrator import build_decision_packet
+        pkt = build_decision_packet()
+        qo = pkt["quality_overview"]
+        assert "confidence_assessment" in qo
+        assert "uncertainty_summary" in qo
+        assert qo["uncertainty_summary"]["adjusted_score"] == \
+               qo["confidence_assessment"]["adjusted_score"]

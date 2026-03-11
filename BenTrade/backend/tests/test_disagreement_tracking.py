@@ -1,10 +1,11 @@
-"""Tests for Model-vs-Engine Disagreement Tracking v1.
+"""Tests for Model-vs-Engine Disagreement Tracking v1.1.
 
 Coverage targets:
 ─── Contract-level tests
     - top-level report shape / required keys
     - empty / sparse / populated status
     - version string
+    - override_patterns section present
 ─── Single-record disagreement detection (build_disagreement_record)
     - model_vs_policy: model approve + policy block → detected
     - model_vs_policy: model reject + policy allow → detected
@@ -17,18 +18,31 @@ Coverage targets:
     - caution_level: high conviction + high conflict → detected
     - risk_acceptance: approve + elevated event risk → detected
     - confidence_uncertainty: high conviction + low confidence → detected
+    - model_vs_portfolio_fit: approve + poor portfolio fit → detected (v1.1)
     - fully aligned: no disagreement records
+─── Outcome classification (v1.1)
+    - pnl > 0 → win
+    - pnl == 0 → breakeven
+    - pnl < 0 → loss
+    - no pnl → None
 ─── Feedback-record batch (build_tracking_report)
     - disagreement_summary by category
     - disagreement_rates computation
     - disagreement_by_regime grouping
     - disagreement_by_strategy grouping
     - disagreement_by_policy_state grouping
-    - outcome stats (win/loss/unknown)
+    - outcome stats (win/loss/breakeven/unknown)
+    - breakeven_count and decided_count in outcome stats
+    - confidence_state in outcome stats
+─── Override patterns (v1.1)
+    - repeated overrides produce pattern entry
+    - single override does not produce pattern
+    - outcome stats attached to patterns
 ─── Weighting diagnostics
     - low-sample → preliminary warning only
     - model_vs_policy override pattern with outcomes
     - no disagreement → general diagnostic
+    - language is observational not prescriptive
 ─── Sparse-data tests
     - empty records list
     - None input
@@ -43,21 +57,31 @@ Coverage targets:
 ─── Validation tests
     - valid report passes
     - missing key detected
-    - wrong version detected
+    - wrong version detected (incompatible)
+    - compatible versions accepted
     - invalid status detected
+─── Report summary (v1.1)
+    - compact digest output
+    - module_role field
 ─── Aligned-case tests
     - fully aligned record → no disagreements
     - aligned batch → low disagreement rate
+─── Integration tests
+    - realistic multi-record scenario
 """
 
 import pytest
 
 from app.services.disagreement_tracking import (
     VALID_CATEGORIES,
+    VALID_OUTCOME_CLASSIFICATIONS,
     VALID_SEVERITIES,
+    _COMPATIBLE_VERSIONS,
     _REQUIRED_REPORT_KEYS,
+    _TRACKING_VERSION,
     build_disagreement_record,
     build_tracking_report,
+    report_summary,
     validate_tracking_report,
 )
 
@@ -147,6 +171,7 @@ def _feedback_record(
     confidence=0.75,
     realized_pnl=None,
     status="closed",
+    portfolio_fit="good",
 ):
     """Build a minimal feedback record for batch testing."""
     rec = {
@@ -159,6 +184,7 @@ def _feedback_record(
             "decision": decision,
             "conviction": conviction,
             "market_alignment": market_alignment,
+            "portfolio_fit": portfolio_fit,
             "policy_alignment": "clear",
             "event_risk": event_risk,
             "size_guidance": "normal",
@@ -203,7 +229,8 @@ class TestReportContract:
 
     def test_version_string(self):
         report = build_tracking_report([])
-        assert report["tracking_version"] == "1.0"
+        assert report["tracking_version"] == _TRACKING_VERSION
+        assert report["tracking_version"] == "1.1"
 
     def test_generated_at_present(self):
         report = build_tracking_report([])
@@ -227,7 +254,8 @@ class TestReportContract:
         report = build_tracking_report([])
         for k in ("disagreement_records", "disagreement_by_regime",
                    "disagreement_by_strategy", "disagreement_by_policy_state",
-                   "weighting_diagnostics", "warning_flags"):
+                   "override_patterns", "weighting_diagnostics",
+                   "warning_flags"):
             assert isinstance(report[k], list), f"{k} must be list"
 
     def test_dicts_are_dicts(self):
@@ -386,6 +414,44 @@ class TestBuildDisagreementRecord:
         cats = [d["category"] for d in dis]
         assert "confidence_uncertainty" not in cats
 
+    def test_portfolio_fit_approve_poor(self):
+        """Approve + poor portfolio_fit → model_vs_portfolio_fit (v1.1)."""
+        dis = build_disagreement_record(
+            response=_response(decision="approve", portfolio_fit="poor"),
+            policy=_policy(),
+        )
+        cats = [d["category"] for d in dis]
+        assert "model_vs_portfolio_fit" in cats
+
+    def test_portfolio_fit_approve_good_no_disagreement(self):
+        """Approve + good portfolio_fit → no model_vs_portfolio_fit."""
+        dis = build_disagreement_record(
+            response=_response(decision="approve", portfolio_fit="good"),
+            policy=_policy(),
+        )
+        cats = [d["category"] for d in dis]
+        assert "model_vs_portfolio_fit" not in cats
+
+    def test_portfolio_fit_reject_poor_no_disagreement(self):
+        """Reject + poor portfolio_fit → no model_vs_portfolio_fit (model is cautious)."""
+        dis = build_disagreement_record(
+            response=_response(decision="reject", portfolio_fit="poor"),
+            policy=_policy(),
+        )
+        cats = [d["category"] for d in dis]
+        assert "model_vs_portfolio_fit" not in cats
+
+    def test_portfolio_fit_missing_no_crash(self):
+        """Missing portfolio_fit → no model_vs_portfolio_fit, no crash."""
+        resp = _response(decision="approve")
+        del resp["portfolio_fit"]
+        dis = build_disagreement_record(
+            response=resp,
+            policy=_policy(),
+        )
+        cats = [d["category"] for d in dis]
+        assert "model_vs_portfolio_fit" not in cats
+
     def test_fully_aligned_no_disagreements(self):
         """Fully aligned case → empty list."""
         dis = build_disagreement_record(
@@ -446,6 +512,24 @@ class TestBuildDisagreementRecord:
         )
         dis = build_disagreement_record(feedback_record=fb)
         assert any(d["outcome"] == "loss" for d in dis)
+
+    def test_feedback_record_outcome_breakeven(self):
+        """pnl == 0 → outcome 'breakeven' (v1.1)."""
+        fb = _feedback_record(
+            decision="approve", policy_decision="block",
+            realized_pnl=0.0,
+        )
+        dis = build_disagreement_record(feedback_record=fb)
+        assert any(d["outcome"] == "breakeven" for d in dis)
+
+    def test_feedback_record_outcome_win(self):
+        """pnl > 0 → outcome 'win'."""
+        fb = _feedback_record(
+            decision="approve", policy_decision="block",
+            realized_pnl=50.0,
+        )
+        dis = build_disagreement_record(feedback_record=fb)
+        assert any(d["outcome"] == "win" for d in dis)
 
 
 # =====================================================================
@@ -517,6 +601,35 @@ class TestBatchTracking:
         os = mvp.get("outcome_stats", {})
         assert os.get("win_count", 0) >= 1
         assert os.get("loss_count", 0) >= 1
+
+    def test_outcome_stats_breakeven_count(self):
+        """Breakeven pnl tracked separately in v1.1."""
+        records = [
+            _feedback_record(decision="approve", policy_decision="block",
+                             realized_pnl=0.0),
+            _feedback_record(decision="approve", policy_decision="block",
+                             realized_pnl=50.0),
+        ]
+        report = build_tracking_report(records)
+        mvp = report["disagreement_summary"].get("model_vs_policy", {})
+        os = mvp.get("outcome_stats", {})
+        assert os.get("breakeven_count", -1) >= 1
+        assert "decided_count" in os
+        assert "confidence_state" in os
+
+    def test_sample_size_with_decided(self):
+        """Sample size includes with_decided field (v1.1)."""
+        records = [
+            _feedback_record(realized_pnl=50.0),
+            _feedback_record(realized_pnl=0.0),
+            _feedback_record(realized_pnl=-30.0),
+        ]
+        report = build_tracking_report(records)
+        ss = report["sample_size"]
+        assert "with_decided" in ss
+        # with_decided counts pnl != 0 (50.0 and -30.0), not breakeven (0.0)
+        assert ss["with_decided"] == 2
+        assert ss["with_outcome"] == 3
 
 
 # =====================================================================
@@ -694,6 +807,206 @@ class TestValidation:
             ok, errors = validate_tracking_report(report)
             assert ok, f"Failed with {len(records)} records: {errors}"
 
+    def test_compatible_version_1_0_accepted(self):
+        """A report with version '1.0' still passes validation."""
+        report = build_tracking_report([])
+        report["tracking_version"] = "1.0"
+        ok, errors = validate_tracking_report(report)
+        assert ok, f"Errors: {errors}"
+
+    def test_compatible_version_1_1_accepted(self):
+        """A report with version '1.1' passes validation."""
+        report = build_tracking_report([])
+        report["tracking_version"] = "1.1"
+        ok, errors = validate_tracking_report(report)
+        assert ok, f"Errors: {errors}"
+
+    def test_incompatible_version_rejected(self):
+        """A version not in _COMPATIBLE_VERSIONS is rejected."""
+        report = build_tracking_report([])
+        report["tracking_version"] = "99.9"
+        ok, errors = validate_tracking_report(report)
+        assert not ok
+        assert any("99.9" in e for e in errors)
+
+    def test_compatible_versions_constant(self):
+        """_COMPATIBLE_VERSIONS includes both 1.0 and 1.1."""
+        assert "1.0" in _COMPATIBLE_VERSIONS
+        assert "1.1" in _COMPATIBLE_VERSIONS
+
+
+# =====================================================================
+#  Override patterns (v1.1)
+# =====================================================================
+
+class TestOverridePatterns:
+
+    def test_repeated_overrides_produce_pattern(self):
+        """>=2 model_vs_policy overrides in same regime×strategy → pattern entry."""
+        records = [
+            _feedback_record(decision="approve", policy_decision="block",
+                             regime_label="bearish", strategy="iron_condor",
+                             realized_pnl=-50.0),
+            _feedback_record(decision="approve", policy_decision="block",
+                             regime_label="bearish", strategy="iron_condor",
+                             realized_pnl=30.0),
+        ]
+        report = build_tracking_report(records)
+        patterns = report["override_patterns"]
+        assert len(patterns) >= 1
+        p = patterns[0]
+        assert p["regime_label"] == "bearish"
+        assert p["strategy"] == "iron_condor"
+        assert p["override_count"] >= 2
+        assert "outcome_stats" in p
+        assert "confidence_state" in p
+
+    def test_single_override_no_pattern(self):
+        """Single override does not produce a pattern."""
+        records = [
+            _feedback_record(decision="approve", policy_decision="block",
+                             regime_label="bearish", strategy="iron_condor"),
+            _feedback_record(decision="approve", policy_decision="allow",
+                             regime_label="bearish", strategy="iron_condor"),
+        ]
+        report = build_tracking_report(records)
+        patterns = report["override_patterns"]
+        # At most 1 override in this regime×strategy, so no pattern
+        assert len(patterns) == 0
+
+    def test_pattern_outcome_stats_present(self):
+        """Pattern includes outcome stats with breakeven/decided fields."""
+        records = [
+            _feedback_record(decision="approve", policy_decision="block",
+                             regime_label="neutral", strategy="butterfly",
+                             realized_pnl=0.0),
+            _feedback_record(decision="approve", policy_decision="block",
+                             regime_label="neutral", strategy="butterfly",
+                             realized_pnl=50.0),
+            _feedback_record(decision="approve", policy_decision="restrict",
+                             regime_label="neutral", strategy="butterfly",
+                             realized_pnl=-20.0),
+        ]
+        report = build_tracking_report(records)
+        patterns = report["override_patterns"]
+        assert len(patterns) >= 1
+        os = patterns[0]["outcome_stats"]
+        assert "breakeven_count" in os
+        assert "decided_count" in os
+        assert "confidence_state" in os
+
+    def test_pattern_has_low_sample_warning(self):
+        """Pattern with few overrides should flag low_sample_warning."""
+        records = [
+            _feedback_record(decision="approve", policy_decision="block",
+                             regime_label="bearish", strategy="iron_condor"),
+            _feedback_record(decision="approve", policy_decision="block",
+                             regime_label="bearish", strategy="iron_condor"),
+        ]
+        report = build_tracking_report(records)
+        patterns = report["override_patterns"]
+        assert len(patterns) >= 1
+        assert patterns[0]["low_sample_warning"] is True
+
+    def test_empty_records_no_patterns(self):
+        """Empty records → no override patterns."""
+        report = build_tracking_report([])
+        assert report["override_patterns"] == []
+
+
+# =====================================================================
+#  Report summary (v1.1)
+# =====================================================================
+
+class TestReportSummary:
+
+    def test_summary_keys(self):
+        """report_summary produces expected keys."""
+        report = build_tracking_report([_feedback_record()])
+        s = report_summary(report)
+        expected = {
+            "tracking_version", "status", "total_records",
+            "records_with_disagreement", "disagreement_rate",
+            "categories_detected", "override_pattern_count",
+            "warning_count", "module_role",
+        }
+        assert expected.issubset(s.keys())
+
+    def test_module_role_is_diagnostic(self):
+        """module_role must always be 'diagnostic'."""
+        report = build_tracking_report([])
+        s = report_summary(report)
+        assert s["module_role"] == "diagnostic"
+
+    def test_summary_reflects_data(self):
+        """Summary values reflect actual report data."""
+        records = [
+            _feedback_record(decision="approve", policy_decision="block",
+                             realized_pnl=-50.0),
+            _feedback_record(realized_pnl=30.0),
+        ]
+        report = build_tracking_report(records)
+        s = report_summary(report)
+        assert s["total_records"] == 2
+        assert s["records_with_disagreement"] >= 1
+        assert s["tracking_version"] == "1.1"
+        assert isinstance(s["categories_detected"], list)
+
+    def test_summary_empty_report(self):
+        """Summary on empty report → default values."""
+        report = build_tracking_report([])
+        s = report_summary(report)
+        assert s["total_records"] == 0
+        assert s["override_pattern_count"] == 0
+        assert s["status"] == "insufficient"
+
+
+# =====================================================================
+#  Outcome classification constants (v1.1)
+# =====================================================================
+
+class TestOutcomeConstants:
+
+    def test_valid_outcome_classifications(self):
+        """VALID_OUTCOME_CLASSIFICATIONS contains expected values."""
+        assert "win" in VALID_OUTCOME_CLASSIFICATIONS
+        assert "loss" in VALID_OUTCOME_CLASSIFICATIONS
+        assert "breakeven" in VALID_OUTCOME_CLASSIFICATIONS
+        assert "unknown" in VALID_OUTCOME_CLASSIFICATIONS
+
+    def test_valid_categories_includes_portfolio_fit(self):
+        """VALID_CATEGORIES includes model_vs_portfolio_fit (v1.1)."""
+        assert "model_vs_portfolio_fit" in VALID_CATEGORIES
+
+
+# =====================================================================
+#  Observational language (v1.1 — diagnostic-only guardrail)
+# =====================================================================
+
+class TestObservationalLanguage:
+
+    def test_weighting_diagnostics_no_prescriptive_language(self):
+        """Weighting diagnostics should use observational language only."""
+        records = [
+            _feedback_record(decision="approve", policy_decision="block",
+                             realized_pnl=-50.0)
+            for _ in range(6)
+        ]
+        report = build_tracking_report(records)
+        diags = report["weighting_diagnostics"]
+        prescriptive_phrases = [
+            "consider higher", "consider lower", "consider loosening",
+            "strongly recommend", "you should", "must adjust",
+        ]
+        for d in diags:
+            obs = d.get("observation", "").lower()
+            rec = d.get("recommendation", "").lower()
+            full = obs + " " + rec
+            for phrase in prescriptive_phrases:
+                assert phrase not in full, (
+                    f"Prescriptive language found: '{phrase}' in diagnostic"
+                )
+
 
 # =====================================================================
 #  Aligned-case tests
@@ -779,7 +1092,9 @@ class TestIntegration:
         assert report["status"] == "sufficient"
         assert report["sample_size"]["total_records"] == 6
         assert report["sample_size"]["records_with_disagreement"] >= 2
+        assert "with_decided" in report["sample_size"]
         assert len(report["disagreement_records"]) >= 2
+        assert isinstance(report["override_patterns"], list)
 
     def test_sparse_diverse_report(self):
         """Few records with disagreement."""

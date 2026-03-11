@@ -48,7 +48,8 @@ from app.services.market_composite import (
 TOP_LEVEL_KEYS = {
     "composite_version", "computed_at", "status",
     "market_state", "support_state", "stability_state",
-    "confidence", "evidence", "adjustments", "summary", "metadata",
+    "confidence", "confidence_assessment",
+    "evidence", "adjustments", "summary", "metadata",
 }
 
 EVIDENCE_KEYS = {"market_state", "support_state", "stability_state"}

@@ -1,4 +1,4 @@
-"""Final Decision Prompt Payload Builder v1.
+"""Final Decision Prompt Payload Builder v1.1.
 
 Transforms a structured decision packet (from the Trade Decision
 Orchestrator) into a compact, stable, model-ready payload suitable for
@@ -25,7 +25,17 @@ build_prompt_payload(
     model_context = None,
 ) -> dict
 
-Output version: 1.0
+Output version: 1.1
+
+Changelog
+---------
+v1.1  - Centralised compression limit constants (_MAX_TOP_CHECKS, _MAX_NEAREST_EVENTS).
+      - Policy and event blocks now surface trimming metadata (total/trimmed flag).
+      - Quality-block fallback path detects degraded sections via section status fields.
+      - Metadata expanded: packet_provided, model_context_input_form,
+        model_context_count, compression_limits, token_budget (deferred).
+      - Source packet version read from top-level key first (canonical).
+      - Token-budget enforcement explicitly deferred (_TOKEN_BUDGET_STATUS).
 """
 
 from __future__ import annotations
@@ -36,7 +46,23 @@ from typing import Any
 # ---------------------------------------------------------------------------
 # Version
 # ---------------------------------------------------------------------------
-_PAYLOAD_VERSION = "1.0"
+_PAYLOAD_VERSION = "1.1"
+
+# ---------------------------------------------------------------------------
+# Compression limits — centralised so trimming rules are explicit
+# ---------------------------------------------------------------------------
+_MAX_TOP_CHECKS = 5        # max triggered policy checks surfaced
+_MAX_NEAREST_EVENTS = 5    # max nearest events surfaced (within_24h + within_3d)
+
+_COMPRESSION_LIMITS: dict[str, int] = {
+    "max_top_checks": _MAX_TOP_CHECKS,
+    "max_nearest_events": _MAX_NEAREST_EVENTS,
+}
+
+# ---------------------------------------------------------------------------
+# Token-budget enforcement — explicitly deferred
+# ---------------------------------------------------------------------------
+_TOKEN_BUDGET_STATUS = "deferred"  # not enforced in v1.1
 
 # ---------------------------------------------------------------------------
 # Instruction block — stable, reusable scaffold
@@ -98,6 +124,7 @@ def build_prompt_payload(
     now = datetime.now(timezone.utc).isoformat()
 
     packet = decision_packet if isinstance(decision_packet, dict) else {}
+    packet_provided = isinstance(decision_packet, dict) and bool(decision_packet)
     fallbacks: dict[str, Any] = {
         "candidate": candidate,
         "market": market,
@@ -110,6 +137,18 @@ def build_prompt_payload(
 
     # --- Resolve effective sections (packet-first, fallback second) --------
     resolved, fallbacks_used = _resolve_sections(packet, fallbacks)
+
+    # --- Track model_context input form ------------------------------------
+    raw_mc = resolved.get("model_context")
+    if raw_mc is None:
+        mc_input_form = None
+        mc_count = 0
+    elif isinstance(raw_mc, list):
+        mc_input_form = "list"
+        mc_count = len(raw_mc)
+    else:
+        mc_input_form = "dict"
+        mc_count = 1
 
     # --- Derive status -----------------------------------------------------
     packet_status = packet.get("status") if packet else None
@@ -133,7 +172,12 @@ def build_prompt_payload(
     warning_flags = _collect_warning_flags(packet, resolved, fallbacks_used)
 
     # --- Metadata ----------------------------------------------------------
-    metadata = _build_metadata(packet, resolved, fallbacks_used, now)
+    metadata = _build_metadata(
+        packet, resolved, fallbacks_used, now,
+        packet_provided=packet_provided,
+        mc_input_form=mc_input_form,
+        mc_count=mc_count,
+    )
 
     return {
         "payload_version": _PAYLOAD_VERSION,
@@ -280,8 +324,9 @@ def _compress_portfolio(section: dict[str, Any] | None) -> dict[str, Any] | None
 def _compress_policy(section: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(section, dict) or not section:
         return None
-    # Include top triggered checks (up to 5) for visibility
+    # Include top triggered checks (up to _MAX_TOP_CHECKS) for visibility
     triggered = section.get("triggered_checks") or []
+    total_triggered = len(triggered)
     top_checks = [
         {
             "check_code": c.get("check_code"),
@@ -289,7 +334,7 @@ def _compress_policy(section: dict[str, Any] | None) -> dict[str, Any] | None:
             "title": c.get("title"),
             "recommended_effect": c.get("recommended_effect"),
         }
-        for c in triggered[:5]
+        for c in triggered[:_MAX_TOP_CHECKS]
         if isinstance(c, dict)
     ]
     return {
@@ -301,26 +346,28 @@ def _compress_policy(section: dict[str, Any] | None) -> dict[str, Any] | None:
         "caution_count": len(section.get("caution_checks") or []),
         "restrictive_count": len(section.get("restrictive_checks") or []),
         "top_checks": top_checks,
+        "checks_total": total_triggered,
+        "checks_trimmed": total_triggered > _MAX_TOP_CHECKS,
     }
 
 
 def _compress_events(section: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(section, dict) or not section:
         return None
-    # Surface nearest events (within_24h + within_3d, up to 5 total)
+    # Surface nearest events (within_24h + within_3d, up to _MAX_NEAREST_EVENTS)
     windows = section.get("event_windows") or {}
-    near = []
+    all_near: list[dict[str, Any]] = []
     for bucket in ("within_24h", "within_3d"):
         for evt in (windows.get(bucket) or []):
-            if len(near) >= 5:
-                break
             if isinstance(evt, dict):
-                near.append({
+                all_near.append({
                     "event_name": evt.get("event_name"),
                     "event_type": evt.get("event_type"),
                     "importance": evt.get("importance"),
                     "risk_window": evt.get("risk_window"),
                 })
+    total_near = len(all_near)
+    near = all_near[:_MAX_NEAREST_EVENTS]
     overlap = section.get("candidate_event_overlap") or {}
     return {
         "event_risk_state": section.get("event_risk_state"),
@@ -331,6 +378,8 @@ def _compress_events(section: dict[str, Any] | None) -> dict[str, Any] | None:
         "candidate_overlap_count": (
             overlap.get("overlap_count") if isinstance(overlap, dict) else 0
         ),
+        "events_total": total_near,
+        "events_trimmed": total_near > _MAX_NEAREST_EVENTS,
     }
 
 
@@ -397,18 +446,49 @@ def _build_quality_block(
     # Fallback: derive from resolved sections
     present = [k for k in _SECTION_KEYS if _is_present(resolved.get(k))]
     missing = [k for k in _SECTION_KEYS if not _is_present(resolved.get(k))]
+    # Detect degraded sections by checking each section's status field
+    degraded = []
+    for k in present:
+        sec = resolved.get(k)
+        if isinstance(sec, dict):
+            sec_status = sec.get("status")
+            if isinstance(sec_status, str) and sec_status in ("degraded", "error", "partial"):
+                degraded.append(k)
     ready = status == "complete"
     note = (
         "All required blocks present." if ready
         else "Payload is incomplete — some sections missing."
     )
+    cov_ratio = round(len(present) / len(_SECTION_KEYS), 2) if _SECTION_KEYS else 0.0
+
+    # Build a confidence_assessment for the fallback path so every
+    # payload has a structured confidence block regardless of origin.
+    from app.services.confidence_framework import quick_assess
+    _quality_st = (
+        "degraded" if degraded
+        else ("good" if cov_ratio >= 0.85 else "acceptable")
+    )
+    _coverage_lvl = (
+        "full" if cov_ratio >= 1.0
+        else "high" if cov_ratio >= 0.75
+        else "partial" if cov_ratio >= 0.50
+        else "minimal" if cov_ratio > 0
+        else "none"
+    )
+    fb_assessment = quick_assess(
+        cov_ratio,
+        quality=_quality_st,
+        coverage=_coverage_lvl,
+        source="decision_prompt_payload_fallback",
+    )
     return {
         "decision_ready": ready,
         "readiness_note": note,
-        "coverage_ratio": round(len(present) / len(_SECTION_KEYS), 2) if _SECTION_KEYS else 0.0,
+        "coverage_ratio": cov_ratio,
         "subsystems_present": sorted(present),
         "subsystems_missing": sorted(missing),
-        "subsystems_degraded": [],
+        "subsystems_degraded": sorted(degraded),
+        "confidence_assessment": fb_assessment,
     }
 
 
@@ -507,15 +587,23 @@ def _build_metadata(
     resolved: dict[str, Any],
     fallbacks_used: list[str],
     generated_at: str,
+    *,
+    packet_provided: bool = False,
+    mc_input_form: str | None = None,
+    mc_count: int = 0,
 ) -> dict[str, Any]:
-    pkt_meta = packet.get("metadata") if isinstance(packet, dict) else None
-    pkt_version = (
-        pkt_meta.get("decision_packet_version")
-        if isinstance(pkt_meta, dict) else None
-    )
+    # Read source packet version — top-level key is canonical, metadata is fallback
+    pkt_version = None
+    if isinstance(packet, dict):
+        pkt_version = packet.get("decision_packet_version")
+        if pkt_version is None:
+            pkt_meta = packet.get("metadata")
+            if isinstance(pkt_meta, dict):
+                pkt_version = pkt_meta.get("decision_packet_version")
     return {
         "payload_version": _PAYLOAD_VERSION,
         "generated_at": generated_at,
+        "packet_provided": packet_provided,
         "source_packet_version": pkt_version,
         "source_packet_status": packet.get("status") if isinstance(packet, dict) else None,
         "fallbacks_used": list(fallbacks_used),
@@ -525,4 +613,8 @@ def _build_metadata(
         "sections_missing": sorted(
             k for k in _SECTION_KEYS if not _is_present(resolved.get(k))
         ),
+        "model_context_input_form": mc_input_form,
+        "model_context_count": mc_count,
+        "compression_limits": dict(_COMPRESSION_LIMITS),
+        "token_budget": None,  # explicitly deferred — see _TOKEN_BUDGET_STATUS
     }

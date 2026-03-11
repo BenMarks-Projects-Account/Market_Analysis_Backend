@@ -438,6 +438,49 @@ window.BenTradeApi = (function(){
     return jsonFetch('/api/trading/orders/' + encodeURIComponent(orderId) + '/tradier-status');
   }
 
+  /* ── Pipeline Monitor ──────────────────────────────────── */
+  function getPipelineRuns(){
+    return jsonFetch('/api/pipeline/runs');
+  }
+  function getPipelineRunDetail(runId){
+    return jsonFetch('/api/pipeline/runs/' + encodeURIComponent(runId));
+  }
+  function getPipelineArtifact(runId, artifactId){
+    return jsonFetch('/api/pipeline/runs/' + encodeURIComponent(runId) + '/artifacts/' + encodeURIComponent(artifactId));
+  }
+  function getPipelineEvents(runId, opts){
+    var params = [];
+    if (opts && opts.level) params.push('level=' + encodeURIComponent(opts.level));
+    if (opts && opts.stage_key) params.push('stage_key=' + encodeURIComponent(opts.stage_key));
+    var qs = params.length ? '?' + params.join('&') : '';
+    return jsonFetch('/api/pipeline/runs/' + encodeURIComponent(runId) + '/events' + qs);
+  }
+  function createPipelineDemoRun(){
+    return jsonFetch('/api/pipeline/demo-run', { method: 'POST' });
+  }
+  function getPipelineStatus(){
+    return jsonFetch('/api/pipeline/status');
+  }
+  function getPipelineDependencyMap(){
+    return jsonFetch('/api/pipeline/dependency-map');
+  }
+  function startPipelineRun(opts){
+    return jsonFetch('/api/pipeline/runs/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(opts || {}),
+    });
+  }
+  function pausePipelineRun(runId){
+    return jsonFetch('/api/pipeline/runs/' + encodeURIComponent(runId) + '/pause', { method: 'POST' });
+  }
+  function resumePipelineRun(runId){
+    return jsonFetch('/api/pipeline/runs/' + encodeURIComponent(runId) + '/resume', { method: 'POST' });
+  }
+  function cancelPipelineRun(runId){
+    return jsonFetch('/api/pipeline/runs/' + encodeURIComponent(runId) + '/cancel', { method: 'POST' });
+  }
+
   return {
     listReports,
     getReport,
@@ -492,6 +535,17 @@ window.BenTradeApi = (function(){
     getMonitorResults,
     getMonitorNarrative,
     analyzeActiveTrade,
+    getPipelineRuns,
+    getPipelineRunDetail,
+    getPipelineArtifact,
+    getPipelineEvents,
+    createPipelineDemoRun,
+    getPipelineStatus,
+    getPipelineDependencyMap,
+    startPipelineRun,
+    pausePipelineRun,
+    resumePipelineRun,
+    cancelPipelineRun,
     MODEL_TIMEOUT_MS: MODEL_TIMEOUT_MS,
     modelFetch: modelFetch,
   };

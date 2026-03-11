@@ -1,4 +1,4 @@
-"""Tests for Final Decision Prompt Payload Builder v1.
+"""Tests for Final Decision Prompt Payload Builder v1.1.
 
 Covers:
 - Contract shape
@@ -12,6 +12,11 @@ Covers:
 - Degraded / edge-case inputs
 - Compression effectiveness
 - Integration scenarios
+- Compression limit visibility (checks_trimmed, events_trimmed)
+- Model context input form tracking (dict vs list)
+- Quality-block degraded section detection
+- Token budget deferral
+- Messy-packet resilience
 """
 
 from __future__ import annotations
@@ -347,7 +352,7 @@ class TestContractShape:
 
     def test_version_is_string(self):
         pl = build_prompt_payload(decision_packet=_make_packet())
-        assert pl["payload_version"] == "1.0"
+        assert pl["payload_version"] == "1.1"
 
     def test_generated_at_is_iso(self):
         pl = build_prompt_payload(decision_packet=_make_packet())
@@ -691,7 +696,7 @@ class TestInstructionBlock:
 
     def test_has_version(self):
         pl = build_prompt_payload(decision_packet=_make_packet())
-        assert pl["instruction_block"]["version"] == "1.0"
+        assert pl["instruction_block"]["version"] == "1.1"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -803,16 +808,21 @@ class TestMetadata:
     def test_shape(self):
         pl = build_prompt_payload(decision_packet=_make_packet())
         md = pl["metadata"]
-        assert md["payload_version"] == "1.0"
+        assert md["payload_version"] == "1.1"
         assert isinstance(md["generated_at"], str)
         assert isinstance(md["sections_included"], list)
         assert isinstance(md["sections_missing"], list)
         assert isinstance(md["fallbacks_used"], list)
+        assert isinstance(md["packet_provided"], bool)
+        assert isinstance(md["compression_limits"], dict)
+        assert "token_budget" in md
 
     def test_source_packet_version(self):
         pl = build_prompt_payload(decision_packet=_make_packet())
+        # Reads from top-level decision_packet_version (canonical)
         assert pl["metadata"]["source_packet_version"] == "1.0"
         assert pl["metadata"]["source_packet_status"] == "complete"
+        assert pl["metadata"]["packet_provided"] is True
 
     def test_fallbacks_tracked(self):
         pkt = _make_packet(portfolio=None)
@@ -963,3 +973,333 @@ class TestIntegrationScenarios:
         assert pl["policy_block"]["policy_decision"] == "block"
         assert "market_composite_degraded" in pl["warning_flags"]
         assert "policy_blocks_trade" in pl["warning_flags"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 18. Compression limit visibility tests
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestCompressionLimitVisibility:
+    """Verify trimming is deterministic and inspectable."""
+
+    def test_policy_checks_not_trimmed(self):
+        """Fewer checks than limit → trimmed=False."""
+        pkt = _make_packet(policy=_make_policy(triggered_checks=[
+            {"check_code": "CHK_1", "severity": "low", "title": "X",
+             "recommended_effect": "caution"},
+        ]))
+        pl = build_prompt_payload(decision_packet=pkt)
+        pb = pl["policy_block"]
+        assert pb["checks_total"] == 1
+        assert pb["checks_trimmed"] is False
+
+    def test_policy_checks_trimmed(self):
+        """More checks than limit → trimmed=True, only top N surfaced."""
+        checks = [
+            {"check_code": f"CHK_{i}", "severity": "low", "title": f"Check {i}",
+             "recommended_effect": "caution"}
+            for i in range(8)
+        ]
+        pkt = _make_packet(policy=_make_policy(triggered_checks=checks))
+        pl = build_prompt_payload(decision_packet=pkt)
+        pb = pl["policy_block"]
+        assert pb["checks_total"] == 8
+        assert pb["checks_trimmed"] is True
+        assert len(pb["top_checks"]) == 5
+
+    def test_events_not_trimmed(self):
+        """Fewer events than limit → trimmed=False."""
+        events_data = _make_events(event_windows={
+            "within_24h": [
+                {"event_name": "FOMC", "event_type": "macro",
+                 "importance": "high", "risk_window": "within_24h"},
+            ],
+            "within_3d": [], "within_7d": [], "beyond_7d": [],
+        })
+        pkt = _make_packet(events=events_data)
+        pl = build_prompt_payload(decision_packet=pkt)
+        eb = pl["event_block"]
+        assert eb["events_total"] == 1
+        assert eb["events_trimmed"] is False
+
+    def test_events_trimmed(self):
+        """More events than limit → trimmed=True."""
+        many = [
+            {"event_name": f"EVT_{i}", "event_type": "macro",
+             "importance": "medium", "risk_window": "within_24h"}
+            for i in range(7)
+        ]
+        events_data = _make_events(event_windows={
+            "within_24h": many,
+            "within_3d": [], "within_7d": [], "beyond_7d": [],
+        })
+        pkt = _make_packet(events=events_data)
+        pl = build_prompt_payload(decision_packet=pkt)
+        eb = pl["event_block"]
+        assert eb["events_total"] == 7
+        assert eb["events_trimmed"] is True
+        assert len(eb["nearest_events"]) == 5
+
+    def test_compression_limits_in_metadata(self):
+        """Metadata includes the compression limits dict."""
+        pl = build_prompt_payload(decision_packet=_make_packet())
+        md = pl["metadata"]
+        assert "compression_limits" in md
+        cl = md["compression_limits"]
+        assert cl["max_top_checks"] == 5
+        assert cl["max_nearest_events"] == 5
+
+    def test_no_event_block_no_trimming_metadata(self):
+        """When events absent, no event block returned (no trimming fields)."""
+        pkt = _make_packet(events=None)
+        pl = build_prompt_payload(decision_packet=pkt)
+        assert pl["event_block"] is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 19. Model context input form tracking
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestModelContextInputForm:
+    """Verify dict vs list model_context is tracked honestly."""
+
+    def test_single_dict_form(self):
+        """Single dict model context → form=dict, count=1."""
+        pkt = _make_packet(model_context=_make_model_analysis())
+        pl = build_prompt_payload(decision_packet=pkt)
+        md = pl["metadata"]
+        assert md["model_context_input_form"] == "dict"
+        assert md["model_context_count"] == 1
+
+    def test_list_form(self):
+        """List of model contexts → form=list, count=N."""
+        models = [
+            _make_model_analysis(analysis_type="technical"),
+            _make_model_analysis(analysis_type="sentiment"),
+        ]
+        pkt = _make_packet(model_context=models)
+        pl = build_prompt_payload(decision_packet=pkt)
+        md = pl["metadata"]
+        assert md["model_context_input_form"] == "list"
+        assert md["model_context_count"] == 2
+
+    def test_absent_form(self):
+        """No model context → form=None, count=0."""
+        pkt = _make_packet(model_context=None)
+        pl = build_prompt_payload(decision_packet=pkt)
+        md = pl["metadata"]
+        assert md["model_context_input_form"] is None
+        assert md["model_context_count"] == 0
+
+    def test_dict_preserves_structure(self):
+        """Dict input → output is still list with 1 item preserving fields."""
+        model = _make_model_analysis(analysis_type="technical", confidence=0.88)
+        pkt = _make_packet(model_context=model)
+        pl = build_prompt_payload(decision_packet=pkt)
+        mc = pl["model_context_block"]
+        assert isinstance(mc, list)
+        assert len(mc) == 1
+        assert mc[0]["analysis_type"] == "technical"
+        assert mc[0]["confidence"] == 0.88
+
+    def test_list_preserves_all_items(self):
+        """Multiple model contexts → all preserved, no silent aggregation."""
+        models = [
+            _make_model_analysis(analysis_type="technical", summary="Tech ok."),
+            _make_model_analysis(analysis_type="sentiment", summary="Sent ok."),
+            _make_model_analysis(analysis_type="fundamental", summary="Fund ok."),
+        ]
+        pkt = _make_packet(model_context=models)
+        pl = build_prompt_payload(decision_packet=pkt)
+        mc = pl["model_context_block"]
+        assert len(mc) == 3
+        types = [m["analysis_type"] for m in mc]
+        assert types == ["technical", "sentiment", "fundamental"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 20. Quality-block degraded section detection
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestQualityDegradedDetection:
+    """Verify fallback quality derivation detects degraded sections."""
+
+    def test_degraded_market_detected(self):
+        """Market with status=degraded → appears in subsystems_degraded."""
+        pl = build_prompt_payload(
+            candidate=_make_candidate(),
+            market=_make_market(status="degraded"),
+            policy=_make_policy(),
+        )
+        qb = pl["quality_block"]
+        assert "market" in qb["subsystems_degraded"]
+
+    def test_no_degraded_when_all_ok(self):
+        """All sections ok → subsystems_degraded is empty."""
+        pl = build_prompt_payload(
+            candidate=_make_candidate(),
+            market=_make_market(),
+            policy=_make_policy(),
+        )
+        qb = pl["quality_block"]
+        assert qb["subsystems_degraded"] == []
+
+    def test_multiple_degraded(self):
+        """Multiple degraded sections all detected."""
+        pl = build_prompt_payload(
+            candidate=_make_candidate(),
+            market=_make_market(status="degraded"),
+            policy=_make_policy(status="error"),
+            portfolio=_make_portfolio(status="partial"),
+        )
+        qb = pl["quality_block"]
+        assert "market" in qb["subsystems_degraded"]
+        assert "policy" in qb["subsystems_degraded"]
+        assert "portfolio" in qb["subsystems_degraded"]
+
+    def test_packet_quality_overview_preferred(self):
+        """When packet provides quality_overview, it is used as-is."""
+        pkt = _make_packet()  # has quality_overview with subsystems_degraded=[]
+        pkt["market"]["status"] = "degraded"  # modify market status
+        pl = build_prompt_payload(decision_packet=pkt)
+        qb = pl["quality_block"]
+        # Packet quality_overview is used, not re-derived
+        assert qb["subsystems_degraded"] == []
+
+    def test_error_status_detected(self):
+        """Section with status=error treated as degraded."""
+        pl = build_prompt_payload(
+            candidate=_make_candidate(),
+            market=_make_market(status="error"),
+            policy=_make_policy(),
+        )
+        qb = pl["quality_block"]
+        assert "market" in qb["subsystems_degraded"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 21. Token budget deferral
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestTokenBudgetDeferred:
+    """Token-budget is explicitly deferred — placeholder in metadata."""
+
+    def test_token_budget_is_none(self):
+        pl = build_prompt_payload(decision_packet=_make_packet())
+        assert pl["metadata"]["token_budget"] is None
+
+    def test_token_budget_present_in_all_builds(self):
+        pl = build_prompt_payload()
+        assert "token_budget" in pl["metadata"]
+        assert pl["metadata"]["token_budget"] is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 22. Messy-packet resilience
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestMessyPacketScenarios:
+    """Payload builders love to panic when the world is not symmetrical."""
+
+    def test_mixed_degraded_and_missing(self):
+        """Some sections degraded, some missing — quality block surfaces both."""
+        pl = build_prompt_payload(
+            candidate=_make_candidate(),
+            market=_make_market(status="degraded"),
+            policy=_make_policy(),
+            # portfolio, events, conflicts, model_context all missing
+        )
+        qb = pl["quality_block"]
+        assert "market" in qb["subsystems_degraded"]
+        assert "portfolio" in qb["subsystems_missing"]
+        assert "events" in qb["subsystems_missing"]
+
+    def test_partial_with_trimmed_checks_and_events(self):
+        """Partial packet with lots of checks and events — trimming + warnings."""
+        checks = [
+            {"check_code": f"CHK_{i}", "severity": "caution", "title": f"Check {i}",
+             "recommended_effect": "caution"}
+            for i in range(9)
+        ]
+        many_events = [
+            {"event_name": f"EVT_{i}", "event_type": "macro",
+             "importance": "high", "risk_window": "within_24h"}
+            for i in range(8)
+        ]
+        pkt = _make_packet(
+            status="partial",
+            portfolio=None,
+            conflicts=None,
+            model_context=None,
+            policy=_make_policy(triggered_checks=checks),
+            events=_make_events(event_windows={
+                "within_24h": many_events,
+                "within_3d": [], "within_7d": [], "beyond_7d": [],
+            }),
+            warning_flags=["portfolio_not_provided"],
+        )
+        pl = build_prompt_payload(decision_packet=pkt)
+        assert pl["status"] == "partial"
+        assert pl["policy_block"]["checks_trimmed"] is True
+        assert pl["policy_block"]["checks_total"] == 9
+        assert pl["event_block"]["events_trimmed"] is True
+        assert pl["event_block"]["events_total"] == 8
+        assert len(pl["warning_flags"]) > 0
+
+    def test_all_sections_degraded_status(self):
+        """Every section present but degraded — all surfaced in quality."""
+        pl = build_prompt_payload(
+            candidate=_make_candidate(),
+            market=_make_market(status="degraded"),
+            policy=_make_policy(status="degraded"),
+            portfolio=_make_portfolio(status="degraded"),
+            events=_make_events(status="degraded"),
+            conflicts=_make_conflicts(status="degraded"),
+        )
+        qb = pl["quality_block"]
+        for sec in ("market", "policy", "portfolio", "events", "conflicts"):
+            assert sec in qb["subsystems_degraded"], f"{sec} not in degraded list"
+
+    def test_model_context_with_empty_items(self):
+        """List with empty dicts → filtered out, result is None."""
+        pkt = _make_packet(model_context=[{}, {}, {}])
+        pl = build_prompt_payload(decision_packet=pkt)
+        # Empty dicts are skipped by _compress_model_context
+        assert pl["model_context_block"] is None
+
+    def test_weird_nested_model_context(self):
+        """Dict model context with extra noise fields doesn't blow up."""
+        model = _make_model_analysis()
+        model["extra_unknown_field"] = {"deep": {"nested": True}}
+        model["another_noise"] = [1, 2, 3]
+        pkt = _make_packet(model_context=model)
+        pl = build_prompt_payload(decision_packet=pkt)
+        mc = pl["model_context_block"]
+        assert mc is not None
+        assert len(mc) == 1
+        assert "extra_unknown_field" not in mc[0]
+        assert "another_noise" not in mc[0]
+
+    def test_packet_version_from_top_level(self):
+        """Source packet version read from top-level key, not just metadata."""
+        pkt = _make_packet()
+        pkt["decision_packet_version"] = "2.0"
+        pkt["metadata"]["decision_packet_version"] = "1.0"  # stale
+        pl = build_prompt_payload(decision_packet=pkt)
+        # Top-level takes precedence
+        assert pl["metadata"]["source_packet_version"] == "2.0"
+
+    def test_packet_version_fallback_to_metadata(self):
+        """When top-level version missing, falls back to metadata."""
+        pkt = _make_packet()
+        del pkt["decision_packet_version"]  # remove top-level
+        pl = build_prompt_payload(decision_packet=pkt)
+        assert pl["metadata"]["source_packet_version"] == "1.0"
+
+    def test_no_packet_metadata(self):
+        """No packet → packet_provided=False, no version."""
+        pl = build_prompt_payload(candidate=_make_candidate())
+        md = pl["metadata"]
+        assert md["packet_provided"] is False
+        assert md["source_packet_version"] is None
+        assert md["model_context_input_form"] is None

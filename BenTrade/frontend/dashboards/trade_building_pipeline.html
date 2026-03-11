@@ -1,0 +1,81 @@
+<!-- Trade Building Pipeline — execution-focused DAG workflow dashboard -->
+<div class="tbp-container">
+
+  <!-- ── Run Header bar ──────────────────────────────────────── -->
+  <div class="tbp-run-header" id="tbpRunHeader">
+    <div class="tbp-run-header-left">
+      <h2 class="tbp-title">Trade Building Pipeline</h2>
+      <span class="tbp-run-id" id="tbpRunId">No run selected</span>
+      <span class="tbp-run-status" id="tbpRunStatus"></span>
+    </div>
+    <div class="tbp-run-header-right">
+      <div class="tbp-run-meta" id="tbpRunMeta">
+        <!-- Filled by JS: duration, started, stages completed -->
+      </div>
+      <div class="tbp-controls">
+        <button class="btn tbp-btn tbp-btn-start" id="tbpBtnStart" title="Start a new pipeline run">▶ Start Run</button>
+        <button class="btn tbp-btn tbp-btn-pause" id="tbpBtnPause" title="Pause (scaffolded)" disabled>⏸ Pause</button>
+        <button class="btn tbp-btn tbp-btn-resume" id="tbpBtnResume" title="Resume (scaffolded)" disabled style="display:none">⏵ Resume</button>
+        <button class="btn tbp-btn tbp-btn-cancel" id="tbpBtnCancel" title="Cancel (scaffolded)" disabled>✕ Cancel</button>
+        <select class="tbp-run-picker" id="tbpRunPicker" title="Select a previous run">
+          <option value="">— Recent Runs —</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Main body: graph + detail panel ─────────────────────── -->
+  <div class="tbp-body">
+
+    <!-- Graph area (dependency DAG) -->
+    <div class="tbp-graph-area" id="tbpGraphArea">
+      <div class="tbp-graph-loading" id="tbpGraphLoading">Loading dependency graph…</div>
+      <svg class="tbp-connectors" id="tbpConnectorsSvg" aria-hidden="true"></svg>
+      <div class="tbp-graph-grid" id="tbpGraphGrid">
+        <!-- Stage nodes rendered by JS -->
+      </div>
+    </div>
+
+    <!-- Stage detail panel (right side) -->
+    <div class="tbp-detail-panel" id="tbpDetailPanel">
+      <div class="tbp-detail-empty" id="tbpDetailEmpty">
+        <div class="tbp-detail-empty-icon">◉</div>
+        <div class="tbp-detail-empty-text">Click a stage node to inspect</div>
+      </div>
+      <div class="tbp-detail-content" id="tbpDetailContent" style="display:none">
+        <div class="tbp-detail-header">
+          <div class="tbp-detail-stage-icon" id="tbpDetailIcon"></div>
+          <div class="tbp-detail-stage-name" id="tbpDetailName"></div>
+          <div class="tbp-detail-stage-status" id="tbpDetailStatus"></div>
+        </div>
+        <div class="tbp-detail-metrics" id="tbpDetailMetrics">
+          <!-- duration, artifact count, etc -->
+        </div>
+        <div class="tbp-detail-section" id="tbpDetailDepsSection">
+          <div class="tbp-detail-section-title">Dependencies</div>
+          <div class="tbp-detail-deps" id="tbpDetailDeps"></div>
+        </div>
+        <div class="tbp-detail-section" id="tbpDetailCountsSection" style="display:none">
+          <div class="tbp-detail-section-title">Summary Counts</div>
+          <div class="tbp-detail-counts" id="tbpDetailCounts"></div>
+        </div>
+        <div class="tbp-detail-section" id="tbpDetailErrorSection" style="display:none">
+          <div class="tbp-detail-section-title">Error</div>
+          <div class="tbp-detail-error" id="tbpDetailError"></div>
+        </div>
+        <div class="tbp-detail-section" id="tbpDetailArtifactsSection" style="display:none">
+          <div class="tbp-detail-section-title">Artifacts</div>
+          <div class="tbp-detail-artifacts" id="tbpDetailArtifacts"></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /tbp-body -->
+
+  <!-- ── Status bar (bottom) ─────────────────────────────────── -->
+  <div class="tbp-status-bar" id="tbpStatusBar">
+    <span class="tbp-status-text" id="tbpStatusText">Ready</span>
+    <span class="tbp-status-scaffolded" title="Pause/Resume/Cancel are scaffolded. Pipeline runs synchronously.">ℹ Some controls are scaffolded</span>
+  </div>
+
+</div>
