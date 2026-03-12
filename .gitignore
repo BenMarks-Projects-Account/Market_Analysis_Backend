@@ -54,6 +54,9 @@ BenTrade/backend/dist/
 BenTrade/backend/build/
 
 # Generated report files
+BenTrade/backend/app/results/*.json
+BenTrade/backend/app/results/*.jsonl
+# Generated report files
 BenTrade/backend/results/*.json
 BenTrade/backend/results/*.jsonl
 

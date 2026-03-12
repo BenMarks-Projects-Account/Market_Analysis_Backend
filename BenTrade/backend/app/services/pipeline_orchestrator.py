@@ -450,6 +450,11 @@ def execute_stage(
     )
 
     # ── 3. Invoke handler (timed) ───────────────────────────────
+    # Inject event_callback into handler kwargs so stage handlers
+    # can emit fine-grained events (e.g. per-candidate progress).
+    if event_callback is not None and "event_callback" not in extra_kwargs:
+        extra_kwargs["event_callback"] = event_callback
+
     t0 = time.monotonic()
     try:
         handler_result = handler_fn(

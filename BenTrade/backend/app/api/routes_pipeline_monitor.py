@@ -9,6 +9,7 @@ Prefix: ``/api/pipeline`` (set in this file, not in ``main.py``).
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -19,6 +20,10 @@ from app.services.pipeline_run_contract import PIPELINE_STAGES, STAGE_LABELS
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline-monitor"])
+
+# Guard against concurrent pipeline runs.
+_active_run_lock = threading.Lock()
+_active_run_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -53,11 +58,26 @@ async def list_pipeline_runs(request: Request) -> dict[str, Any]:
 
 @router.post("/runs/start")
 async def start_pipeline_run(request: Request) -> dict[str, Any]:
-    """Trigger a new pipeline run and return its run_id.
+    """Trigger a new pipeline run and return its run_id immediately.
 
-    Executes the real pipeline with the default (real) stage handlers.
+    The pipeline executes in a background thread so the frontend can poll
+    ``GET /runs/{run_id}`` for live stage-by-stage progress.
     """
-    from app.services.pipeline_orchestrator import run_pipeline
+    global _active_run_id
+
+    from app.services.pipeline_orchestrator import (
+        create_orchestrator,
+        _execute_pipeline,
+    )
+
+    with _active_run_lock:
+        if _active_run_id is not None:
+            return {
+                "ok": False,
+                "message": "A pipeline run is already in progress.",
+                "run_id": _active_run_id,
+                "status": "running",
+            }
 
     body: dict[str, Any] = {}
     try:
@@ -65,32 +85,73 @@ async def start_pipeline_run(request: Request) -> dict[str, Any]:
     except Exception:
         pass
 
+    trigger = body.get("trigger_source", "trade-building-pipeline")
+    scope = body.get("scope", {"mode": "full"})
+
     events: list[dict[str, Any]] = []
 
-    def _capture_event(event: dict[str, Any]) -> None:
+    # Build orchestrator so we can snapshot the run object up front.
+    orch = create_orchestrator(
+        trigger_source=trigger,
+        requested_scope=scope,
+    )
+    run = orch["run"]
+    run_id = run["run_id"]
+
+    # Capture events AND incrementally update the store on every stage.
+    def _live_callback(event: dict[str, Any]) -> None:
         events.append(event)
-
-    try:
-        result = run_pipeline(
-            trigger_source=body.get("trigger_source", "trade-building-pipeline"),
-            requested_scope=body.get("scope", {"mode": "full"}),
-            event_callback=_capture_event,
+        # Extract per-candidate progress from Step 14 events.
+        candidate_progress = None
+        event_type = event.get("event_type", "")
+        if event_type == "candidate_execution_completed":
+            meta = event.get("metadata") or {}
+            candidate_progress = {
+                "candidate_id": meta.get("candidate_id"),
+                "symbol": meta.get("symbol"),
+                "queue_position": meta.get("queue_position"),
+                "candidate_status": meta.get("candidate_status"),
+                "completed_count": meta.get("completed_count"),
+                "remaining_count": meta.get("remaining_count"),
+                "elapsed_ms": meta.get("elapsed_ms"),
+            }
+        pipeline_run_store.update_active_run(
+            run_id, run, events=events,
+            candidate_progress=candidate_progress,
         )
-    except Exception as exc:
-        logger.exception("event=pipeline_run_failed error=%s", exc)
-        raise HTTPException(
-            status_code=500,
-            detail={"message": f"Pipeline execution failed: {exc}", "error_type": type(exc).__name__},
-        )
 
-    result["events"] = events
-    run_id = pipeline_run_store.store_pipeline_result(result)
+    orch["event_callback"] = _live_callback
+
+    # Store an initial "pending" snapshot so the UI can poll immediately.
+    pipeline_run_store.store_active_run(run_id, run)
+
+    with _active_run_lock:
+        _active_run_id = run_id
+
+    def _background() -> None:
+        global _active_run_id
+        try:
+            result = _execute_pipeline(orch)
+            result["events"] = events
+            pipeline_run_store.store_pipeline_result(result)
+            logger.info("event=pipeline_run_completed run_id=%s", run_id)
+        except Exception as exc:
+            logger.exception("event=pipeline_run_failed run_id=%s error=%s", run_id, exc)
+            # Ensure the snapshot reflects failure.
+            run["status"] = "failed"
+            pipeline_run_store.update_active_run(run_id, run, events=events)
+        finally:
+            with _active_run_lock:
+                _active_run_id = None
+
+    thread = threading.Thread(target=_background, name=f"pipeline-{run_id}", daemon=True)
+    thread.start()
     logger.info("event=pipeline_run_started run_id=%s", run_id)
 
     return {
         "ok": True,
         "run_id": run_id,
-        "status": result.get("run", {}).get("status", "unknown"),
+        "status": "running",
     }
 
 

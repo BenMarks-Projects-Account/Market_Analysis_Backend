@@ -1411,7 +1411,7 @@ def analyze_news_sentiment(
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_data_str},
         ],
-        "max_tokens": 4000,
+        "max_tokens": 2500,
         "temperature": 0.0,
         "stream": False,
     }
@@ -1760,7 +1760,7 @@ def analyze_breadth_participation(
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_data_str},
         ],
-        "max_tokens": 4000,
+        "max_tokens": 2500,
         "temperature": 0.0,
         "stream": False,
     }
@@ -2093,7 +2093,7 @@ def analyze_volatility_options(
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_data_str},
         ],
-        "max_tokens": 4000,
+        "max_tokens": 2500,
         "temperature": 0.0,
         "stream": False,
     }
@@ -2389,7 +2389,7 @@ def analyze_cross_asset_macro(
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_data_str},
         ],
-        "max_tokens": 4000,
+        "max_tokens": 2500,
         "temperature": 0.0,
         "stream": False,
     }
@@ -2405,6 +2405,11 @@ def analyze_cross_asset_macro(
                 "[MODEL_CROSS_ASSET] response HTTP %d (%d bytes, %.1fs)",
                 response.status_code, len(response.content), response.elapsed.total_seconds(),
             )
+            if response.status_code >= 400:
+                _log.error(
+                    "[MODEL_CROSS_ASSET] HTTP %d response body: %s",
+                    response.status_code, response.text[:2000],
+                )
             response.raise_for_status()
 
             response_json = None
@@ -2453,14 +2458,20 @@ def analyze_cross_asset_macro(
 
             return normalized
         except RequestException as exc:
+            # Capture response body for 4xx/5xx errors to aid debugging
+            resp_body = ""
+            if hasattr(exc, "response") and exc.response is not None:
+                resp_body = f" | response_body={exc.response.text[:500]}"
             last_error = exc
+            last_error_detail = resp_body
         except Exception as exc:
             last_error = exc
+            last_error_detail = ""
             break
 
     if isinstance(last_error, RequestException):
         raise LocalModelUnavailableError(
-            f"Local model endpoint unavailable at {model_url}: {last_error}"
+            f"Local model endpoint unavailable at {model_url}: {last_error}{last_error_detail}"
         ) from last_error
     raise RuntimeError(f"Cross-asset model analysis failed: {last_error}")
 
@@ -2687,7 +2698,7 @@ def analyze_flows_positioning(
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_data_str},
         ],
-        "max_tokens": 4000,
+        "max_tokens": 2500,
         "temperature": 0.0,
         "stream": False,
     }
@@ -3005,7 +3016,7 @@ def analyze_liquidity_conditions(
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_data_str},
         ],
-        "max_tokens": 4000,
+        "max_tokens": 2500,
         "temperature": 0.0,
         "stream": False,
     }
@@ -3021,6 +3032,11 @@ def analyze_liquidity_conditions(
                 "[MODEL_LIQ_COND] response HTTP %d (%d bytes, %.1fs)",
                 response.status_code, len(response.content), response.elapsed.total_seconds(),
             )
+            if response.status_code >= 400:
+                _log.error(
+                    "[MODEL_LIQ_COND] HTTP %d response body: %s",
+                    response.status_code, response.text[:2000],
+                )
             response.raise_for_status()
 
             response_json = None
@@ -3075,13 +3091,18 @@ def analyze_liquidity_conditions(
 
             return normalized
         except RequestException as exc:
+            resp_body = ""
+            if hasattr(exc, "response") and exc.response is not None:
+                resp_body = f" | response_body={exc.response.text[:500]}"
             last_error = exc
+            last_error_detail = resp_body
         except Exception as exc:
             last_error = exc
+            last_error_detail = ""
             break
 
     if isinstance(last_error, RequestException):
         raise LocalModelUnavailableError(
-            f"Local model endpoint unavailable at {model_url}: {last_error}"
+            f"Local model endpoint unavailable at {model_url}: {last_error}{last_error_detail}"
         ) from last_error
     raise RuntimeError(f"Liquidity conditions model analysis failed: {last_error}")

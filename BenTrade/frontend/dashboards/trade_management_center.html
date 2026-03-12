@@ -1,0 +1,55 @@
+<!-- Trade Management Center — Candidate review + execution hub -->
+<div class="tmc-container">
+
+  <!-- ── Banner ──────────────────────────────────────────────── -->
+  <div class="tmc-banner">
+    <h2 class="tmc-banner-title">Trade Management Center</h2>
+    <p class="tmc-banner-subtitle">Pipeline candidates ready for review and execution</p>
+  </div>
+
+  <!-- ── Run selector bar ────────────────────────────────────── -->
+  <div class="tmc-control-bar">
+    <div class="tmc-control-left">
+      <label class="tmc-label">Pipeline Run</label>
+      <select id="tmcRunPicker" class="tmc-select">
+        <option value="">— Select Run —</option>
+      </select>
+      <button id="tmcRefreshBtn" class="btn tmc-btn" title="Refresh run list">↻ Refresh</button>
+      <button id="tmcLatestBtn" class="btn tmc-btn" title="Load most recent run">Latest</button>
+    </div>
+    <div class="tmc-control-right">
+      <span id="tmcRunStatus" class="tmc-run-status"></span>
+      <span id="tmcRunMeta" class="tmc-run-meta"></span>
+    </div>
+  </div>
+
+  <!-- ═══ SECTION 1 — Trade Builder Candidates ═══ -->
+  <section class="tmc-section">
+    <div class="tmc-section-header">
+      <h3 class="tmc-section-title">Trade Builder Candidates</h3>
+      <span id="tmcCandidateCount" class="tmc-count-badge">0</span>
+    </div>
+    <div id="tmcCandidateGrid" class="tmc-candidate-grid">
+      <div class="tmc-empty-state" id="tmcEmptyState">
+        <div class="tmc-empty-icon">◎</div>
+        <div class="tmc-empty-text">Select a pipeline run to view candidates</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ SECTION 2 — Active Trade Candidates (placeholder) ═══ -->
+  <section class="tmc-section">
+    <div class="tmc-section-header">
+      <h3 class="tmc-section-title">Active Trade Candidates</h3>
+      <span class="tmc-count-badge tmc-count-muted">—</span>
+    </div>
+    <div class="tmc-active-placeholder">
+      <div class="tmc-empty-icon">◉</div>
+      <div class="tmc-placeholder-text">
+        Active trade monitoring will connect to broker positions.<br>
+        <span class="tmc-placeholder-sub">Coming soon — bridge from execution to position management</span>
+      </div>
+    </div>
+  </section>
+
+</div>

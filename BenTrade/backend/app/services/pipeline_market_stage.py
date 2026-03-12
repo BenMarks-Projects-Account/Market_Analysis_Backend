@@ -469,6 +469,7 @@ def build_engine_result(
     error: dict[str, Any] | None = None,
     artifact_ref: str | None = None,
     eligible_for_model_analysis: bool = False,
+    raw_result: Any = None,
 ) -> dict[str, Any]:
     """Build a normalized per-engine execution record.
 
@@ -490,8 +491,10 @@ def build_engine_result(
         artifact_id of the persisted engine output, if any.
     eligible_for_model_analysis : bool
         Whether this result is suitable for downstream Step 5.
+    raw_result : Any
+        The raw engine service output (used for artifact writing).
     """
-    return {
+    rec: dict[str, Any] = {
         "engine_key": engine_key,
         "status": status,
         "started_at": started_at,
@@ -502,6 +505,9 @@ def build_engine_result(
         "artifact_ref": artifact_ref,
         "eligible_for_model_analysis": eligible_for_model_analysis,
     }
+    if raw_result is not None:
+        rec["raw_result"] = raw_result
+    return rec
 
 
 # =====================================================================
@@ -619,6 +625,7 @@ def _run_single_engine(
             elapsed_ms=elapsed_ms,
             summary=summary,
             eligible_for_model_analysis=True,
+            raw_result=result,
         )
 
     except Exception as exc:
@@ -1115,6 +1122,11 @@ def market_stage_handler(
         engine_records = _execute_engines_parallel(
             eligible, run_id, max_workers, event_emitter,
         )
+        # Extract raw_result from records (populated by _run_single_engine)
+        for key, rec in engine_records.items():
+            raw = rec.pop("raw_result", None)
+            if raw is not None:
+                raw_payloads[key] = raw
 
     # ── Write per-engine artifacts ──────────────────────────────
     artifact_ids: list[str] = []

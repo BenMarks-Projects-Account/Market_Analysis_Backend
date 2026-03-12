@@ -121,6 +121,8 @@
     var elDetailErrorSection = scope.querySelector('#tbpDetailErrorSection');
     var elDetailArtifacts = scope.querySelector('#tbpDetailArtifacts');
     var elDetailArtifactsSection = scope.querySelector('#tbpDetailArtifactsSection');
+    var elCandidateProgress = scope.querySelector('#tbpCandidateProgress');
+    var elCandidateProgressSection = scope.querySelector('#tbpCandidateProgressSection');
     var elStatusText  = scope.querySelector('#tbpStatusText');
 
     var depMap = {};            // stage → [dependencies]
@@ -274,7 +276,10 @@
 
         el.querySelector('.tbp-node-icon').textContent = icon;
         var meta = el.querySelector('.tbp-node-meta');
-        if (s && s.duration_ms != null) {
+        if (key === 'final_model_decision' && status === 'running' && runData && runData.candidate_progress) {
+          var cp = runData.candidate_progress;
+          meta.textContent = (cp.completed_count || 0) + '/' + (((cp.completed_count || 0) + (cp.remaining_count || 0))) + ' candidates';
+        } else if (s && s.duration_ms != null) {
           meta.textContent = fmtMs(s.duration_ms);
         } else if (status === 'running') {
           meta.textContent = '…';
@@ -385,6 +390,9 @@
         elDetailError.textContent = errMsg;
       }
 
+      // Candidate progress (Step 14 only)
+      renderCandidateProgress(stageKey, stage);
+
       // Artifacts (run-time only)
       var arts = stage ? (stage.artifact_refs || []) : [];
       if (elDetailArtifactsSection) elDetailArtifactsSection.style.display = arts.length > 0 ? '' : 'none';
@@ -393,6 +401,127 @@
           return '<div class="tbp-artifact-ref" data-aid="' + esc(aid) + '">' + esc(shortId(aid)) + '</div>';
         }).join('');
       }
+    }
+
+    /* ── Candidate progress rendering (Step 14) ────────────── */
+    function renderCandidateProgress(stageKey, stage) {
+      if (!elCandidateProgressSection) return;
+      // Only show for final_model_decision
+      if (stageKey !== 'final_model_decision') {
+        elCandidateProgressSection.style.display = 'none';
+        return;
+      }
+
+      var cp = currentRunData ? currentRunData.candidate_progress : null;
+      var stageStatus = stage ? stage.status : 'idle';
+
+      // Derive per-candidate history from events
+      var candidateEvents = deriveCandidateEvents();
+
+      // Show section if stage is running with progress, or completed with event history
+      if (!cp && candidateEvents.length === 0) {
+        elCandidateProgressSection.style.display = 'none';
+        return;
+      }
+
+      elCandidateProgressSection.style.display = '';
+      var html = '';
+
+      // Live progress header (when running)
+      if (cp && stageStatus === 'running') {
+        var total = (cp.completed_count || 0) + (cp.remaining_count || 0);
+        var pct = total > 0 ? Math.round(((cp.completed_count || 0) / total) * 100) : 0;
+        html += '<div class="tbp-cp-summary">'
+              + '<div class="tbp-cp-bar-track"><div class="tbp-cp-bar-fill" style="width:' + pct + '%"></div></div>'
+              + '<div class="tbp-cp-stats">'
+              + '<span>' + (cp.completed_count || 0) + ' / ' + total + ' candidates</span>'
+              + '<span>' + (cp.remaining_count || 0) + ' remaining</span>'
+              + '</div>'
+              + '</div>';
+        if (cp.candidate_id) {
+          var statusCls = cp.candidate_status === 'completed' ? 'tbp-cp-ok'
+            : cp.candidate_status === 'failed' ? 'tbp-cp-fail' : 'tbp-cp-deg';
+          html += '<div class="tbp-cp-current">'
+                + '<span class="tbp-cp-current-label">Last processed:</span> '
+                + '<span class="tbp-cp-sym">' + esc(cp.symbol || cp.candidate_id) + '</span> '
+                + '<span class="tbp-cp-badge ' + statusCls + '">' + esc(cp.candidate_status || '') + '</span>'
+                + (cp.elapsed_ms != null ? ' <span class="tbp-cp-time">' + fmtMs(cp.elapsed_ms) + '</span>' : '')
+                + '</div>';
+        }
+      } else if (stageStatus === 'completed' || stageStatus === 'failed') {
+        // Completed — show final tally from summary_counts
+        var sc = stage ? (stage.summary_counts || {}) : {};
+        var total = (sc.total_completed || 0) + (sc.total_failed || 0) + (sc.total_skipped || 0);
+        if (total > 0) {
+          html += '<div class="tbp-cp-summary tbp-cp-done">'
+                + '<div class="tbp-cp-stats">'
+                + '<span>Completed: ' + (sc.total_completed || 0) + '</span>'
+                + (sc.total_failed ? '<span class="tbp-cp-fail">Failed: ' + sc.total_failed + '</span>' : '')
+                + (sc.total_skipped ? '<span>Skipped: ' + sc.total_skipped + '</span>' : '')
+                + '</div></div>';
+        }
+      }
+
+      // Per-candidate event log
+      if (candidateEvents.length > 0) {
+        html += '<div class="tbp-cp-log">';
+        for (var i = 0; i < candidateEvents.length; i++) {
+          var ce = candidateEvents[i];
+          var rowCls = ce.status === 'completed' ? 'tbp-cp-ok'
+            : ce.status === 'failed' ? 'tbp-cp-fail'
+            : ce.status === 'degraded' ? 'tbp-cp-deg'
+            : ce.status === 'started' ? 'tbp-cp-active' : '';
+          html += '<div class="tbp-cp-log-row ' + rowCls + '">'
+                + '<span class="tbp-cp-pos">' + ce.position + '</span>'
+                + '<span class="tbp-cp-sym">' + esc(ce.symbol || ce.candidate_id) + '</span>'
+                + '<span class="tbp-cp-badge ' + rowCls + '">' + esc(ce.status) + '</span>';
+          if (ce.elapsed_ms != null) {
+            html += '<span class="tbp-cp-time">' + fmtMs(ce.elapsed_ms) + '</span>';
+          }
+          html += '</div>';
+        }
+        html += '</div>';
+      }
+
+      if (elCandidateProgress) elCandidateProgress.innerHTML = html;
+    }
+
+    function deriveCandidateEvents() {
+      if (!currentRunData || !currentRunData.events) return [];
+      var events = currentRunData.events;
+      var started = {};   // candidate_id → event
+      var completed = {};  // candidate_id → event
+      var order = [];      // ordered candidate_ids
+
+      for (var i = 0; i < events.length; i++) {
+        var e = events[i];
+        var et = e.event_type || '';
+        var meta = e.metadata || {};
+        var cid = meta.candidate_id;
+        if (!cid) continue;
+        if (et === 'candidate_execution_started') {
+          started[cid] = meta;
+          if (order.indexOf(cid) === -1) order.push(cid);
+        } else if (et === 'candidate_execution_completed') {
+          completed[cid] = meta;
+          if (order.indexOf(cid) === -1) order.push(cid);
+        }
+      }
+
+      var result = [];
+      for (var j = 0; j < order.length; j++) {
+        var id = order[j];
+        var c = completed[id];
+        var s = started[id];
+        result.push({
+          candidate_id: id,
+          symbol: (c && c.symbol) || (s && s.symbol) || id,
+          position: (c && c.queue_position) || (s && s.queue_position) || (j + 1),
+          status: c ? (c.candidate_status || 'completed') : 'started',
+          elapsed_ms: c ? c.elapsed_ms : null,
+        });
+      }
+      return result;
     }
 
     function showDetailEmpty() {
@@ -448,15 +577,23 @@
         body: JSON.stringify({ trigger_source: 'trade-building-pipeline', scope: { mode: 'full' } }),
       })
         .then(function (data) {
-          elBtnStart.disabled = false;
           if (data.ok && data.run_id) {
             setStatus('Run started: ' + shortId(data.run_id));
             currentRunId = data.run_id;
             loadRun(data.run_id);
             loadRunList();
+            startPolling();
+          } else if (!data.ok && data.run_id) {
+            // A run is already in progress — poll it instead.
+            setStatus('Run already in progress: ' + shortId(data.run_id));
+            currentRunId = data.run_id;
+            loadRun(data.run_id);
+            startPolling();
+            elBtnStart.disabled = false;
           } else {
-            setStatus('Run completed: ' + (data.status || 'unknown'));
+            setStatus('Run response: ' + (data.status || 'unknown'));
             if (data.run_id) { loadRun(data.run_id); loadRunList(); }
+            elBtnStart.disabled = false;
           }
         })
         .catch(function (err) {
@@ -492,6 +629,9 @@
               // Stop polling if terminal state
               if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
                 stopPolling();
+                elBtnStart.disabled = false;
+                loadRunList();
+                setStatus('Run ' + shortId(currentRunId) + ' ' + data.status);
               }
             })
             .catch(function () { /* silent */ });

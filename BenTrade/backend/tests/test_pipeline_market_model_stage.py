@@ -850,7 +850,7 @@ class TestBoundedParallel:
         assert result["summary_counts"]["analyses_succeeded"] == 4
 
     def test_default_max_workers_value(self):
-        assert DEFAULT_MODEL_MAX_WORKERS == 2
+        assert DEFAULT_MODEL_MAX_WORKERS == 1
 
     def test_parallel_with_failures(self):
         run, store = _make_run_and_store()
@@ -1375,3 +1375,151 @@ class TestExecutorInjection:
         assert "engine_key" in mi
         assert "normalized_data" in mi
         assert "compact_summary" in mi
+
+
+# =====================================================================
+#  Test: news_sentiment items/macro_context survive normalization
+# =====================================================================
+
+class TestNewsSentimentDataPlumbing:
+    """Regression tests for the news_sentiment normalization → model input
+    data path.  The bug was that ``items`` and ``macro_context`` from the
+    Step 4 engine payload were placed under ``detail_sections`` during
+    normalization but the model executor read them at the top level — so
+    the model always received empty inputs.
+    """
+
+    @staticmethod
+    def _make_news_artifact(run_id, store):
+        """Create a realistic Step 4 news_sentiment artifact with items
+        and macro_context, exactly as news_sentiment_service produces."""
+        news_data = {
+            "internal_engine": {
+                "score": 65,
+                "regime_label": "Constructive",
+                "confidence_score": 0.75,
+                "signal_quality": "medium",
+                "components": {},
+                "weights": {},
+                "explanation": {"summary": "test", "trader_takeaway": "test"},
+            },
+            "items": [
+                {
+                    "source": "finnhub",
+                    "headline": "S&P 500 rallies on strong jobs data",
+                    "category": "macro",
+                    "published_at": "2026-03-11T09:00:00Z",
+                    "symbols": ["SPY"],
+                },
+                {
+                    "source": "polygon",
+                    "headline": "Oil prices drop amid demand concerns",
+                    "category": "commodities",
+                    "published_at": "2026-03-11T08:30:00Z",
+                    "symbols": [],
+                },
+            ],
+            "macro_context": {
+                "vix": 15.2,
+                "us_10y_yield": 4.25,
+                "us_2y_yield": 4.65,
+                "fed_funds_rate": 5.25,
+                "oil_wti": 78.50,
+                "usd_index": 104.3,
+                "yield_curve_spread": -0.40,
+            },
+            "source_freshness": [],
+            "as_of": "2026-03-11T10:00:00Z",
+            "item_count": 2,
+        }
+        art = build_artifact_record(
+            run_id=run_id,
+            stage_key="market_data",
+            artifact_key="engine_news_sentiment",
+            artifact_type="market_engine_output",
+            data=news_data,
+            summary={"score": 65, "label": "Constructive"},
+            metadata={"engine_key": "news_sentiment"},
+        )
+        put_artifact(store, art, overwrite=True)
+        return art
+
+    def test_normalize_preserves_items_and_macro(self):
+        """normalize_engine_for_model must produce normalized_data
+        that contains items and macro_context (under detail_sections)."""
+        run, store = _make_run_and_store()
+        art = self._make_news_artifact(run["run_id"], store)
+
+        model_input = normalize_engine_for_model("news_sentiment", art)
+        nd = model_input["normalized_data"]
+
+        assert "detail_sections" in nd
+        assert len(nd["detail_sections"]["items"]) == 2
+        assert nd["detail_sections"]["macro_context"]["vix"] == 15.2
+
+    def test_model_executor_receives_populated_items(self):
+        """The default model executor dispatch for news_sentiment must
+        pass populated items and macro_context to analyze_news_sentiment,
+        not empty defaults."""
+        run, store = _make_run_and_store()
+        self._make_news_artifact(run["run_id"], store)
+
+        # Also need a stage summary for eligibility
+        summary_data = {
+            "stage_key": "market_data",
+            "stage_status": "success",
+            "total_attempted": 1,
+            "engines_succeeded": ["news_sentiment"],
+            "engines_failed": [],
+            "engines_skipped": [],
+            "engines_unavailable": [],
+            "success_count": 1,
+            "fail_count": 0,
+            "artifact_refs": {"news_sentiment": "dummy"},
+            "engine_summaries": {
+                "news_sentiment": {
+                    "status": "success",
+                    "score": 65,
+                    "label": "Constructive",
+                    "confidence": 75,
+                    "elapsed_ms": 100,
+                    "artifact_ref": "dummy",
+                    "eligible_for_model_analysis": True,
+                },
+            },
+        }
+        summary_art = build_artifact_record(
+            run_id=run["run_id"],
+            stage_key="market_data",
+            artifact_key="market_stage_summary",
+            artifact_type="market_stage_summary",
+            data=summary_data,
+            summary={"stage_status": "success"},
+        )
+        put_artifact(store, summary_art, overwrite=True)
+
+        # Capture what the executor receives
+        received = {}
+
+        def spy_executor(engine_key, model_input):
+            received[engine_key] = model_input
+            return {"label": "OK", "score": 70}
+
+        market_model_stage_handler(
+            run, store, "market_model_analysis",
+            model_executor=spy_executor,
+        )
+
+        assert "news_sentiment" in received
+        nd = received["news_sentiment"]["normalized_data"]
+
+        # After normalization, items/macro_context are under detail_sections.
+        # The executor dispatch must read them from there.
+        ds = nd.get("detail_sections", {})
+        items = ds.get("items", [])
+        macro = ds.get("macro_context", {})
+
+        assert len(items) == 2, f"Expected 2 news items, got {len(items)}"
+        assert items[0]["headline"] == "S&P 500 rallies on strong jobs data"
+        assert macro.get("vix") == 15.2
+        assert macro.get("us_10y_yield") == 4.25

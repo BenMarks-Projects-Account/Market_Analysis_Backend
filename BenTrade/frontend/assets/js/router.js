@@ -185,6 +185,7 @@
     "income": { title: "Income Strategies", group: "Analysis", subgroup: "Options", description: "Income" },
     "active-trade": { title: "Active Trade Dashboard", group: "Trading", subgroup: "Execution & Monitoring", description: "Broker positions/orders" },
     "trade-testing": { title: "Trade Testing Workbench", group: "Trading", subgroup: "Execution & Monitoring", description: "What-if lab + scenarios" },
+    "trade-management": { title: "Trade Management Center", group: "Trading", subgroup: "Execution & Monitoring", description: "Candidate review + execution" },
     "stock-analysis": { title: "Stock Analysis Dashboard", group: "Analysis", subgroup: "Equities", description: "Stock analysis" },
     "stock-scanner": { title: "Stock Scanner (Deprecated)", group: "Analysis", subgroup: "Equities", description: "Legacy generic scanner" },
     "stocks/pullback-swing": { title: "Pullback Swing — Stock Scanner", group: "Stock Strategies", subgroup: "Equities → Swing", description: "Dip buys in trend" },
@@ -266,6 +267,11 @@
       view: "dashboards/trade_workbench.html",
       init: () => window.BenTradePages?.initTradeWorkbench?.(document.getElementById('view')),
       title: routeMeta["trade-testing"].title
+    },
+    "trade-management": {
+      view: "dashboards/trade_management_center.html",
+      init: () => window.BenTradePages?.initTradeManagementCenter?.(document.getElementById('view')),
+      title: routeMeta["trade-management"].title
     },
     "stock-analysis": {
       view: "dashboards/stock_analysis.html",

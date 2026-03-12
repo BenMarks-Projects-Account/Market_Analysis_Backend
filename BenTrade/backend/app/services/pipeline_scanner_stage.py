@@ -328,6 +328,80 @@ def _select_scanners(
 
 
 # =====================================================================
+#  Scanner dependency construction
+# =====================================================================
+
+def _build_scanner_dependencies() -> dict[str, Any]:
+    """Construct *shared* (event-loop-agnostic) scanner dependencies.
+
+    Each scanner runs inside its own ``asyncio.run()`` call which
+    creates a fresh event loop.  httpx.AsyncClient (and the API clients
+    wrapping it) are bound to the loop where they are created, so they
+    **cannot** be shared across scanners.
+
+    This function therefore returns only loop-agnostic objects:
+      * settings, cache, results_dir
+
+    Per-scanner httpx + API clients + BaseDataService are created inside
+    ``_make_per_scanner_clients()`` which is called within each
+    scanner's ``asyncio.run()`` boundary.
+    """
+    from pathlib import Path
+
+    from app.config import Settings
+    from app.utils.cache import TTLCache
+
+    settings = Settings()
+    cache = TTLCache()
+
+    # results_dir: same resolution as main.py
+    backend_dir = Path(__file__).resolve().parents[1]
+    results_dir = backend_dir / "results"
+
+    return {
+        "settings": settings,
+        "cache": cache,
+        "results_dir": results_dir,
+    }
+
+
+def _make_per_scanner_clients(deps: dict[str, Any]) -> dict[str, Any]:
+    """Create per-scanner httpx.AsyncClient + API clients + BaseDataService.
+
+    Must be called inside the event loop where the clients will be used
+    (i.e. inside the coroutine passed to ``asyncio.run()``).
+    """
+    import httpx
+
+    from app.clients.finnhub_client import FinnhubClient
+    from app.clients.fred_client import FredClient
+    from app.clients.polygon_client import PolygonClient
+    from app.clients.tradier_client import TradierClient
+    from app.services.base_data_service import BaseDataService
+
+    settings = deps["settings"]
+    cache = deps["cache"]
+    http_client = httpx.AsyncClient()
+
+    tradier_client = TradierClient(settings, http_client, cache)
+    finnhub_client = FinnhubClient(settings, http_client, cache)
+    fred_client = FredClient(settings, http_client, cache)
+    polygon_client = PolygonClient(settings, http_client, cache)
+
+    base_data_service = BaseDataService(
+        tradier_client=tradier_client,
+        finnhub_client=finnhub_client,
+        fred_client=fred_client,
+        polygon_client=polygon_client,
+    )
+
+    return {
+        "http_client": http_client,
+        "base_data_service": base_data_service,
+    }
+
+
+# =====================================================================
 #  Default scanner executor
 # =====================================================================
 
@@ -338,16 +412,26 @@ def _default_scanner_executor(
 ) -> dict[str, Any]:
     """Default scanner executor — dispatches to real scanner services.
 
-    Stock scanners: lazy-imports the service class, instantiates,
-    runs async ``scan()`` via ``asyncio.run()``.
+    Each scanner runs inside ``asyncio.run()`` which creates its own
+    event loop.  httpx.AsyncClient and the API clients wrapping it are
+    event-loop-bound, so we construct per-scanner clients inside the
+    coroutine via ``_make_per_scanner_clients()``.
 
-    Options scanners: lazy-imports ``StrategyService``, calls
-    ``generate(strategy_type, payload)``.
+    Stock scanners: lazy-imports the service class, instantiates with
+    a fresh ``BaseDataService``, runs async ``scan()``.
+
+    Options scanners: maps scanner ``strategy_type`` to the
+    ``StrategyService`` plugin ID, lazy-imports ``StrategyService``,
+    calls ``generate(plugin_id, payload)``.
 
     Override via kwargs['scanner_executor'] for testing.
     """
     family = scanner_entry.get("scanner_family", "")
     strategy_type = scanner_entry.get("strategy_type", scanner_key)
+
+    # Shared (loop-agnostic) deps from context
+    scanner_deps = context.get("_scanner_deps") or {}
+    results_dir = context.get("results_dir")
 
     if family == "stock":
         import asyncio
@@ -371,23 +455,74 @@ def _default_scanner_executor(
         if spec is None:
             raise ValueError(f"No stock scanner service for '{scanner_key}'")
 
-        mod = __import__(spec[0], fromlist=[spec[1]])
-        service = getattr(mod, spec[1])()
-        max_candidates = context.get("max_candidates", 30)
-        return asyncio.run(service.scan(max_candidates=max_candidates))
+        async def _run_stock() -> dict[str, Any]:
+            clients = _make_per_scanner_clients(scanner_deps)
+            try:
+                bds = clients["base_data_service"]
+                mod = __import__(spec[0], fromlist=[spec[1]])
+                service = getattr(mod, spec[1])(bds)
+                max_candidates = context.get("max_candidates", 30)
+                return await service.scan(max_candidates=max_candidates)
+            finally:
+                http = clients.get("http_client")
+                if http:
+                    await http.aclose()
+
+        return asyncio.run(_run_stock())
 
     if family == "options":
+        import asyncio
+
         from app.services.strategy_service import StrategyService
 
-        service = StrategyService()
+        # Map scanner strategy_type → StrategyService plugin ID + payload overrides
+        # Plugin IDs: credit_spread, debit_spreads, iron_condor, butterflies
+        _STRATEGY_MAP: dict[str, tuple[str, dict[str, Any]]] = {
+            "put_credit_spread":  ("credit_spread",  {}),
+            "call_credit_spread": ("credit_spread",  {}),
+            "iron_condor":        ("iron_condor",    {}),
+            "butterfly_debit":    ("butterflies",    {}),
+            "put_debit":          ("debit_spreads",  {"direction": "put"}),
+            "call_debit":         ("debit_spreads",  {"direction": "call"}),
+        }
+
+        mapped = _STRATEGY_MAP.get(strategy_type)
+        if mapped is None:
+            raise ValueError(
+                f"No strategy plugin mapping for '{strategy_type}' "
+                f"(scanner_key='{scanner_key}')"
+            )
+        plugin_id, extra_payload = mapped
+
+        if results_dir is None:
+            from pathlib import Path
+            results_dir = Path(__file__).resolve().parents[1] / "results"
+
         symbols = context.get("symbols") or [
             "SPY", "QQQ", "IWM", "DIA",
         ]
         preset = context.get("preset", "balanced")
-        return service.generate(strategy_type, {
-            "symbols": symbols,
-            "preset": preset,
-        })
+
+        async def _run_options() -> dict[str, Any]:
+            clients = _make_per_scanner_clients(scanner_deps)
+            try:
+                bds = clients["base_data_service"]
+                service = StrategyService(
+                    base_data_service=bds,
+                    results_dir=results_dir,
+                )
+                payload: dict[str, Any] = {
+                    "symbols": symbols,
+                    "preset": preset,
+                    **extra_payload,
+                }
+                return await service.generate(plugin_id, payload)
+            finally:
+                http = clients.get("http_client")
+                if http:
+                    await http.aclose()
+
+        return asyncio.run(_run_options())
 
     raise ValueError(
         f"No executor for scanner family '{family}' (key='{scanner_key}')"
@@ -467,6 +602,12 @@ def normalize_scanner_candidates(
                     or raw.get("candidate_id")
                     or f"{scanner_key}_{i}"
                 )
+
+            # Ensure strategy_type and scanner_family — required by
+            # downstream stages (policy checks these as required fields)
+            base.setdefault("strategy_type", strategy_type)
+            base.setdefault("scanner_family", scanner_family)
+            base.setdefault("scanner_key", scanner_key)
 
             # Pipeline lineage fields
             base["source_scanner_artifact_ref"] = source_artifact_ref
@@ -1095,12 +1236,16 @@ def scanner_stage_handler(
         "scanner_results_override",
     )
 
-    # Scanner execution context
+    # Scanner execution context — pass shared (loop-agnostic) deps;
+    # per-scanner clients are created inside _default_scanner_executor.
+    scanner_deps = _build_scanner_dependencies()
     context: dict[str, Any] = {
         "run_id": run_id,
         "symbols": kwargs.get("symbols"),
         "preset": kwargs.get("preset"),
         "max_candidates": kwargs.get("max_candidates"),
+        "_scanner_deps": scanner_deps,
+        "results_dir": scanner_deps["results_dir"],
     }
 
     # ── 2. Optionally retrieve Step 4 market context ────────────

@@ -83,6 +83,67 @@ def store_pipeline_result(result: dict[str, Any]) -> str:
     return run_id
 
 
+def store_active_run(run_id: str, run: dict[str, Any]) -> None:
+    """Create an initial in-progress snapshot so the UI can poll immediately.
+
+    Called once at the start of a background pipeline run, before any stages
+    execute.  Subsequent stage transitions call ``update_active_run``.
+    """
+    if not run_id:
+        return
+    snapshot: dict[str, Any] = {
+        "run_id": run_id,
+        "stored_at": _now_iso(),
+        "run": copy.deepcopy(run),
+        "artifact_store": {},
+        "stage_results": [],
+        "summary": {},
+        "events": [],
+    }
+    with _lock:
+        _runs[run_id] = snapshot
+        while len(_runs) > _MAX_RUNS:
+            _runs.popitem(last=False)
+
+
+def update_active_run(
+    run_id: str,
+    run: dict[str, Any],
+    *,
+    events: list[dict[str, Any]] | None = None,
+    candidate_progress: dict[str, Any] | None = None,
+) -> None:
+    """Incrementally update the snapshot for an in-progress run.
+
+    Called by the event callback on every stage transition so the polling
+    endpoint returns current state.
+
+    Parameters
+    ----------
+    run_id : str
+        The run to update.
+    run : dict
+        Current run state (deep-copied into snapshot).
+    events : list | None
+        Latest events list.
+    candidate_progress : dict | None
+        Per-candidate execution progress from Step 14 sequential queue.
+        Contains: current_candidate_id, current_candidate_symbol,
+        completed_count, remaining_count, total_runnable,
+        queue_position, candidate_status, elapsed_ms, timestamp.
+    """
+    with _lock:
+        snap = _runs.get(run_id)
+        if snap is None:
+            return
+        snap["run"] = copy.deepcopy(run)
+        snap["stored_at"] = _now_iso()
+        if events is not None:
+            snap["events"] = copy.deepcopy(events)
+        if candidate_progress is not None:
+            snap["candidate_progress"] = copy.deepcopy(candidate_progress)
+
+
 def clear_all() -> int:
     """Remove all stored runs. Returns count removed."""
     with _lock:
@@ -204,6 +265,7 @@ def get_run_detail(run_id: str) -> dict[str, Any] | None:
         "artifact_store_summary": summarize_artifact_store(artifact_store) if artifact_store.get("artifacts") else {},
         "ledger": ledger,
         "events": snap.get("events", []),
+        "candidate_progress": snap.get("candidate_progress"),
         "summary": summary,
         "stored_at": snap.get("stored_at"),
         "module_role": _MODULE_ROLE,

@@ -5,14 +5,35 @@ the final recommendation model through an injectable execution seam,
 normalizes raw model output into stable per-candidate final
 recommendation artifacts, and produces a stage summary.
 
+Execution model — Sequential Execution Queue
+─────────────────────────────────────────────
+Candidates are processed **strictly one at a time**, in deterministic
+order (input order from Step 13 summary).  For each candidate:
+
+  1. Mark candidate execution as started
+  2. Send exactly one prompt payload to the model executor
+  3. Wait for the response to complete
+  4. Normalize and store the result artifact
+  5. Update per-candidate progress tracking
+  6. Proceed to the next candidate
+
+No concurrent model calls occur during a pipeline run.  This is
+enforced by design (explicit sequential loop), not by accidental
+thread-pool configuration.  The executor seam is the single insertion
+point for future local / model-machine / Bedrock distribution logic.
+
 Public API
 ──────────
     final_recommendation_handler(run, artifact_store, stage_key, **kwargs)
         Stage handler compatible with the Step 3 orchestrator.
     normalize_model_response(raw_result, prompt_payload, run_id)
         Convert raw model output into the stable recommendation contract.
-    default_model_executor(payload, rendered_text)
-        Default stub executor for testing / fallback.
+    real_model_executor(payload, rendered_text)
+        Live model executor — calls LLM via model_router.
+    stub_model_executor(payload, rendered_text)
+        Deterministic stub executor for testing / fallback (test-only).
+    default_model_executor
+        Legacy alias for stub_model_executor (backward compat).
 
 Role boundary
 ─────────────
@@ -20,12 +41,13 @@ This module:
 - Retrieves per-candidate prompt payloads from Step 13.
 - Determines runnable vs skipped payloads via downstream_usable.
 - Invokes the final model through a clean injectable executor seam.
+- Executes candidates strictly one at a time (sequential queue).
 - Normalizes model responses into stable recommendation artifacts.
 - Preserves policy guardrail echo from the prompt payload.
 - Writes per-candidate final recommendation artifacts keyed final_{cid}.
+- Updates per-candidate execution progress during processing.
 - Writes a final_model_summary artifact.
 - Emits structured events via event_callback.
-- Supports bounded parallel execution.
 
 This module does NOT:
 - Re-compress or re-assemble prompt payloads.
@@ -33,13 +55,13 @@ This module does NOT:
 - Render final user-facing responses or trade cards.
 - Perform cross-candidate ranking for presentation.
 - Persist to disk/database (future layer).
+- Execute multiple candidates concurrently.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -78,7 +100,6 @@ VALID_FINAL_STATUSES = frozenset({
 })
 
 # ── Default execution configuration ────────────────────────────
-_DEFAULT_MAX_WORKERS = 1
 _DEFAULT_INPUT_MODE = "structured"
 
 
@@ -102,15 +123,199 @@ _DEFAULT_INPUT_MODE = "structured"
 ModelExecutor = Callable[[dict, str | None], dict[str, Any]]
 
 
-def default_model_executor(
+# ── System prompt for final recommendation model ────────────────
+_FINAL_RECOMMENDATION_SYSTEM_PROMPT = """\
+You are BenTrade's final recommendation engine for options trades.
+You will receive a structured candidate analysis containing:
+- Candidate identity (symbol, strategy, strikes, expiration)
+- Policy evaluation outcome (cleared / caution / restricted / blocked)
+- Event context (upcoming earnings, dividends, macro events)
+- Data quality notes
+
+Analyze the candidate and return ONLY valid JSON (no markdown, no commentary) with exactly these keys:
+{
+  "decision": "buy" | "hold" | "pass",
+  "conviction": <float 0.0 to 1.0>,
+  "rationale_summary": "<1-3 sentence summary of your reasoning>",
+  "key_supporting_points": ["<point1>", "<point2>", ...],
+  "key_risks": ["<risk1>", "<risk2>", ...],
+  "market_alignment": "bullish" | "bearish" | "neutral" | "uncertain",
+  "portfolio_fit": "strong" | "acceptable" | "marginal" | "poor",
+  "event_sensitivity": "high" | "moderate" | "low" | "none",
+  "sizing_guidance": "full" | "standard" | "reduced" | "minimal"
+}
+
+Rules:
+- If policy outcome is "blocked", decision MUST be "pass".
+- If policy outcome is "restricted", decision should be "pass" or "hold".
+- conviction must honestly reflect certainty; do not inflate.
+- key_supporting_points and key_risks should each have 1-5 items.
+- Do NOT wrap your response in markdown code fences.
+"""
+
+
+def real_model_executor(
     payload: dict[str, Any],
     rendered_text: str | None,
 ) -> dict[str, Any]:
-    """Default stub model executor.
+    """Live model executor that calls the LLM via model_router.
 
-    Returns a deterministic stub recommendation derived from the
-    structured payload.  Suitable for testing and pipeline
-    validation without a real model backend.
+    Sends the rendered prompt text (from Step 13) as user content and
+    parses the JSON response via the json_repair pipeline.
+
+    Input fields used from payload:
+        - rendered_prompt_text (via rendered_text param)
+        - compact_candidate_block, compact_policy_block (fallback context)
+        - candidate_id, symbol (identity)
+
+    Output fields:
+        status, raw_response, provider, model_name, latency_ms, metadata
+    """
+    import json as _json
+
+    from app.services.model_router import get_model_endpoint, model_request
+    from common.json_repair import extract_and_repair_json
+
+    candidate_id = payload.get("candidate_id", "unknown")
+    symbol = payload.get("symbol", "unknown")
+
+    # Build user message from rendered text or fallback to structured JSON
+    if rendered_text:
+        user_content = rendered_text
+    else:
+        # Fallback: serialize the structured blocks
+        fallback_data = {
+            "candidate_id": candidate_id,
+            "symbol": symbol,
+            "candidate": payload.get("compact_candidate_block", {}),
+            "policy": payload.get("compact_policy_block", {}),
+            "events": payload.get("compact_event_block", {}),
+            "quality": payload.get("compact_quality_block", {}),
+        }
+        user_content = _json.dumps(fallback_data, ensure_ascii=False)
+
+    messages_payload = {
+        "messages": [
+            {"role": "system", "content": _FINAL_RECOMMENDATION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        "max_tokens": 1200,
+        "temperature": 0.0,
+    }
+
+    t0 = time.monotonic()
+    try:
+        # Resolve provider info before the call for metadata
+        endpoint = get_model_endpoint()
+        from app.services.model_state import get_model_source
+        source_key = get_model_source()
+
+        raw_api_response = model_request(
+            messages_payload, timeout=120, retries=1,
+        )
+        latency_ms = int((time.monotonic() - t0) * 1000)
+    except Exception as exc:
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        logger.error(
+            "[real_model_executor] Model call failed for %s (%s) "
+            "after %dms: %s",
+            symbol, candidate_id, latency_ms, exc,
+        )
+        return {
+            "status": "error",
+            "raw_response": {},
+            "provider": "model_router",
+            "model_name": "unavailable",
+            "latency_ms": latency_ms,
+            "error": str(exc),
+            "metadata": {"source_key": "unknown"},
+        }
+
+    # Extract assistant content from OpenAI-compatible response
+    assistant_text = ""
+    choices = raw_api_response.get("choices", [])
+    if choices and isinstance(choices[0], dict):
+        message = choices[0].get("message", {})
+        if isinstance(message, dict):
+            assistant_text = message.get("content", "")
+
+    if not assistant_text:
+        logger.warning(
+            "[real_model_executor] Empty assistant content for %s (%s)",
+            symbol, candidate_id,
+        )
+        return {
+            "status": "error",
+            "raw_response": {},
+            "provider": source_key,
+            "model_name": raw_api_response.get("model", "unknown"),
+            "latency_ms": latency_ms,
+            "error": "empty_assistant_content",
+            "metadata": {"raw_keys": list(raw_api_response.keys())},
+        }
+
+    # Strip <think> tags if present (some models emit reasoning traces)
+    from common.model_sanitize import had_think_tags
+    if had_think_tags(assistant_text):
+        logger.info(
+            "[real_model_executor] Stripping <think> tags for %s", symbol,
+        )
+        import re as _re
+        assistant_text = _re.sub(
+            r"<think>.*?</think>", "", assistant_text, flags=_re.DOTALL,
+        ).strip()
+
+    # Parse JSON from model output
+    parsed, method = extract_and_repair_json(assistant_text)
+
+    if parsed is None or not isinstance(parsed, dict):
+        logger.warning(
+            "[real_model_executor] JSON parse failed for %s (%s), "
+            "method=%s, text[:200]=%s",
+            symbol, candidate_id, method, assistant_text[:200],
+        )
+        return {
+            "status": "error",
+            "raw_response": {"raw_text": assistant_text[:500]},
+            "provider": source_key,
+            "model_name": raw_api_response.get("model", "unknown"),
+            "latency_ms": latency_ms,
+            "error": "json_parse_failure",
+            "metadata": {"parse_method": method},
+        }
+
+    logger.info(
+        "[real_model_executor] Success for %s (%s) — decision=%s, "
+        "conviction=%s, parsed_via=%s, latency=%dms",
+        symbol, candidate_id,
+        parsed.get("decision"), parsed.get("conviction"),
+        method, latency_ms,
+    )
+
+    return {
+        "status": "success",
+        "raw_response": parsed,
+        "provider": source_key,
+        "model_name": raw_api_response.get("model", "unknown"),
+        "latency_ms": latency_ms,
+        "metadata": {
+            "parse_method": method,
+            "finish_reason": (
+                choices[0].get("finish_reason")
+                if choices else None
+            ),
+        },
+    }
+
+
+def stub_model_executor(
+    payload: dict[str, Any],
+    rendered_text: str | None,
+) -> dict[str, Any]:
+    """Deterministic stub executor for testing and fallback.
+
+    Returns a stub recommendation derived from the policy outcome
+    without calling any model backend.
     """
     candidate_id = payload.get("candidate_id")
     symbol = payload.get("symbol")
@@ -149,10 +354,14 @@ def default_model_executor(
             "sizing_guidance": "standard",
         },
         "provider": "stub",
-        "model_name": "default_model_executor",
+        "model_name": "stub_model_executor",
         "latency_ms": 0,
         "metadata": {"stub": True},
     }
+
+
+# Keep legacy alias for backward compatibility
+default_model_executor = stub_model_executor
 
 
 # =====================================================================
@@ -405,6 +614,47 @@ def _build_stage_summary(
         "summary_artifact_ref": None,  # filled after write
         "elapsed_ms": elapsed_ms,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# =====================================================================
+#  Execution queue progress tracker
+# =====================================================================
+
+# ProgressCallback signature:
+#   (progress: dict[str, Any]) -> None
+#
+# Called after each candidate completes.  The dict contains:
+#   current_candidate_id, current_candidate_symbol,
+#   completed_count, remaining_count, total_runnable,
+#   queue_position (1-based index of this candidate),
+#   candidate_status ("completed" | "failed" | "degraded"),
+#   elapsed_ms (for this candidate).
+ProgressCallback = Callable[[dict[str, Any]], None]
+
+
+def _build_candidate_progress(
+    *,
+    queue_position: int,
+    candidate_id: str,
+    symbol: str | None,
+    candidate_status: str,
+    completed_count: int,
+    remaining_count: int,
+    total_runnable: int,
+    elapsed_ms: int,
+) -> dict[str, Any]:
+    """Build a per-candidate progress snapshot for live tracking."""
+    return {
+        "queue_position": queue_position,
+        "current_candidate_id": candidate_id,
+        "current_candidate_symbol": symbol,
+        "candidate_status": candidate_status,
+        "completed_count": completed_count,
+        "remaining_count": remaining_count,
+        "total_runnable": total_runnable,
+        "elapsed_ms": elapsed_ms,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -738,10 +988,26 @@ def final_recommendation_handler(
 ) -> dict[str, Any]:
     """Final recommendation / model execution stage handler (Step 14).
 
-    Retrieves per-candidate prompt payloads (Step 13), executes the
-    final model through an injectable executor seam, normalizes
-    responses into stable per-candidate final recommendation
-    artifacts, and produces a stage summary.
+    Executes the final model for each candidate through a **sequential
+    execution queue** — strictly one candidate at a time, in
+    deterministic order.
+
+    Execution contract
+    ──────────────────
+    1. Load runnable payloads from Step 13.
+    2. For each runnable payload, in order:
+       a. Emit ``candidate_execution_started`` event.
+       b. Call the model executor (one active call at a time).
+       c. Wait for the response to complete.
+       d. Normalize and write the result artifact.
+       e. Update per-candidate progress tracking.
+       f. Emit ``candidate_execution_completed`` event.
+       g. Invoke ``progress_callback`` with live progress snapshot.
+    3. After all candidates: write stage summary, emit completion.
+
+    The executor seam (``model_executor`` kwarg) is the single
+    insertion point for future distributed routing (local machine,
+    model machine, Bedrock, etc.).
 
     Parameters
     ----------
@@ -755,13 +1021,15 @@ def final_recommendation_handler(
         event_callback : callable | None
             Optional event callback for structured events.
         model_executor : ModelExecutor | None
-            Injectable model execution function.
+            Injectable model execution function.  Defaults to
+            ``real_model_executor`` (live LLM calls).
         input_mode : str
             "structured" or "text" — how to pass to executor.
-        max_workers : int
-            Max parallel model executions (default 1).
         override_used : bool
             Whether an override routing mode is active.
+        progress_callback : ProgressCallback | None
+            Called after each candidate finishes with a progress
+            snapshot dict for live UI updates.
 
     Returns
     -------
@@ -776,11 +1044,13 @@ def final_recommendation_handler(
     event_callback = kwargs.get("event_callback")
     emit = _make_event_emitter(run, event_callback)
     executor: ModelExecutor = kwargs.get(
-        "model_executor", default_model_executor,
+        "model_executor", real_model_executor,
     )
     input_mode: str = kwargs.get("input_mode", _DEFAULT_INPUT_MODE)
-    max_workers: int = kwargs.get("max_workers", _DEFAULT_MAX_WORKERS)
     override_used: bool = kwargs.get("override_used", False)
+    progress_callback: ProgressCallback | None = kwargs.get(
+        "progress_callback",
+    )
 
     # ── 2. Emit final_model_started ─────────────────────────────
     if emit:
@@ -923,69 +1193,16 @@ def final_recommendation_handler(
             note="Zero runnable payloads",
         )
 
-    # ── 6. Execute model for each runnable candidate ────────────
-    execution_results: dict[str, dict[str, Any]] = {}
+    # ── 6. Sequential execution queue ─────────────────────────────
+    # Candidates are executed strictly one at a time, in the order
+    # they appear in the Step 13 summary.  The next model call does
+    # not begin until the previous one fully completes.
+    #
+    # This loop is the single insertion point for future distributed
+    # routing (local / model-machine / Bedrock).  To add routing,
+    # replace or wrap the `executor` callable — do not add
+    # concurrency here.
 
-    if max_workers <= 1:
-        # Sequential execution
-        for cid, pdata, part_id in runnable:
-            result = _execute_single_candidate(
-                candidate_id=cid,
-                payload_data=pdata,
-                payload_art_id=part_id,
-                run_id=run_id,
-                executor=executor,
-                input_mode=input_mode,
-                override_used=override_used,
-            )
-            execution_results[cid] = result
-    else:
-        # Bounded parallel execution
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {}
-            for cid, pdata, part_id in runnable:
-                fut = pool.submit(
-                    _execute_single_candidate,
-                    candidate_id=cid,
-                    payload_data=pdata,
-                    payload_art_id=part_id,
-                    run_id=run_id,
-                    executor=executor,
-                    input_mode=input_mode,
-                    override_used=override_used,
-                )
-                futures[fut] = cid
-
-            for fut in as_completed(futures):
-                cid = futures[fut]
-                try:
-                    execution_results[cid] = fut.result()
-                except Exception as exc:
-                    execution_results[cid] = {
-                        "normalized": None,
-                        "execution_record": _build_execution_record(
-                            candidate_id=cid,
-                            symbol=None,
-                            payload_status=None,
-                            execution_status=STATUS_FAILED,
-                            source_prompt_payload_ref=None,
-                            provider=None,
-                            model_name=None,
-                            input_mode_used=input_mode,
-                            override_used=override_used,
-                            output_artifact_ref=None,
-                            downstream_usable=False,
-                            degraded_reasons=[str(exc)],
-                            elapsed_ms=0,
-                            error_info={
-                                "code": "PARALLEL_EXECUTION_ERROR",
-                                "message": str(exc),
-                            },
-                        ),
-                        "raw_result": None,
-                    }
-
-    # ── 7. Persist artifacts and collect records ────────────────
     execution_records: list[dict[str, Any]] = []
     output_artifact_refs: dict[str, str] = {}
     provider_usage_counts: dict[str, int] = {}
@@ -995,15 +1212,59 @@ def final_recommendation_handler(
     total_degraded = 0
     total_failed = 0
 
-    # Process results in candidate_id order for determinism
-    for cid, pdata, part_id in runnable:
-        result = execution_results.get(cid)
-        if result is None:
-            total_failed += 1
-            continue
+    # Track which candidates have been submitted to prevent
+    # accidental re-submission in the same pass.
+    _submitted: set[str] = set()
 
+    for queue_position, (cid, pdata, part_id) in enumerate(
+        runnable, start=1,
+    ):
+        # ── Guard: prevent duplicate execution ──────────────────
+        if cid in _submitted:
+            logger.error(
+                "Duplicate candidate_id '%s' in runnable queue; "
+                "skipping to prevent double execution", cid,
+            )
+            continue
+        _submitted.add(cid)
+
+        symbol = pdata.get("symbol")
+
+        # ── 6a. Emit candidate_execution_started ────────────────
+        if emit:
+            emit(
+                "candidate_execution_started",
+                message=(
+                    f"Executing candidate {queue_position}/"
+                    f"{len(runnable)}: {symbol} ({cid})"
+                ),
+                metadata={
+                    "candidate_id": cid,
+                    "symbol": symbol,
+                    "queue_position": queue_position,
+                    "total_runnable": len(runnable),
+                },
+            )
+
+        # ── 6b. Execute model (one active call at a time) ───────
+        candidate_t0 = time.monotonic()
+        result = _execute_single_candidate(
+            candidate_id=cid,
+            payload_data=pdata,
+            payload_art_id=part_id,
+            run_id=run_id,
+            executor=executor,
+            input_mode=input_mode,
+            override_used=override_used,
+        )
+        candidate_elapsed_ms = int(
+            (time.monotonic() - candidate_t0) * 1000
+        )
+
+        # ── 6c. Normalize and persist artifact immediately ──────
         rec = result["execution_record"]
         normalized = result.get("normalized")
+        candidate_status = "failed"
 
         if normalized is not None:
             art_id = _write_recommendation_artifact(
@@ -1012,31 +1273,28 @@ def final_recommendation_handler(
             rec["output_artifact_ref"] = art_id
             output_artifact_refs[cid] = art_id
 
-            # Track status
             final_status = normalized.get("final_status")
             if final_status == STATUS_COMPLETED:
                 total_completed += 1
+                candidate_status = "completed"
             elif final_status == STATUS_COMPLETED_DEGRADED:
                 total_completed += 1
                 total_degraded += 1
+                candidate_status = "degraded"
             elif final_status == STATUS_FAILED:
                 total_failed += 1
+                candidate_status = "failed"
 
-            # Track provider usage
             provider = rec.get("provider")
             if provider:
                 provider_usage_counts[provider] = (
                     provider_usage_counts.get(provider, 0) + 1
                 )
-
-            # Track overrides
             if rec.get("override_used"):
-                override_label = "override"
-                override_usage_counts[override_label] = (
-                    override_usage_counts.get(override_label, 0) + 1
+                override_usage_counts["override"] = (
+                    override_usage_counts.get("override", 0) + 1
                 )
 
-            # Collect warnings from normalized output
             norm_warnings = normalized.get("warnings", [])
             for w in norm_warnings:
                 warnings.append(f"[{cid}] {w}")
@@ -1044,11 +1302,52 @@ def final_recommendation_handler(
             total_failed += 1
 
         execution_records.append(rec)
+        completed_so_far = total_completed + total_failed
+
+        # ── 6d. Emit candidate_execution_completed ──────────────
+        if emit:
+            emit(
+                "candidate_execution_completed",
+                message=(
+                    f"Candidate {queue_position}/{len(runnable)} "
+                    f"{candidate_status}: {symbol} ({cid}) "
+                    f"in {candidate_elapsed_ms}ms"
+                ),
+                metadata={
+                    "candidate_id": cid,
+                    "symbol": symbol,
+                    "queue_position": queue_position,
+                    "candidate_status": candidate_status,
+                    "completed_count": completed_so_far,
+                    "remaining_count": len(runnable) - queue_position,
+                    "elapsed_ms": candidate_elapsed_ms,
+                },
+            )
+
+        # ── 6e. Invoke progress callback for live UI updates ────
+        if progress_callback is not None:
+            progress = _build_candidate_progress(
+                queue_position=queue_position,
+                candidate_id=cid,
+                symbol=symbol,
+                candidate_status=candidate_status,
+                completed_count=completed_so_far,
+                remaining_count=len(runnable) - queue_position,
+                total_runnable=len(runnable),
+                elapsed_ms=candidate_elapsed_ms,
+            )
+            try:
+                progress_callback(progress)
+            except Exception:
+                logger.warning(
+                    "progress_callback raised for candidate %s",
+                    cid, exc_info=True,
+                )
 
     # Add skipped records to execution_records
     execution_records.extend(skipped_records)
 
-    # ── 8. Compute stage status ─────────────────────────────────
+    # ── 7. Compute stage status ─────────────────────────────────
     if total_failed > 0 and total_completed == 0:
         stage_status = "failed"
     elif total_failed > 0 or total_degraded > 0:
@@ -1056,7 +1355,7 @@ def final_recommendation_handler(
     else:
         stage_status = "success"
 
-    # ── 9. Build and write stage summary ────────────────────────
+    # ── 8. Build and write stage summary ────────────────────────
     elapsed_ms = int((time.monotonic() - t0) * 1000)
 
     summary = _build_stage_summary(
@@ -1079,7 +1378,7 @@ def final_recommendation_handler(
     )
     summary["summary_artifact_ref"] = summary_art_id
 
-    # ── 10. Handle all-failed case ──────────────────────────────
+    # ── 9. Handle all-failed case ───────────────────────────────
     if stage_status == "failed":
         if emit:
             emit(
@@ -1117,7 +1416,7 @@ def final_recommendation_handler(
             ),
         }
 
-    # ── 11. Emit success / degraded ─────────────────────────────
+    # ── 10. Emit success / degraded ─────────────────────────────
     if emit:
         emit(
             "final_model_completed",

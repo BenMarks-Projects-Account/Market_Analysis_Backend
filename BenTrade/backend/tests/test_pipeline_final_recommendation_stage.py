@@ -20,7 +20,9 @@ Covers:
   - Injectable executor behavior
   - Input mode selection (structured, text)
   - Override metadata capture
-  - Bounded parallel execution
+  - Sequential execution queue (order, one-active, duplicates, progress)
+  - Incremental artifact writing (per-candidate, not batched)
+  - Per-candidate event emission (started/completed ordering)
   - Artifact creation and lineage
   - Stage summary contents
   - Provider/model metadata capture
@@ -70,6 +72,20 @@ from app.services.pipeline_orchestrator import (
 # =====================================================================
 #  Test helpers
 # =====================================================================
+
+@pytest.fixture(autouse=True)
+def _use_stub_executor(monkeypatch):
+    """Default to stub executor in tests — no LLM server required.
+
+    The live handler defaults to ``real_model_executor``.  This fixture
+    replaces the module-level ``real_model_executor`` with the stub so
+    that tests not passing an explicit ``model_executor`` kwarg do not
+    attempt real HTTP calls.  Tests that supply their own executor
+    (``_custom_executor``, ``_failing_executor``, etc.) are unaffected.
+    """
+    import app.services.pipeline_final_recommendation_stage as mod
+    monkeypatch.setattr(mod, "real_model_executor", mod.stub_model_executor)
+
 
 def _make_run_and_store(run_id="test-fm-001"):
     """Create a fresh run+store with upstream stages completed.
@@ -1079,27 +1095,27 @@ class TestOverrideMetadata:
 #  TestBoundedParallelExecution
 # =====================================================================
 
-class TestBoundedParallelExecution:
-    def test_parallel_produces_same_results(self):
+class TestSequentialExecutionQueue:
+    """Verify the sequential execution queue contract."""
+
+    def test_sequential_produces_same_results(self):
+        """Three candidates run one-at-a-time and all complete."""
         run, store = _make_run_and_store()
         rid = run["run_id"]
         _populate_prompt_payloads(store, rid, ["c1", "c2", "c3"])
         result = final_recommendation_handler(
             run, store, "final_model_decision",
-            max_workers=3,
         )
         assert result["outcome"] == "completed"
         assert result["summary_counts"]["total_completed"] == 3
 
-    def test_parallel_with_failure(self):
+    def test_sequential_with_failure(self):
+        """One failure does not prevent remaining candidates."""
         run, store = _make_run_and_store()
         rid = run["run_id"]
         _populate_prompt_payloads(store, rid, ["c1", "c2"])
 
-        call_count = {"n": 0}
-
-        def _thread_safe_fail_first(payload, text):
-            import threading
+        def _fail_first(payload, text):
             cid = payload.get("candidate_id")
             if cid == "c1":
                 raise RuntimeError("c1 fails")
@@ -1107,12 +1123,172 @@ class TestBoundedParallelExecution:
 
         result = final_recommendation_handler(
             run, store, "final_model_decision",
-            model_executor=_thread_safe_fail_first,
-            max_workers=2,
+            model_executor=_fail_first,
         )
         assert result["outcome"] == "completed"
         assert result["summary_counts"]["total_completed"] == 1
         assert result["summary_counts"]["total_failed"] == 1
+
+    def test_strictly_sequential_order(self):
+        """Candidates execute in the order they appear in the queue."""
+        run, store = _make_run_and_store()
+        rid = run["run_id"]
+        ids = ["cA", "cB", "cC"]
+        _populate_prompt_payloads(store, rid, ids)
+
+        execution_order = []
+
+        def _tracking_executor(payload, text):
+            execution_order.append(payload.get("candidate_id"))
+            return default_model_executor(payload, text)
+
+        final_recommendation_handler(
+            run, store, "final_model_decision",
+            model_executor=_tracking_executor,
+        )
+        assert execution_order == ids
+
+    def test_one_active_call_at_a_time(self):
+        """Only one executor call is active at any moment."""
+        import time as _time
+
+        run, store = _make_run_and_store()
+        rid = run["run_id"]
+        _populate_prompt_payloads(store, rid, ["c1", "c2", "c3"])
+
+        active_count = {"current": 0, "max_seen": 0}
+
+        def _concurrency_detector(payload, text):
+            active_count["current"] += 1
+            if active_count["current"] > active_count["max_seen"]:
+                active_count["max_seen"] = active_count["current"]
+            _time.sleep(0.01)  # small delay to expose concurrency
+            result = default_model_executor(payload, text)
+            active_count["current"] -= 1
+            return result
+
+        final_recommendation_handler(
+            run, store, "final_model_decision",
+            model_executor=_concurrency_detector,
+        )
+        assert active_count["max_seen"] == 1, (
+            f"Expected max 1 active call, saw {active_count['max_seen']}"
+        )
+
+    def test_duplicate_candidate_id_prevented(self):
+        """Duplicate candidate IDs in the queue are skipped."""
+        run, store = _make_run_and_store()
+        rid = run["run_id"]
+        # Write summary with duplicated c1
+        _write_prompt_payload_summary(store, rid, ["c1", "c1", "c2"])
+        _write_prompt_payload(store, rid, "c1")
+        _write_prompt_payload(store, rid, "c2")
+
+        call_ids = []
+
+        def _tracking(payload, text):
+            call_ids.append(payload.get("candidate_id"))
+            return default_model_executor(payload, text)
+
+        result = final_recommendation_handler(
+            run, store, "final_model_decision",
+            model_executor=_tracking,
+        )
+        # c1 should only be executed once
+        assert call_ids.count("c1") == 1
+        assert result["outcome"] == "completed"
+
+    def test_per_candidate_progress_callback(self):
+        """progress_callback receives a snapshot after each candidate."""
+        run, store = _make_run_and_store()
+        rid = run["run_id"]
+        _populate_prompt_payloads(store, rid, ["c1", "c2"])
+
+        progress_snapshots = []
+
+        def _progress_cb(progress):
+            progress_snapshots.append(progress)
+
+        final_recommendation_handler(
+            run, store, "final_model_decision",
+            progress_callback=_progress_cb,
+        )
+        assert len(progress_snapshots) == 2
+
+        # First candidate progress
+        p1 = progress_snapshots[0]
+        assert p1["queue_position"] == 1
+        assert p1["current_candidate_id"] == "c1"
+        assert p1["completed_count"] == 1
+        assert p1["remaining_count"] == 1
+        assert p1["total_runnable"] == 2
+
+        # Second candidate progress
+        p2 = progress_snapshots[1]
+        assert p2["queue_position"] == 2
+        assert p2["current_candidate_id"] == "c2"
+        assert p2["completed_count"] == 2
+        assert p2["remaining_count"] == 0
+
+    def test_incremental_artifact_writing(self):
+        """Each candidate's artifact is written immediately, not batched."""
+        run, store = _make_run_and_store()
+        rid = run["run_id"]
+        _populate_prompt_payloads(store, rid, ["c1", "c2", "c3"])
+
+        artifacts_after_each = []
+
+        def _artifact_checking_executor(payload, text):
+            # Check how many final_* artifacts exist RIGHT NOW
+            # using the artifact_index which keys by "stage::artifact_key"
+            cid = payload.get("candidate_id")
+            index = store.get("artifact_index", {})
+            count = sum(
+                1 for key in index
+                if key.startswith("final_model_decision::final_c")
+            )
+            artifacts_after_each.append(
+                {"before_cid": cid, "existing_count": count}
+            )
+            return default_model_executor(payload, text)
+
+        final_recommendation_handler(
+            run, store, "final_model_decision",
+            model_executor=_artifact_checking_executor,
+        )
+        # Before executing c1, 0 artifacts; before c2, 1; before c3, 2
+        assert artifacts_after_each[0]["existing_count"] == 0
+        assert artifacts_after_each[1]["existing_count"] == 1
+        assert artifacts_after_each[2]["existing_count"] == 2
+
+    def test_candidate_events_emitted(self):
+        """Started/completed events emitted for each candidate."""
+        run, store = _make_run_and_store()
+        rid = run["run_id"]
+        _populate_prompt_payloads(store, rid, ["c1", "c2"])
+
+        events = []
+        final_recommendation_handler(
+            run, store, "final_model_decision",
+            event_callback=lambda e: events.append(e),
+        )
+        types = [e["event_type"] for e in events]
+        assert types.count("candidate_execution_started") == 2
+        assert types.count("candidate_execution_completed") == 2
+
+        # Verify ordering: started before completed for each
+        started_indices = [
+            i for i, e in enumerate(events)
+            if e["event_type"] == "candidate_execution_started"
+        ]
+        completed_indices = [
+            i for i, e in enumerate(events)
+            if e["event_type"] == "candidate_execution_completed"
+        ]
+        # First candidate started before first completed
+        assert started_indices[0] < completed_indices[0]
+        # Second candidate started after first completed (sequential!)
+        assert started_indices[1] > completed_indices[0]
 
 
 # =====================================================================
@@ -1204,6 +1380,7 @@ class TestStageSummary:
         _populate_prompt_payloads(store, rid, ["c1"])
         result = final_recommendation_handler(
             run, store, "final_model_decision",
+            model_executor=default_model_executor,
         )
         summary = result["metadata"]["stage_summary"]
         assert "stub" in summary["provider_usage_counts"]

@@ -57,11 +57,12 @@ _STAGE_KEY = "market_model_analysis"
 _SOURCE_STAGE_KEY = "market_data"
 
 # ── Concurrency ─────────────────────────────────────────────────
-DEFAULT_MODEL_MAX_WORKERS: int = 2
+DEFAULT_MODEL_MAX_WORKERS: int = 1
 """Default concurrency limit for parallel model-analysis calls.
 
-Set conservatively — model endpoints are often single-capacity
-(local LLM or rate-limited API).  Override via kwargs['max_workers'].
+Set to 1 — local LLM endpoints are single-capacity and share context
+window memory across concurrent requests, leading to "Context size
+exceeded" errors when parallelized.  Override via kwargs['max_workers'].
 """
 
 # ── Analysis status vocabulary ──────────────────────────────────
@@ -332,7 +333,17 @@ def _default_model_executor(
             engine_result=engine_data,
         ),
         "news_sentiment": lambda: analyze_news_sentiment(
-            engine_result=engine_data,
+            # items and macro_context live under detail_sections after
+            # normalize_engine_output(); fall back to top-level keys for
+            # callers that pass raw (un-normalized) engine payloads.
+            items=(
+                engine_data.get("detail_sections", {}).get("items")
+                or engine_data.get("items", [])
+            ),
+            macro_context=(
+                engine_data.get("detail_sections", {}).get("macro_context")
+                or engine_data.get("macro_context", {})
+            ),
         ),
     }
 
