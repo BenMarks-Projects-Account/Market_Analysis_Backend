@@ -111,10 +111,14 @@ These are downstream concerns.
 V2 scanners execute in 6 ordered phases. Each phase has a single responsibility.
 
 ```
-Phase A ── Universe & Chain Loading
+Phase A ── Universe & Chain Loading (data narrowing)
         │  Load option chain from Tradier.
-        │  Load underlying quote.
+        │  Normalize raw contracts → V2OptionContract list.
         │  Filter expirations to structural DTE window.
+        │  Narrow strikes by distance / moneyness / option-type.
+        │  Deduplicate and group into V2ExpiryBucket.
+        │  Produce V2NarrowedUniverse with diagnostics.
+        │  (Multi-expiry mode for calendars/diagonals.)
         ▼
 Phase B ── Candidate Construction
         │  Family-specific: build all valid leg combos.
@@ -167,6 +171,20 @@ BenTrade/backend/app/services/scanner_v2/
 ├── phases.py                   # Shared phase implementations (C, D, E, F)
 ├── registry.py                 # Family registry + metadata
 ├── migration.py                # V2/legacy routing, side-by-side dispatch
+├── data/                       # Shared data-narrowing framework (Phase A)
+│   ├── __init__.py             # Public API: narrow_chain, V2NarrowedUniverse, etc.
+│   ├── contracts.py            # V2NarrowingRequest, V2OptionContract, V2ExpiryBucket, etc.
+│   ├── chain.py                # Chain normalization: raw Tradier → V2OptionContract
+│   ├── expiry.py               # Expiry narrowing: DTE windows, multi-expiry
+│   ├── strikes.py              # Strike-window narrowing: distance, moneyness, dedup
+│   └── narrow.py               # Orchestrator: narrow_chain() full pipeline
+├── comparison/                 # Side-by-side comparison harness (Prompt 2)
+│   ├── __init__.py
+│   ├── contracts.py
+│   ├── equivalence.py
+│   ├── harness.py
+│   ├── snapshots.py
+│   └── fixtures.py
 └── families/
     ├── __init__.py
     ├── vertical_spreads.py     # Phase B for put/call credit & debit spreads
@@ -182,8 +200,10 @@ BenTrade/backend/app/services/scanner_v2/
 | `contracts.py` | All V2 data shapes (candidate, diagnostics, legs, math). No logic. |
 | `base_scanner.py` | The 6-phase runner. Calls family-specific Phase B, then shared C→F. |
 | `phases.py` | Shared implementations of Phase C (structural), D (quote/liquidity), E (math), F (normalization). |
+| `data/` | Shared data-narrowing framework (Phase A): chain normalization, expiry narrowing, strike-window narrowing, underlying snapshot, diagnostics. Produces `V2NarrowedUniverse`. |
 | `registry.py` | Maps `strategy_id` → family module + metadata. Single source of truth for which families exist. |
 | `migration.py` | Routing seam: decides whether a scanner_key runs legacy or V2. Enables side-by-side comparison. |
+| `comparison/` | Side-by-side harness: frozen snapshots, equivalence matching, structured diff reports. |
 | `families/*.py` | Family-specific Phase B (candidate construction) and any family-specific structural validation rules. |
 
 ---
@@ -321,18 +341,191 @@ These are the points where later prompts plug in:
 
 | Seam | Module | Later prompt |
 |------|--------|-------------|
-| Comparison harness | `migration.py` | Prompt 2 |
-| Vertical spreads family | `families/vertical_spreads.py` | Prompt 3 |
-| Iron condors family | `families/iron_condors.py` | Prompt 4 |
-| Butterflies family | `families/butterflies.py` | Prompt 5 |
-| Calendars family | `families/calendars.py` | Prompt 6 |
+| Comparison harness | `comparison/` | Prompt 2 ✅ |
+| Data narrowing layer | `data/` | Prompt 3 ✅ |
+| Vertical spreads family | `families/vertical_spreads.py` | Prompt 4 |
+| Iron condors family | `families/iron_condors.py` | Prompt 5 |
+| Butterflies family | `families/butterflies.py` | Prompt 6 |
+| Calendars family | `families/calendars.py` | Prompt 7 |
 | Scanner stage integration | `pipeline_scanner_stage.py` | Prompt 2 (routing seam) |
 | Downstream candidate selection | `pipeline_candidate_selection_stage.py` | V2-aware selection |
 | Data loading helpers | `base_scanner.py` | Shared Tradier chain loading |
 
 ---
 
-## 9. Cross-References
+## 9. Data Narrowing Framework (Prompt 3)
+
+The data narrowing layer centralizes all chain loading, normalization, expiry narrowing,
+and strike-window narrowing into a shared module (`scanner_v2/data/`).  Family builders
+consume a `V2NarrowedUniverse` instead of raw chain dicts and loose expiration lists.
+
+### Purpose
+
+- **Eliminate ~200 lines of duplicated chain-narrowing code** across 4 legacy families.
+- **Normalize Tradier data once** into typed `V2OptionContract` objects.
+- **Produce full diagnostics** for every narrowing run (what was loaded, kept, dropped, why).
+- **Support multi-expiry families** (calendars/diagonals) with near/far DTE windows.
+
+### Pipeline stages
+
+```
+Raw Tradier chain (dict)
+         │
+    1. normalize_chain()     → list[V2OptionContract]
+         │
+    2. narrow_expirations()  → filtered by DTE window
+         │
+    3. narrow_strikes()      → filtered by distance/moneyness/type
+         │                     grouped into V2ExpiryBucket
+         │
+    4. Package               → V2NarrowedUniverse
+                               (underlying + buckets + diagnostics + request)
+```
+
+### Key contracts
+
+| Type | Role |
+|------|------|
+| `V2NarrowingRequest` | Parameters: DTE window, option types, distance bounds, moneyness, multi-expiry. |
+| `V2OptionContract` | Normalized option contract (strike, bid/ask/mid, greeks, OI, volume, quality flags). |
+| `V2StrikeEntry` | One strike within an expiry bucket (deduplicated). |
+| `V2ExpiryBucket` | All narrowed contracts for one expiration date (with helper methods). |
+| `V2UnderlyingSnapshot` | Normalized underlying price and context. |
+| `V2NarrowedUniverse` | Complete pipeline output for family builders. |
+| `V2NarrowingDiagnostics` | Full trace: loaded/kept/dropped counts, reason codes, quality tallies. |
+
+### How families use it
+
+```python
+class VerticalSpreadsV2Scanner(BaseV2Scanner):
+
+    def build_narrowing_request(self, *, context=None):
+        return V2NarrowingRequest(
+            dte_min=self.dte_min,
+            dte_max=self.dte_max,
+            option_types=["put"],       # if scanning put credit spreads
+            distance_min_pct=0.01,
+            distance_max_pct=0.12,
+            moneyness="otm",
+        )
+
+    def construct_candidates(self, *, narrowed_universe, **kw):
+        for bucket in narrowed_universe.expiry_buckets.values():
+            strike_map = bucket.get_strike_map()
+            # Build all (short, long) pairs from the narrowed strikes...
+```
+
+### Narrowing ≠ rejection
+
+Narrowing is "what's worth constructing from?" — it reduces the search space for
+family builders.  It is NOT trade acceptance.  Candidates rejected at scanner-time
+are rejected in Phases C–F with explicit reason codes.
+
+---
+
+## 10. Comparison Harness (Prompt 2)
+
+The comparison harness enables side-by-side execution of legacy and V2 scanners on identical market data, producing structured diff reports.
+
+### Philosophy
+
+- **Legacy is reference, not truth.**  Differences are exposed, not auto-failed.
+- **Same input, always.**  Both systems see the identical `ComparisonSnapshot` (frozen chain + underlying price).
+- **Family-by-family.**  Compare one scanner_key at a time — no need to run the entire universe.
+- **Trust over parity.**  The harness answers "is V2 more trustworthy?" not "does V2 match legacy exactly?"
+
+### Architecture
+
+```
+ComparisonSnapshot (frozen input)
+         │
+    ┌────┴────┐
+    ▼         ▼
+ Legacy     V2
+ Runner    Runner
+    │         │
+    ▼         ▼
+legacy_result  v2_result
+    │         │
+    └────┬────┘
+         ▼
+  match_candidates()        ← equivalence.py
+         │
+         ▼
+  compare_from_results()    ← harness.py
+         │
+         ▼
+  ComparisonReport
+```
+
+### Candidate Equivalence
+
+Candidates are matched by a **structural comparison key**:
+
+```
+"{symbol}|{strategy_id}|{expiration}|{sorted_strikes}"
+```
+
+Examples:
+- `SPY|put_credit_spread|2026-03-20|585/590`
+- `SPY|iron_condor|2026-04-17|500/510/530/540`
+
+This works because two candidates with the same underlying, strategy, expiration, and strikes are structurally equivalent regardless of which system built them or what IDs they assigned.
+
+### Comparison Report Fields
+
+| Category | Fields |
+|----------|--------|
+| Identity | comparison_id, scanner_family, scanner_key, snapshot_id |
+| Counts | legacy/v2 total_constructed/passed/rejected, overlap_count, legacy_only_count, v2_only_count |
+| Matches | list of CandidateMatch (matched / legacy_only / v2_only) |
+| Rejections | legacy_rejection_counts, v2_rejection_counts |
+| Phase trace | legacy_stage_counts, v2_phase_counts |
+| Trust signals | v2_caught_broken, v2_new_valid, v2_diagnostics_richer_count |
+| Metrics | per-metric mean/max abs_diff and pct_diff across matched candidates |
+| Summary | anomalies, conclusions |
+
+### Snapshot Fixtures
+
+Snapshots freeze market data for deterministic comparison:
+
+| Fixture | Scenario |
+|---------|----------|
+| `fixture_spy_golden_put_spread` | 4-put chain, 2 valid credit spreads, all clean |
+| `fixture_spy_bad_liquidity` | Missing OI, zero volume |
+| `fixture_spy_wide_spreads` | Wide bid-ask, one inverted quote |
+| `fixture_spy_empty_chain` | No options |
+| `fixture_spy_golden_iron_condor` | 2 puts + 2 calls for valid IC |
+
+### Module Layout
+
+```
+scanner_v2/comparison/
+├── __init__.py          # Public API
+├── contracts.py         # ComparisonReport, CandidateMatch, MetricDelta, etc.
+├── equivalence.py       # build_comparison_key, match_candidates
+├── harness.py           # compare_scanner_family, compare_from_results
+├── snapshots.py         # build_snapshot, load_snapshot, save_snapshot
+└── fixtures.py          # Pre-built test fixtures
+```
+
+### Usage in Family Cutover
+
+When implementing a V2 family (e.g. vertical spreads in Prompt 3+):
+
+1. Use `fixture_spy_golden_put_spread()` as frozen input.
+2. Inject a real legacy runner and the new V2 runner.
+3. Call `compare_scanner_family()`.
+4. Inspect the `ComparisonReport` for:
+   - Overlap percentage (structural equivalence)
+   - V2 caught broken candidates legacy accepted?
+   - V2 surfaced valid candidates legacy over-filtered?
+   - Metric deltas within tolerance?
+5. When satisfied, flip `_SCANNER_VERSION_MAP["put_credit_spread"] = "v2"`.
+
+---
+
+## 10. Cross-References
 
 - Legacy scanner contract: [docs/standards/scanner-contract.md](../../standards/scanner-contract.md)
 - Rejection taxonomy (legacy codes): [docs/standards/rejection-taxonomy.md](../../standards/rejection-taxonomy.md)
@@ -340,3 +533,4 @@ These are the points where later prompts plug in:
 - Data quality rules: [docs/standards/data-quality-rules.md](../../standards/data-quality-rules.md)
 - V2 contracts (code): `BenTrade/backend/app/services/scanner_v2/contracts.py`
 - V2 migration routing: `BenTrade/backend/app/services/scanner_v2/migration.py`
+- V2 comparison harness: `BenTrade/backend/app/services/scanner_v2/comparison/`

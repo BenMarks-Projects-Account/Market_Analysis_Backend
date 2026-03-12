@@ -29,6 +29,21 @@ from app.services.scanner_v2.contracts import (
     V2Leg,
     V2RecomputedMath,
 )
+from app.services.scanner_v2.diagnostics.builder import (
+    DiagnosticsBuilder,
+    collect_pass_reasons,
+)
+from app.services.scanner_v2.diagnostics.reason_codes import (
+    REJECT_INVERTED_QUOTE,
+    REJECT_MISSING_OI,
+    REJECT_MISSING_QUOTE,
+    REJECT_MISSING_VOLUME,
+    REJECT_ZERO_MID,
+)
+from app.services.scanner_v2.validation.math_checks import run_math_verification
+from app.services.scanner_v2.validation.structural import (
+    run_shared_structural_checks,
+)
 
 _log = logging.getLogger("bentrade.scanner_v2.phases")
 
@@ -41,135 +56,41 @@ def phase_c_structural_validation(
     candidates: list[V2Candidate],
     *,
     family_checks: Any | None = None,
+    expected_leg_count: int | tuple[int, ...] | None = None,
+    require_same_expiry: bool = True,
 ) -> list[V2Candidate]:
     """Run shared + family-specific structural checks.
 
-    Shared checks (all families):
-    - valid_leg_count: at least 1 leg exists.
-    - legs_have_strikes: every leg has a finite strike.
-    - legs_have_option_type: every leg has "put" or "call".
-    - legs_have_sides: every leg has "long" or "short".
-    - valid_width: width > 0 (for families that have width).
-    - non_degenerate_pricing: credit < width (credit strategies) or
-      debit < width (debit strategies).
-
-    Family-specific checks are appended by calling
-    ``family_checks(candidate) → list[V2CheckResult]`` if provided.
+    Delegates to the validation.structural module for composable checks.
+    Family-specific checks can be provided via ``family_checks``
+    callback (returns ``list[V2CheckResult]``) or by passing a
+    ``V2ValidationSummary``-returning callable.
 
     Rejected candidates get reason codes added to
     ``candidate.diagnostics.reject_reasons``.
     """
     for cand in candidates:
-        checks: list[V2CheckResult] = []
+        builder = DiagnosticsBuilder(source_phase="C")
 
-        # ── Leg count ───────────────────────────────────────────
-        if not cand.legs:
-            checks.append(V2CheckResult("valid_leg_count", False, "no legs"))
-            cand.diagnostics.reject_reasons.append("v2_malformed_legs")
-        else:
-            checks.append(V2CheckResult("valid_leg_count", True,
-                                        f"{len(cand.legs)} legs"))
+        # Run shared structural checks via validation framework
+        summary = run_shared_structural_checks(
+            cand,
+            expected_leg_count=expected_leg_count,
+            require_same_expiry=require_same_expiry,
+        )
 
-        # ── Strikes present ─────────────────────────────────────
-        missing_strikes = [
-            leg.index for leg in cand.legs
-            if not _is_finite(leg.strike)
-        ]
-        if missing_strikes:
-            checks.append(V2CheckResult("legs_have_strikes", False,
-                                        f"missing on legs {missing_strikes}"))
-            if "v2_malformed_legs" not in cand.diagnostics.reject_reasons:
-                cand.diagnostics.reject_reasons.append("v2_malformed_legs")
-        elif cand.legs:
-            checks.append(V2CheckResult("legs_have_strikes", True, ""))
+        # Import fail codes and check results via builder
+        builder.merge_validation_summary(summary, check_section="structural")
 
-        # ── Option type present ─────────────────────────────────
-        bad_type = [
-            leg.index for leg in cand.legs
-            if leg.option_type not in ("put", "call")
-        ]
-        if bad_type:
-            checks.append(V2CheckResult("legs_have_option_type", False,
-                                        f"invalid on legs {bad_type}"))
-            if "v2_malformed_legs" not in cand.diagnostics.reject_reasons:
-                cand.diagnostics.reject_reasons.append("v2_malformed_legs")
-        elif cand.legs:
-            checks.append(V2CheckResult("legs_have_option_type", True, ""))
-
-        # ── Side present ────────────────────────────────────────
-        bad_side = [
-            leg.index for leg in cand.legs
-            if leg.side not in ("long", "short")
-        ]
-        if bad_side:
-            checks.append(V2CheckResult("legs_have_sides", False,
-                                        f"invalid on legs {bad_side}"))
-            if "v2_malformed_legs" not in cand.diagnostics.reject_reasons:
-                cand.diagnostics.reject_reasons.append("v2_malformed_legs")
-        elif cand.legs:
-            checks.append(V2CheckResult("legs_have_sides", True, ""))
-
-        # ── Expiration consistency (non-calendar families) ──────
-        if cand.expiration_back is None and len(cand.legs) >= 2:
-            expirations = {leg.expiration for leg in cand.legs}
-            if len(expirations) > 1:
-                checks.append(V2CheckResult(
-                    "matched_expiry", False,
-                    f"found {len(expirations)} distinct expirations",
-                ))
-                cand.diagnostics.reject_reasons.append("v2_mismatched_expiry")
-            else:
-                checks.append(V2CheckResult("matched_expiry", True, ""))
-
-        # ── Width check (if applicable) ─────────────────────────
-        if cand.math.width is not None:
-            if cand.math.width <= 0:
-                checks.append(V2CheckResult("valid_width", False,
-                                            f"width={cand.math.width}"))
-                cand.diagnostics.reject_reasons.append("v2_invalid_width")
-            else:
-                checks.append(V2CheckResult("valid_width", True,
-                                            f"width={cand.math.width}"))
-
-        # ── Degenerate pricing ──────────────────────────────────
-        if cand.math.width is not None and cand.math.width > 0:
-            if cand.math.net_credit is not None:
-                if cand.math.net_credit <= 0:
-                    checks.append(V2CheckResult(
-                        "non_positive_credit", False,
-                        f"credit={cand.math.net_credit}",
-                    ))
-                    cand.diagnostics.reject_reasons.append("v2_non_positive_credit")
-                elif cand.math.net_credit >= cand.math.width:
-                    checks.append(V2CheckResult(
-                        "non_degenerate_pricing", False,
-                        f"credit={cand.math.net_credit} >= width={cand.math.width}",
-                    ))
-                    cand.diagnostics.reject_reasons.append("v2_impossible_pricing")
-                else:
-                    checks.append(V2CheckResult("non_degenerate_pricing", True, ""))
-            elif cand.math.net_debit is not None:
-                if cand.math.net_debit <= 0:
-                    checks.append(V2CheckResult(
-                        "non_positive_debit", False,
-                        f"debit={cand.math.net_debit}",
-                    ))
-                    cand.diagnostics.reject_reasons.append("v2_non_positive_credit")
-                elif cand.math.net_debit >= cand.math.width:
-                    checks.append(V2CheckResult(
-                        "non_degenerate_pricing", False,
-                        f"debit={cand.math.net_debit} >= width={cand.math.width}",
-                    ))
-                    cand.diagnostics.reject_reasons.append("v2_impossible_pricing")
-                else:
-                    checks.append(V2CheckResult("non_degenerate_pricing", True, ""))
-
-        # ── Family-specific checks ──────────────────────────────
+        # Family-specific checks (legacy callback interface)
         if family_checks is not None:
             extra = family_checks(cand)
-            checks.extend(extra)
+            if "structural" in builder._check_results:
+                builder._check_results["structural"].extend(extra)
+            else:
+                builder.set_check_results("structural", extra)
 
-        cand.diagnostics.structural_checks = checks
+        builder.apply(cand.diagnostics)
 
     return candidates
 
@@ -200,6 +121,7 @@ def phase_d_quote_liquidity_sanity(
             # Already rejected in Phase C — skip to avoid stacking
             continue
 
+        builder = DiagnosticsBuilder(source_phase="D")
         q_checks: list[V2CheckResult] = []
         l_checks: list[V2CheckResult] = []
 
@@ -211,8 +133,12 @@ def phase_d_quote_liquidity_sanity(
                 q_checks.append(V2CheckResult(
                     "quote_present", False, f"{prefix}: bid={leg.bid} ask={leg.ask}",
                 ))
-                if "v2_missing_quote" not in cand.diagnostics.reject_reasons:
-                    cand.diagnostics.reject_reasons.append("v2_missing_quote")
+                builder.add_reject(
+                    REJECT_MISSING_QUOTE,
+                    source_check="quote_present",
+                    message=f"{prefix}: bid={leg.bid} ask={leg.ask}",
+                    leg_index=leg.index,
+                )
                 continue  # Skip further quote checks on this leg
 
             # ── Inverted ────────────────────────────────────────
@@ -221,8 +147,12 @@ def phase_d_quote_liquidity_sanity(
                     "not_inverted", False,
                     f"{prefix}: ask={leg.ask} < bid={leg.bid}",
                 ))
-                if "v2_inverted_quote" not in cand.diagnostics.reject_reasons:
-                    cand.diagnostics.reject_reasons.append("v2_inverted_quote")
+                builder.add_reject(
+                    REJECT_INVERTED_QUOTE,
+                    source_check="not_inverted",
+                    message=f"{prefix}: ask={leg.ask} < bid={leg.bid}",
+                    leg_index=leg.index,
+                )
             else:
                 q_checks.append(V2CheckResult("not_inverted", True, prefix))
 
@@ -232,8 +162,12 @@ def phase_d_quote_liquidity_sanity(
                 q_checks.append(V2CheckResult(
                     "positive_mid", False, f"{prefix}: mid={mid}",
                 ))
-                if "v2_zero_mid" not in cand.diagnostics.reject_reasons:
-                    cand.diagnostics.reject_reasons.append("v2_zero_mid")
+                builder.add_reject(
+                    REJECT_ZERO_MID,
+                    source_check="positive_mid",
+                    message=f"{prefix}: mid={mid}",
+                    leg_index=leg.index,
+                )
             else:
                 q_checks.append(V2CheckResult("positive_mid", True, prefix))
 
@@ -242,8 +176,12 @@ def phase_d_quote_liquidity_sanity(
                 l_checks.append(V2CheckResult(
                     "oi_present", False, f"{prefix}: OI=None",
                 ))
-                if "v2_missing_oi" not in cand.diagnostics.reject_reasons:
-                    cand.diagnostics.reject_reasons.append("v2_missing_oi")
+                builder.add_reject(
+                    REJECT_MISSING_OI,
+                    source_check="oi_present",
+                    message=f"{prefix}: OI=None",
+                    leg_index=leg.index,
+                )
             else:
                 l_checks.append(V2CheckResult("oi_present", True, prefix))
 
@@ -252,13 +190,18 @@ def phase_d_quote_liquidity_sanity(
                 l_checks.append(V2CheckResult(
                     "volume_present", False, f"{prefix}: volume=None",
                 ))
-                if "v2_missing_volume" not in cand.diagnostics.reject_reasons:
-                    cand.diagnostics.reject_reasons.append("v2_missing_volume")
+                builder.add_reject(
+                    REJECT_MISSING_VOLUME,
+                    source_check="volume_present",
+                    message=f"{prefix}: volume=None",
+                    leg_index=leg.index,
+                )
             else:
                 l_checks.append(V2CheckResult("volume_present", True, prefix))
 
-        cand.diagnostics.quote_checks = q_checks
-        cand.diagnostics.liquidity_checks = l_checks
+        builder.set_check_results("quote", q_checks)
+        builder.set_check_results("liquidity", l_checks)
+        builder.apply(cand.diagnostics)
 
     return candidates
 
@@ -271,83 +214,40 @@ def phase_e_recomputed_math(
     candidates: list[V2Candidate],
     *,
     family_math: Any | None = None,
+    family_key: str | None = None,
 ) -> list[V2Candidate]:
-    """Recompute core pricing from leg quotes.
+    """Recompute core pricing from leg quotes, then verify the results.
 
     Default implementation handles 2-leg vertical spreads (credit and
     debit).  Families with different math (iron condors, butterflies,
     calendars) provide ``family_math(candidate) → V2RecomputedMath``
     to override.
 
+    After recomputation, delegates to ``math_checks.run_math_verification()``
+    for independent verification of all derived values.
+
     This phase does NOT reject candidates for unfavorable POP/EV/RoR.
     It only rejects for structurally impossible math results
-    (max_loss ≤ 0, max_profit ≤ 0 when they must be positive).
+    (max_loss ≤ 0, max_profit ≤ 0, mismatches beyond tolerance).
     """
     for cand in candidates:
         if cand.diagnostics.reject_reasons:
             # Already rejected — skip
             continue
 
-        math_checks: list[V2CheckResult] = []
-
+        # Step 1: Recompute math
         if family_math is not None:
             cand.math = family_math(cand)
         else:
             _recompute_vertical_math(cand)
 
-        # ── Validate recomputed results ─────────────────────────
-        m = cand.math
+        # Step 2: Verify recomputed results via validation framework
+        summary = run_math_verification(cand, family_key=family_key)
 
-        if m.max_loss is not None:
-            if not _is_finite(m.max_loss) or m.max_loss <= 0:
-                math_checks.append(V2CheckResult(
-                    "valid_max_loss", False, f"max_loss={m.max_loss}",
-                ))
-                cand.diagnostics.reject_reasons.append("v2_impossible_max_loss")
-            else:
-                math_checks.append(V2CheckResult(
-                    "valid_max_loss", True, f"max_loss={m.max_loss:.2f}",
-                ))
-
-        if m.max_profit is not None:
-            if not _is_finite(m.max_profit) or m.max_profit <= 0:
-                math_checks.append(V2CheckResult(
-                    "valid_max_profit", False, f"max_profit={m.max_profit}",
-                ))
-                cand.diagnostics.reject_reasons.append("v2_impossible_max_profit")
-            else:
-                math_checks.append(V2CheckResult(
-                    "valid_max_profit", True, f"max_profit={m.max_profit:.2f}",
-                ))
-
-        # ── POP / EV / RoR: compute if possible, warn if not ───
-        if m.pop is not None:
-            math_checks.append(V2CheckResult(
-                "pop_computed", True, f"pop={m.pop:.4f} source={m.pop_source}",
-            ))
-        else:
-            math_checks.append(V2CheckResult(
-                "pop_computed", False, "could not compute POP",
-            ))
-            cand.diagnostics.warnings.append(
-                "POP could not be computed — downstream stages may need to estimate it",
-            )
-
-        if m.ev is not None:
-            math_checks.append(V2CheckResult(
-                "ev_computed", True, f"ev={m.ev:.2f}",
-            ))
-        else:
-            math_checks.append(V2CheckResult(
-                "ev_computed", False, "could not compute EV (missing POP or max_loss)",
-            ))
-
-        if m.ror is not None:
-            math_checks.append(V2CheckResult(
-                "ror_computed", True, f"ror={m.ror:.4f}",
-            ))
-
-        cand.diagnostics.math_checks = math_checks
+        # Step 3: Use builder to import results into diagnostics
+        builder = DiagnosticsBuilder(source_phase="E")
+        builder.merge_validation_summary(summary, check_section="math")
+        builder.apply(cand.diagnostics)
 
     return candidates
 
@@ -476,39 +376,12 @@ def phase_f_normalize(
         if not cand.diagnostics.reject_reasons:
             cand.passed = True
             cand.downstream_usable = True
-            cand.diagnostics.pass_reasons = _collect_pass_reasons(cand)
+            cand.diagnostics.pass_reasons = collect_pass_reasons(cand.diagnostics)
         else:
             cand.passed = False
             cand.downstream_usable = False
 
     return candidates
-
-
-def _collect_pass_reasons(cand: V2Candidate) -> list[str]:
-    """Build human-readable pass reasons from check results."""
-    reasons: list[str] = []
-
-    s_pass = sum(1 for c in cand.diagnostics.structural_checks if c.passed)
-    s_total = len(cand.diagnostics.structural_checks)
-    if s_total > 0:
-        reasons.append(f"structural: {s_pass}/{s_total} passed")
-
-    q_pass = sum(1 for c in cand.diagnostics.quote_checks if c.passed)
-    q_total = len(cand.diagnostics.quote_checks)
-    if q_total > 0:
-        reasons.append(f"quotes: {q_pass}/{q_total} passed")
-
-    l_pass = sum(1 for c in cand.diagnostics.liquidity_checks if c.passed)
-    l_total = len(cand.diagnostics.liquidity_checks)
-    if l_total > 0:
-        reasons.append(f"liquidity: {l_pass}/{l_total} passed")
-
-    m_pass = sum(1 for c in cand.diagnostics.math_checks if c.passed)
-    m_total = len(cand.diagnostics.math_checks)
-    if m_total > 0:
-        reasons.append(f"math: {m_pass}/{m_total} passed")
-
-    return reasons
 
 
 # =====================================================================

@@ -82,7 +82,7 @@ _FAMILY_REGISTRY: list[V2FamilyMeta] = [
         leg_count=2,
         module_path="app.services.scanner_v2.families.vertical_spreads",
         class_name="VerticalSpreadsV2Scanner",
-        implemented=False,
+        implemented=True,
     ),
     V2FamilyMeta(
         family_key="iron_condors",

@@ -26,7 +26,12 @@ Design rules
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.services.scanner_v2.diagnostics.diagnostic_item import (
+        V2DiagnosticItem,
+    )
 
 
 # ── Version ─────────────────────────────────────────────────────────
@@ -194,6 +199,12 @@ class V2Diagnostics:
     """Why the candidate is valid (e.g. ``"all structural checks passed"``,
     ``"quotes valid on all legs"``).  Useful for downstream trust."""
 
+    # ── Structured diagnostic items (Prompt 5) ──────────────────
+    items: list[V2DiagnosticItem] = field(default_factory=list)
+    """Rich structured diagnostic events.  Every reject, pass, and
+    warning is captured here with code, category, severity, phase,
+    and metadata.  The flat lists above remain for backward compat."""
+
 
 # ── V2Candidate ─────────────────────────────────────────────────────
 
@@ -327,6 +338,10 @@ class V2ScanResult:
             {"phase": "normalized", "remaining": 385},
         ]
     """
+
+    narrowing_diagnostics: dict[str, Any] = field(default_factory=dict)
+    """Narrowing diagnostics from Phase A (V2NarrowingDiagnostics.to_dict()).
+    Shows what was loaded, kept, dropped, and why at the chain level."""
 
     # ── Metadata ────────────────────────────────────────────────
     scanner_version: str = ""

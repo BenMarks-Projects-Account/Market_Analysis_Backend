@@ -28,8 +28,8 @@ from app.services.scanner_v2.registry import (
 )
 families = list_v2_families()
 assert len(families) == 4, f"Expected 4 families, got {len(families)}"
-assert not is_v2_supported("put_credit_spread"), "Should not be supported yet"
-print(f"PASS registry ({len(families)} families, none implemented)")
+assert is_v2_supported("put_credit_spread"), "Vertical spreads should be implemented"
+print(f"PASS registry ({len(families)} families, vertical_spreads implemented)")
 
 # 5. Migration
 from app.services.scanner_v2.migration import (

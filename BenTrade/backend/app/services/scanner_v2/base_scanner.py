@@ -30,6 +30,11 @@ from app.services.scanner_v2.contracts import (
     V2RecomputedMath,
     V2ScanResult,
 )
+from app.services.scanner_v2.data import (
+    V2NarrowedUniverse,
+    V2NarrowingRequest,
+    narrow_chain,
+)
 from app.services.scanner_v2.phases import (
     phase_c_structural_validation,
     phase_d_quote_liquidity_sanity,
@@ -111,10 +116,23 @@ class BaseV2Scanner(ABC):
         ctx = context or {}
 
         # ── Phase A: Universe & chain loading ───────────────────
-        expirations = self._filter_expirations(chain, symbol)
+        narrowing_request = self.build_narrowing_request(context=ctx)
+        price = underlying_price if underlying_price is not None else 0.0
+        narrowed = narrow_chain(
+            chain=chain,
+            symbol=symbol,
+            underlying_price=price,
+            request=narrowing_request,
+        )
+        expirations = narrowed.diagnostics.expirations_kept_list
         _log.info(
-            "V2 %s %s: Phase A — %d expirations in DTE[%d, %d]",
-            scanner_key, symbol, len(expirations), self.dte_min, self.dte_max,
+            "V2 %s %s: Phase A — %d expirations, %d contracts narrowed "
+            "(loaded=%d, kept=%d)",
+            scanner_key, symbol,
+            narrowed.diagnostics.expirations_kept,
+            narrowed.diagnostics.contracts_final,
+            narrowed.diagnostics.total_contracts_loaded,
+            narrowed.diagnostics.contracts_final,
         )
 
         # ── Phase B: Candidate construction (family-specific) ──
@@ -126,6 +144,7 @@ class BaseV2Scanner(ABC):
             strategy_id=strategy_id,
             scanner_key=scanner_key,
             context=ctx,
+            narrowed_universe=narrowed,
         )
         total_constructed = len(candidates)
         _log.info(
@@ -161,7 +180,7 @@ class BaseV2Scanner(ABC):
         # ── Phase E: Recomputed math ────────────────────────────
         family_math = self._get_family_math_fn()
         candidates = phase_e_recomputed_math(
-            candidates, family_math=family_math,
+            candidates, family_math=family_math, family_key=self.family_key,
         )
         remaining_e = sum(1 for c in candidates if not c.diagnostics.reject_reasons)
         phase_counts.append({"phase": "recomputed_math", "remaining": remaining_e})
@@ -211,6 +230,7 @@ class BaseV2Scanner(ABC):
             reject_reason_counts=dict(reject_counter),
             warning_counts=dict(warning_counter),
             phase_counts=phase_counts,
+            narrowing_diagnostics=narrowed.diagnostics.to_dict(),
             scanner_version=self.scanner_version,
             contract_version=SCANNER_V2_CONTRACT_VERSION,
             elapsed_ms=round(elapsed_ms, 1),
@@ -218,6 +238,21 @@ class BaseV2Scanner(ABC):
         )
 
     # ── Abstract: Phase B ───────────────────────────────────────
+
+    def build_narrowing_request(
+        self, *, context: dict[str, Any] | None = None,
+    ) -> V2NarrowingRequest:
+        """Build the narrowing request for Phase A.
+
+        Override in family subclasses to customize DTE windows,
+        strike distance, moneyness, multi-expiry, etc.
+
+        The default implementation uses the instance's dte_min/dte_max.
+        """
+        return V2NarrowingRequest(
+            dte_min=self.dte_min,
+            dte_max=self.dte_max,
+        )
 
     @abstractmethod
     def construct_candidates(
@@ -230,6 +265,7 @@ class BaseV2Scanner(ABC):
         strategy_id: str,
         scanner_key: str,
         context: dict[str, Any],
+        narrowed_universe: V2NarrowedUniverse | None = None,
     ) -> list[V2Candidate]:
         """Phase B — build all valid leg combinations for this family.
 
@@ -241,6 +277,10 @@ class BaseV2Scanner(ABC):
         - math.width set (if applicable)
         - math.net_credit or math.net_debit set
         - expiration, dte set
+
+        ``narrowed_universe`` contains the pre-narrowed chain data
+        from Phase A.  Family builders should prefer this over
+        raw ``chain`` + ``expirations`` when available.
 
         Phases C–F will handle validation, math recomputation, and
         normalization.

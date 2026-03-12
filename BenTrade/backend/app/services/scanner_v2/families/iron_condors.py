@@ -35,6 +35,7 @@ from app.services.scanner_v2.contracts import (
     V2CheckResult,
     V2RecomputedMath,
 )
+from app.services.scanner_v2.data import V2NarrowedUniverse
 
 
 class IronCondorsV2Scanner(BaseV2Scanner):
@@ -55,6 +56,7 @@ class IronCondorsV2Scanner(BaseV2Scanner):
         strategy_id: str,
         scanner_key: str,
         context: dict[str, Any],
+        narrowed_universe: V2NarrowedUniverse | None = None,
     ) -> list[V2Candidate]:
         """Phase B — construct all iron condor candidates.
 
