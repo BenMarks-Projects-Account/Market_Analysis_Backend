@@ -91,7 +91,7 @@ _FAMILY_REGISTRY: list[V2FamilyMeta] = [
         leg_count=4,
         module_path="app.services.scanner_v2.families.iron_condors",
         class_name="IronCondorsV2Scanner",
-        implemented=False,
+        implemented=True,
     ),
     V2FamilyMeta(
         family_key="butterflies",
@@ -100,7 +100,7 @@ _FAMILY_REGISTRY: list[V2FamilyMeta] = [
         leg_count="3-4",
         module_path="app.services.scanner_v2.families.butterflies",
         class_name="ButterfliesV2Scanner",
-        implemented=False,
+        implemented=True,
     ),
     V2FamilyMeta(
         family_key="calendars",

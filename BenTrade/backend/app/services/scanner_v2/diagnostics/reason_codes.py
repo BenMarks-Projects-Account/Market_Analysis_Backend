@@ -85,6 +85,23 @@ REJECT_ZERO_MID = "v2_zero_mid"
 REJECT_MISSING_OI = "v2_missing_oi"
 REJECT_MISSING_VOLUME = "v2_missing_volume"
 
+# Phase D2 — quote sanity (hygiene layer)
+REJECT_NEGATIVE_BID = "v2_negative_bid"
+REJECT_NEGATIVE_ASK = "v2_negative_ask"
+REJECT_SPREAD_PRICING_IMPOSSIBLE = "v2_spread_pricing_impossible"
+
+# Phase D2 — liquidity sanity (hygiene layer)
+REJECT_DEAD_LEG = "v2_dead_leg"
+
+# Phase D2 — duplicate suppression (hygiene layer)
+REJECT_EXACT_DUPLICATE = "v2_exact_duplicate"
+
+# Prompt 10 — iron condor geometry
+REJECT_IC_INVALID_GEOMETRY = "v2_ic_invalid_geometry"
+
+# Prompt 11 — butterfly geometry
+REJECT_BF_INVALID_GEOMETRY = "v2_bf_invalid_geometry"
+
 # Phase E — math
 REJECT_IMPOSSIBLE_MAX_LOSS = "v2_impossible_max_loss"
 REJECT_IMPOSSIBLE_MAX_PROFIT = "v2_impossible_max_profit"
@@ -112,6 +129,17 @@ WARN_ROR_MISMATCH = "v2_warn_ror_mismatch"
 WARN_POP_MISSING = "v2_warn_pop_missing"
 WARN_EV_MISSING = "v2_warn_ev_missing"
 
+# Phase D2 — quote sanity warnings (hygiene layer)
+WARN_WIDE_LEG_SPREAD = "v2_warn_wide_leg_spread"
+
+# Phase D2 — liquidity sanity warnings (hygiene layer)
+WARN_LOW_OI = "v2_warn_low_oi"
+WARN_LOW_VOLUME = "v2_warn_low_volume"
+WARN_WIDE_COMPOSITE_SPREAD = "v2_warn_wide_composite_spread"
+
+# Phase D2 — dedup warnings (hygiene layer)
+WARN_NEAR_DUPLICATE_SUPPRESSED = "v2_warn_near_duplicate_suppressed"
+
 
 # =====================================================================
 #  PASS CODES — emitted by phase F for passing candidates
@@ -122,6 +150,11 @@ PASS_QUOTES_CLEAN = "v2_pass_quotes_clean"
 PASS_LIQUIDITY_PRESENT = "v2_pass_liquidity_present"
 PASS_MATH_CONSISTENT = "v2_pass_math_consistent"
 PASS_ALL_PHASES = "v2_pass_all_phases"
+
+# Phase D2 — hygiene layer pass codes
+PASS_QUOTE_SANITY_CLEAN = "v2_pass_quote_sanity_clean"
+PASS_LIQUIDITY_SANITY_OK = "v2_pass_liquidity_sanity_ok"
+PASS_DEDUP_UNIQUE = "v2_pass_dedup_unique"
 
 
 # =====================================================================
@@ -142,6 +175,18 @@ _REJECT_REGISTRY: dict[str, CodeInfo] = {
     # Liquidity
     REJECT_MISSING_OI:          CodeInfo(REJECT_MISSING_OI, CAT_LIQUIDITY, SEV_ERROR, "Missing open interest"),
     REJECT_MISSING_VOLUME:      CodeInfo(REJECT_MISSING_VOLUME, CAT_LIQUIDITY, SEV_ERROR, "Missing volume"),
+    # Quote sanity (hygiene)
+    REJECT_NEGATIVE_BID:        CodeInfo(REJECT_NEGATIVE_BID, CAT_QUOTE, SEV_ERROR, "Negative bid"),
+    REJECT_NEGATIVE_ASK:        CodeInfo(REJECT_NEGATIVE_ASK, CAT_QUOTE, SEV_ERROR, "Negative ask"),
+    REJECT_SPREAD_PRICING_IMPOSSIBLE: CodeInfo(REJECT_SPREAD_PRICING_IMPOSSIBLE, CAT_QUOTE, SEV_ERROR, "Spread pricing impossible"),
+    # Liquidity sanity (hygiene)
+    REJECT_DEAD_LEG:            CodeInfo(REJECT_DEAD_LEG, CAT_LIQUIDITY, SEV_ERROR, "Dead leg (OI=0, volume=0)"),
+    # Dedup (hygiene)
+    REJECT_EXACT_DUPLICATE:     CodeInfo(REJECT_EXACT_DUPLICATE, CAT_STRUCTURAL, SEV_ERROR, "Exact duplicate suppressed"),
+    # Iron condor geometry (Prompt 10)
+    REJECT_IC_INVALID_GEOMETRY: CodeInfo(REJECT_IC_INVALID_GEOMETRY, CAT_STRUCTURAL, SEV_ERROR, "Iron condor geometry invalid"),
+    # Butterfly geometry (Prompt 11)
+    REJECT_BF_INVALID_GEOMETRY: CodeInfo(REJECT_BF_INVALID_GEOMETRY, CAT_STRUCTURAL, SEV_ERROR, "Butterfly geometry invalid"),
     # Math
     REJECT_IMPOSSIBLE_MAX_LOSS:   CodeInfo(REJECT_IMPOSSIBLE_MAX_LOSS, CAT_MATH, SEV_ERROR, "Impossible max loss"),
     REJECT_IMPOSSIBLE_MAX_PROFIT: CodeInfo(REJECT_IMPOSSIBLE_MAX_PROFIT, CAT_MATH, SEV_ERROR, "Impossible max profit"),
@@ -165,6 +210,14 @@ _WARN_REGISTRY: dict[str, CodeInfo] = {
     WARN_ROR_MISMATCH:        CodeInfo(WARN_ROR_MISMATCH, CAT_MATH, SEV_WARNING, "RoR near tolerance"),
     WARN_POP_MISSING:         CodeInfo(WARN_POP_MISSING, CAT_MATH, SEV_WARNING, "POP could not be computed"),
     WARN_EV_MISSING:          CodeInfo(WARN_EV_MISSING, CAT_MATH, SEV_WARNING, "EV could not be computed"),
+    # Quote sanity warnings (hygiene)
+    WARN_WIDE_LEG_SPREAD:     CodeInfo(WARN_WIDE_LEG_SPREAD, CAT_QUOTE, SEV_WARNING, "Wide leg bid-ask spread"),
+    # Liquidity sanity warnings (hygiene)
+    WARN_LOW_OI:              CodeInfo(WARN_LOW_OI, CAT_LIQUIDITY, SEV_WARNING, "Low open interest"),
+    WARN_LOW_VOLUME:          CodeInfo(WARN_LOW_VOLUME, CAT_LIQUIDITY, SEV_WARNING, "Low volume"),
+    WARN_WIDE_COMPOSITE_SPREAD: CodeInfo(WARN_WIDE_COMPOSITE_SPREAD, CAT_LIQUIDITY, SEV_WARNING, "Wide composite bid-ask spread"),
+    # Dedup warnings (hygiene)
+    WARN_NEAR_DUPLICATE_SUPPRESSED: CodeInfo(WARN_NEAR_DUPLICATE_SUPPRESSED, CAT_STRUCTURAL, SEV_WARNING, "Near-duplicate suppressed"),
 }
 
 _PASS_REGISTRY: dict[str, CodeInfo] = {
@@ -173,6 +226,10 @@ _PASS_REGISTRY: dict[str, CodeInfo] = {
     PASS_LIQUIDITY_PRESENT: CodeInfo(PASS_LIQUIDITY_PRESENT, CAT_LIQUIDITY, SEV_INFO, "Liquidity data present"),
     PASS_MATH_CONSISTENT:   CodeInfo(PASS_MATH_CONSISTENT, CAT_MATH, SEV_INFO, "Math verification passed"),
     PASS_ALL_PHASES:        CodeInfo(PASS_ALL_PHASES, CAT_STRUCTURAL, SEV_INFO, "All phases passed"),
+    # Hygiene pass codes
+    PASS_QUOTE_SANITY_CLEAN: CodeInfo(PASS_QUOTE_SANITY_CLEAN, CAT_QUOTE, SEV_INFO, "Quote sanity checks passed"),
+    PASS_LIQUIDITY_SANITY_OK: CodeInfo(PASS_LIQUIDITY_SANITY_OK, CAT_LIQUIDITY, SEV_INFO, "Liquidity sanity checks passed"),
+    PASS_DEDUP_UNIQUE:       CodeInfo(PASS_DEDUP_UNIQUE, CAT_STRUCTURAL, SEV_INFO, "Candidate is unique (dedup passed)"),
 }
 
 
@@ -260,6 +317,18 @@ _V2_TO_CANONICAL: dict[str, str] = {
     # Liquidity → data_quality category in taxonomy
     REJECT_MISSING_OI:          "missing_open_interest",
     REJECT_MISSING_VOLUME:      "missing_volume",
+    # Hygiene — quote sanity
+    REJECT_NEGATIVE_BID:        "invalid_quote",
+    REJECT_NEGATIVE_ASK:        "invalid_quote",
+    REJECT_SPREAD_PRICING_IMPOSSIBLE: "invalid_quote",
+    # Hygiene — liquidity sanity
+    REJECT_DEAD_LEG:            "missing_open_interest",
+    # Hygiene — dedup
+    REJECT_EXACT_DUPLICATE:     "duplicate_suppressed",
+    # Iron condor geometry (Prompt 10)
+    REJECT_IC_INVALID_GEOMETRY: "invalid_geometry",
+    # Butterfly geometry (Prompt 11)
+    REJECT_BF_INVALID_GEOMETRY: "bf_invalid_geometry",
 }
 
 _CANONICAL_TO_V2: dict[str, str] = {v: k for k, v in _V2_TO_CANONICAL.items()}

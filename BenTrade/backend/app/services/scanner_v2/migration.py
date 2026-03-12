@@ -49,11 +49,11 @@ _log = logging.getLogger("bentrade.scanner_v2.migration")
 # This map is the ONLY place where the cutover decision lives.
 
 _SCANNER_VERSION_MAP: dict[str, str] = {
-    # Vertical spreads
-    "put_credit_spread":   "v1",
-    "call_credit_spread":  "v1",
-    "put_debit":           "v1",
-    "call_debit":          "v1",
+    # Vertical spreads — all cut over to V2 (credit: Prompt 7, debit: Prompt 8)
+    "put_credit_spread":   "v2",
+    "call_credit_spread":  "v2",
+    "put_debit":           "v2",
+    "call_debit":          "v2",
     # Iron condors
     "iron_condor":         "v1",
     # Butterflies
@@ -195,7 +195,8 @@ def _v2_result_to_legacy_shape(result: Any) -> dict[str, Any]:
     }
 
     return {
-        "accepted_trades": accepted,
+        "candidates": accepted,           # pipeline_scanner_stage reads this
+        "accepted_trades": accepted,       # legacy alias
         "candidate_count": result.total_constructed,
         "accepted_count": result.total_passed,
         "filter_trace": filter_trace,

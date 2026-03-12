@@ -15,15 +15,29 @@ Scans option chains for vertical credit spreads — selling a closer-to-the-mone
 
 ---
 
-## 2. Known Bug — Call Credit Spreads Never Constructed
+## 2. V2 Cutover Status (Prompt 7)
 
-`build_candidates()` filters contracts to `option_type == "put"` unconditionally. The `call_credit_spread` scanner key is registered and dispatches to this plugin, but no call-side candidates are ever built. This means the `call_credit_spread` scanner always returns zero results.
+**Both `put_credit_spread` and `call_credit_spread` are now routed to V2.**
 
-**Impact:** The call_credit_spread scanner key exists in the UI and pipeline registry but is functionally dead. Any call credit spread results in the system would require this to be fixed.
+- `_SCANNER_VERSION_MAP` in `scanner_v2/migration.py` has both set to `"v2"`.
+- `pipeline_scanner_stage.py` checks `should_run_v2()` at dispatch time;
+  when True, it fetches chains per-symbol via TradierClient and calls
+  `execute_v2_scanner()` instead of the legacy StrategyService plugin.
+- V2 engine: `scanner_v2/families/vertical_spreads.py` — single engine
+  for all 4 vertical spread variants, parameterized by `_VARIANT_CONFIG`.
+- Call credit spread is truly alive in V2 (uses `option_type="call"`).
+- Debit spreads (`put_debit`, `call_debit`) remain at v1.
+
+### Legacy Bug Fixed
+
+`build_candidates()` in the legacy plugin filtered to `option_type == "put"`
+unconditionally. The `call_credit_spread` scanner key was registered but
+never produced candidates. V2 fixes this via `_VARIANT_CONFIG` which
+correctly sets `option_type="call"` for `call_credit_spread`.
 
 ---
 
-## 3. End-to-End Flow
+## 3. End-to-End Flow (Legacy — retained for reference)
 
 ### Phase 1: `build_candidates()`
 

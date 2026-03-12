@@ -9,10 +9,11 @@ Phase B (candidate construction) is family-specific.
 
 Phase summary
 -------------
-C — structural_validation   Reject malformed candidates.
-D — quote_liquidity_sanity  Reject broken/missing quotes and missing OI/volume.
-E — recomputed_math         Recompute core pricing from leg quotes.
-F — normalize_and_package   Assign IDs, timestamps, set passed/downstream_usable.
+C  — structural_validation   Reject malformed candidates.
+D  — quote_liquidity_sanity  Reject broken/missing quotes and missing OI/volume.
+D2 — trust_hygiene           Quote sanity, liquidity sanity, duplicate suppression.
+E  — recomputed_math         Recompute core pricing from leg quotes.
+F  — normalize_and_package   Assign IDs, timestamps, set passed/downstream_usable.
 """
 
 from __future__ import annotations
@@ -204,6 +205,55 @@ def phase_d_quote_liquidity_sanity(
         builder.apply(cand.diagnostics)
 
     return candidates
+
+
+# =====================================================================
+#  Phase D2 — Trust Hygiene (Quote Sanity + Liquidity Sanity + Dedup)
+# =====================================================================
+
+def phase_d2_trust_hygiene(
+    candidates: list[V2Candidate],
+    *,
+    dedup_key_fn: Any | None = None,
+) -> tuple[list[V2Candidate], dict[str, Any]]:
+    """Run quote sanity, liquidity sanity, and duplicate suppression.
+
+    This phase sits between Phase D (quote/liquidity presence) and
+    Phase E (recomputed math).  It catches candidates that have valid
+    but broken/unusable quotes or liquidity, and suppresses duplicates.
+
+    Parameters
+    ----------
+    candidates
+        Full list including any already-rejected candidates.
+    dedup_key_fn
+        Optional custom dedup key function for family-specific
+        duplicate detection.
+
+    Returns
+    -------
+    (candidates, hygiene_summary)
+        candidates with diagnostics updated; hygiene_summary dict
+        with quote_sanity, liquidity_sanity, and dedup stats.
+    """
+    from app.services.scanner_v2.hygiene.quote_sanity import run_quote_sanity
+    from app.services.scanner_v2.hygiene.liquidity_sanity import run_liquidity_sanity
+    from app.services.scanner_v2.hygiene.dedup import run_dedup
+
+    # Step 1: Quote sanity
+    candidates = run_quote_sanity(candidates)
+
+    # Step 2: Liquidity sanity
+    candidates = run_liquidity_sanity(candidates)
+
+    # Step 3: Duplicate suppression
+    candidates, dedup_result = run_dedup(candidates, key_fn=dedup_key_fn)
+
+    hygiene_summary = {
+        "dedup": dedup_result.to_dict(),
+    }
+
+    return candidates, hygiene_summary
 
 
 # =====================================================================

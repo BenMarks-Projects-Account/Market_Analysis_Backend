@@ -162,16 +162,16 @@ class TestReasonCodeRegistry:
     """Verify all reason codes are properly registered."""
 
     def test_reject_codes_count(self):
-        """All 20 reject codes registered."""
-        assert len(all_reject_codes()) == 20
+        """All 27 reject codes registered (20 original + 5 hygiene + 1 IC + 1 BF)."""
+        assert len(all_reject_codes()) == 27
 
     def test_warn_codes_count(self):
-        """All 9 warn codes registered."""
-        assert len(all_warn_codes()) == 9
+        """All 14 warn codes registered (9 original + 5 hygiene)."""
+        assert len(all_warn_codes()) == 14
 
     def test_pass_codes_count(self):
-        """All 5 pass codes registered."""
-        assert len(all_pass_codes()) == 5
+        """All 8 pass codes registered (5 original + 3 hygiene)."""
+        assert len(all_pass_codes()) == 8
 
     def test_all_reject_codes_start_with_v2(self):
         for code in all_reject_codes():
@@ -898,6 +898,16 @@ class TestContractStability:
         "v2_max_loss_mismatch",
         "v2_breakeven_mismatch",
         "v2_ror_mismatch",
+        # Prompt 9 — trust hygiene codes
+        "v2_negative_bid",
+        "v2_negative_ask",
+        "v2_spread_pricing_impossible",
+        "v2_dead_leg",
+        "v2_exact_duplicate",
+        # Prompt 10 — iron condor codes
+        "v2_ic_invalid_geometry",
+        # Prompt 11 — butterfly codes
+        "v2_bf_invalid_geometry",
     }
 
     EXPECTED_WARN_CODES = {
@@ -910,6 +920,12 @@ class TestContractStability:
         "v2_warn_ror_mismatch",
         "v2_warn_pop_missing",
         "v2_warn_ev_missing",
+        # Prompt 9 — trust hygiene codes
+        "v2_warn_wide_leg_spread",
+        "v2_warn_low_oi",
+        "v2_warn_low_volume",
+        "v2_warn_wide_composite_spread",
+        "v2_warn_near_duplicate_suppressed",
     }
 
     EXPECTED_PASS_CODES = {
@@ -918,6 +934,10 @@ class TestContractStability:
         "v2_pass_liquidity_present",
         "v2_pass_math_consistent",
         "v2_pass_all_phases",
+        # Prompt 9 — trust hygiene codes
+        "v2_pass_quote_sanity_clean",
+        "v2_pass_liquidity_sanity_ok",
+        "v2_pass_dedup_unique",
     }
 
     def test_reject_codes_stable(self):

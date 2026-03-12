@@ -35,9 +35,19 @@ print(f"PASS registry ({len(families)} families, vertical_spreads implemented)")
 from app.services.scanner_v2.migration import (
     get_scanner_version, should_run_v2,
 )
-assert get_scanner_version("put_credit_spread") == "v1"
-assert not should_run_v2("put_credit_spread")
-print("PASS migration (all v1)")
+# All vertical spreads cut over to v2 (credit: Prompt 7, debit: Prompt 8)
+assert get_scanner_version("put_credit_spread") == "v2"
+assert should_run_v2("put_credit_spread")
+assert get_scanner_version("call_credit_spread") == "v2"
+assert should_run_v2("call_credit_spread")
+assert get_scanner_version("put_debit") == "v2"
+assert should_run_v2("put_debit")
+assert get_scanner_version("call_debit") == "v2"
+assert should_run_v2("call_debit")
+# Non-vertical families remain at v1
+assert get_scanner_version("iron_condor") == "v1"
+assert not should_run_v2("iron_condor")
+print("PASS migration (all verticals v2, others v1)")
 
 # 6. Candidate construction + validation smoke
 leg_short = V2Leg(index=0, side="short", strike=440, option_type="put",

@@ -473,6 +473,87 @@ def _default_scanner_executor(
     if family == "options":
         import asyncio
 
+        from app.services.scanner_v2.migration import should_run_v2
+
+        # ── V2 path: route through migration seam ───────────────
+        if should_run_v2(scanner_key):
+            from app.services.scanner_v2.migration import execute_v2_scanner
+
+            symbols = context.get("symbols") or [
+                "SPY", "QQQ", "IWM", "DIA",
+            ]
+
+            async def _run_v2_options() -> dict[str, Any]:
+                clients = _make_per_scanner_clients(scanner_deps)
+                try:
+                    tc = clients["base_data_service"].tradier_client
+                    all_candidates: list[dict[str, Any]] = []
+                    total_constructed = 0
+                    total_passed = 0
+
+                    for sym in symbols:
+                        try:
+                            quote = await tc.get_quote(sym)
+                            price = float(
+                                quote.get("last") or quote.get("close") or 0
+                            )
+                            if not price:
+                                logger.warning(
+                                    "V2 %s/%s: no underlying price, skipped",
+                                    scanner_key, sym,
+                                )
+                                continue
+
+                            expirations = await tc.get_expirations(sym)
+                            if not expirations:
+                                continue
+
+                            # Merge all expirations into one chain dict
+                            merged_contracts: list[dict[str, Any]] = []
+                            for exp in expirations:
+                                merged_contracts.extend(
+                                    await tc.get_chain(sym, exp)
+                                )
+                            if not merged_contracts:
+                                continue
+
+                            chain = {
+                                "options": {"option": merged_contracts},
+                            }
+                            result = execute_v2_scanner(
+                                scanner_key,
+                                symbol=sym,
+                                chain=chain,
+                                underlying_price=price,
+                            )
+                            all_candidates.extend(
+                                result.get("candidates", [])
+                            )
+                            total_constructed += result.get(
+                                "candidate_count", 0
+                            )
+                            total_passed += result.get("accepted_count", 0)
+                        except Exception as exc:
+                            logger.warning(
+                                "V2 scanner %s/%s failed: %s: %s",
+                                scanner_key, sym,
+                                type(exc).__name__, exc,
+                            )
+
+                    return {
+                        "candidates": all_candidates,
+                        "candidate_count": total_constructed,
+                        "accepted_count": total_passed,
+                    }
+                finally:
+                    http = clients.get("http_client")
+                    if http:
+                        await http.aclose()
+
+            return asyncio.run(_run_v2_options())
+
+        # ── Legacy path: StrategyService ────────────────────────
+
         from app.services.strategy_service import StrategyService
 
         # Map scanner strategy_type → StrategyService plugin ID + payload overrides

@@ -38,6 +38,7 @@ from app.services.scanner_v2.data import (
 from app.services.scanner_v2.phases import (
     phase_c_structural_validation,
     phase_d_quote_liquidity_sanity,
+    phase_d2_trust_hygiene,
     phase_e_recomputed_math,
     phase_f_normalize,
 )
@@ -177,6 +178,20 @@ class BaseV2Scanner(ABC):
             scanner_key, symbol, remaining_d, total_constructed,
         )
 
+        # ── Phase D2: Trust hygiene (quote/liq sanity + dedup) ──
+        dedup_key_fn = self._get_dedup_key_fn()
+        candidates, hygiene_summary = phase_d2_trust_hygiene(
+            candidates, dedup_key_fn=dedup_key_fn,
+        )
+        remaining_d2 = sum(1 for c in candidates if not c.diagnostics.reject_reasons)
+        phase_counts.append({"phase": "trust_hygiene", "remaining": remaining_d2})
+        _log.info(
+            "V2 %s %s: Phase D2 — %d/%d survived trust hygiene "
+            "(dedup suppressed %d)",
+            scanner_key, symbol, remaining_d2, total_constructed,
+            hygiene_summary.get("dedup", {}).get("duplicates_suppressed", 0),
+        )
+
         # ── Phase E: Recomputed math ────────────────────────────
         family_math = self._get_family_math_fn()
         candidates = phase_e_recomputed_math(
@@ -313,6 +328,17 @@ class BaseV2Scanner(ABC):
         """
         return None
 
+    def family_dedup_key(self, candidate: V2Candidate) -> tuple:
+        """Phase D2 hook: family-specific dedup key.
+
+        Override for families that need richer structural equivalence
+        (e.g. iron condors with inner/outer wings, calendars with
+        multiple expirations).  The default dedup key uses
+        (symbol, strategy_id, expiration, frozenset of leg tuples).
+        """
+        from app.services.scanner_v2.hygiene.dedup import candidate_dedup_key
+        return candidate_dedup_key(candidate)
+
     # ── Internal helpers ────────────────────────────────────────
 
     def _get_family_checks_fn(self):
@@ -336,6 +362,18 @@ class BaseV2Scanner(ABC):
             _recompute_vertical_math(cand)
             return cand.math
         return _fn
+
+    def _get_dedup_key_fn(self):
+        """Return the dedup key function for this family.
+
+        Override ``family_dedup_key()`` in subclasses to provide
+        family-specific duplicate detection (e.g. multi-leg condors,
+        multi-expiry calendars).  Returns None to use the default
+        generic key function.
+        """
+        if type(self).family_dedup_key is BaseV2Scanner.family_dedup_key:
+            return None  # Use default from dedup module
+        return self.family_dedup_key
 
     def _filter_expirations(
         self, chain: dict[str, Any], symbol: str,

@@ -8,15 +8,21 @@ Fixture naming convention:
     ``fixture_{symbol}_{scenario}``
 
 Scenarios:
-- ``golden_put_spread``   — clean 4-contract chain for 2 valid put credit spreads
-- ``bad_liquidity``       — chain with missing OI / zero volume
-- ``wide_spreads``        — chain with wide bid-ask spreads (inverted on one leg)
-- ``empty_chain``         — chain with no options
+- ``golden_put_spread``        — clean 4-contract chain for 2 valid put credit spreads
+- ``golden_call_credit``       — clean 4-contract call chain for 2 valid call credit spreads
+- ``golden_put_debit``         — clean 4-contract put chain for 2 valid put debit spreads
+- ``golden_call_debit``        — clean 4-contract call chain for 2 valid call debit spreads
+- ``bad_liquidity``            — chain with missing OI / zero volume
+- ``wide_spreads``             — chain with wide bid-ask spreads (inverted on one leg)
+- ``empty_chain``              — chain with no options
 
 Usage in tests::
 
     from app.services.scanner_v2.comparison.fixtures import (
         fixture_spy_golden_put_spread,
+        fixture_spy_golden_call_credit,
+        fixture_spy_golden_put_debit,
+        fixture_spy_golden_call_debit,
     )
 
     snapshot = fixture_spy_golden_put_spread()
@@ -91,6 +97,182 @@ def fixture_spy_golden_put_spread() -> ComparisonSnapshot:
             "All quotes valid, greeks present, good liquidity."
         ),
         tags=["golden", "put_credit_spread", "vertical_spreads"],
+        metadata={"dte": 9, "scenario": "known_good"},
+    )
+
+
+# ── Golden: 2 valid call credit spread candidates ──────────────────
+
+def fixture_spy_golden_call_credit() -> ComparisonSnapshot:
+    """Clean 4-call chain yielding 2 obvious call credit spreads.
+
+    Spreads:
+    - 600/605 (5-wide): short 600 call, long 605 call
+    - 605/610 (5-wide): short 605 call, long 610 call
+
+    All quotes valid, delta/IV present, OI/volume adequate.
+    This proves call credit spreads are truly alive in V2
+    (legacy always returned zero results).
+    """
+    chain = build_synthetic_chain(
+        symbol="SPY",
+        underlying_price=595.50,
+        expiration="2026-03-20",
+        call_strikes=[
+            {
+                "strike": 600.0,
+                "bid": 1.80, "ask": 1.95,
+                "delta": 0.35, "iv": 0.22,
+                "oi": 6000, "volume": 900,
+            },
+            {
+                "strike": 605.0,
+                "bid": 0.85, "ask": 1.00,
+                "delta": 0.22, "iv": 0.21,
+                "oi": 4000, "volume": 600,
+            },
+            {
+                "strike": 610.0,
+                "bid": 0.30, "ask": 0.42,
+                "delta": 0.12, "iv": 0.20,
+                "oi": 2500, "volume": 350,
+            },
+            {
+                "strike": 615.0,
+                "bid": 0.10, "ask": 0.20,
+                "delta": 0.05, "iv": 0.19,
+                "oi": 1500, "volume": 200,
+            },
+        ],
+    )
+
+    return build_snapshot(
+        snapshot_id="spy_golden_call_credit_2026-03-20",
+        symbol="SPY",
+        underlying_price=595.50,
+        chain=chain,
+        description=(
+            "Clean 4-call chain for 2 valid call credit spreads. "
+            "All quotes valid, greeks present, good liquidity. "
+            "Proves call credit is truly alive (legacy returned zero)."
+        ),
+        tags=["golden", "call_credit_spread", "vertical_spreads"],
+        metadata={"dte": 9, "scenario": "known_good"},
+    )
+
+
+# ── Golden: 2 valid put debit spread candidates ────────────────────
+
+def fixture_spy_golden_put_debit() -> ComparisonSnapshot:
+    """Clean 4-put chain yielding 2 obvious put debit spreads.
+
+    Put debit (bear put): buy higher-strike put, sell lower-strike put.
+    Spreads:
+    - long 590 put / short 585 put (5-wide)
+    - long 585 put / short 580 put (5-wide)
+
+    All quotes valid, delta/IV present, OI/volume adequate.
+    """
+    chain = build_synthetic_chain(
+        symbol="SPY",
+        underlying_price=595.50,
+        expiration="2026-03-20",
+        put_strikes=[
+            {
+                "strike": 590.0,
+                "bid": 2.80, "ask": 3.00,
+                "delta": -0.35, "iv": 0.22,
+                "oi": 5000, "volume": 800,
+            },
+            {
+                "strike": 585.0,
+                "bid": 1.50, "ask": 1.70,
+                "delta": -0.22, "iv": 0.21,
+                "oi": 3500, "volume": 550,
+            },
+            {
+                "strike": 580.0,
+                "bid": 0.70, "ask": 0.85,
+                "delta": -0.14, "iv": 0.20,
+                "oi": 2500, "volume": 350,
+            },
+            {
+                "strike": 575.0,
+                "bid": 0.25, "ask": 0.38,
+                "delta": -0.08, "iv": 0.19,
+                "oi": 1500, "volume": 200,
+            },
+        ],
+    )
+
+    return build_snapshot(
+        snapshot_id="spy_golden_put_debit_2026-03-20",
+        symbol="SPY",
+        underlying_price=595.50,
+        chain=chain,
+        description=(
+            "Clean 4-put chain for 2 valid put debit spreads. "
+            "All quotes valid, greeks present, good liquidity."
+        ),
+        tags=["golden", "put_debit", "vertical_spreads"],
+        metadata={"dte": 9, "scenario": "known_good"},
+    )
+
+
+# ── Golden: 2 valid call debit spread candidates ───────────────────
+
+def fixture_spy_golden_call_debit() -> ComparisonSnapshot:
+    """Clean 4-call chain yielding 2 obvious call debit spreads.
+
+    Call debit (bull call): buy lower-strike call, sell higher-strike call.
+    Spreads:
+    - long 600 call / short 605 call (5-wide)
+    - long 605 call / short 610 call (5-wide)
+
+    All quotes valid, delta/IV present, OI/volume adequate.
+    """
+    chain = build_synthetic_chain(
+        symbol="SPY",
+        underlying_price=595.50,
+        expiration="2026-03-20",
+        call_strikes=[
+            {
+                "strike": 600.0,
+                "bid": 3.20, "ask": 3.40,
+                "delta": 0.40, "iv": 0.22,
+                "oi": 6000, "volume": 900,
+            },
+            {
+                "strike": 605.0,
+                "bid": 1.60, "ask": 1.80,
+                "delta": 0.28, "iv": 0.21,
+                "oi": 4000, "volume": 600,
+            },
+            {
+                "strike": 610.0,
+                "bid": 0.65, "ask": 0.80,
+                "delta": 0.18, "iv": 0.20,
+                "oi": 2500, "volume": 400,
+            },
+            {
+                "strike": 615.0,
+                "bid": 0.20, "ask": 0.32,
+                "delta": 0.08, "iv": 0.19,
+                "oi": 1500, "volume": 200,
+            },
+        ],
+    )
+
+    return build_snapshot(
+        snapshot_id="spy_golden_call_debit_2026-03-20",
+        symbol="SPY",
+        underlying_price=595.50,
+        chain=chain,
+        description=(
+            "Clean 4-call chain for 2 valid call debit spreads. "
+            "All quotes valid, greeks present, good liquidity."
+        ),
+        tags=["golden", "call_debit", "vertical_spreads"],
         metadata={"dte": 9, "scenario": "known_good"},
     )
 

@@ -195,7 +195,54 @@ _primary_rejection_reason, _valid_for_ranking
 
 ---
 
-## 8. Simplification Recommendations
+## 8. V2 Cutover Status
+
+> **Status: CUT OVER to V2** (Prompt 8)
+> **Scanner family:** `vertical_spreads`
+> **V2 engine:** `scanner_v2/families/vertical_spreads.py`
+> **Migration map:** `put_debit → v2`, `call_debit → v2`
+> **Test file:** `tests/test_v2_debit_cutover.py` (32 tests)
+
+### What V2 eliminates
+
+| Legacy Issue | V2 Resolution |
+|--------------|---------------|
+| `short_delta_abs` stores long delta (naming mismatch) | V2 uses canonical `V2Leg` with explicit `side` and raw `delta` per leg |
+| Spread quote inversion not detected | V2 Phase D validates quote integrity before math |
+| Three-tier POP hierarchy in scanner-time (over-decisioning) | V2 computes POP in Phase E for informational use only — no gating |
+| Excessive evaluate gates (POP, EV, spread-width, DQ) | V2 rejects only structurally broken candidates; downstream decides |
+| Direction param indirection | V2 dispatches directly by `scanner_key` via `_VARIANT_CONFIG` |
+| Hardcoded strike window / width tiers | V2 Phase A narrowing uses configurable parameters |
+
+### V2 pipeline path
+
+```
+pipeline_scanner_stage → should_run_v2("put_debit")=True
+  → execute_v2_scanner("put_debit", chain, price)
+    → vertical_spreads.run(scanner_key="put_debit")
+      → Phase A: Narrowing (filter by option_type=put, DTE)
+      → Phase B: Construction (pair strikes, long=higher, short=lower)
+      → Phase C: Structural validation (2 legs, correct types/sides)
+      → Phase D: Quote/liquidity checks (bid>0, ask>bid, OI present)
+      → Phase E: Math (net_debit, max_profit, max_loss, POP, EV)
+      → Phase F: Normalize → V2Candidate list
+    → _v2_result_to_legacy_shape() → pipeline-compatible dict
+```
+
+### Comparison evidence
+
+Golden fixtures in `scanner_v2/comparison/fixtures.py`:
+- `fixture_spy_golden_put_debit()`: 4-put chain, 2 valid spreads
+- `fixture_spy_golden_call_debit()`: 4-call chain, 2 valid spreads
+
+Comparison harness confirms V2 produces:
+- More candidates (no POP/EV scanner-time rejection)
+- Clean canonical field naming
+- Rich per-candidate diagnostics (structural, quote, liquidity, math checks)
+
+---
+
+## 9. Simplification Recommendations (Legacy Reference)
 
 1. **Fix field naming** — Rename `short_delta_abs` to `long_delta_abs` (HIGH priority, prevents consumer confusion).
 2. **Add spread quote validation** — After computing `spread_bid` and `spread_ask`, verify `spread_bid ≤ spread_ask`. Flag or reject inverted quotes.
