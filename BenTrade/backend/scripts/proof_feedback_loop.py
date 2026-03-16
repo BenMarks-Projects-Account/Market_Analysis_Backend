@@ -6,6 +6,10 @@ Demonstrates three scenarios:
 3. Exited trade: partial context → outcome snapshot
 
 Each record is validated and printed.
+
+DEPRECATED: This script imports from trade_decision_orchestrator which has been
+quarantined as part of the workflow pivot (Prompt 0). Do not use as a foundation
+for new workflow builds.
 """
 
 import json

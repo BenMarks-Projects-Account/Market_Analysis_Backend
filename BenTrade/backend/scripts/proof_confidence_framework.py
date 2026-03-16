@@ -3,6 +3,10 @@
 Demonstrates two scenarios:
 1. Clean / high-confidence — all systems healthy
 2. Degraded / low-confidence — stale, missing, conflicted data
+
+DEPRECATED: This script imports from trade_decision_orchestrator which has been
+quarantined as part of the workflow pivot (Prompt 0). Do not use as a foundation
+for new workflow builds.
 """
 
 import json

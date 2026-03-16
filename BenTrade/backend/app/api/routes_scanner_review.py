@@ -14,7 +14,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from app.services import pipeline_run_store
+# NOTE: pipeline_run_store removed — deprecated as part of workflow pivot (Prompt 0).
+# Per-run scanner diagnostic endpoints now return 410 Gone until the new workflow
+# provides a replacement artifact source.
 
 logger = logging.getLogger(__name__)
 
@@ -67,47 +69,15 @@ async def get_run_scanner_summary(
 
     Extracts the ``scanner_stage_summary`` artifact and restructures it
     for the Scanner Review dashboard with family-grouped views.
+
+    DEPRECATED: Pipeline run store has been removed (workflow pivot).
+    This endpoint returns 410 Gone until the new workflow provides
+    a replacement artifact source.
     """
-    snap = pipeline_run_store.get_run(run_id)
-    if snap is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"message": f"Pipeline run '{run_id}' not found"},
-        )
-
-    # Find the scanner stage summary artifact
-    art_store = snap.get("artifact_store") or {}
-    summary_art = _find_scanner_summary_artifact(art_store)
-
-    if summary_art is None:
-        return {
-            "run_id": run_id,
-            "available": False,
-            "message": "No scanner stage summary artifact found in this run.",
-        }
-
-    data = summary_art.get("data", {})
-    scanner_summaries = data.get("scanner_summaries", {})
-
-    # Group scanners by family for the dashboard
-    family_groups = _group_by_family(scanner_summaries)
-
-    return {
-        "run_id": run_id,
-        "available": True,
-        "stage_status": data.get("stage_status"),
-        "total_run": data.get("total_run", 0),
-        "total_candidates": data.get("total_candidates", 0),
-        "total_usable_candidates": data.get("total_usable_candidates", 0),
-        "completed_count": data.get("completed_count", 0),
-        "failed_count": data.get("failed_count", 0),
-        "routing_summary": data.get("routing_summary", {}),
-        "liveness_snapshot": data.get("liveness_snapshot"),
-        "scanner_summaries": scanner_summaries,
-        "family_groups": family_groups,
-        "elapsed_ms": data.get("elapsed_ms"),
-        "generated_at": data.get("generated_at"),
-    }
+    raise HTTPException(
+        status_code=410,
+        detail={"message": "Pipeline run store removed — workflow pivot in progress"},
+    )
 
 
 @router.get("/runs/{run_id}/candidates")
@@ -127,26 +97,15 @@ async def get_run_scanner_candidates(
 
     Collects candidates from normalized_candidate artifacts and
     supports filtering by scanner_key or family.
+
+    DEPRECATED: Pipeline run store has been removed (workflow pivot).
+    This endpoint returns 410 Gone until the new workflow provides
+    a replacement artifact source.
     """
-    snap = pipeline_run_store.get_run(run_id)
-    if snap is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"message": f"Pipeline run '{run_id}' not found"},
-        )
-
-    art_store = snap.get("artifact_store") or {}
-    candidates = _collect_candidates(art_store, scanner_key, family)
-
-    return {
-        "run_id": run_id,
-        "candidates": candidates,
-        "count": len(candidates),
-        "filters": {
-            "scanner_key": scanner_key,
-            "family": family,
-        },
-    }
+    raise HTTPException(
+        status_code=410,
+        detail={"message": "Pipeline run store removed — workflow pivot in progress"},
+    )
 
 
 # ---------------------------------------------------------------------------

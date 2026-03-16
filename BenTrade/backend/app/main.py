@@ -38,7 +38,7 @@ from app.api.routes_flows_positioning import router as flows_positioning_router
 from app.api.routes_liquidity_conditions import router as liquidity_conditions_router
 from app.api.routes_news_sentiment import router as news_sentiment_router
 from app.api.routes_volatility_options import router as volatility_options_router
-from app.api.routes_pipeline_monitor import router as pipeline_monitor_router
+# NOTE: routes_pipeline_monitor removed — deprecated as part of workflow pivot (Prompt 0)
 from app.api.routes_scanner_review import router as scanner_review_router
 from app.clients.finnhub_client import FinnhubClient
 from app.clients.fred_client import FredClient
@@ -360,7 +360,7 @@ def create_app() -> FastAPI:
     app.include_router(flows_positioning_router)
     app.include_router(liquidity_conditions_router)
     app.include_router(snapshots_router)
-    app.include_router(pipeline_monitor_router)
+    # NOTE: pipeline_monitor_router removed — deprecated as part of workflow pivot (Prompt 0)
     app.include_router(scanner_review_router)
     app.include_router(dev_router)
     app.include_router(frontend_router)
