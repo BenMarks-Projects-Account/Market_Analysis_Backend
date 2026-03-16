@@ -1,0 +1,85 @@
+<!-- Active Trade Pipeline — position reassessment execution dashboard -->
+<div class="tbp-container atp-container">
+
+  <!-- ── Run Header bar (mirrors TBP) ────────────────────────── -->
+  <div class="tbp-run-header" id="atpRunHeader">
+    <div class="tbp-run-header-left">
+      <h2 class="tbp-title">Active Trade Pipeline</h2>
+      <span class="tbp-run-id" id="atpRunId">No run selected</span>
+      <span class="tbp-run-status" id="atpRunStatus"></span>
+    </div>
+    <div class="tbp-run-header-right">
+      <div class="tbp-run-meta" id="atpRunMeta">
+        <!-- Filled by JS: duration, started, trade count -->
+      </div>
+      <div class="tbp-controls">
+        <button class="btn tbp-btn tbp-btn-start" id="atpBtnStart" title="Start Active Trade Pipeline run">▶ Start Run</button>
+        <label class="atp-checkbox-label" title="Skip LLM model layer — engine-only mode">
+          <input type="checkbox" id="atpSkipModel"> Engine Only
+        </label>
+        <select class="tbp-run-picker" id="atpRunPicker" title="Select a previous run">
+          <option value="">— Recent Runs —</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Main body: graph + detail panel (mirrors TBP layout) ── -->
+  <div class="tbp-body">
+
+    <!-- Graph area (linear pipeline stages) -->
+    <div class="tbp-graph-area" id="atpGraphArea">
+      <svg class="tbp-connectors" id="atpConnectorsSvg" aria-hidden="true"></svg>
+      <div class="tbp-graph-grid atp-graph-grid" id="atpGraphGrid">
+        <!-- Stage nodes rendered by JS -->
+      </div>
+    </div>
+
+    <!-- Detail panel (right side — recommendation inspector) -->
+    <div class="tbp-detail-panel" id="atpDetailPanel">
+      <div class="tbp-detail-empty" id="atpDetailEmpty">
+        <div class="tbp-detail-empty-icon">◉</div>
+        <div class="tbp-detail-empty-text">Click a stage or recommendation to inspect</div>
+      </div>
+      <div class="tbp-detail-content" id="atpDetailContent" style="display:none">
+        <!-- Stage inspector -->
+        <div id="atpStageDetail">
+          <div class="tbp-detail-header">
+            <div class="tbp-detail-stage-icon" id="atpDetailIcon"></div>
+            <div class="tbp-detail-stage-name" id="atpDetailName"></div>
+            <div class="tbp-detail-stage-status" id="atpDetailStatus"></div>
+          </div>
+          <div class="tbp-detail-metrics" id="atpDetailMetrics"></div>
+        </div>
+        <!-- Recommendation inspector (fills when a rec card is clicked below the graph) -->
+        <div id="atpRecDetail" style="display:none"></div>
+      </div>
+    </div>
+
+  </div><!-- /tbp-body -->
+
+  <!-- ── Results summary + recommendation grid (below graph) ── -->
+  <div class="atp-results-section" id="atpResultsSection" style="display:none">
+    <div class="atp-results-banner">
+      <div class="atp-results-title" id="atpResultsTitle">Recommendations</div>
+      <div class="atp-results-controls">
+        <select class="tbp-run-picker" id="atpFilterRec" title="Filter by recommendation">
+          <option value="">All</option>
+          <option value="URGENT_REVIEW">Urgent Review</option>
+          <option value="CLOSE">Close</option>
+          <option value="REDUCE">Reduce</option>
+          <option value="HOLD">Hold</option>
+        </select>
+        <button class="btn tbp-btn" id="atpBtnTmc" title="Open in Trade Management Center">Open in TMC ↗</button>
+      </div>
+    </div>
+    <div class="atp-results-grid" id="atpResultsGrid"></div>
+  </div>
+
+  <!-- ── Status bar (bottom — mirrors TBP) ────────────────────── -->
+  <div class="tbp-status-bar" id="atpStatusBar">
+    <span class="tbp-status-text" id="atpStatusText">Ready</span>
+    <span class="tbp-status-scaffolded" title="Pipeline runs synchronously. Pause/Cancel not yet available.">ℹ Runs execute synchronously</span>
+  </div>
+
+</div>

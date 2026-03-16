@@ -662,16 +662,22 @@ def context_assembly_handler(
     # failed (no usable context at all).
     if overall_status == ASSEMBLY_STATUS_FAILED:
         outcome = "failed"
+        failed_names = [
+            r["module_name"] for r in module_records
+            if r["assembly_status"] == ASSEMBLY_STATUS_FAILED
+        ]
         if emit:
             emit(
                 "context_assembly_failed",
                 level="error",
                 message=(
                     f"Context assembly failed: "
-                    f"{modules_failed}/{len(_CONTEXT_MODULES)} modules failed"
+                    f"{modules_failed}/{len(_CONTEXT_MODULES)} modules failed "
+                    f"({', '.join(failed_names)})"
                 ),
                 metadata={
                     "modules_failed": modules_failed,
+                    "failed_module_names": failed_names,
                     "degraded_reasons": shared_context["degraded_reasons"],
                 },
             )
@@ -685,6 +691,7 @@ def context_assembly_handler(
             "artifacts": [],
             "metadata": {
                 "overall_status": overall_status,
+                "failed_module_names": failed_names,
                 "module_records": module_records,
                 "stage_summary": stage_summary,
                 "elapsed_ms": elapsed_ms,
@@ -694,9 +701,16 @@ def context_assembly_handler(
                 message=(
                     f"All {modules_failed} context modules failed assembly"
                     if modules_failed == len(_CONTEXT_MODULES)
-                    else f"{modules_failed}/{len(_CONTEXT_MODULES)} modules failed"
+                    else (
+                        f"{modules_failed}/{len(_CONTEXT_MODULES)} modules "
+                        f"failed ({', '.join(failed_names)})"
+                    )
                 ),
                 source=_STAGE_KEY,
+                detail={
+                    "failed_modules": failed_names,
+                    "module_records": module_records,
+                },
             ),
         }
 

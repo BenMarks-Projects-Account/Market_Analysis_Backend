@@ -49,6 +49,7 @@ Reuse from V2 shared infrastructure:
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from app.services.scanner_v2.base_scanner import BaseV2Scanner
@@ -132,6 +133,10 @@ class IronCondorsV2Scanner(BaseV2Scanner):
         seq = 0
         capped = False
 
+        # Side-array cap: since condors = put_sides × call_sides,
+        # cap each side at √generation_cap to prevent memory spikes.
+        side_cap = int(math.isqrt(generation_cap)) or generation_cap
+
         for exp, bucket in narrowed_universe.expiry_buckets.items():
             if capped:
                 break
@@ -156,23 +161,31 @@ class IronCondorsV2Scanner(BaseV2Scanner):
             # short_put > long_put  (credit: short closer to ATM)
             put_sides: list[tuple[float, Any, float, Any]] = []
             for i in range(len(puts)):
+                if len(put_sides) >= side_cap:
+                    break
                 for j in range(i + 1, len(puts)):
                     lp_s, lp_c = puts[i]   # lower strike  = long put
                     sp_s, sp_c = puts[j]   # higher strike = short put
                     if sp_s - lp_s > max_wing:
                         continue
                     put_sides.append((sp_s, sp_c, lp_s, lp_c))
+                    if len(put_sides) >= side_cap:
+                        break
 
             # ── 3. Build call credit spread sides ──────────────
             # short_call < long_call  (credit: short closer to ATM)
             call_sides: list[tuple[float, Any, float, Any]] = []
             for i in range(len(calls)):
+                if len(call_sides) >= side_cap:
+                    break
                 for j in range(i + 1, len(calls)):
                     sc_s, sc_c = calls[i]   # lower strike  = short call
                     lc_s, lc_c = calls[j]   # higher strike = long call
                     if lc_s - sc_s > max_wing:
                         continue
                     call_sides.append((sc_s, sc_c, lc_s, lc_c))
+                    if len(call_sides) >= side_cap:
+                        break
 
             # ── 4. Cross-product into condors ──────────────────
             for ps_s, ps_c, pl_s, pl_c in put_sides:

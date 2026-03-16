@@ -65,20 +65,19 @@ class TestDebitMigrationRouting:
             )
             assert should_run_v2(key), f"{key} should_run_v2"
 
-    def test_non_vertical_families_remain_v1(self):
+    def test_all_implemented_families_now_v2(self):
+        # Updated in Prompt 13: V2-forward routing — all implemented families route V2
         for key in ("iron_condor", "butterfly_debit", "iron_butterfly"):
-            assert get_scanner_version(key) == "v1", (
-                f"{key} should still be v1"
+            assert get_scanner_version(key) == "v2", (
+                f"{key} should be v2 after Prompt 13 V2-forward cutover"
             )
 
     def test_migration_status_reflects_debit_cutover(self):
         status = get_migration_status()
-        versions = status["scanner_versions"]
-        assert versions["put_debit"] == "v2"
-        assert versions["call_debit"] == "v2"
-        # Credit spreads still v2 from Prompt 7
-        assert versions["put_credit_spread"] == "v2"
-        assert versions["call_credit_spread"] == "v2"
+        # Prompt 13: scanner_versions replaced by version_overrides
+        # All families route V2 automatically — no overrides needed by default
+        assert "version_overrides" in status
+        assert "v2_families_implemented" in status
 
 
 # =====================================================================

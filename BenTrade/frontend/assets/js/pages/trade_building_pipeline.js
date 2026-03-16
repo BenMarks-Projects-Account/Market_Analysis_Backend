@@ -1,7 +1,7 @@
 /**
  * Trade Building Pipeline — execution-focused DAG workflow dashboard.
  *
- * Renders the 12 canonical pipeline stages as a dependency-aware graph,
+ * Renders the 13 canonical pipeline stages as a dependency-aware graph,
  * provides run controls (start / pause / resume / cancel), a clickable
  * stage-detail panel, and polling for live execution feel.
  *
@@ -15,7 +15,8 @@
   var STAGE_LABELS = {
     market_data:                  'Market Data',
     market_model_analysis:        'Model Analysis',
-    scanners:                     'Scanners',
+    stock_scanners:               'Stock Scanners',
+    options_scanners:             'Options Scanners',
     candidate_selection:          'Selection',
     shared_context:               'Shared Context',
     candidate_enrichment:         'Enrichment',
@@ -47,23 +48,24 @@
    * at a specific (row, col) coordinate.  Connectors are drawn as
    * SVG paths between node centres.
    *
-   * Layout (cols 0-5, rows 0-8):
-   *   Row 0:              market_data (col 2-3, centre)
-   *   Row 1:  market_model_analysis (col 1)    scanners (col 4)
-   *   Row 2:  shared_context (col 1)           candidate_selection (col 4)
-   *   Row 3:              candidate_enrichment (col 2-3, centre)
-   *   Row 4:  policy (col 1)  events (col 3)
-   *   Row 5:              orchestration (col 2-3, centre)
-   *   Row 6:              prompt_payload (col 2-3, centre)
-   *   Row 7:              final_model_decision (col 2-3, centre)
-   *   Row 8:              final_response_normalization (col 2-3, centre)
+   * Layout (cols 0-4, rows 0-9):
+   *   Row 0:  market_data (col 0)  stock_scanners (col 2)  options_scanners (col 4)   ← Wave 0 (parallel)
+   *   Row 1:  market_model_analysis (col 0)                candidate_selection (col 4)
+   *   Row 2:  shared_context (col 0)
+   *   Row 3:              candidate_enrichment (col 2, centre)
+   *   Row 4:  policy (col 0)                               events (col 4)
+   *   Row 5:              orchestration (col 2, centre)
+   *   Row 6:              prompt_payload (col 2, centre)
+   *   Row 7:              final_model_decision (col 2, centre)
+   *   Row 8:              final_response_normalization (col 2, centre)
    */
   var GRAPH_LAYOUT = {
-    market_data:                  { row: 0, col: 2 },
+    market_data:                  { row: 0, col: 0 },
+    stock_scanners:               { row: 0, col: 2 },
+    options_scanners:             { row: 0, col: 4 },
     market_model_analysis:        { row: 1, col: 0 },
-    scanners:                     { row: 1, col: 4 },
+    candidate_selection:          { row: 1, col: 4 },
     shared_context:               { row: 2, col: 0 },
-    candidate_selection:          { row: 2, col: 4 },
     candidate_enrichment:         { row: 3, col: 2 },
     policy:                       { row: 4, col: 0 },
     events:                       { row: 4, col: 4 },
@@ -616,31 +618,36 @@
     }
 
     /* ── Polling for live updates ────────────────────────────── */
+    var pollInFlight = false;
+
     function startPolling() {
       stopPolling();
+      pollInFlight = false;
       pollTimer = setInterval(function () {
-        if (currentRunId) {
-          apiFetch('/api/pipeline/runs/' + encodeURIComponent(currentRunId))
-            .then(function (data) {
-              currentRunData = data;
-              updateRunHeader(data);
-              updateNodes(data);
-              if (selectedStage) selectStage(selectedStage);
-              // Stop polling if terminal state
-              if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
-                stopPolling();
-                elBtnStart.disabled = false;
-                loadRunList();
-                setStatus('Run ' + shortId(currentRunId) + ' ' + data.status);
-              }
-            })
-            .catch(function () { /* silent */ });
-        }
+        if (!currentRunId || pollInFlight) return;
+        pollInFlight = true;
+        apiFetch('/api/pipeline/runs/' + encodeURIComponent(currentRunId))
+          .then(function (data) {
+            currentRunData = data;
+            updateRunHeader(data);
+            updateNodes(data);
+            if (selectedStage) selectStage(selectedStage);
+            // Stop polling if terminal state
+            if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+              stopPolling();
+              elBtnStart.disabled = false;
+              loadRunList();
+              setStatus('Run ' + shortId(currentRunId) + ' ' + data.status);
+            }
+          })
+          .catch(function () { /* silent */ })
+          .then(function () { pollInFlight = false; });
       }, POLL_INTERVAL_MS);
     }
 
     function stopPolling() {
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      pollInFlight = false;
     }
 
     /* ── Wire events ─────────────────────────────────────────── */

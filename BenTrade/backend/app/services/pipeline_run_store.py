@@ -132,16 +132,59 @@ def update_active_run(
         completed_count, remaining_count, total_runnable,
         queue_position, candidate_status, elapsed_ms, timestamp.
     """
+    # Deep-copy OUTSIDE the lock to avoid holding it during expensive copies.
+    run_copy = copy.deepcopy(run)
+    events_copy = copy.deepcopy(events) if events is not None else None
+    progress_copy = copy.deepcopy(candidate_progress) if candidate_progress is not None else None
+
     with _lock:
         snap = _runs.get(run_id)
         if snap is None:
             return
-        snap["run"] = copy.deepcopy(run)
+        snap["run"] = run_copy
         snap["stored_at"] = _now_iso()
-        if events is not None:
-            snap["events"] = copy.deepcopy(events)
-        if candidate_progress is not None:
-            snap["candidate_progress"] = copy.deepcopy(candidate_progress)
+        if events_copy is not None:
+            snap["events"] = events_copy
+        if progress_copy is not None:
+            snap["candidate_progress"] = progress_copy
+
+
+def update_active_run_precopied(
+    run_id: str,
+    run_copy: dict[str, Any],
+    events_copy: list[dict[str, Any]] | None = None,
+    *,
+    candidate_progress: dict[str, Any] | None = None,
+    artifact_store_copy: dict[str, Any] | None = None,
+) -> None:
+    """Like ``update_active_run`` but accepts *already-copied* data.
+
+    Used by the live-callback path where the caller has already acquired
+    the orchestrator's run-lock and performed the deep-copy itself for
+    thread-safety.  Avoids a redundant (and potentially racy) second
+    deep-copy inside the run store.
+
+    Parameters
+    ----------
+    artifact_store_copy : dict | None
+        Pre-copied artifact store snapshot.  When provided, the
+        snapshot's ``artifact_store`` is replaced so that endpoints
+        like Scanner Review can access artifacts mid-run.
+    """
+    progress_copy = copy.deepcopy(candidate_progress) if candidate_progress is not None else None
+
+    with _lock:
+        snap = _runs.get(run_id)
+        if snap is None:
+            return
+        snap["run"] = run_copy
+        snap["stored_at"] = _now_iso()
+        if events_copy is not None:
+            snap["events"] = events_copy
+        if progress_copy is not None:
+            snap["candidate_progress"] = progress_copy
+        if artifact_store_copy is not None:
+            snap["artifact_store"] = artifact_store_copy
 
 
 def clear_all() -> int:
@@ -187,9 +230,11 @@ def get_run(run_id: str) -> dict[str, Any] | None:
     """Return the full snapshot for a run, or ``None``."""
     with _lock:
         snap = _runs.get(run_id)
-    if snap is None:
-        return None
-    return copy.deepcopy(snap)
+        if snap is None:
+            return None
+        # Shallow-copy the dict reference under lock; deep-copy outside.
+        snap_ref = snap.copy()
+    return copy.deepcopy(snap_ref)
 
 
 def get_run_detail(run_id: str) -> dict[str, Any] | None:
@@ -248,6 +293,15 @@ def get_run_detail(run_id: str) -> dict[str, Any] | None:
             ledger = art.get("data")
             break
 
+    # Scanner liveness snapshot (if scanner stage is running)
+    scanner_liveness = None
+    liveness_tracker = run.get("_scanner_liveness")
+    if liveness_tracker and hasattr(liveness_tracker, "snapshot"):
+        try:
+            scanner_liveness = liveness_tracker.snapshot()
+        except Exception:
+            pass
+
     return {
         "run_id": run.get("run_id", ""),
         "status": run.get("status", "unknown"),
@@ -266,6 +320,7 @@ def get_run_detail(run_id: str) -> dict[str, Any] | None:
         "ledger": ledger,
         "events": snap.get("events", []),
         "candidate_progress": snap.get("candidate_progress"),
+        "scanner_liveness": scanner_liveness,
         "summary": summary,
         "stored_at": snap.get("stored_at"),
         "module_role": _MODULE_ROLE,

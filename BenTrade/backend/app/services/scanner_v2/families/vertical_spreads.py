@@ -48,6 +48,15 @@ from app.services.scanner_v2.data import V2NarrowedUniverse
 
 _log = logging.getLogger("bentrade.scanner_v2.families.vertical_spreads")
 
+# Construction safety cap — prevent combinatorial explosion.
+# Vertical spreads are O(n²) per expiry per symbol; without this, a
+# symbol with 100 strikes × 20 expirations can generate millions.
+_DEFAULT_GENERATION_CAP = 50_000
+
+# Maximum allowable width between strikes in dollars.
+# Filters out impractically wide spreads at construction time.
+_DEFAULT_MAX_WIDTH = 50.0
+
 
 # ═══════════════════════════════════════════════════════════════════
 #  Variant configuration
@@ -129,10 +138,16 @@ class VerticalSpreadsV2Scanner(BaseV2Scanner):
         target_type: str = config["option_type"]
         short_is_higher: bool = config["short_is_higher"]
 
+        generation_cap = int(context.get("generation_cap", _DEFAULT_GENERATION_CAP))
+        max_width = float(context.get("max_width", _DEFAULT_MAX_WIDTH))
+
         candidates: list[V2Candidate] = []
         seq = 0
+        capped = False
 
         for exp, bucket in narrowed_universe.expiry_buckets.items():
+            if capped:
+                break
             # Filter strikes to target option type
             typed_contracts: list[tuple[float, Any]] = []
             for entry in bucket.strikes:
@@ -147,9 +162,15 @@ class VerticalSpreadsV2Scanner(BaseV2Scanner):
 
             # Generate all valid (S_low, S_high) pairs
             for i in range(len(typed_contracts)):
+                if capped:
+                    break
                 for j in range(i + 1, len(typed_contracts)):
                     s_low, c_low = typed_contracts[i]
                     s_high, c_high = typed_contracts[j]
+
+                    # Skip impossibly wide spreads
+                    if s_high - s_low > max_width:
+                        break  # remaining j values only wider
 
                     if short_is_higher:
                         short_strike, short_c = s_high, c_high
@@ -176,10 +197,19 @@ class VerticalSpreadsV2Scanner(BaseV2Scanner):
                     candidates.append(cand)
                     seq += 1
 
+                    if seq >= generation_cap:
+                        capped = True
+                        _log.warning(
+                            "Vertical %s %s: hit generation cap (%d)",
+                            strategy_id, symbol, generation_cap,
+                        )
+                        break
+
         _log.info(
-            "Vertical %s %s: constructed %d candidates from %d expirations",
+            "Vertical %s %s: constructed %d candidates from %d expirations%s",
             strategy_id, symbol, len(candidates),
             len(narrowed_universe.expiry_buckets),
+            " (CAPPED)" if capped else "",
         )
         return candidates
 

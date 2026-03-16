@@ -44,10 +44,10 @@ assert get_scanner_version("put_debit") == "v2"
 assert should_run_v2("put_debit")
 assert get_scanner_version("call_debit") == "v2"
 assert should_run_v2("call_debit")
-# Non-vertical families remain at v1
-assert get_scanner_version("iron_condor") == "v1"
-assert not should_run_v2("iron_condor")
-print("PASS migration (all verticals v2, others v1)")
+# Prompt 13: V2-forward routing — all implemented families route V2
+assert get_scanner_version("iron_condor") == "v2"
+assert should_run_v2("iron_condor")
+print("PASS migration (all implemented families v2)")
 
 # 6. Candidate construction + validation smoke
 leg_short = V2Leg(index=0, side="short", strike=440, option_type="put",

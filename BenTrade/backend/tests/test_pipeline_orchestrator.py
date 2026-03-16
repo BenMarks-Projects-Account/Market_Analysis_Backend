@@ -228,6 +228,13 @@ class TestOrchestratorInit:
         assert isinstance(orch["dependency_map"], dict)
         assert "market_model_analysis" in orch["dependency_map"]
 
+    def test_shared_context_depends_on_candidate_selection(self):
+        """shared_context must wait for candidate_selection (DAG contract)."""
+        orch = create_orchestrator()
+        deps = orch["dependency_map"]
+        assert "candidate_selection" in deps["shared_context"]
+        assert "market_model_analysis" in deps["shared_context"]
+
     def test_event_callback_preserved(self):
         cb = lambda e: None
         orch = create_orchestrator(event_callback=cb)
@@ -284,7 +291,8 @@ def _all_stub_pipeline(**kwargs):
     handlers = kwargs.pop("handlers", {})
     handlers.setdefault("market_data", _success_handler)
     handlers.setdefault("market_model_analysis", _success_handler)
-    handlers.setdefault("scanners", _success_handler)
+    handlers.setdefault("stock_scanners", _success_handler)
+    handlers.setdefault("options_scanners", _success_handler)
     handlers.setdefault("candidate_selection", _success_handler)
     handlers.setdefault("shared_context", _success_handler)
     handlers.setdefault("candidate_enrichment", _success_handler)
@@ -322,12 +330,13 @@ class TestDependencyGating:
     def test_satisfied_deps_allow_execution(self):
         run = create_pipeline_run(run_id="run-dep-001")
         store = create_artifact_store("run-dep-001")
-        # Complete market_data first
+        # Complete all prerequisites for market_model_analysis
         from app.services.pipeline_run_contract import (
             mark_stage_completed, mark_stage_running,
         )
-        mark_stage_running(run, "market_data")
-        mark_stage_completed(run, "market_data")
+        for dep in ("market_data", "stock_scanners", "options_scanners"):
+            mark_stage_running(run, dep)
+            mark_stage_completed(run, dep)
 
         result = execute_stage(run, store, "market_model_analysis",
                                handler=_success_handler)
@@ -531,7 +540,11 @@ class TestStopOnFailure:
 
     def test_fatal_failure_halts_pipeline(self):
         """market_data failure should halt the pipeline."""
-        handlers = {"market_data": _failing_handler}
+        handlers = {
+            "market_data": _failing_handler,
+            "stock_scanners": _success_handler,
+            "options_scanners": _success_handler,
+        }
         result = run_pipeline_with_handlers(
             handlers, run_id="run-halt-001"
         )
@@ -540,36 +553,57 @@ class TestStopOnFailure:
             for sr in result["stage_results"]
         }
         assert stage_outcomes["market_data"] == "failed"
-        # All subsequent stages should be skipped
-        for sk in list(PIPELINE_STAGES)[1:]:
-            assert stage_outcomes[sk] == "skipped", (
-                f"Stage {sk} should be skipped but was {stage_outcomes[sk]}"
+        # Wave 0 peers (scanners) may complete, be skipped, or be
+        # cancelled (failed) depending on timing under parallel Wave 0:
+        for sk in ("stock_scanners", "options_scanners"):
+            assert stage_outcomes[sk] in ("completed", "skipped", "failed"), (
+                f"Wave 0 stage {sk} should be completed, skipped, or "
+                f"failed but was {stage_outcomes[sk]}"
             )
+        # All stages after Wave 0 must be skipped
+        wave_zero = {"market_data", "stock_scanners", "options_scanners"}
+        for sk in PIPELINE_STAGES:
+            if sk not in wave_zero:
+                assert stage_outcomes[sk] == "skipped", (
+                    f"Stage {sk} should be skipped but was "
+                    f"{stage_outcomes[sk]}"
+                )
 
     def test_fatal_failure_run_status(self):
-        handlers = {"market_data": _failing_handler}
+        handlers = {
+            "market_data": _failing_handler,
+            "stock_scanners": _success_handler,
+            "options_scanners": _success_handler,
+        }
         result = run_pipeline_with_handlers(
             handlers, run_id="run-halt-002"
         )
         assert result["run"]["status"] == "failed"
 
     def test_exception_halts_pipeline(self):
-        handlers = {"market_data": _exception_handler}
+        handlers = {
+            "market_data": _exception_handler,
+            "stock_scanners": _success_handler,
+            "options_scanners": _success_handler,
+        }
         result = run_pipeline_with_handlers(
             handlers, run_id="run-halt-003"
         )
         outcomes = {sr["stage_key"]: sr["outcome"]
                     for sr in result["stage_results"]}
         assert outcomes["market_data"] == "failed"
-        # Downstream halted
-        assert outcomes["scanners"] == "skipped"
+        # Wave 0 peers may complete, be skipped, or be cancelled
+        # under parallel execution — all are valid
+        assert outcomes["stock_scanners"] in ("completed", "skipped", "failed")
 
     def test_mid_pipeline_failure_halts(self):
-        """Failure in scanners should halt candidate_selection onward."""
+        """Failure in candidate_selection should halt downstream."""
         handlers = {
             "market_data": _success_handler,
             "market_model_analysis": _success_handler,
-            "scanners": _failing_handler,
+            "stock_scanners": _success_handler,
+            "options_scanners": _success_handler,
+            "candidate_selection": _failing_handler,
         }
         result = run_pipeline_with_handlers(
             handlers, run_id="run-halt-004"
@@ -577,8 +611,8 @@ class TestStopOnFailure:
         outcomes = {sr["stage_key"]: sr["outcome"]
                     for sr in result["stage_results"]}
         assert outcomes["market_data"] == "completed"
-        assert outcomes["scanners"] == "failed"
-        assert outcomes["candidate_selection"] == "skipped"
+        assert outcomes["candidate_selection"] == "failed"
+        assert outcomes["shared_context"] == "skipped"
 
 
 # =====================================================================
@@ -597,7 +631,8 @@ class TestContinueBehavior:
             "events": _failing_handler,
             "market_data": _success_handler,
             "market_model_analysis": _success_handler,
-            "scanners": _success_handler,
+            "stock_scanners": _success_handler,
+            "options_scanners": _success_handler,
             "candidate_selection": _success_handler,
             "shared_context": _success_handler,
         }
@@ -641,7 +676,8 @@ class TestCustomHandlers:
         handlers = {
             "market_data": tracking_handler,
             "market_model_analysis": _success_handler,
-            "scanners": _success_handler,
+            "stock_scanners": _success_handler,
+            "options_scanners": _success_handler,
             "candidate_selection": _success_handler,
             "shared_context": _success_handler,
         }
@@ -666,7 +702,8 @@ class TestCustomHandlers:
         handlers = {
             "market_data": inspecting_handler,
             "market_model_analysis": _success_handler,
-            "scanners": _success_handler,
+            "stock_scanners": _success_handler,
+            "options_scanners": _success_handler,
             "candidate_selection": _success_handler,
             "shared_context": _success_handler,
         }
@@ -685,7 +722,13 @@ class TestUnknownStage:
 
     def test_missing_handler_uses_stub(self):
         """If no handler registered, stub is used."""
-        orch = create_orchestrator(run_id="run-unk-001")
+        orch = create_orchestrator(
+            run_id="run-unk-001",
+            handlers={
+                "stock_scanners": _success_handler,
+                "options_scanners": _success_handler,
+            },
+        )
         # Remove a handler from registry
         del orch["handlers"]["market_data"]
         # Execute should still work via fallback in _execute_pipeline
@@ -709,7 +752,11 @@ class TestRunFinalization:
         assert run["status"] == "completed"
 
     def test_finalize_called_on_failure(self):
-        handlers = {"market_data": _failing_handler}
+        handlers = {
+            "market_data": _failing_handler,
+            "stock_scanners": _success_handler,
+            "options_scanners": _success_handler,
+        }
         result = run_pipeline_with_handlers(
             handlers, run_id="run-final-002"
         )
@@ -747,16 +794,24 @@ class TestResultShape:
     def test_stage_outcome_counts(self):
         result = _all_stub_pipeline(run_id="run-shape-003")
         counts = result["summary"]["stage_outcome_counts"]
-        assert counts.get("completed", 0) == 12
+        assert counts.get("completed", 0) == 13
 
     def test_failed_run_outcome_counts(self):
-        handlers = {"market_data": _failing_handler}
+        handlers = {
+            "market_data": _failing_handler,
+            "stock_scanners": _success_handler,
+            "options_scanners": _success_handler,
+        }
         result = run_pipeline_with_handlers(
             handlers, run_id="run-shape-004"
         )
         counts = result["summary"]["stage_outcome_counts"]
-        assert counts.get("failed", 0) == 1
-        assert counts.get("skipped", 0) == 11
+        assert counts.get("failed", 0) >= 1
+        # Wave 0 peers may complete, be skipped, or be cancelled
+        # (failed) under parallel execution; non-Wave-0 stages are
+        # always skipped.
+        total = sum(counts.values())
+        assert total == 13
 
 
 # =====================================================================
@@ -859,6 +914,11 @@ class TestDependencyMap:
         d1["market_data"].append("fake")
         assert "fake" not in d2["market_data"]
 
+    def test_shared_context_depends_on_market_data(self):
+        """shared_context reads market_data artifacts directly — must declare it."""
+        deps = get_default_dependency_map()
+        assert "market_data" in deps["shared_context"]
+
 
 # =====================================================================
 #  Event Emission Seam
@@ -904,7 +964,11 @@ class TestSerialization:
         assert isinstance(serialized, str)
 
     def test_failed_result_json_serializable(self):
-        handlers = {"market_data": _exception_handler}
+        handlers = {
+            "market_data": _exception_handler,
+            "stock_scanners": _success_handler,
+            "options_scanners": _success_handler,
+        }
         result = run_pipeline_with_handlers(
             handlers, run_id="run-json-002"
         )
@@ -921,7 +985,7 @@ class TestAllStubsSucceed:
     def test_full_pipeline_success(self):
         result = _all_stub_pipeline(run_id="run-scenario-001")
         assert result["run"]["status"] == "completed"
-        assert len(result["stage_results"]) == 12
+        assert len(result["stage_results"]) == 13
         assert all(
             sr["outcome"] == "completed"
             for sr in result["stage_results"]
@@ -942,7 +1006,8 @@ class TestFailureDownstreamSkip:
         handlers = {
             "market_data": _success_handler,
             "market_model_analysis": _success_handler,
-            "scanners": _failing_handler,
+            "stock_scanners": _failing_handler,
+            "options_scanners": _failing_handler,
         }
         result = run_pipeline_with_handlers(
             handlers, run_id="run-scenario-002"
@@ -951,19 +1016,20 @@ class TestFailureDownstreamSkip:
                     for sr in result["stage_results"]}
 
         assert outcomes["market_data"] == "completed"
-        assert outcomes["market_model_analysis"] == "completed"
-        assert outcomes["scanners"] == "failed"
-        # Pipeline halted → everything after scanners is skipped
-        for sk in list(PIPELINE_STAGES)[3:]:
-            assert outcomes[sk] == "skipped", (
-                f"{sk} should be skipped, got {outcomes[sk]}"
-            )
+        # scanner stages are continuable — failure does NOT halt pipeline
+        assert outcomes["stock_scanners"] == "failed"
+        assert outcomes["options_scanners"] == "failed"
+        # market_model_analysis depends on scanner stages → skipped
+        assert outcomes["market_model_analysis"] == "skipped"
+        # candidate_selection also depends on scanner stages → skipped
+        assert outcomes["candidate_selection"] == "skipped"
 
     def test_run_has_errors(self):
         handlers = {
             "market_data": _success_handler,
             "market_model_analysis": _success_handler,
-            "scanners": _failing_handler,
+            "stock_scanners": _failing_handler,
+            "options_scanners": _success_handler,
         }
         result = run_pipeline_with_handlers(
             handlers, run_id="run-scenario-003"
@@ -978,7 +1044,11 @@ class TestFailureDownstreamSkip:
 class TestExceptionScenario:
 
     def test_exception_captured_and_halts(self):
-        handlers = {"market_data": _exception_handler}
+        handlers = {
+            "market_data": _exception_handler,
+            "stock_scanners": _success_handler,
+            "options_scanners": _success_handler,
+        }
         result = run_pipeline_with_handlers(
             handlers, run_id="run-scenario-004"
         )
@@ -990,7 +1060,8 @@ class TestExceptionScenario:
         outcomes = {sr["stage_key"]: sr["outcome"]
                     for sr in result["stage_results"]}
         assert outcomes["market_data"] == "failed"
-        assert outcomes["scanners"] == "skipped"
+        # Wave 0 peers may complete or be skipped under parallel execution
+        assert outcomes["stock_scanners"] in ("completed", "skipped")
 
 
 # =====================================================================
@@ -1008,3 +1079,216 @@ class TestConstants:
 
     def test_default_dependency_map_complete(self):
         assert len(_DEFAULT_DEPENDENCY_MAP) == len(PIPELINE_STAGES)
+
+
+# =====================================================================
+#  Execution ordering and Wave 0 parallelism
+# =====================================================================
+
+class TestExecutionOrdering:
+    """Verify execution ordering: Wave 0 stages (no dependencies) run
+    in parallel, all subsequent stages execute sequentially in
+    canonical PIPELINE_STAGES order.
+
+    CONTEXT: Full wave parallelism was rolled back (2026-03-12) for
+    stability.  Targeted Wave 0 parallelism was re-introduced to
+    align with the dependency graph: market_data, stock_scanners,
+    and options_scanners have no dependencies and run concurrently.
+    """
+
+    _WAVE_ZERO = frozenset({"market_data", "stock_scanners", "options_scanners"})
+
+    def _make_tracking_handler(self, log: list):
+        """Build a handler that records start/end times."""
+        import time
+
+        def _handler(run, artifact_store, stage_key, **kwargs):
+            log.append((stage_key, "start", time.monotonic()))
+            time.sleep(0.001)
+            log.append((stage_key, "end", time.monotonic()))
+            return {
+                "outcome": "completed",
+                "summary_counts": {"items_processed": 1},
+                "artifacts": [],
+                "metadata": {},
+                "error": None,
+            }
+
+        return _handler
+
+    def test_stages_execute_in_canonical_order(self):
+        """Stage results must appear in PIPELINE_STAGES order."""
+        result = _all_stub_pipeline(run_id="run-seq-001")
+        result_keys = [sr["stage_key"] for sr in result["stage_results"]]
+        assert result_keys == list(PIPELINE_STAGES)
+
+    def test_post_wave_zero_stages_do_not_overlap(self):
+        """Post-Wave-0 stages should not have overlapping execution."""
+        log = []
+        handler = self._make_tracking_handler(log)
+        handlers = {stage: handler for stage in PIPELINE_STAGES}
+        run_pipeline_with_handlers(
+            handlers, run_id="run-seq-002",
+        )
+        # Extract per-stage intervals
+        intervals = {}
+        for stage_key, event, t in log:
+            intervals.setdefault(stage_key, {})
+            intervals[stage_key][event] = t
+
+        # Filter to post-Wave-0 stages only
+        post_w0 = {
+            k: v for k, v in intervals.items()
+            if k not in self._WAVE_ZERO
+        }
+        sorted_stages = sorted(
+            post_w0.items(),
+            key=lambda x: x[1].get("start", 0),
+        )
+        for i in range(len(sorted_stages) - 1):
+            prev_key, prev_times = sorted_stages[i]
+            next_key, next_times = sorted_stages[i + 1]
+            assert prev_times["end"] <= next_times["start"], (
+                f"Post-Wave-0 stages overlapped: {prev_key} ended at "
+                f"{prev_times['end']:.6f} but {next_key} started at "
+                f"{next_times['start']:.6f}"
+            )
+
+    def test_market_model_analysis_after_market_data(self):
+        """market_model_analysis must not start before market_data completes."""
+        log = []
+        handler = self._make_tracking_handler(log)
+        handlers = {stage: handler for stage in PIPELINE_STAGES}
+        run_pipeline_with_handlers(handlers, run_id="run-seq-003")
+        intervals = {}
+        for stage_key, event, t in log:
+            intervals.setdefault(stage_key, {})
+            intervals[stage_key][event] = t
+        assert intervals["market_data"]["end"] <= intervals["market_model_analysis"]["start"]
+
+    def test_candidate_selection_after_scanners(self):
+        """candidate_selection must not start before both scanner stages complete."""
+        log = []
+        handler = self._make_tracking_handler(log)
+        handlers = {stage: handler for stage in PIPELINE_STAGES}
+        run_pipeline_with_handlers(handlers, run_id="run-seq-005")
+        intervals = {}
+        for stage_key, event, t in log:
+            intervals.setdefault(stage_key, {})
+            intervals[stage_key][event] = t
+        cs_start = intervals["candidate_selection"]["start"]
+        assert intervals["stock_scanners"]["end"] <= cs_start
+        assert intervals["options_scanners"]["end"] <= cs_start
+
+    def test_pipeline_progresses_past_scanners(self):
+        """Pipeline must advance through scanner stages to candidate_selection
+        and beyond."""
+        result = _all_stub_pipeline(run_id="run-seq-006")
+        outcomes = {sr["stage_key"]: sr["outcome"]
+                    for sr in result["stage_results"]}
+        assert outcomes["stock_scanners"] == "completed"
+        assert outcomes["options_scanners"] == "completed"
+        assert outcomes["candidate_selection"] == "completed"
+        assert outcomes["shared_context"] == "completed"
+        assert outcomes["candidate_enrichment"] == "completed"
+        assert result["run"]["status"] == "completed"
+
+    def test_post_wave_zero_events_strictly_sequential(self):
+        """Post-Wave-0 stage_started/stage_completed events must
+        alternate — no two post-Wave-0 stage_started events without
+        a stage_completed between them. Wave 0 events may interleave."""
+        events = []
+
+        def _cb(event):
+            events.append(event)
+
+        _all_stub_pipeline(run_id="run-seq-007", event_callback=_cb)
+
+        stage_events = [
+            e for e in events
+            if e.get("event_type") in ("stage_started", "stage_completed")
+            and e.get("stage_key") not in self._WAVE_ZERO
+        ]
+        i = 0
+        while i < len(stage_events) - 1:
+            if stage_events[i]["event_type"] == "stage_started":
+                nxt = stage_events[i + 1]
+                assert nxt["event_type"] == "stage_completed", (
+                    f"After stage_started for "
+                    f"{stage_events[i].get('stage_key')}, expected "
+                    f"stage_completed but got {nxt['event_type']} for "
+                    f"{nxt.get('stage_key')}"
+                )
+                assert nxt.get("stage_key") == stage_events[i].get("stage_key")
+            i += 1
+
+    def test_failure_halts_and_stage_results_preserved(self):
+        """When a scanner stage fails, downstream stages that depend on it
+        are skipped but stage_results for the failed stage are correct."""
+        def _fail_stock_scanners(run, artifact_store, stage_key, **kwargs):
+            return {
+                "outcome": "failed",
+                "summary_counts": {},
+                "artifacts": [],
+                "metadata": {},
+                "error": {
+                    "code": "TEST",
+                    "message": "intentional",
+                    "source": "stock_scanners",
+                    "detail": {},
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "retryable": False,
+                },
+            }
+
+        handlers = {stage: _success_handler for stage in PIPELINE_STAGES}
+        handlers["stock_scanners"] = _fail_stock_scanners
+        result = run_pipeline_with_handlers(
+            handlers, run_id="run-seq-008",
+        )
+        outcomes = {sr["stage_key"]: sr["outcome"]
+                    for sr in result["stage_results"]}
+        assert outcomes["market_data"] == "completed"
+        # stock_scanners is continuable — failure doesn't halt pipeline
+        assert outcomes["stock_scanners"] == "failed"
+        assert outcomes["options_scanners"] == "completed"
+        # candidate_selection depends on stock_scanners (failed) → skipped
+        assert outcomes["candidate_selection"] == "skipped"
+
+
+# =====================================================================
+#  Handler direct call (no timeout wrapping)
+# =====================================================================
+
+class TestHandlerDirectCall:
+    """Tests that execute_stage calls the handler directly without any
+    timeout wrapping.  Legacy handler_timeout_seconds kwargs are stripped."""
+
+    def test_handler_called_directly(self):
+        """Handler is invoked directly — no ThreadPool timeout wrapper."""
+        run = create_pipeline_run(run_id="direct-001")
+        store = create_artifact_store("direct-001")
+
+        result = execute_stage(
+            run, store, "market_data",
+            handler=_success_handler,
+        )
+
+        assert result["outcome"] == "completed"
+        meta = result.get("metadata", {})
+        assert meta.get("forced_completion") is None
+
+    def test_legacy_timeout_kwarg_stripped(self):
+        """Legacy handler_timeout_seconds kwarg is stripped and ignored."""
+        run = create_pipeline_run(run_id="direct-002")
+        store = create_artifact_store("direct-002")
+
+        result = execute_stage(
+            run, store, "market_data",
+            handler=_success_handler,
+            handler_kwargs={"handler_timeout_seconds": 0},
+        )
+
+        assert result["outcome"] == "completed"
+        meta = result.get("metadata", {})
+        assert meta.get("forced_completion") is None

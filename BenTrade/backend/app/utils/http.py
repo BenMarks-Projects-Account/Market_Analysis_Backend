@@ -27,6 +27,7 @@ async def request_json(
     json_body: dict[str, Any] | None = None,
     retries: int = 2,
     backoff_ms: int = 300,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
     """Make an HTTP request and return parsed JSON.
 
@@ -35,6 +36,11 @@ async def request_json(
         or network-level exceptions (timeouts, connection resets).
       - Waits *backoff_ms* milliseconds between retries (doubles each attempt).
       - Non-transient HTTP errors (401/403/404/429/500 etc.) are raised immediately.
+
+    Parameters
+    ----------
+    timeout : float | None
+        Per-request timeout in seconds (overrides client default if set).
     """
     last_exc: Exception | None = None
 
@@ -57,10 +63,13 @@ async def request_json(
         logger.debug("[http] request %s %s body=%s", method, url, json_body or data)
 
         try:
-            response = await client.request(
-                method, url, params=params, headers=headers,
+            req_kwargs: dict[str, Any] = dict(
+                params=params, headers=headers,
                 data=data, json=json_body,
             )
+            if timeout is not None:
+                req_kwargs["timeout"] = timeout
+            response = await client.request(method, url, **req_kwargs)
         except httpx.HTTPError as exc:
             last_exc = UpstreamError(
                 f"Network error calling upstream: {url}",

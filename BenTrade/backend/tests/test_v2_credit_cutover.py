@@ -62,16 +62,18 @@ class TestMigrationRouting:
         assert get_scanner_version("call_debit") == "v2"
         assert should_run_v2("call_debit") is True
 
-    def test_iron_condor_remains_v1(self):
-        assert get_scanner_version("iron_condor") == "v1"
+    def test_iron_condor_now_v2(self):
+        # Updated in Prompt 13: V2-forward routing — all implemented families route V2
+        assert get_scanner_version("iron_condor") == "v2"
 
     def test_migration_status_reflects_cutover(self):
         status = get_migration_status()
-        versions = status["scanner_versions"]
-        assert versions["put_credit_spread"] == "v2"
-        assert versions["call_credit_spread"] == "v2"
-        assert versions["put_debit"] == "v2"
-        assert versions["call_debit"] == "v2"
+        # Prompt 13: scanner_versions replaced by version_overrides
+        # Vertical spreads route V2 automatically (no overrides needed)
+        assert status["version_overrides"] == {} or all(
+            v == "v2" for k, v in status["version_overrides"].items()
+            if k in ("put_credit_spread", "call_credit_spread", "put_debit", "call_debit")
+        )
 
     def test_v2_families_implemented(self):
         status = get_migration_status()
@@ -349,12 +351,14 @@ class TestPipelineIntegrationGlue:
     """Verify pipeline_scanner_stage routes to V2 for credit spreads."""
 
     def test_v2_dispatch_exists_in_executor(self):
-        """The _default_scanner_executor should import V2 migration."""
+        """The _default_scanner_executor should import V2 migration.
+        Updated Prompt 13: V2 path extracted to _execute_v2_options_scanner."""
         import inspect
         from app.services.pipeline_scanner_stage import _default_scanner_executor
         source = inspect.getsource(_default_scanner_executor)
         assert "should_run_v2" in source
-        assert "execute_v2_scanner" in source
+        # Prompt 13: V2 call extracted to _execute_v2_options_scanner helper
+        assert "_execute_v2_options_scanner" in source
 
     def test_scanner_results_override_works_with_v2_output(self):
         """Pipeline stage handler accepts V2-shaped scanner output

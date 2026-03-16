@@ -104,16 +104,17 @@ _FAMILY_REGISTRY: list[V2FamilyMeta] = [
     ),
     V2FamilyMeta(
         family_key="calendars",
-        display_name="Calendar Spreads",
+        display_name="Calendar / Diagonal Spreads",
         strategy_ids=[
-            "calendar_spread",
             "calendar_call_spread",
             "calendar_put_spread",
+            "diagonal_call_spread",
+            "diagonal_put_spread",
         ],
         leg_count=2,
         module_path="app.services.scanner_v2.families.calendars",
         class_name="CalendarsV2Scanner",
-        implemented=False,
+        implemented=True,
     ),
 ]
 

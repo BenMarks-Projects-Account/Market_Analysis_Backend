@@ -987,7 +987,7 @@ class TestReasonCodeRegistry:
 
     def test_all_reject_codes_count(self):
         """Total reject codes should be 27 (25 + 1 IC geometry + 1 BF geometry)."""
-        assert len(all_reject_codes()) == 27
+        assert len(all_reject_codes()) == 28
 
 
 # =====================================================================

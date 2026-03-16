@@ -54,8 +54,9 @@ _COMPATIBLE_VERSIONS = frozenset({"1.0"})
 
 PIPELINE_STAGES: tuple[str, ...] = (
     "market_data",
+    "stock_scanners",
+    "options_scanners",
     "market_model_analysis",
-    "scanners",
     "candidate_selection",
     "shared_context",
     "candidate_enrichment",
@@ -76,8 +77,9 @@ _STAGE_INDEX: dict[str, int] = {s: i for i, s in enumerate(PIPELINE_STAGES)}
 
 STAGE_LABELS: dict[str, str] = {
     "market_data":                   "Market Data Fetch",
+    "stock_scanners":                "Stock Scanners",
+    "options_scanners":              "Options Scanners",
     "market_model_analysis":         "Market Model Analysis",
-    "scanners":                      "Scanner Execution",
     "candidate_selection":           "Candidate Selection",
     "shared_context":                "Shared Context Assembly",
     "candidate_enrichment":          "Candidate Enrichment",

@@ -201,60 +201,150 @@ def build_selection_record(
 #  Duplicate detection
 # =====================================================================
 
+def _extract_expiration(candidate: dict[str, Any]) -> str:
+    """Extract expiration from a candidate, checking nested locations.
+
+    Checks (in order): top-level ``expiration``,
+    ``strategy_structure.expiration``, ``entry_context.expiration``.
+    """
+    exp = candidate.get("expiration")
+    if not exp:
+        ss = candidate.get("strategy_structure") or {}
+        exp = ss.get("expiration")
+    if not exp:
+        ec = candidate.get("entry_context") or {}
+        exp = ec.get("expiration")
+    return str(exp or "")
+
+
+def _extract_strike_signature(candidate: dict[str, Any]) -> str:
+    """Build a sorted strike signature from candidate legs or strike fields.
+
+    Examples:
+      Vertical spread with legs at 300 and 305 → ``"300/305"``
+      Iron condor at 280/285/310/315 → ``"280/285/310/315"``
+    """
+    # Try strategy_structure.legs first (most reliable for multi-leg)
+    ss = candidate.get("strategy_structure") or {}
+    legs = ss.get("legs") or candidate.get("legs") or []
+
+    if legs:
+        strikes: list[float] = []
+        for leg in legs:
+            strike = leg.get("strike") if isinstance(leg, dict) else None
+            if strike is not None:
+                try:
+                    strikes.append(float(strike))
+                except (ValueError, TypeError):
+                    pass
+        if strikes:
+            strikes.sort()
+            return "/".join(f"{s:g}" for s in strikes)
+
+    # Fallback: short_strike / long_strike from strategy_structure
+    # or entry_context
+    ec = candidate.get("entry_context") or {}
+    short = ss.get("short_strike") or candidate.get("short_strike") or ec.get("short_strike")
+    long_ = ss.get("long_strike") or candidate.get("long_strike") or ec.get("long_strike")
+    if short is not None or long_ is not None:
+        fallback: list[float] = []
+        for s in (short, long_):
+            if s is not None:
+                try:
+                    fallback.append(float(s))
+                except (ValueError, TypeError):
+                    pass
+        if fallback:
+            fallback.sort()
+            return "/".join(f"{s:g}" for s in fallback)
+
+    return ""
+
+
 def build_candidate_dedup_key(candidate: dict[str, Any]) -> str:
     """Build a deterministic deduplication key for a candidate.
 
-    Composite key from:
-    - symbol (uppercased)
-    - scanner_family (or strategy_family)
-    - strategy_type (or setup_type)
-    - opportunity_type if present
-    - direction if present
+    Stock candidates:
+        symbol | family | strategy_type | opportunity_type | direction
+
+    Options candidates (structure-aware):
+        symbol | family | strategy_type | expiration | strike_signature | direction
+
+    The options key includes expiration and strike structure so that
+    different expirations / strike combinations are NOT collapsed.
 
     Returns
     -------
     str
         Pipe-delimited dedup key.
     """
-    parts = [
-        str(candidate.get("symbol", "")).upper(),
-        str(candidate.get("scanner_family")
-            or candidate.get("strategy_family", "")).lower(),
-        str(candidate.get("strategy_type")
-            or candidate.get("setup_type", "")).lower(),
-        str(candidate.get("opportunity_type", "")).lower(),
-        str(candidate.get("direction", "")).lower(),
-    ]
+    symbol = str(candidate.get("symbol", "")).upper()
+    family = str(
+        candidate.get("scanner_family")
+        or candidate.get("strategy_family", "")
+    ).lower()
+    strategy = str(
+        candidate.get("strategy_type")
+        or candidate.get("setup_type", "")
+    ).lower()
+    direction = str(candidate.get("direction", "")).lower()
+
+    if family == "options":
+        expiration = _extract_expiration(candidate)
+        strike_sig = _extract_strike_signature(candidate)
+        parts = [symbol, family, strategy, expiration, strike_sig, direction]
+    else:
+        opp_type = str(candidate.get("opportunity_type", "")).lower()
+        parts = [symbol, family, strategy, opp_type, direction]
+
     return "|".join(parts)
 
 
 def _deduplicate_candidates(
     candidates: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     """Remove duplicate candidates, keeping the first occurrence.
 
     Duplicates are detected via build_candidate_dedup_key.
 
     Returns
     -------
-    (unique, duplicates)
+    (unique, duplicates, dedup_diagnostics)
         unique: list of candidates with duplicates removed.
         duplicates: list of removed duplicate candidates.
+        dedup_diagnostics: dict with duplicate bucket counts and
+            top duplicate keys for observability.
     """
     seen: dict[str, str] = {}  # dedup_key → candidate_id of first seen
+    bucket_counts: dict[str, int] = {}  # dedup_key → total occurrences
     unique: list[dict[str, Any]] = []
     duplicates: list[dict[str, Any]] = []
 
     for cand in candidates:
         key = build_candidate_dedup_key(cand)
         cid = cand.get("candidate_id", "")
+        bucket_counts[key] = bucket_counts.get(key, 0) + 1
         if key in seen:
             duplicates.append(cand)
         else:
             seen[key] = cid
             unique.append(cand)
 
-    return unique, duplicates
+    # Build diagnostics: top duplicate buckets (keys with count > 1)
+    dup_buckets = {k: v for k, v in bucket_counts.items() if v > 1}
+    top_buckets = sorted(
+        dup_buckets.items(), key=lambda x: x[1], reverse=True,
+    )[:10]
+
+    dedup_diagnostics: dict[str, Any] = {
+        "total_unique_keys": len(seen),
+        "total_duplicate_keys": len(dup_buckets),
+        "top_duplicate_buckets": [
+            {"dedup_key": k, "count": c} for k, c in top_buckets
+        ],
+    }
+
+    return unique, duplicates, dedup_diagnostics
 
 
 # =====================================================================
@@ -429,6 +519,7 @@ def build_selection_summary(
     counts_by_family: dict[str, dict[str, int]] | None = None,
     counts_by_strategy: dict[str, dict[str, int]] | None = None,
     exclusion_reason_counts: dict[str, int] | None = None,
+    dedup_diagnostics: dict[str, Any] | None = None,
     stage_status: str = "success",
     degraded_reasons: list[str] | None = None,
     elapsed_ms: int | None = None,
@@ -493,6 +584,7 @@ def build_selection_summary(
         "counts_by_family": counts_by_family or {},
         "counts_by_strategy": counts_by_strategy or {},
         "exclusion_reason_counts": exclusion_reason_counts or {},
+        "dedup_diagnostics": dedup_diagnostics or {},
         "degraded_reasons": degraded_reasons or [],
         "elapsed_ms": elapsed_ms,
         "generated_at": _now_iso(),
@@ -654,12 +746,12 @@ def _make_event_emitter(
 #  Candidate loading from Step 6 artifacts
 # =====================================================================
 
-def _load_candidates_from_scanner_stage(
+def _load_candidates_from_scanner_stages(
     artifact_store: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], dict[str, str], list[str]]:
-    """Load all normalized candidates from Step 6 scanner artifacts.
+    """Load all normalized candidates from stock_scanners and options_scanners artifacts.
 
-    Reads the scanner_stage_summary to discover which scanners
+    Reads both scanner stage summaries to discover which scanners
     produced candidates, then retrieves each grouped candidate
     artifact.
 
@@ -671,64 +763,75 @@ def _load_candidates_from_scanner_stage(
         warnings: diagnostic messages.
     """
     warnings: list[str] = []
-
-    # Locate scanner stage summary
-    summary_art = get_artifact_by_key(
-        artifact_store, "scanners", "scanner_stage_summary",
-    )
-    if summary_art is None:
-        return [], {}, ["scanner_stage_summary artifact not found"]
-
-    summary_data = summary_art.get("data", {})
-    if not isinstance(summary_data, dict):
-        return [], {}, ["scanner_stage_summary data is not a dict"]
-
-    # Discover scanner keys with candidate artifacts
-    scanner_summaries = summary_data.get("scanner_summaries", {})
-    candidate_artifact_refs = summary_data.get("candidate_artifact_refs", {})
-
     candidates: list[dict[str, Any]] = []
     artifact_ref_map: dict[str, str] = {}
 
-    for scanner_key, scanner_info in scanner_summaries.items():
-        # Only process scanners that are downstream_usable
-        if not scanner_info.get("downstream_usable", False):
-            continue
+    # Each scanner stage writes its own summary artifact under its stage key.
+    _SCANNER_STAGE_SPECS = [
+        ("stock_scanners", "stock_scanners_summary"),
+        ("options_scanners", "options_scanners_summary"),
+    ]
 
-        cand_art_ref = candidate_artifact_refs.get(scanner_key)
-        if not cand_art_ref:
-            continue
+    found_any_summary = False
 
-        # Retrieve grouped candidate artifact
-        cand_art = get_artifact_by_key(
-            artifact_store, "scanners", f"candidates_{scanner_key}",
+    for stage_key, summary_artifact_key in _SCANNER_STAGE_SPECS:
+        summary_art = get_artifact_by_key(
+            artifact_store, stage_key, summary_artifact_key,
         )
-        if cand_art is None:
-            warnings.append(
-                f"Candidate artifact for scanner '{scanner_key}' "
-                f"not found (ref={cand_art_ref})"
-            )
+        if summary_art is None:
+            warnings.append(f"{summary_artifact_key} artifact not found")
             continue
 
-        cand_data = cand_art.get("data", [])
-        if not isinstance(cand_data, list):
-            warnings.append(
-                f"Candidate artifact for scanner '{scanner_key}' "
-                f"data is not a list"
-            )
+        summary_data = summary_art.get("data", {})
+        if not isinstance(summary_data, dict):
+            warnings.append(f"{summary_artifact_key} data is not a dict")
             continue
 
-        art_id = cand_art.get("artifact_id", "")
-        for cand in cand_data:
-            if isinstance(cand, dict):
-                cid = cand.get("candidate_id", "")
-                if cid:
-                    artifact_ref_map[cid] = art_id
-                candidates.append(cand)
-            else:
+        found_any_summary = True
+
+        scanner_summaries = summary_data.get("scanner_summaries", {})
+        candidate_artifact_refs = summary_data.get("candidate_artifact_refs", {})
+
+        for scanner_key, scanner_info in scanner_summaries.items():
+            if not scanner_info.get("downstream_usable", False):
+                continue
+
+            cand_art_ref = candidate_artifact_refs.get(scanner_key)
+            if not cand_art_ref:
+                continue
+
+            cand_art = get_artifact_by_key(
+                artifact_store, stage_key, f"candidates_{scanner_key}",
+            )
+            if cand_art is None:
                 warnings.append(
-                    f"Non-dict candidate in scanner '{scanner_key}', skipped"
+                    f"Candidate artifact for scanner '{scanner_key}' "
+                    f"not found in stage '{stage_key}' (ref={cand_art_ref})"
                 )
+                continue
+
+            cand_data = cand_art.get("data", [])
+            if not isinstance(cand_data, list):
+                warnings.append(
+                    f"Candidate artifact for scanner '{scanner_key}' "
+                    f"data is not a list"
+                )
+                continue
+
+            art_id = cand_art.get("artifact_id", "")
+            for cand in cand_data:
+                if isinstance(cand, dict):
+                    cid = cand.get("candidate_id", "")
+                    if cid:
+                        artifact_ref_map[cid] = art_id
+                    candidates.append(cand)
+                else:
+                    warnings.append(
+                        f"Non-dict candidate in scanner '{scanner_key}', skipped"
+                    )
+
+    if not found_any_summary:
+        warnings.append("No scanner stage summaries found at all")
 
     return candidates, artifact_ref_map, warnings
 
@@ -752,6 +855,7 @@ def _run_selection_pipeline(
     dict[str, dict[str, int]],  # counts_by_scanner
     dict[str, dict[str, int]],  # counts_by_family
     dict[str, dict[str, int]],  # counts_by_strategy
+    dict[str, Any],             # dedup_diagnostics
 ]:
     """Run the deterministic selection pipeline.
 
@@ -825,8 +929,8 @@ def _run_selection_pipeline(
         eligible_candidates.append(cand)
 
     # ── 2. Duplicate exclusion ─────────────────────────────────
-    unique_candidates, duplicate_candidates = _deduplicate_candidates(
-        eligible_candidates,
+    unique_candidates, duplicate_candidates, dedup_diagnostics = (
+        _deduplicate_candidates(eligible_candidates)
     )
 
     for dup in duplicate_candidates:
@@ -963,6 +1067,7 @@ def _run_selection_pipeline(
         scanner_counts,
         family_counts,
         strategy_counts,
+        dedup_diagnostics,
     )
 
 
@@ -1023,17 +1128,21 @@ def candidate_selection_handler(
     event_callback = kwargs.get("event_callback")
     event_emitter = _make_event_emitter(run, event_callback)
 
-    # ── 2. Load candidates from Step 6 ─────────────────────────
-    scanner_summary_art = get_artifact_by_key(
-        artifact_store, "scanners", "scanner_stage_summary",
+    # ── 2. Load candidates from scanner stages ──────────────────
+    # Check that at least one scanner stage produced a summary.
+    stock_summary = get_artifact_by_key(
+        artifact_store, "stock_scanners", "stock_scanners_summary",
     )
-    if scanner_summary_art is None:
+    options_summary = get_artifact_by_key(
+        artifact_store, "options_scanners", "options_scanners_summary",
+    )
+    if stock_summary is None and options_summary is None:
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         error = build_run_error(
             code="NO_SOURCE_SUMMARY",
-            message="scanner_stage_summary artifact not found",
+            message="No scanner stage summary artifacts found",
             source=_STAGE_KEY,
-            detail={"expected_artifact_key": "scanner_stage_summary"},
+            detail={"expected": ["stock_scanners_summary", "options_scanners_summary"]},
         )
         if event_emitter:
             event_emitter(
@@ -1051,7 +1160,7 @@ def candidate_selection_handler(
         }
 
     candidates, artifact_ref_map, load_warnings = (
-        _load_candidates_from_scanner_stage(artifact_store)
+        _load_candidates_from_scanner_stages(artifact_store)
     )
     total_loaded = len(candidates)
 
@@ -1138,6 +1247,7 @@ def candidate_selection_handler(
         counts_by_scanner,
         counts_by_family,
         counts_by_strategy,
+        dedup_diagnostics,
     ) = _run_selection_pipeline(
         candidates,
         artifact_ref_map,
@@ -1196,6 +1306,7 @@ def candidate_selection_handler(
         counts_by_family=counts_by_family,
         counts_by_strategy=counts_by_strategy,
         exclusion_reason_counts=exclusion_counts,
+        dedup_diagnostics=dedup_diagnostics,
         stage_status=stage_status,
         degraded_reasons=degraded_reasons,
         elapsed_ms=elapsed_ms,

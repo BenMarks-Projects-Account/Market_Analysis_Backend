@@ -10,7 +10,8 @@
   var STAGE_LABELS = {
     market_data: 'Market Data',
     market_model_analysis: 'Market Model',
-    scanners: 'Scanners',
+    stock_scanners: 'Stock Scanners',
+    options_scanners: 'Options Scanners',
     candidate_selection: 'Selection',
     shared_context: 'Context',
     candidate_enrichment: 'Enrichment',

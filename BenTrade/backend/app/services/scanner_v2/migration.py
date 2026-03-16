@@ -2,15 +2,23 @@
 
 Controls whether a given scanner_key runs legacy (V1) or V2.
 
-During migration, both code paths coexist.  This module provides the
-routing decision and the hooks that ``pipeline_scanner_stage.py`` will
-call to dispatch to the correct executor.
+As of Prompt 13, V2 is the **primary** scanner architecture.  All four
+implemented families (vertical spreads, iron condors, butterflies,
+calendars/diagonals) route through V2 by default.  Legacy fallback
+only applies to scanner_keys that have NO V2 implementation.
 
 Routing model
 ─────────────
-- Default: all scanners run legacy (``"v1"``).
-- Per-family cutover: flip entries in ``_SCANNER_VERSION_MAP``.
+- Default: V2 if implemented, legacy otherwise.
+- Per-key override: ``_SCANNER_VERSION_OVERRIDES`` can force a key
+  back to v1 for emergency rollback.
 - Side-by-side mode: run both and compare (built in Prompt 2).
+
+Retirement note
+───────────────
+This module is a TEMPORARY migration seam.  Once all families are
+validated and legacy code is deleted (target: Prompt 15), this module
+can be removed entirely.  Callers will import V2 scanners directly.
 
 Usage
 ─────
@@ -18,12 +26,8 @@ Usage
         get_scanner_version,
         should_run_v2,
         execute_v2_scanner,
+        get_routing_report,
     )
-
-    version = get_scanner_version("put_credit_spread")  # "v1" or "v2"
-
-    if should_run_v2("put_credit_spread"):
-        result = execute_v2_scanner("put_credit_spread", ...)
 """
 
 from __future__ import annotations
@@ -35,34 +39,31 @@ from app.services.scanner_v2.registry import (
     get_v2_family,
     get_v2_scanner,
     is_v2_supported,
+    list_v2_families,
 )
 
 _log = logging.getLogger("bentrade.scanner_v2.migration")
 
 
-# ── Version map ─────────────────────────────────────────────────────
+# ── Version overrides ───────────────────────────────────────────────
 #
-# Change entries from "v1" to "v2" to cut over individual scanner_keys.
-# Only scanner_keys with a registered + implemented V2 family can be
-# set to "v2".  Invalid entries are ignored (default to "v1").
+# As of Prompt 13, V2 is the default for ALL implemented families.
+# This map is only used for emergency rollback — to force a specific
+# scanner_key back to legacy ("v1").
 #
-# This map is the ONLY place where the cutover decision lives.
+# If a key is NOT in this map, the routing decision is:
+#   V2 if is_v2_supported(key) else v1.
+#
+# To roll back a family: add an entry here with value "v1".
+# To explicitly confirm V2: add an entry with value "v2" (optional).
+#
+# RETIREMENT TARGET: delete this map and get_scanner_version() logic
+# once legacy is fully retired (Prompt 15).
 
-_SCANNER_VERSION_MAP: dict[str, str] = {
-    # Vertical spreads — all cut over to V2 (credit: Prompt 7, debit: Prompt 8)
-    "put_credit_spread":   "v2",
-    "call_credit_spread":  "v2",
-    "put_debit":           "v2",
-    "call_debit":          "v2",
-    # Iron condors
-    "iron_condor":         "v1",
-    # Butterflies
-    "butterfly_debit":     "v1",
-    "iron_butterfly":      "v1",
-    # Calendars
-    "calendar_spread":     "v1",
-    "calendar_call_spread": "v1",
-    "calendar_put_spread": "v1",
+_SCANNER_VERSION_OVERRIDES: dict[str, str] = {
+    # No overrides — all implemented V2 families run V2 by default.
+    # To emergency-rollback a family, add e.g.:
+    #   "iron_condor": "v1",
 }
 
 
@@ -84,19 +85,35 @@ _SIDE_BY_SIDE_KEYS: set[str] = set()
 def get_scanner_version(scanner_key: str) -> str:
     """Return ``"v1"`` or ``"v2"`` for a scanner_key.
 
-    Returns ``"v1"`` if:
-    - The key is not in the version map.
-    - The key is mapped to ``"v2"`` but the V2 family is not implemented.
+    Routing logic (V2-forward, Prompt 13):
+    1. If the key has an explicit override in ``_SCANNER_VERSION_OVERRIDES``,
+       use that (unless the override says v2 but V2 is not implemented →
+       fall back to v1).
+    2. Otherwise: v2 if ``is_v2_supported(key)`` else v1.
+
+    This means V2 is the **default** for all implemented families.
+    Legacy is only used for keys with no V2 implementation.
     """
-    version = _SCANNER_VERSION_MAP.get(scanner_key, "v1")
-    if version == "v2" and not is_v2_supported(scanner_key):
-        _log.warning(
-            "scanner_key=%r mapped to v2 but V2 family not implemented — "
-            "falling back to v1",
-            scanner_key,
-        )
-        return "v1"
-    return version
+    override = _SCANNER_VERSION_OVERRIDES.get(scanner_key)
+    if override is not None:
+        if override == "v2" and not is_v2_supported(scanner_key):
+            _log.warning(
+                "scanner_key=%r overridden to v2 but V2 family not "
+                "implemented — falling back to v1",
+                scanner_key,
+            )
+            return "v1"
+        if override == "v1":
+            _log.info(
+                "scanner_key=%r forced to v1 via override (emergency rollback)",
+                scanner_key,
+            )
+        return override
+
+    # V2-forward default: use V2 if implemented, otherwise v1.
+    if is_v2_supported(scanner_key):
+        return "v2"
+    return "v1"
 
 
 def should_run_v2(scanner_key: str) -> bool:
@@ -219,10 +236,20 @@ def _extract_dq_counts(reject_counts: dict[str, int]) -> dict[str, int]:
 # ── Configuration helpers (for tests / admin) ──────────────────────
 
 def set_scanner_version(scanner_key: str, version: str) -> None:
-    """Override the version for a scanner_key.  For testing/admin."""
+    """Override the version for a scanner_key.  For testing/admin.
+
+    Sets an entry in ``_SCANNER_VERSION_OVERRIDES``.  To remove an
+    override and return to V2-forward default, use
+    ``clear_scanner_version_override()``.
+    """
     if version not in ("v1", "v2"):
         raise ValueError(f"version must be 'v1' or 'v2', got {version!r}")
-    _SCANNER_VERSION_MAP[scanner_key] = version
+    _SCANNER_VERSION_OVERRIDES[scanner_key] = version
+
+
+def clear_scanner_version_override(scanner_key: str) -> None:
+    """Remove a version override, returning to V2-forward default."""
+    _SCANNER_VERSION_OVERRIDES.pop(scanner_key, None)
 
 
 def enable_side_by_side(
@@ -238,15 +265,72 @@ def enable_side_by_side(
 
 
 def get_migration_status() -> dict[str, Any]:
-    """Return current migration status for diagnostics."""
+    """Return current migration status for diagnostics.
+
+    .. deprecated:: Prompt 13
+       Prefer ``get_routing_report()`` for richer visibility.
+    """
     return {
-        "scanner_versions": dict(_SCANNER_VERSION_MAP),
+        "version_overrides": dict(_SCANNER_VERSION_OVERRIDES),
         "side_by_side_enabled": _SIDE_BY_SIDE_ENABLED,
         "side_by_side_keys": sorted(_SIDE_BY_SIDE_KEYS) if _SIDE_BY_SIDE_KEYS else "all",
         "v2_families_implemented": [
-            fm_key for fm_key, fm in __import__(
-                "app.services.scanner_v2.registry", fromlist=["V2_FAMILIES"],
-            ).V2_FAMILIES.items()
-            if fm.implemented
+            fm["family_key"] for fm in list_v2_families() if fm["implemented"]
         ],
+    }
+
+
+def get_routing_report() -> dict[str, Any]:
+    """Return a comprehensive V2-forward routing report.
+
+    Designed for manual verification (Prompt 13).  Reports:
+    - Which families are V2 and which strategy_ids they serve.
+    - Which scanner_keys have overrides.
+    - Which scanner_keys would fall to legacy (no V2 implementation).
+    - Retirement readiness per family.
+    """
+    families = list_v2_families()
+
+    # Collect all known scanner_keys from V2 families
+    v2_keys: dict[str, dict[str, Any]] = {}
+    for fm in families:
+        for sid in fm["strategy_ids"]:
+            v2_keys[sid] = {
+                "family_key": fm["family_key"],
+                "display_name": fm["display_name"],
+                "implemented": fm["implemented"],
+                "routing": get_scanner_version(sid),
+                "override": _SCANNER_VERSION_OVERRIDES.get(sid),
+            }
+
+    # Legacy-only keys: anything in overrides set to v1
+    legacy_forced = {
+        k: v for k, v in _SCANNER_VERSION_OVERRIDES.items() if v == "v1"
+    }
+
+    return {
+        "routing_model": "v2_forward",
+        "v2_families": families,
+        "scanner_key_routing": v2_keys,
+        "overrides_active": dict(_SCANNER_VERSION_OVERRIDES),
+        "legacy_forced_keys": list(legacy_forced.keys()),
+        "side_by_side_enabled": _SIDE_BY_SIDE_ENABLED,
+        "retirement_readiness": {
+            fm["family_key"]: {
+                "implemented": fm["implemented"],
+                "strategy_ids": fm["strategy_ids"],
+                "all_routing_v2": all(
+                    get_scanner_version(sid) == "v2"
+                    for sid in fm["strategy_ids"]
+                ),
+                "ready_for_legacy_deletion": (
+                    fm["implemented"]
+                    and all(
+                        get_scanner_version(sid) == "v2"
+                        for sid in fm["strategy_ids"]
+                    )
+                ),
+            }
+            for fm in families
+        },
     }

@@ -1,0 +1,147 @@
+<div class="view-wrap scanner-review-view">
+
+  <!-- ── TOOLBAR ─────────────────────────────────────────────── -->
+  <div class="sr-toolbar">
+    <div class="sr-toolbar-left">
+      <h2 class="sr-title">Scanner Review</h2>
+      <span class="sr-subtitle" id="srSubtitle">V2 scanner diagnostics &amp; verification</span>
+    </div>
+    <div class="sr-toolbar-right">
+      <button class="btn sr-btn" id="srRefreshBtn" type="button">Refresh</button>
+    </div>
+  </div>
+
+  <!-- ── ERROR BANNER ────────────────────────────────────────── -->
+  <div class="sr-error-banner" id="srErrorBanner" style="display:none;"></div>
+
+  <!-- ── LOADING STATE ───────────────────────────────────────── -->
+  <div class="sr-loading" id="srLoading" style="display:none;">
+    <div class="sr-loading-spinner"></div>
+    <span>Loading scanner review data…</span>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       SECTION 1 — V2 ROUTING OVERVIEW
+       ═══════════════════════════════════════════════════════════ -->
+  <div class="sr-section" id="srRoutingSection">
+    <div class="stock-card sr-section-card">
+      <div class="stock-card-title">V2 Routing Overview</div>
+      <div class="sr-routing-grid" id="srRoutingGrid">
+        <!-- Routing status cards rendered here -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       SECTION 2 — FAMILY VERIFICATION CARDS
+       ═══════════════════════════════════════════════════════════ -->
+  <div class="sr-section" id="srFamilySection">
+    <div class="stock-card sr-section-card">
+      <div class="stock-card-title">Family Verification</div>
+      <div class="sr-family-grid" id="srFamilyGrid">
+        <!-- Family cards rendered here -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       SECTION 3 — PER-RUN SCANNER DIAGNOSTICS
+       ═══════════════════════════════════════════════════════════ -->
+  <div class="sr-section" id="srRunSection">
+    <div class="stock-card sr-section-card">
+      <div class="stock-card-title sr-run-title">
+        <span>Run Scanner Diagnostics</span>
+        <div class="sr-run-controls">
+          <select id="srRunSelector" class="sr-select">
+            <option value="">Select a pipeline run…</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Run summary header (shown after selection) -->
+      <div class="sr-run-summary" id="srRunSummary" style="display:none;">
+        <div class="sr-run-header-grid" id="srRunHeaderGrid"></div>
+      </div>
+
+      <!-- Per-scanner family group cards -->
+      <div class="sr-scanner-families" id="srScannerFamilies" style="display:none;"></div>
+
+      <!-- Per-scanner diagnostics table -->
+      <div class="sr-scanner-table-wrap" id="srScannerTableWrap" style="display:none;">
+        <table class="risk-table sr-scanner-table">
+          <thead>
+            <tr>
+              <th>Scanner Key</th>
+              <th>Path</th>
+              <th>Status</th>
+              <th>Candidates</th>
+              <th>Usable</th>
+              <th>Duration</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="srScannerRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       SECTION 4 — CANDIDATE DRILL-IN
+       ═══════════════════════════════════════════════════════════ -->
+  <div class="sr-section" id="srCandidateSection" style="display:none;">
+    <div class="stock-card sr-section-card">
+      <div class="stock-card-title sr-candidate-title">
+        <span id="srCandidateSectionTitle">Candidates</span>
+        <div class="sr-candidate-controls">
+          <select id="srCandidateFamilyFilter" class="sr-select">
+            <option value="">All Families</option>
+          </select>
+          <button class="btn sr-btn sr-btn-sm" id="srCandidateBackBtn" type="button">← Back</button>
+        </div>
+      </div>
+      <div class="sr-candidate-table-wrap">
+        <table class="risk-table sr-candidate-table">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Strategy</th>
+              <th>Scanner</th>
+              <th>Status</th>
+              <th>Credit</th>
+              <th>Width</th>
+              <th>EV</th>
+              <th>Delta</th>
+              <th>DTE</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="srCandidateRows"></tbody>
+        </table>
+      </div>
+      <div class="sr-candidate-count" id="srCandidateCount"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       DETAIL PANEL — candidate drill-in (overlay)
+       ═══════════════════════════════════════════════════════════ -->
+  <div class="sr-detail-panel" id="srDetailPanel" style="display:none;">
+    <div class="sr-detail-header">
+      <span id="srDetailTitle">Candidate Detail</span>
+      <button class="btn sr-btn sr-btn-sm" id="srDetailCloseBtn" type="button">Close</button>
+    </div>
+    <div class="sr-detail-body">
+      <!-- Diagnostics metrics -->
+      <div class="sr-detail-metrics" id="srDetailMetrics"></div>
+      <!-- Filter trace / rejection reasons -->
+      <div class="sr-detail-trace" id="srDetailTrace"></div>
+      <!-- Raw JSON -->
+      <div class="sr-detail-raw-section">
+        <button class="btn sr-btn sr-btn-sm" id="srDetailRawToggle" type="button">Show Raw JSON</button>
+        <pre class="sr-detail-json" id="srDetailJson" style="display:none;"></pre>
+      </div>
+    </div>
+  </div>
+
+</div>

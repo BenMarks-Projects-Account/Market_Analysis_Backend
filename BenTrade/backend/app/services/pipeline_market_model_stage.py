@@ -351,6 +351,7 @@ def _default_model_executor(
     if fn is None:
         raise ValueError(f"No model analysis function for engine '{engine_key}'")
 
+    logger.info("event=dispatching_to_analyze engine=%s", engine_key)
     return fn()
 
 
@@ -372,6 +373,8 @@ def _run_single_model_analysis(
     started_at = _now_iso()
     t0 = time.monotonic()
 
+    logger.info("event=model_call_starting engine=%s", engine_key)
+
     if event_emitter:
         event_emitter(
             "model_analysis_started",
@@ -384,6 +387,10 @@ def _run_single_model_analysis(
         result = model_executor(engine_key, model_input)
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         completed_at = _now_iso()
+        logger.info(
+            "event=model_call_returned engine=%s elapsed_ms=%d has_result=%s",
+            engine_key, elapsed_ms, result is not None,
+        )
 
         # Extract model/provider metadata if available
         model_provider = None
@@ -489,6 +496,12 @@ def _execute_analyses_parallel(
         return results
 
     actual_workers = min(max_workers, len(work_items))
+    total = len(work_items)
+    engine_keys = [item["engine_key"] for item in work_items]
+    logger.info(
+        "event=model_analyses_starting total=%d max_workers=%d engines=%s",
+        total, actual_workers, engine_keys,
+    )
 
     with ThreadPoolExecutor(max_workers=actual_workers) as pool:
         futures = {
@@ -503,15 +516,31 @@ def _execute_analyses_parallel(
             for item in work_items
         }
 
+        completed_count = 0
         for future in futures:
             engine_key = futures[future]
+            logger.info(
+                "event=waiting_for_model_result engine=%s progress=%d/%d",
+                engine_key, completed_count, total,
+            )
             try:
                 result = future.result()
+                completed_count += 1
+                status = result.get("record", {}).get("status", "unknown")
+                elapsed = result.get("record", {}).get("elapsed_ms", 0)
+                logger.info(
+                    "event=model_result_received engine=%s status=%s "
+                    "elapsed_ms=%s progress=%d/%d",
+                    engine_key, status, elapsed, completed_count, total,
+                )
                 results[engine_key] = result
             except Exception as exc:
+                completed_count += 1
                 logger.error(
-                    "Unexpected executor error for model analysis '%s': %s",
-                    engine_key, exc, exc_info=True,
+                    "event=model_executor_error engine=%s error=%s "
+                    "progress=%d/%d",
+                    engine_key, exc, completed_count, total,
+                    exc_info=True,
                 )
                 results[engine_key] = {
                     "record": build_model_analysis_record(
@@ -526,6 +555,14 @@ def _execute_analyses_parallel(
                     "model_output": None,
                 }
 
+    logger.info(
+        "event=model_analyses_complete total=%d succeeded=%d failed=%d",
+        total,
+        sum(1 for r in results.values()
+            if r.get("record", {}).get("status") == "analyzed"),
+        sum(1 for r in results.values()
+            if r.get("record", {}).get("status") == "failed"),
+    )
     return results
 
 
@@ -801,12 +838,15 @@ def market_model_stage_handler(
     """
     t0 = time.monotonic()
     run_id = run["run_id"]
+    logger.info("event=handler_entered run_id=%s stage=%s", run_id, _STAGE_KEY)
 
     # ── Resolve parameters ──────────────────────────────────────
     model_executor = kwargs.get("model_executor", _default_model_executor)
     max_workers = kwargs.get("max_workers", DEFAULT_MODEL_MAX_WORKERS)
     event_callback = kwargs.get("event_callback")
     event_emitter = _make_event_emitter(run, event_callback)
+    if event_emitter is not None:
+        event_emitter("handler_entered", "", message="market_model_stage_handler entered")
     disabled_engines: set[str] = set(kwargs.get("disabled_engines") or [])
     model_results_override: dict[str, Any] | None = kwargs.get("model_results_override")
 
@@ -874,6 +914,13 @@ def market_model_stage_handler(
         })
 
     # ── Handle zero eligible engines ────────────────────────────
+    eligible_keys = [item["engine_key"] for item in work_items]
+    skipped_keys = list(skipped_records.keys())
+    logger.info(
+        "event=eligibility_resolved eligible=%s skipped=%s",
+        eligible_keys, skipped_keys,
+    )
+
     if not work_items and model_results_override is None:
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         summary = build_model_stage_summary({}, skipped_records, elapsed_ms)
@@ -955,6 +1002,7 @@ def market_model_stage_handler(
         if art_id:
             rec["normalized_output_ref"] = art_id
             artifact_ids.append(art_id)
+            logger.info("event=artifact_written engine=%s artifact_id=%s", key, art_id)
 
     # ── 8. Build and write stage summary ────────────────────────
     elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -984,6 +1032,12 @@ def market_model_stage_handler(
         error = None
 
     # ── 10. Return handler result ───────────────────────────────
+    logger.info(
+        "event=handler_complete run_id=%s outcome=%s "
+        "attempted=%d succeeded=%d failed=%d skipped=%d elapsed_ms=%d",
+        run_id, outcome, total_attempted, analyzed_count,
+        failed_count, len(skipped_records), elapsed_ms,
+    )
     return {
         "outcome": outcome,
         "summary_counts": {

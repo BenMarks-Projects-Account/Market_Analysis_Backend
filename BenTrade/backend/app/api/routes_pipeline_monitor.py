@@ -8,6 +8,7 @@ Prefix: ``/api/pipeline`` (set in this file, not in ``main.py``).
 
 from __future__ import annotations
 
+import copy
 import logging
 import threading
 from typing import Any
@@ -99,26 +100,59 @@ async def start_pipeline_run(request: Request) -> dict[str, Any]:
     run_id = run["run_id"]
 
     # Capture events AND incrementally update the store on every stage.
+    # Serialise callbacks so concurrent stage threads don't race on
+    # copy.deepcopy(run) / list mutations (see Root Cause note below).
+    _cb_lock = threading.Lock()
+
+    # Import the orchestrator's run-mutation lock so we can hold it
+    # during the deepcopy of `run`, preventing mark_stage_* races.
+    from app.services.pipeline_orchestrator import get_run_lock
+    _rl = get_run_lock()
+
+    # Also capture the artifact store reference so stage-completion
+    # callbacks can propagate artifacts to the snapshot mid-run.
+    _artifact_store = orch["artifact_store"]
+
     def _live_callback(event: dict[str, Any]) -> None:
-        events.append(event)
-        # Extract per-candidate progress from Step 14 events.
-        candidate_progress = None
-        event_type = event.get("event_type", "")
-        if event_type == "candidate_execution_completed":
-            meta = event.get("metadata") or {}
-            candidate_progress = {
-                "candidate_id": meta.get("candidate_id"),
-                "symbol": meta.get("symbol"),
-                "queue_position": meta.get("queue_position"),
-                "candidate_status": meta.get("candidate_status"),
-                "completed_count": meta.get("completed_count"),
-                "remaining_count": meta.get("remaining_count"),
-                "elapsed_ms": meta.get("elapsed_ms"),
-            }
-        pipeline_run_store.update_active_run(
-            run_id, run, events=events,
-            candidate_progress=candidate_progress,
-        )
+        # ROOT CAUSE NOTE  (parallel-stage stall):
+        # Without _cb_lock, multiple stage threads call deepcopy(run)
+        # concurrently.  Without _rl, mark_stage_* can mutate the run
+        # dict while deepcopy iterates it, causing RuntimeError.  And
+        # prior to adding __deepcopy__ on ScannerLivenessTracker, the
+        # tracker's threading.Lock raised TypeError on every deepcopy.
+        with _cb_lock:
+            events.append(event)
+            # Extract per-candidate progress from Step 14 events.
+            candidate_progress = None
+            event_type = event.get("event_type", "")
+            if event_type == "candidate_execution_completed":
+                meta = event.get("metadata") or {}
+                candidate_progress = {
+                    "candidate_id": meta.get("candidate_id"),
+                    "symbol": meta.get("symbol"),
+                    "queue_position": meta.get("queue_position"),
+                    "candidate_status": meta.get("candidate_status"),
+                    "completed_count": meta.get("completed_count"),
+                    "remaining_count": meta.get("remaining_count"),
+                    "elapsed_ms": meta.get("elapsed_ms"),
+                }
+            # Hold the run-mutation lock during deepcopy to prevent
+            # mark_stage_* from modifying run mid-copy.
+            with _rl:
+                run_copy = copy.deepcopy(run)
+            events_copy = list(events)  # shallow; events are immutable dicts
+
+            # Propagate artifact store on stage completion/failure so
+            # endpoints like Scanner Review see artifacts mid-run.
+            artifact_store_copy = None
+            if event_type in ("stage_completed", "stage_failed"):
+                artifact_store_copy = copy.deepcopy(_artifact_store)
+
+            pipeline_run_store.update_active_run_precopied(
+                run_id, run_copy, events_copy,
+                candidate_progress=candidate_progress,
+                artifact_store_copy=artifact_store_copy,
+            )
 
     orch["event_callback"] = _live_callback
 
@@ -137,9 +171,20 @@ async def start_pipeline_run(request: Request) -> dict[str, Any]:
             logger.info("event=pipeline_run_completed run_id=%s", run_id)
         except Exception as exc:
             logger.exception("event=pipeline_run_failed run_id=%s error=%s", run_id, exc)
-            # Ensure the snapshot reflects failure.
-            run["status"] = "failed"
-            pipeline_run_store.update_active_run(run_id, run, events=events)
+            # Ensure the snapshot reflects failure — use the safe
+            # precopied path with the run-lock held during deepcopy.
+            try:
+                run["status"] = "failed"
+                with _rl:
+                    run_copy = copy.deepcopy(run)
+                pipeline_run_store.update_active_run_precopied(
+                    run_id, run_copy, list(events),
+                )
+            except Exception:
+                logger.exception(
+                    "event=pipeline_snapshot_failed run_id=%s "
+                    "(could not persist failure snapshot)", run_id,
+                )
         finally:
             with _active_run_lock:
                 _active_run_id = None

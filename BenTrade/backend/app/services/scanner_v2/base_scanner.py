@@ -74,6 +74,10 @@ class BaseV2Scanner(ABC):
     dte_max: int = 90
     """Maximum DTE for expirations to consider (structural, not preference)."""
 
+    require_same_expiry: bool = True
+    """If True (default), Phase C rejects candidates with mixed expirations.
+    Set False for multi-expiry families like calendars/diagonals."""
+
     # ── Main runner ─────────────────────────────────────────────
 
     def run(
@@ -161,6 +165,7 @@ class BaseV2Scanner(ABC):
         family_checks = self._get_family_checks_fn()
         candidates = phase_c_structural_validation(
             candidates, family_checks=family_checks,
+            require_same_expiry=self.require_same_expiry,
         )
         remaining_c = sum(1 for c in candidates if not c.diagnostics.reject_reasons)
         phase_counts.append({"phase": "structural_validation", "remaining": remaining_c})

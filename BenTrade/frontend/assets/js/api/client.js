@@ -481,6 +481,24 @@ window.BenTradeApi = (function(){
     return jsonFetch('/api/pipeline/runs/' + encodeURIComponent(runId) + '/cancel', { method: 'POST' });
   }
 
+  /* ── Active Trade Pipeline ────────────────────────────────── */
+  function runActiveTradesPipeline(opts){
+    var params = [];
+    if (opts && opts.skip_model) params.push('skip_model=true');
+    if (opts && opts.account_mode) params.push('account_mode=' + encodeURIComponent(opts.account_mode));
+    var qs = params.length ? '?' + params.join('&') : '';
+    return modelFetch('/api/active-trade-pipeline/run' + qs, { method: 'POST' });
+  }
+  function getLatestActiveTradeResults(){
+    return jsonFetch('/api/active-trade-pipeline/results');
+  }
+  function getActiveTradeRunDetail(runId){
+    return jsonFetch('/api/active-trade-pipeline/results/' + encodeURIComponent(runId));
+  }
+  function listActiveTradeRuns(){
+    return jsonFetch('/api/active-trade-pipeline/runs');
+  }
+
   return {
     listReports,
     getReport,
@@ -546,6 +564,10 @@ window.BenTradeApi = (function(){
     pausePipelineRun,
     resumePipelineRun,
     cancelPipelineRun,
+    runActiveTradesPipeline,
+    getLatestActiveTradeResults,
+    getActiveTradeRunDetail,
+    listActiveTradeRuns,
     MODEL_TIMEOUT_MS: MODEL_TIMEOUT_MS,
     modelFetch: modelFetch,
   };

@@ -14,6 +14,7 @@ from app.api.routes_health import router as health_router
 from app.api.routes_snapshots import router as snapshots_router
 from app.api.routes_options import router as options_router
 from app.api.routes_active_trades import router as active_trades_router
+from app.api.routes_active_trade_pipeline import router as active_trade_pipeline_router
 from app.api.routes_decisions import router as decisions_router
 from app.api.routes_playbook import router as playbook_router
 from app.api.routes_portfolio_risk import router as portfolio_risk_router
@@ -38,6 +39,7 @@ from app.api.routes_liquidity_conditions import router as liquidity_conditions_r
 from app.api.routes_news_sentiment import router as news_sentiment_router
 from app.api.routes_volatility_options import router as volatility_options_router
 from app.api.routes_pipeline_monitor import router as pipeline_monitor_router
+from app.api.routes_scanner_review import router as scanner_review_router
 from app.clients.finnhub_client import FinnhubClient
 from app.clients.fred_client import FredClient
 from app.clients.polygon_client import PolygonClient
@@ -345,6 +347,7 @@ def create_app() -> FastAPI:
     app.include_router(trade_lifecycle_router)
     app.include_router(trading_router)
     app.include_router(active_trades_router)
+    app.include_router(active_trade_pipeline_router)
     app.include_router(workbench_router)
     app.include_router(strategy_analytics_router)
     app.include_router(reports_router)
@@ -358,6 +361,7 @@ def create_app() -> FastAPI:
     app.include_router(liquidity_conditions_router)
     app.include_router(snapshots_router)
     app.include_router(pipeline_monitor_router)
+    app.include_router(scanner_review_router)
     app.include_router(dev_router)
     app.include_router(frontend_router)
 

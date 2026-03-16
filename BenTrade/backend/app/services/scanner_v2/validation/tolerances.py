@@ -94,6 +94,12 @@ _FAMILY_OVERRIDES: dict[str, dict[str, V2ToleranceSpec]] = {
         "max_profit": V2ToleranceSpec(abs_pass=1.00, abs_warn=5.00, rel_warn=0.02),
         "max_loss": V2ToleranceSpec(abs_pass=1.00, abs_warn=5.00, rel_warn=0.02),
     },
+    # Calendars/diagonals: net_debit is straightforward (2-leg),
+    # max_loss is approximate, many fields are deferred (None)
+    "calendars": {
+        "net_debit": V2ToleranceSpec(abs_pass=0.005, abs_warn=0.02),
+        "max_loss": V2ToleranceSpec(abs_pass=0.50, abs_warn=2.00, rel_warn=0.01),
+    },
 }
 
 

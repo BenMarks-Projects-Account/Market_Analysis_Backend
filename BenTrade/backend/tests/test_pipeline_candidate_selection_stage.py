@@ -72,7 +72,9 @@ from app.services.pipeline_candidate_selection_stage import (
     SELECTION_STATUSES,
     _check_candidate_eligibility,
     _deduplicate_candidates,
-    _load_candidates_from_scanner_stage,
+    _extract_expiration,
+    _extract_strike_signature,
+    _load_candidates_from_scanner_stages,
     _run_selection_pipeline,
     _write_selected_candidates_artifact,
     _write_selection_ledger_artifact,
@@ -110,11 +112,11 @@ from app.services.pipeline_orchestrator import (
 # ── Helper factories ────────────────────────────────────────────
 
 def _make_run_and_store(run_id="test-sel-001"):
-    """Create a fresh run+store with market_data and scanners completed."""
+    """Create a fresh run+store with market_data and scanner stages completed."""
     run = create_pipeline_run(run_id=run_id)
     store = create_artifact_store(run_id)
     # Complete prerequisites
-    for stage in ("market_data", "scanners"):
+    for stage in ("market_data", "stock_scanners", "options_scanners"):
         mark_stage_running(run, stage)
         mark_stage_completed(run, stage)
     return run, store
@@ -145,7 +147,7 @@ def _make_candidate(
         "direction": direction,
         "normalization_status": "normalized",
         "run_id": "test-sel-001",
-        "stage_key": "scanners",
+        "stage_key": "options_scanners",
     }
     cand.update(extra)
     return cand
@@ -155,6 +157,7 @@ def _write_scanner_stage_artifacts(
     store,
     run_id,
     scanner_candidates,
+    stage_key="options_scanners",
 ):
     """Write scanner stage summary and candidate artifacts.
 
@@ -162,7 +165,10 @@ def _write_scanner_stage_artifacts(
     ----------
     scanner_candidates : dict
         scanner_key → list of candidate dicts
+    stage_key : str
+        Which scanner stage to write under (options_scanners or stock_scanners).
     """
+    summary_artifact_key = f"{stage_key}_summary"
     scanner_summaries = {}
     candidate_artifact_refs = {}
     all_candidate_ids = []
@@ -174,7 +180,7 @@ def _write_scanner_stage_artifacts(
         # Write candidate artifact
         art = build_artifact_record(
             run_id=run_id,
-            stage_key="scanners",
+            stage_key=stage_key,
             artifact_key=f"candidates_{scanner_key}",
             artifact_type="normalized_candidate",
             data=candidates,
@@ -202,7 +208,7 @@ def _write_scanner_stage_artifacts(
 
     # Write scanner stage summary
     summary_data = {
-        "stage_key": "scanners",
+        "stage_key": stage_key,
         "stage_status": "success",
         "scanner_summaries": scanner_summaries,
         "candidate_artifact_refs": candidate_artifact_refs,
@@ -212,8 +218,8 @@ def _write_scanner_stage_artifacts(
     }
     summary_art = build_artifact_record(
         run_id=run_id,
-        stage_key="scanners",
-        artifact_key="scanner_stage_summary",
+        stage_key=stage_key,
+        artifact_key=summary_artifact_key,
         artifact_type="scanner_stage_summary",
         data=summary_data,
     )
@@ -338,7 +344,7 @@ class TestDedupKey:
             _make_candidate(candidate_id="c3", symbol="QQQ",
                             strategy_type="put_credit_spread"),
         ]
-        unique, dups = _deduplicate_candidates(cands)
+        unique, dups, diag = _deduplicate_candidates(cands)
         assert len(unique) == 2
         assert len(dups) == 1
         assert dups[0].get("candidate_id") == "c2"
@@ -348,14 +354,216 @@ class TestDedupKey:
             _make_candidate(candidate_id="c1", symbol="SPY"),
             _make_candidate(candidate_id="c2", symbol="QQQ"),
         ]
-        unique, dups = _deduplicate_candidates(cands)
+        unique, dups, diag = _deduplicate_candidates(cands)
         assert len(unique) == 2
         assert len(dups) == 0
 
     def test_empty_list(self):
-        unique, dups = _deduplicate_candidates([])
+        unique, dups, diag = _deduplicate_candidates([])
         assert unique == []
         assert dups == []
+
+    # ── Options structure-aware dedup tests ──────────────────────
+
+    def test_options_different_expirations_different_keys(self):
+        """Same symbol/strategy but different expirations must NOT collide."""
+        c1 = _make_candidate(
+            symbol="SPY", scanner_family="options",
+            strategy_structure={"expiration": "2026-03-20", "legs": [
+                {"strike": 300.0}, {"strike": 305.0},
+            ]},
+        )
+        c2 = _make_candidate(
+            symbol="SPY", scanner_family="options",
+            strategy_structure={"expiration": "2026-04-17", "legs": [
+                {"strike": 300.0}, {"strike": 305.0},
+            ]},
+        )
+        assert build_candidate_dedup_key(c1) != build_candidate_dedup_key(c2)
+
+    def test_options_different_strikes_different_keys(self):
+        """Same symbol/strategy/expiry but different strikes must NOT collide."""
+        c1 = _make_candidate(
+            symbol="SPY", scanner_family="options",
+            strategy_structure={"expiration": "2026-03-20", "legs": [
+                {"strike": 300.0}, {"strike": 305.0},
+            ]},
+        )
+        c2 = _make_candidate(
+            symbol="SPY", scanner_family="options",
+            strategy_structure={"expiration": "2026-03-20", "legs": [
+                {"strike": 310.0}, {"strike": 315.0},
+            ]},
+        )
+        assert build_candidate_dedup_key(c1) != build_candidate_dedup_key(c2)
+
+    def test_options_exact_duplicates_same_key(self):
+        """Identical options candidates should collapse to same dedup key."""
+        c1 = _make_candidate(
+            candidate_id="c1", symbol="SPY", scanner_family="options",
+            strategy_structure={"expiration": "2026-03-20", "legs": [
+                {"strike": 300.0}, {"strike": 305.0},
+            ]},
+        )
+        c2 = _make_candidate(
+            candidate_id="c2", symbol="SPY", scanner_family="options",
+            strategy_structure={"expiration": "2026-03-20", "legs": [
+                {"strike": 300.0}, {"strike": 305.0},
+            ]},
+        )
+        assert build_candidate_dedup_key(c1) == build_candidate_dedup_key(c2)
+
+    def test_options_multi_leg_iron_condor_unique(self):
+        """4-leg iron condors with different strikes should NOT collide."""
+        c1 = _make_candidate(
+            symbol="SPY", scanner_family="options",
+            strategy_type="iron_condor",
+            strategy_structure={"expiration": "2026-03-20", "legs": [
+                {"strike": 280.0}, {"strike": 285.0},
+                {"strike": 310.0}, {"strike": 315.0},
+            ]},
+        )
+        c2 = _make_candidate(
+            symbol="SPY", scanner_family="options",
+            strategy_type="iron_condor",
+            strategy_structure={"expiration": "2026-03-20", "legs": [
+                {"strike": 290.0}, {"strike": 295.0},
+                {"strike": 320.0}, {"strike": 325.0},
+            ]},
+        )
+        assert build_candidate_dedup_key(c1) != build_candidate_dedup_key(c2)
+
+    def test_options_leg_order_irrelevant(self):
+        """Legs in different order should produce the same key (sorted)."""
+        c1 = _make_candidate(
+            symbol="SPY", scanner_family="options",
+            strategy_structure={"expiration": "2026-03-20", "legs": [
+                {"strike": 305.0}, {"strike": 300.0},
+            ]},
+        )
+        c2 = _make_candidate(
+            symbol="SPY", scanner_family="options",
+            strategy_structure={"expiration": "2026-03-20", "legs": [
+                {"strike": 300.0}, {"strike": 305.0},
+            ]},
+        )
+        assert build_candidate_dedup_key(c1) == build_candidate_dedup_key(c2)
+
+    def test_options_fallback_short_long_strike(self):
+        """Dedup key uses short_strike/long_strike when legs are absent."""
+        c1 = _make_candidate(
+            symbol="SPY", scanner_family="options",
+            strategy_structure={
+                "expiration": "2026-03-20",
+                "short_strike": 300.0,
+                "long_strike": 305.0,
+            },
+        )
+        c2 = _make_candidate(
+            symbol="SPY", scanner_family="options",
+            strategy_structure={
+                "expiration": "2026-03-20",
+                "short_strike": 310.0,
+                "long_strike": 315.0,
+            },
+        )
+        assert build_candidate_dedup_key(c1) != build_candidate_dedup_key(c2)
+
+    def test_options_expiration_from_entry_context(self):
+        """Expiration extracted from entry_context when not in strategy_structure."""
+        c1 = _make_candidate(
+            symbol="SPY", scanner_family="options",
+            entry_context={"expiration": "2026-03-20"},
+            strategy_structure={"legs": [{"strike": 300.0}, {"strike": 305.0}]},
+        )
+        c2 = _make_candidate(
+            symbol="SPY", scanner_family="options",
+            entry_context={"expiration": "2026-04-17"},
+            strategy_structure={"legs": [{"strike": 300.0}, {"strike": 305.0}]},
+        )
+        assert build_candidate_dedup_key(c1) != build_candidate_dedup_key(c2)
+
+    def test_stock_dedup_unchanged(self):
+        """Stock candidates still use opportunity_type (not structure)."""
+        c1 = _make_candidate(
+            symbol="AAPL", scanner_family="stock",
+            strategy_type="pullback_swing",
+            opportunity_type="earnings_play",
+            direction="long",
+        )
+        c2 = _make_candidate(
+            symbol="AAPL", scanner_family="stock",
+            strategy_type="pullback_swing",
+            opportunity_type="earnings_play",
+            direction="long",
+        )
+        assert build_candidate_dedup_key(c1) == build_candidate_dedup_key(c2)
+
+    def test_dedup_diagnostics_returned(self):
+        """Diagnostics dict has expected keys."""
+        cands = [
+            _make_candidate(candidate_id="c1", symbol="SPY"),
+            _make_candidate(candidate_id="c2", symbol="SPY"),
+            _make_candidate(candidate_id="c3", symbol="QQQ"),
+        ]
+        _, _, diag = _deduplicate_candidates(cands)
+        assert "total_unique_keys" in diag
+        assert "total_duplicate_keys" in diag
+        assert "top_duplicate_buckets" in diag
+        assert diag["total_unique_keys"] == 2
+        assert diag["total_duplicate_keys"] == 1
+
+    def test_options_mass_dedup_preserves_unique_structures(self):
+        """Many options candidates with different strikes ALL survive dedup."""
+        cands = []
+        for i in range(50):
+            cands.append(_make_candidate(
+                candidate_id=f"c{i}",
+                symbol="SPY",
+                scanner_family="options",
+                strategy_type="put_credit_spread",
+                strategy_structure={
+                    "expiration": "2026-03-20",
+                    "legs": [
+                        {"strike": 300.0 + i},
+                        {"strike": 305.0 + i},
+                    ],
+                },
+            ))
+        unique, dups, diag = _deduplicate_candidates(cands)
+        assert len(unique) == 50
+        assert len(dups) == 0
+
+    # ── Extraction helpers ──────────────────────────────────────
+
+    def test_extract_expiration_top_level(self):
+        assert _extract_expiration({"expiration": "2026-03-20"}) == "2026-03-20"
+
+    def test_extract_expiration_strategy_structure(self):
+        c = {"strategy_structure": {"expiration": "2026-04-17"}}
+        assert _extract_expiration(c) == "2026-04-17"
+
+    def test_extract_expiration_entry_context(self):
+        c = {"entry_context": {"expiration": "2026-05-15"}}
+        assert _extract_expiration(c) == "2026-05-15"
+
+    def test_extract_expiration_missing(self):
+        assert _extract_expiration({}) == ""
+
+    def test_extract_strike_signature_from_legs(self):
+        c = {"strategy_structure": {"legs": [
+            {"strike": 305.0}, {"strike": 300.0},
+        ]}}
+        assert _extract_strike_signature(c) == "300/305"
+
+    def test_extract_strike_signature_from_short_long(self):
+        c = {"strategy_structure": {
+            "short_strike": 300.0, "long_strike": 305.0,
+        }}
+        assert _extract_strike_signature(c) == "300/305"
+
+    def test_extract_strike_signature_empty(self):
+        assert _extract_strike_signature({}) == ""
 
 
 # =====================================================================
@@ -496,13 +704,13 @@ class TestCandidateLoading:
         }
         _write_scanner_stage_artifacts(store, run["run_id"], cands)
 
-        loaded, ref_map, warnings = _load_candidates_from_scanner_stage(store)
+        loaded, ref_map, warnings = _load_candidates_from_scanner_stages(store)
         assert len(loaded) == 2
         assert len(warnings) == 0
 
     def test_missing_scanner_summary(self):
         _, store = _make_run_and_store()
-        loaded, ref_map, warnings = _load_candidates_from_scanner_stage(store)
+        loaded, ref_map, warnings = _load_candidates_from_scanner_stages(store)
         assert len(loaded) == 0
         assert any("not found" in w for w in warnings)
 
@@ -510,14 +718,14 @@ class TestCandidateLoading:
         run, store = _make_run_and_store()
         _write_scanner_stage_artifacts(store, run["run_id"], {})
 
-        loaded, ref_map, warnings = _load_candidates_from_scanner_stage(store)
+        loaded, ref_map, warnings = _load_candidates_from_scanner_stages(store)
         assert len(loaded) == 0
 
     def test_non_usable_scanner_skipped(self):
         run, store = _make_run_and_store()
         # Write summary with downstream_usable=False
         summary_data = {
-            "stage_key": "scanners",
+            "stage_key": "options_scanners",
             "scanner_summaries": {
                 "bad_scanner": {
                     "status": "failed",
@@ -530,21 +738,21 @@ class TestCandidateLoading:
         }
         art = build_artifact_record(
             run_id=run["run_id"],
-            stage_key="scanners",
-            artifact_key="scanner_stage_summary",
+            stage_key="options_scanners",
+            artifact_key="options_scanners_summary",
             artifact_type="scanner_stage_summary",
             data=summary_data,
         )
         put_artifact(store, art, overwrite=True)
 
-        loaded, _, _ = _load_candidates_from_scanner_stage(store)
+        loaded, _, _ = _load_candidates_from_scanner_stages(store)
         assert len(loaded) == 0
 
     def test_missing_candidate_artifact(self):
         """Summary references artifact that doesn't exist."""
         run, store = _make_run_and_store()
         summary_data = {
-            "stage_key": "scanners",
+            "stage_key": "options_scanners",
             "scanner_summaries": {
                 "scanner_a": {
                     "status": "completed",
@@ -557,14 +765,14 @@ class TestCandidateLoading:
         }
         art = build_artifact_record(
             run_id=run["run_id"],
-            stage_key="scanners",
-            artifact_key="scanner_stage_summary",
+            stage_key="options_scanners",
+            artifact_key="options_scanners_summary",
             artifact_type="scanner_stage_summary",
             data=summary_data,
         )
         put_artifact(store, art, overwrite=True)
 
-        loaded, _, warnings = _load_candidates_from_scanner_stage(store)
+        loaded, _, warnings = _load_candidates_from_scanner_stages(store)
         assert len(loaded) == 0
         assert any("not found" in w for w in warnings)
 
@@ -573,7 +781,7 @@ class TestCandidateLoading:
         cands = {"scanner_a": [_make_candidate(candidate_id="c1")]}
         _write_scanner_stage_artifacts(store, run["run_id"], cands)
 
-        loaded, ref_map, _ = _load_candidates_from_scanner_stage(store)
+        loaded, ref_map, _ = _load_candidates_from_scanner_stages(store)
         assert "c1" in ref_map
         assert ref_map["c1"]  # non-empty artifact id
 
@@ -589,7 +797,7 @@ class TestSelectionPipeline:
             _make_candidate(candidate_id="c1", symbol="SPY"),
             _make_candidate(candidate_id="c2", symbol="QQQ"),
         ]
-        selected, records, _, _, _, _ = _run_selection_pipeline(
+        selected, records, _, _, _, _, _ = _run_selection_pipeline(
             cands, {}, max_selected=10,
         )
         assert len(selected) == 2
@@ -602,7 +810,7 @@ class TestSelectionPipeline:
                             strategy_type=f"strat_{i}")
             for i in range(10)
         ]
-        selected, records, exc_counts, _, _, _ = _run_selection_pipeline(
+        selected, records, exc_counts, _, _, _, _ = _run_selection_pipeline(
             cands, {}, max_selected=3,
         )
         assert len(selected) == 3
@@ -615,7 +823,7 @@ class TestSelectionPipeline:
             _make_candidate(candidate_id="c2", symbol="SPY",
                             strategy_type="put_credit_spread"),
         ]
-        selected, records, exc_counts, _, _, _ = _run_selection_pipeline(
+        selected, records, exc_counts, _, _, _, _ = _run_selection_pipeline(
             cands, {}, max_selected=10,
         )
         assert len(selected) == 1
@@ -626,7 +834,7 @@ class TestSelectionPipeline:
             _make_candidate(candidate_id="c1", downstream_usable=False),
             _make_candidate(candidate_id="c2", symbol="SPY"),
         ]
-        selected, records, exc_counts, _, _, _ = _run_selection_pipeline(
+        selected, records, exc_counts, _, _, _, _ = _run_selection_pipeline(
             cands, {}, max_selected=10,
         )
         assert len(selected) == 1
@@ -639,13 +847,13 @@ class TestSelectionPipeline:
             _make_candidate(candidate_id="c1", downstream_usable=False),
             _make_candidate(candidate_id="c2", downstream_usable=False),
         ]
-        selected, records, _, _, _, _ = _run_selection_pipeline(
+        selected, records, _, _, _, _, _ = _run_selection_pipeline(
             cands, {}, max_selected=10,
         )
         assert len(selected) == 0
 
     def test_empty_input(self):
-        selected, records, _, _, _, _ = _run_selection_pipeline(
+        selected, records, _, _, _, _, _ = _run_selection_pipeline(
             [], {}, max_selected=10,
         )
         assert len(selected) == 0
@@ -657,7 +865,7 @@ class TestSelectionPipeline:
             _make_candidate(candidate_id="c2", strategy_type="put_credit_spread",
                             symbol="QQQ"),
         ]
-        selected, records, exc_counts, _, _, _ = _run_selection_pipeline(
+        selected, records, exc_counts, _, _, _, _ = _run_selection_pipeline(
             cands, {}, max_selected=10,
             disabled_strategies={"iron_condor"},
         )
@@ -670,7 +878,7 @@ class TestSelectionPipeline:
             _make_candidate(candidate_id="c1", scanner_key="s1", symbol="SPY"),
             _make_candidate(candidate_id="c2", scanner_key="s2", symbol="QQQ"),
         ]
-        _, _, _, scanner_counts, _, _ = _run_selection_pipeline(
+        _, _, _, scanner_counts, _, _, _ = _run_selection_pipeline(
             cands, {}, max_selected=10,
         )
         assert "s1" in scanner_counts
@@ -684,7 +892,7 @@ class TestSelectionPipeline:
             _make_candidate(candidate_id="c2", scanner_family="stock", symbol="QQQ",
                             strategy_type="pullback_swing"),
         ]
-        _, _, _, _, family_counts, _ = _run_selection_pipeline(
+        _, _, _, _, family_counts, _, _ = _run_selection_pipeline(
             cands, {}, max_selected=10,
         )
         assert "options" in family_counts
@@ -696,7 +904,7 @@ class TestSelectionPipeline:
             _make_candidate(candidate_id="c2", setup_quality=50.0, symbol="QQQ",
                             strategy_type="pullback_swing"),
         ]
-        selected, records, _, _, _, _ = _run_selection_pipeline(
+        selected, records, _, _, _, _, _ = _run_selection_pipeline(
             cands, {}, max_selected=10,
         )
         selected_records = [r for r in records if r["downstream_selected"]]
@@ -705,7 +913,7 @@ class TestSelectionPipeline:
 
     def test_selected_candidates_have_rank_metadata(self):
         cands = [_make_candidate(candidate_id="c1")]
-        selected, _, _, _, _, _ = _run_selection_pipeline(
+        selected, _, _, _, _, _, _ = _run_selection_pipeline(
             cands, {}, max_selected=10,
         )
         assert selected[0]["rank_score"] is not None
@@ -1228,7 +1436,7 @@ class TestDegradedBehavior:
         # Write one real candidate artifact
         art = build_artifact_record(
             run_id=run["run_id"],
-            stage_key="scanners",
+            stage_key="options_scanners",
             artifact_key="candidates_scanner_a",
             artifact_type="normalized_candidate",
             data=[_make_candidate(candidate_id="c1")],
@@ -1237,7 +1445,7 @@ class TestDegradedBehavior:
 
         # Summary references both scanner_a and scanner_b
         summary_data = {
-            "stage_key": "scanners",
+            "stage_key": "options_scanners",
             "scanner_summaries": {
                 "scanner_a": {
                     "status": "completed",
@@ -1258,8 +1466,8 @@ class TestDegradedBehavior:
         }
         s_art = build_artifact_record(
             run_id=run["run_id"],
-            stage_key="scanners",
-            artifact_key="scanner_stage_summary",
+            stage_key="options_scanners",
+            artifact_key="options_scanners_summary",
             artifact_type="scanner_stage_summary",
             data=summary_data,
         )
@@ -1292,7 +1500,8 @@ class TestOrchestratorIntegration:
             {
                 "market_data": _success_handler,
                 "market_model_analysis": _success_handler,
-                "scanners": _success_handler,
+                "stock_scanners": _success_handler,
+                "options_scanners": _success_handler,
                 "candidate_selection": _success_handler,
                 "shared_context": _success_handler,
                 "candidate_enrichment": _success_handler,
@@ -1321,7 +1530,8 @@ class TestOrchestratorIntegration:
             {
                 "market_data": _success_handler,
                 "market_model_analysis": _success_handler,
-                "scanners": _success_handler,
+                "stock_scanners": _success_handler,
+                "options_scanners": _success_handler,
                 "candidate_selection": custom_handler,
                 "shared_context": _success_handler,
                 "candidate_enrichment": _success_handler,

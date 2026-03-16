@@ -102,6 +102,9 @@ REJECT_IC_INVALID_GEOMETRY = "v2_ic_invalid_geometry"
 # Prompt 11 — butterfly geometry
 REJECT_BF_INVALID_GEOMETRY = "v2_bf_invalid_geometry"
 
+# Prompt 12 — calendar/diagonal geometry
+REJECT_CAL_INVALID_GEOMETRY = "v2_cal_invalid_geometry"
+
 # Phase E — math
 REJECT_IMPOSSIBLE_MAX_LOSS = "v2_impossible_max_loss"
 REJECT_IMPOSSIBLE_MAX_PROFIT = "v2_impossible_max_profit"
@@ -187,6 +190,8 @@ _REJECT_REGISTRY: dict[str, CodeInfo] = {
     REJECT_IC_INVALID_GEOMETRY: CodeInfo(REJECT_IC_INVALID_GEOMETRY, CAT_STRUCTURAL, SEV_ERROR, "Iron condor geometry invalid"),
     # Butterfly geometry (Prompt 11)
     REJECT_BF_INVALID_GEOMETRY: CodeInfo(REJECT_BF_INVALID_GEOMETRY, CAT_STRUCTURAL, SEV_ERROR, "Butterfly geometry invalid"),
+    # Calendar/diagonal geometry (Prompt 12)
+    REJECT_CAL_INVALID_GEOMETRY: CodeInfo(REJECT_CAL_INVALID_GEOMETRY, CAT_STRUCTURAL, SEV_ERROR, "Calendar/diagonal geometry invalid"),
     # Math
     REJECT_IMPOSSIBLE_MAX_LOSS:   CodeInfo(REJECT_IMPOSSIBLE_MAX_LOSS, CAT_MATH, SEV_ERROR, "Impossible max loss"),
     REJECT_IMPOSSIBLE_MAX_PROFIT: CodeInfo(REJECT_IMPOSSIBLE_MAX_PROFIT, CAT_MATH, SEV_ERROR, "Impossible max profit"),
@@ -329,6 +334,8 @@ _V2_TO_CANONICAL: dict[str, str] = {
     REJECT_IC_INVALID_GEOMETRY: "invalid_geometry",
     # Butterfly geometry (Prompt 11)
     REJECT_BF_INVALID_GEOMETRY: "bf_invalid_geometry",
+    # Calendar/diagonal geometry (Prompt 12)
+    REJECT_CAL_INVALID_GEOMETRY: "cal_invalid_geometry",
 }
 
 _CANONICAL_TO_V2: dict[str, str] = {v: k for k, v in _V2_TO_CANONICAL.items()}

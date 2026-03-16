@@ -385,6 +385,37 @@ class TestMultiExpiryNarrowing:
         assert len(far) == 1   # only 30 DTE
         assert "dte_between_windows" in diag.expiry_drop_reasons
 
+    def test_overlapping_windows_dual_role(self):
+        """When near/far DTE windows overlap, contracts in the overlap
+        must appear in BOTH near and far lists (dual-role)."""
+        # 2026-03-18 =  7 DTE → near only
+        # 2026-03-25 = 14 DTE → overlap (near AND far)
+        # 2026-04-10 = 30 DTE → far only
+        contracts = self._contracts_with_expirations([
+            "2026-03-18", "2026-03-25", "2026-04-10",
+        ])
+        req = V2NarrowingRequest(
+            multi_expiry=True,
+            near_dte_min=5,
+            near_dte_max=20,
+            far_dte_min=10,
+            far_dte_max=40,
+        )
+        diag = V2NarrowingDiagnostics()
+        near, far = narrow_expirations_multi(
+            contracts, req, diag=diag, today=FIXED_TODAY,
+        )
+        # 7 DTE → near only; 14 DTE → both; 30 DTE → far only
+        assert len(near) == 2  # 7 DTE + 14 DTE
+        assert len(far) == 2   # 14 DTE + 30 DTE
+        # The 14 DTE contract is the dual-role one
+        near_exps = [c.expiration for c in near]
+        far_exps = [c.expiration for c in far]
+        assert "2026-03-25" in near_exps
+        assert "2026-03-25" in far_exps
+        # Diagnostics should track dual-role count
+        assert diag.expiry_drop_reasons.get("dual_role_contracts", 0) == 1
+
 
 # ═══════════════════════════════════════════════════════════════════
 #  3. Strike narrowing tests

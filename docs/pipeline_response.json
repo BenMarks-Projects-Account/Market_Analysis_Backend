@@ -1,0 +1,2404 @@
+{
+    "run_id": "run-05072e625be2",
+    "status": "running",
+    "pipeline_version": "1.0",
+    "trigger_source": "trade-building-pipeline",
+    "started_at": "2026-03-14T18:51:05.987608+00:00",
+    "ended_at": null,
+    "duration_ms": null,
+    "candidate_counters": {
+        "scanned": 0,
+        "selected": 0,
+        "enriched": 0,
+        "policy_passed": 0,
+        "submitted_to_model": 0,
+        "approved": 0,
+        "rejected": 0,
+        "options_scanned": 844239,
+        "stock_scanned": 60
+    },
+    "error_count": 0,
+    "errors": [],
+    "stages": [
+        {
+            "stage_key": "market_data",
+            "label": "Market Data Fetch",
+            "status": "completed",
+            "started_at": "2026-03-14T18:51:05.988798+00:00",
+            "ended_at": "2026-03-14T18:51:23.704299+00:00",
+            "duration_ms": 17715,
+            "summary_counts": {
+                "engines_attempted": 6,
+                "engines_succeeded": 6,
+                "engines_failed": 0,
+                "engines_skipped": 0,
+                "engines_unavailable": 0
+            },
+            "artifact_count": 7,
+            "artifact_refs": [
+                "art-21b2951fd08c",
+                "art-26fb9b0dc6eb",
+                "art-b1ef92169d2a",
+                "art-33e201bddf18",
+                "art-d4afe36e31ba",
+                "art-10d0d4263c7c",
+                "art-115de34b37f9"
+            ],
+            "error": null,
+            "log_event_count": 0
+        },
+        {
+            "stage_key": "stock_scanners",
+            "label": "Stock Scanners",
+            "status": "completed",
+            "started_at": "2026-03-14T18:51:05.989328+00:00",
+            "ended_at": "2026-03-14T18:56:10.906297+00:00",
+            "duration_ms": 304916,
+            "summary_counts": {
+                "total_candidates": 60,
+                "completed_scanners": 3,
+                "failed_scanners": 1
+            },
+            "artifact_count": 8,
+            "artifact_refs": [
+                "art-a6ea2edf1f62",
+                "art-3bcc7b65a652",
+                "art-66332e21bae5",
+                "art-aa60be6ae200",
+                "art-a6ea2edf1f62",
+                "art-3bcc7b65a652",
+                "art-66332e21bae5",
+                "art-aa60be6ae200"
+            ],
+            "error": null,
+            "log_event_count": 0
+        },
+        {
+            "stage_key": "options_scanners",
+            "label": "Options Scanners",
+            "status": "completed",
+            "started_at": "2026-03-14T18:51:05.989583+00:00",
+            "ended_at": "2026-03-14T18:55:11.472662+00:00",
+            "duration_ms": 245483,
+            "summary_counts": {
+                "total_candidates": 844239,
+                "completed_scanners": 11,
+                "failed_scanners": 0
+            },
+            "artifact_count": 24,
+            "artifact_refs": [
+                "art-5c1380bc0dfb",
+                "art-c43e458786f1",
+                "art-ce8d5512a7b7",
+                "art-d49547657f49",
+                "art-0d346286eb6f",
+                "art-69ece9e2a40c",
+                "art-9729ed9650fd",
+                "art-c64382e29b89",
+                "art-736d5f406f30",
+                "art-959b8ae6401e",
+                "art-667cf60a4331",
+                "art-e4d4741a1770",
+                "art-5c1380bc0dfb",
+                "art-c43e458786f1",
+                "art-ce8d5512a7b7",
+                "art-d49547657f49",
+                "art-0d346286eb6f",
+                "art-69ece9e2a40c",
+                "art-9729ed9650fd",
+                "art-c64382e29b89",
+                "art-736d5f406f30",
+                "art-959b8ae6401e",
+                "art-667cf60a4331",
+                "art-e4d4741a1770"
+            ],
+            "error": null,
+            "log_event_count": 0
+        },
+        {
+            "stage_key": "market_model_analysis",
+            "label": "Market Model Analysis",
+            "status": "completed",
+            "started_at": "2026-03-14T18:57:35.748741+00:00",
+            "ended_at": "2026-03-14T19:00:48.231111+00:00",
+            "duration_ms": 192482,
+            "summary_counts": {
+                "analyses_attempted": 6,
+                "analyses_succeeded": 6,
+                "analyses_failed": 0,
+                "analyses_skipped": 0
+            },
+            "artifact_count": 7,
+            "artifact_refs": [
+                "art-9a07be72ae89",
+                "art-3ff8993cfd1b",
+                "art-b649f9ec40d2",
+                "art-eef661f9c0bb",
+                "art-f5fd3a07f28a",
+                "art-3356b1472a0f",
+                "art-63ed942c161d"
+            ],
+            "error": null,
+            "log_event_count": 0
+        },
+        {
+            "stage_key": "candidate_selection",
+            "label": "Candidate Selection",
+            "status": "completed",
+            "started_at": "2026-03-14T19:10:03.524906+00:00",
+            "ended_at": "2026-03-14T19:10:30.723883+00:00",
+            "duration_ms": 27198,
+            "summary_counts": {
+                "total_loaded": 844299,
+                "total_eligible": 4,
+                "total_selected": 4,
+                "total_excluded": 844295,
+                "total_duplicates": 844235,
+                "total_cut_by_rank": 0
+            },
+            "artifact_count": 3,
+            "artifact_refs": [
+                "art-98722cf2b74d",
+                "art-d54acbc816fa",
+                "art-3c1e3855b930"
+            ],
+            "error": null,
+            "log_event_count": 0
+        },
+        {
+            "stage_key": "shared_context",
+            "label": "Shared Context Assembly",
+            "status": "completed",
+            "started_at": "2026-03-14T19:18:31.530217+00:00",
+            "ended_at": "2026-03-14T19:18:31.534575+00:00",
+            "duration_ms": 4,
+            "summary_counts": {
+                "modules_assembled": 3,
+                "modules_degraded": 0,
+                "modules_failed": 0
+            },
+            "artifact_count": 2,
+            "artifact_refs": [
+                "art-2d87d5a6c72a",
+                "art-f1daf18fb161"
+            ],
+            "error": null,
+            "log_event_count": 0
+        },
+        {
+            "stage_key": "candidate_enrichment",
+            "label": "Candidate Enrichment",
+            "status": "completed",
+            "started_at": "2026-03-14T19:26:14.914745+00:00",
+            "ended_at": "2026-03-14T19:26:14.924250+00:00",
+            "duration_ms": 9,
+            "summary_counts": {
+                "total_enriched": 4,
+                "total_degraded": 0,
+                "total_failed": 0
+            },
+            "artifact_count": 5,
+            "artifact_refs": [
+                "art-39254338cf10",
+                "art-b1820af845dd",
+                "art-8db83f158c54",
+                "art-73026b39b234",
+                "art-da0b3e85afaa"
+            ],
+            "error": null,
+            "log_event_count": 0
+        },
+        {
+            "stage_key": "events",
+            "label": "Event Context",
+            "status": "completed",
+            "started_at": "2026-03-14T19:38:11.940861+00:00",
+            "ended_at": "2026-03-14T19:38:11.971226+00:00",
+            "duration_ms": 30,
+            "summary_counts": {
+                "total_processed": 4,
+                "total_enriched": 0,
+                "total_no_events": 4,
+                "total_degraded": 0,
+                "total_failed": 0
+            },
+            "artifact_count": 5,
+            "artifact_refs": [
+                "art-d406a56f6684",
+                "art-a6d725fb9254",
+                "art-29d3d70bb120",
+                "art-6ed6e80239f4",
+                "art-98293edc52d5"
+            ],
+            "error": null,
+            "log_event_count": 0
+        },
+        {
+            "stage_key": "policy",
+            "label": "Policy Evaluation",
+            "status": "completed",
+            "started_at": "2026-03-14T19:53:23.660405+00:00",
+            "ended_at": "2026-03-14T19:53:23.692547+00:00",
+            "duration_ms": 32,
+            "summary_counts": {
+                "total_evaluated": 4,
+                "total_eligible": 0,
+                "total_eligible_with_cautions": 0,
+                "total_restricted": 0,
+                "total_blocked": 4,
+                "total_failed": 0
+            },
+            "artifact_count": 5,
+            "artifact_refs": [
+                "art-a5e46042b222",
+                "art-bed58b55bef2",
+                "art-e57540317b47",
+                "art-43c196f44ca9",
+                "art-47357ab82b35"
+            ],
+            "error": null,
+            "log_event_count": 0
+        },
+        {
+            "stage_key": "orchestration",
+            "label": "Decision Packet Assembly",
+            "status": "completed",
+            "started_at": "2026-03-14T20:00:54.937841+00:00",
+            "ended_at": "2026-03-14T20:00:54.955694+00:00",
+            "duration_ms": 17,
+            "summary_counts": {
+                "total_assembled": 4,
+                "total_degraded": 4,
+                "total_failed": 0
+            },
+            "artifact_count": 5,
+            "artifact_refs": [
+                "art-2263df6e87db",
+                "art-147583ec7e4e",
+                "art-74080307c8e0",
+                "art-b8b804fcbf07",
+                "art-02c82e43277a"
+            ],
+            "error": null,
+            "log_event_count": 0
+        },
+        {
+            "stage_key": "prompt_payload",
+            "label": "Prompt Payload Build",
+            "status": "completed",
+            "started_at": "2026-03-14T20:11:24.900598+00:00",
+            "ended_at": "2026-03-14T20:11:25.053807+00:00",
+            "duration_ms": 153,
+            "summary_counts": {
+                "total_built": 4,
+                "total_degraded": 4,
+                "total_failed": 0
+            },
+            "artifact_count": 5,
+            "artifact_refs": [
+                "art-dda05565ab7d",
+                "art-bb264c242dbc",
+                "art-fc3fca197566",
+                "art-c8477fed2855",
+                "art-adbfadf45ffd"
+            ],
+            "error": null,
+            "log_event_count": 0
+        },
+        {
+            "stage_key": "final_model_decision",
+            "label": "Final Model Decision",
+            "status": "completed",
+            "started_at": "2026-03-14T20:26:24.212521+00:00",
+            "ended_at": "2026-03-14T20:26:46.365798+00:00",
+            "duration_ms": 22153,
+            "summary_counts": {
+                "total_completed": 3,
+                "total_degraded": 3,
+                "total_skipped": 0,
+                "total_failed": 1
+            },
+            "artifact_count": 5,
+            "artifact_refs": [
+                "art-28e7e97b4ade",
+                "art-32a88a9f2152",
+                "art-51b4d8bd6eeb",
+                "art-c2086d954f58",
+                "art-c7386119ae97"
+            ],
+            "error": null,
+            "log_event_count": 0
+        },
+        {
+            "stage_key": "final_response_normalization",
+            "label": "Response Normalization",
+            "status": "running",
+            "started_at": "2026-03-14T20:36:56.983060+00:00",
+            "ended_at": null,
+            "duration_ms": null,
+            "summary_counts": {},
+            "artifact_count": 0,
+            "artifact_refs": [],
+            "error": null,
+            "log_event_count": 0
+        }
+    ],
+    "stage_order": [
+        "market_data",
+        "stock_scanners",
+        "options_scanners",
+        "market_model_analysis",
+        "candidate_selection",
+        "shared_context",
+        "candidate_enrichment",
+        "events",
+        "policy",
+        "orchestration",
+        "prompt_payload",
+        "final_model_decision",
+        "final_response_normalization"
+    ],
+    "artifacts": [
+        {
+            "artifact_id": "art-a6ea2edf1f62",
+            "stage_key": "stock_scanners",
+            "artifact_key": "candidates_stock_pullback_swing",
+            "artifact_type": "scanner_output",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:51:20.319918+00:00",
+            "summary": {
+                "candidate_count": 30
+            }
+        },
+        {
+            "artifact_id": "art-21b2951fd08c",
+            "stage_key": "market_data",
+            "artifact_key": "engine_breadth_participation",
+            "artifact_type": "market_engine_output",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T18:51:23.704139+00:00",
+            "summary": {
+                "score": 46.05,
+                "label": "Mixed / Fragile",
+                "confidence": 83.04,
+                "signal_quality": "high",
+                "engine_key": "breadth_participation"
+            }
+        },
+        {
+            "artifact_id": "art-26fb9b0dc6eb",
+            "stage_key": "market_data",
+            "artifact_key": "engine_volatility_options",
+            "artifact_type": "market_engine_output",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T18:51:23.704166+00:00",
+            "summary": {
+                "score": 57.47,
+                "label": "Mixed but Tradable",
+                "confidence": 95.0,
+                "signal_quality": "high",
+                "engine_key": "volatility_options"
+            }
+        },
+        {
+            "artifact_id": "art-b1ef92169d2a",
+            "stage_key": "market_data",
+            "artifact_key": "engine_liquidity_financial_conditions",
+            "artifact_type": "market_engine_output",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T18:51:23.704174+00:00",
+            "summary": {
+                "score": 50.6,
+                "label": "Neutral / Tightening",
+                "confidence": 84.2,
+                "signal_quality": "high",
+                "engine_key": "liquidity_financial_conditions"
+            }
+        },
+        {
+            "artifact_id": "art-33e201bddf18",
+            "stage_key": "market_data",
+            "artifact_key": "engine_cross_asset_macro",
+            "artifact_type": "market_engine_output",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T18:51:23.704180+00:00",
+            "summary": {
+                "score": 59.18,
+                "label": "Partial Confirmation",
+                "confidence": 92.0,
+                "signal_quality": "high",
+                "engine_key": "cross_asset_macro"
+            }
+        },
+        {
+            "artifact_id": "art-d4afe36e31ba",
+            "stage_key": "market_data",
+            "artifact_key": "engine_flows_positioning",
+            "artifact_type": "market_engine_output",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T18:51:23.704186+00:00",
+            "summary": {
+                "score": 61.37,
+                "label": "Mixed but Tradable",
+                "confidence": 69.8,
+                "signal_quality": "medium",
+                "engine_key": "flows_positioning"
+            }
+        },
+        {
+            "artifact_id": "art-10d0d4263c7c",
+            "stage_key": "market_data",
+            "artifact_key": "engine_news_sentiment",
+            "artifact_type": "market_engine_output",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T18:51:23.704191+00:00",
+            "summary": {
+                "score": null,
+                "label": null,
+                "confidence": null,
+                "signal_quality": null,
+                "engine_key": "news_sentiment"
+            }
+        },
+        {
+            "artifact_id": "art-115de34b37f9",
+            "stage_key": "market_data",
+            "artifact_key": "market_stage_summary",
+            "artifact_type": "market_stage_summary",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T18:51:23.704214+00:00",
+            "summary": {
+                "stage_status": "success",
+                "success_count": 6,
+                "fail_count": 0
+            }
+        },
+        {
+            "artifact_id": "art-3bcc7b65a652",
+            "stage_key": "stock_scanners",
+            "artifact_key": "candidates_stock_momentum_breakout",
+            "artifact_type": "scanner_output",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:51:32.514817+00:00",
+            "summary": {
+                "candidate_count": 0
+            }
+        },
+        {
+            "artifact_id": "art-5c1380bc0dfb",
+            "stage_key": "options_scanners",
+            "artifact_key": "candidates_put_credit_spread",
+            "artifact_type": "scanner_output",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:51:55.470670+00:00",
+            "summary": {
+                "candidate_count": 99431
+            }
+        },
+        {
+            "artifact_id": "art-66332e21bae5",
+            "stage_key": "stock_scanners",
+            "artifact_key": "candidates_stock_mean_reversion",
+            "artifact_type": "scanner_output",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:51:59.335696+00:00",
+            "summary": {
+                "candidate_count": 30
+            }
+        },
+        {
+            "artifact_id": "art-c43e458786f1",
+            "stage_key": "options_scanners",
+            "artifact_key": "candidates_call_credit_spread",
+            "artifact_type": "scanner_output",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:52:19.574670+00:00",
+            "summary": {
+                "candidate_count": 101411
+            }
+        },
+        {
+            "artifact_id": "art-ce8d5512a7b7",
+            "stage_key": "options_scanners",
+            "artifact_key": "candidates_iron_condor",
+            "artifact_type": "scanner_output",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:53:05.555700+00:00",
+            "summary": {
+                "candidate_count": 185621
+            }
+        },
+        {
+            "artifact_id": "art-d49547657f49",
+            "stage_key": "options_scanners",
+            "artifact_key": "candidates_butterfly_debit",
+            "artifact_type": "scanner_output",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:53:29.135423+00:00",
+            "summary": {
+                "candidate_count": 80162
+            }
+        },
+        {
+            "artifact_id": "art-0d346286eb6f",
+            "stage_key": "options_scanners",
+            "artifact_key": "candidates_iron_butterfly",
+            "artifact_type": "scanner_output",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:53:48.184808+00:00",
+            "summary": {
+                "candidate_count": 67554
+            }
+        },
+        {
+            "artifact_id": "art-69ece9e2a40c",
+            "stage_key": "options_scanners",
+            "artifact_key": "candidates_put_debit",
+            "artifact_type": "scanner_output",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:54:07.452375+00:00",
+            "summary": {
+                "candidate_count": 89717
+            }
+        },
+        {
+            "artifact_id": "art-9729ed9650fd",
+            "stage_key": "options_scanners",
+            "artifact_key": "candidates_call_debit",
+            "artifact_type": "scanner_output",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:54:31.610817+00:00",
+            "summary": {
+                "candidate_count": 96065
+            }
+        },
+        {
+            "artifact_id": "art-c64382e29b89",
+            "stage_key": "options_scanners",
+            "artifact_key": "candidates_calendar_call_spread",
+            "artifact_type": "scanner_output",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:54:34.910823+00:00",
+            "summary": {
+                "candidate_count": 15462
+            }
+        },
+        {
+            "artifact_id": "art-736d5f406f30",
+            "stage_key": "options_scanners",
+            "artifact_key": "candidates_calendar_put_spread",
+            "artifact_type": "scanner_output",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:54:38.116973+00:00",
+            "summary": {
+                "candidate_count": 16232
+            }
+        },
+        {
+            "artifact_id": "art-959b8ae6401e",
+            "stage_key": "options_scanners",
+            "artifact_key": "candidates_diagonal_call_spread",
+            "artifact_type": "scanner_output",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:54:58.992470+00:00",
+            "summary": {
+                "candidate_count": 53235
+            }
+        },
+        {
+            "artifact_id": "art-667cf60a4331",
+            "stage_key": "options_scanners",
+            "artifact_key": "candidates_diagonal_put_spread",
+            "artifact_type": "scanner_output",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:55:11.238818+00:00",
+            "summary": {
+                "candidate_count": 39349
+            }
+        },
+        {
+            "artifact_id": "art-e4d4741a1770",
+            "stage_key": "options_scanners",
+            "artifact_key": "options_scanners_summary",
+            "artifact_type": "scanner_stage_summary",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:55:11.245143+00:00",
+            "summary": {}
+        },
+        {
+            "artifact_id": "art-aa60be6ae200",
+            "stage_key": "stock_scanners",
+            "artifact_key": "stock_scanners_summary",
+            "artifact_type": "scanner_stage_summary",
+            "candidate_id": null,
+            "status": "superseded",
+            "created_at": "2026-03-14T18:56:10.891087+00:00",
+            "summary": {}
+        },
+        {
+            "artifact_id": "art-9a07be72ae89",
+            "stage_key": "market_model_analysis",
+            "artifact_key": "model_breadth_participation",
+            "artifact_type": "market_model_output",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T19:00:48.225971+00:00",
+            "summary": {
+                "engine_key": "breadth_participation",
+                "status": "analyzed",
+                "model_provider": null
+            }
+        },
+        {
+            "artifact_id": "art-3ff8993cfd1b",
+            "stage_key": "market_model_analysis",
+            "artifact_key": "model_volatility_options",
+            "artifact_type": "market_model_output",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T19:00:48.229563+00:00",
+            "summary": {
+                "engine_key": "volatility_options",
+                "status": "analyzed",
+                "model_provider": null
+            }
+        },
+        {
+            "artifact_id": "art-b649f9ec40d2",
+            "stage_key": "market_model_analysis",
+            "artifact_key": "model_liquidity_financial_conditions",
+            "artifact_type": "market_model_output",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T19:00:48.229737+00:00",
+            "summary": {
+                "engine_key": "liquidity_financial_conditions",
+                "status": "analyzed",
+                "model_provider": null
+            }
+        },
+        {
+            "artifact_id": "art-eef661f9c0bb",
+            "stage_key": "market_model_analysis",
+            "artifact_key": "model_cross_asset_macro",
+            "artifact_type": "market_model_output",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T19:00:48.229799+00:00",
+            "summary": {
+                "engine_key": "cross_asset_macro",
+                "status": "analyzed",
+                "model_provider": null
+            }
+        },
+        {
+            "artifact_id": "art-f5fd3a07f28a",
+            "stage_key": "market_model_analysis",
+            "artifact_key": "model_flows_positioning",
+            "artifact_type": "market_model_output",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T19:00:48.229838+00:00",
+            "summary": {
+                "engine_key": "flows_positioning",
+                "status": "analyzed",
+                "model_provider": null
+            }
+        },
+        {
+            "artifact_id": "art-3356b1472a0f",
+            "stage_key": "market_model_analysis",
+            "artifact_key": "model_news_sentiment",
+            "artifact_type": "market_model_output",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T19:00:48.229892+00:00",
+            "summary": {
+                "engine_key": "news_sentiment",
+                "status": "analyzed",
+                "model_provider": null
+            }
+        },
+        {
+            "artifact_id": "art-63ed942c161d",
+            "stage_key": "market_model_analysis",
+            "artifact_key": "model_stage_summary",
+            "artifact_type": "market_model_output",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T19:00:48.229954+00:00",
+            "summary": {
+                "stage_status": "success",
+                "analyzed_count": 6,
+                "failed_count": 0,
+                "skipped_count": 0
+            }
+        },
+        {
+            "artifact_id": "art-98722cf2b74d",
+            "stage_key": "candidate_selection",
+            "artifact_key": "selected_candidates",
+            "artifact_type": "selected_candidate",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T19:10:30.471630+00:00",
+            "summary": {
+                "total_selected": 4,
+                "candidate_ids": [
+                    "SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+                    "QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+                    "IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+                    "DIA|put_credit_spread|2026-03-20|215.0/210.0|0"
+                ],
+                "symbols": [
+                    "DIA",
+                    "IWM",
+                    "QQQ",
+                    "SPY"
+                ]
+            }
+        },
+        {
+            "artifact_id": "art-d54acbc816fa",
+            "stage_key": "candidate_selection",
+            "artifact_key": "candidate_selection_ledger",
+            "artifact_type": "candidate_selection_ledger",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T19:10:30.675559+00:00",
+            "summary": {
+                "total_reviewed": 844299,
+                "selected_count": 4,
+                "excluded_count": 844295
+            }
+        },
+        {
+            "artifact_id": "art-3c1e3855b930",
+            "stage_key": "candidate_selection",
+            "artifact_key": "candidate_selection_summary",
+            "artifact_type": "candidate_selection_summary",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T19:10:30.676350+00:00",
+            "summary": {
+                "stage_status": "success",
+                "total_loaded": 844299,
+                "total_selected": 4,
+                "total_excluded_pre_ranking": 60,
+                "total_duplicates_excluded": 844235,
+                "total_cut_by_rank": 0,
+                "selection_cap": 20
+            }
+        },
+        {
+            "artifact_id": "art-2d87d5a6c72a",
+            "stage_key": "shared_context",
+            "artifact_key": "shared_context",
+            "artifact_type": "shared_context",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T19:18:31.532864+00:00",
+            "summary": {
+                "overall_status": "full",
+                "module_count": 3,
+                "module_statuses": {
+                    "market_data": "success",
+                    "model_analysis": "success",
+                    "candidate_selection": "success"
+                },
+                "degraded_reason_count": 0,
+                "assembled_at": "2026-03-14T19:18:31.532786+00:00"
+            }
+        },
+        {
+            "artifact_id": "art-f1daf18fb161",
+            "stage_key": "shared_context",
+            "artifact_key": "context_assembly_summary",
+            "artifact_type": "context_assembly_summary",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T19:18:31.534068+00:00",
+            "summary": {
+                "overall_status": "full",
+                "modules_assembled": 3,
+                "modules_degraded": 0,
+                "modules_failed": 0
+            }
+        },
+        {
+            "artifact_id": "art-39254338cf10",
+            "stage_key": "candidate_enrichment",
+            "artifact_key": "enriched_SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "artifact_type": "enriched_candidate",
+            "candidate_id": "SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T19:26:14.919615+00:00",
+            "summary": {
+                "candidate_id": "SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "SPY",
+                "strategy_type": null,
+                "enrichment_status": "full",
+                "enrichment_notes": []
+            }
+        },
+        {
+            "artifact_id": "art-b1820af845dd",
+            "stage_key": "candidate_enrichment",
+            "artifact_key": "enriched_QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "artifact_type": "enriched_candidate",
+            "candidate_id": "QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T19:26:14.923068+00:00",
+            "summary": {
+                "candidate_id": "QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "QQQ",
+                "strategy_type": null,
+                "enrichment_status": "full",
+                "enrichment_notes": []
+            }
+        },
+        {
+            "artifact_id": "art-8db83f158c54",
+            "stage_key": "candidate_enrichment",
+            "artifact_key": "enriched_IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+            "artifact_type": "enriched_candidate",
+            "candidate_id": "IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T19:26:14.923324+00:00",
+            "summary": {
+                "candidate_id": "IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+                "symbol": "IWM",
+                "strategy_type": null,
+                "enrichment_status": "full",
+                "enrichment_notes": []
+            }
+        },
+        {
+            "artifact_id": "art-73026b39b234",
+            "stage_key": "candidate_enrichment",
+            "artifact_key": "enriched_DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+            "artifact_type": "enriched_candidate",
+            "candidate_id": "DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T19:26:14.923351+00:00",
+            "summary": {
+                "candidate_id": "DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+                "symbol": "DIA",
+                "strategy_type": null,
+                "enrichment_status": "full",
+                "enrichment_notes": []
+            }
+        },
+        {
+            "artifact_id": "art-da0b3e85afaa",
+            "stage_key": "candidate_enrichment",
+            "artifact_key": "candidate_enrichment_summary",
+            "artifact_type": "candidate_enrichment_summary",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T19:26:14.923518+00:00",
+            "summary": {
+                "overall_status": "full",
+                "total_enriched": 4,
+                "total_degraded": 0,
+                "total_failed": 0
+            }
+        },
+        {
+            "artifact_id": "art-d406a56f6684",
+            "stage_key": "events",
+            "artifact_key": "event_SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "artifact_type": "event_context",
+            "candidate_id": "SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T19:38:11.947430+00:00",
+            "summary": {
+                "candidate_id": "SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "SPY",
+                "event_status": "no_relevant_events",
+                "risk_flag_count": 1,
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-a6d725fb9254",
+            "stage_key": "events",
+            "artifact_key": "event_QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "artifact_type": "event_context",
+            "candidate_id": "QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T19:38:11.950968+00:00",
+            "summary": {
+                "candidate_id": "QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "QQQ",
+                "event_status": "no_relevant_events",
+                "risk_flag_count": 1,
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-29d3d70bb120",
+            "stage_key": "events",
+            "artifact_key": "event_IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+            "artifact_type": "event_context",
+            "candidate_id": "IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T19:38:11.951180+00:00",
+            "summary": {
+                "candidate_id": "IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+                "symbol": "IWM",
+                "event_status": "no_relevant_events",
+                "risk_flag_count": 1,
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-6ed6e80239f4",
+            "stage_key": "events",
+            "artifact_key": "event_DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+            "artifact_type": "event_context",
+            "candidate_id": "DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T19:38:11.951647+00:00",
+            "summary": {
+                "candidate_id": "DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+                "symbol": "DIA",
+                "event_status": "no_relevant_events",
+                "risk_flag_count": 1,
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-98293edc52d5",
+            "stage_key": "events",
+            "artifact_key": "event_context_summary",
+            "artifact_type": "event_context_summary",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T19:38:11.951872+00:00",
+            "summary": {
+                "stage_status": "success",
+                "total_processed": 4,
+                "total_enriched": 0,
+                "total_failed": 0
+            }
+        },
+        {
+            "artifact_id": "art-a5e46042b222",
+            "stage_key": "policy",
+            "artifact_key": "policy_SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "artifact_type": "policy_output",
+            "candidate_id": "SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T19:53:23.667947+00:00",
+            "summary": {
+                "candidate_id": "SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "SPY",
+                "overall_outcome": "blocked",
+                "blocking_count": 1,
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-bed58b55bef2",
+            "stage_key": "policy",
+            "artifact_key": "policy_QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "artifact_type": "policy_output",
+            "candidate_id": "QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T19:53:23.689349+00:00",
+            "summary": {
+                "candidate_id": "QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "QQQ",
+                "overall_outcome": "blocked",
+                "blocking_count": 1,
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-e57540317b47",
+            "stage_key": "policy",
+            "artifact_key": "policy_IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+            "artifact_type": "policy_output",
+            "candidate_id": "IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T19:53:23.689597+00:00",
+            "summary": {
+                "candidate_id": "IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+                "symbol": "IWM",
+                "overall_outcome": "blocked",
+                "blocking_count": 1,
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-43c196f44ca9",
+            "stage_key": "policy",
+            "artifact_key": "policy_DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+            "artifact_type": "policy_output",
+            "candidate_id": "DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T19:53:23.691070+00:00",
+            "summary": {
+                "candidate_id": "DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+                "symbol": "DIA",
+                "overall_outcome": "blocked",
+                "blocking_count": 1,
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-47357ab82b35",
+            "stage_key": "policy",
+            "artifact_key": "policy_stage_summary",
+            "artifact_type": "policy_stage_summary",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T19:53:23.691532+00:00",
+            "summary": {
+                "stage_status": "success",
+                "total_evaluated": 4,
+                "total_eligible": 0,
+                "total_blocked": 4,
+                "total_failed": 0
+            }
+        },
+        {
+            "artifact_id": "art-2263df6e87db",
+            "stage_key": "orchestration",
+            "artifact_key": "decision_SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "artifact_type": "decision_packet",
+            "candidate_id": "SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T20:00:54.940366+00:00",
+            "summary": {
+                "candidate_id": "SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "SPY",
+                "packet_status": "assembled_degraded",
+                "policy_outcome": "blocked",
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-147583ec7e4e",
+            "stage_key": "orchestration",
+            "artifact_key": "decision_QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "artifact_type": "decision_packet",
+            "candidate_id": "QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T20:00:54.941502+00:00",
+            "summary": {
+                "candidate_id": "QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "QQQ",
+                "packet_status": "assembled_degraded",
+                "policy_outcome": "blocked",
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-74080307c8e0",
+            "stage_key": "orchestration",
+            "artifact_key": "decision_IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+            "artifact_type": "decision_packet",
+            "candidate_id": "IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T20:00:54.941530+00:00",
+            "summary": {
+                "candidate_id": "IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+                "symbol": "IWM",
+                "packet_status": "assembled_degraded",
+                "policy_outcome": "blocked",
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-b8b804fcbf07",
+            "stage_key": "orchestration",
+            "artifact_key": "decision_DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+            "artifact_type": "decision_packet",
+            "candidate_id": "DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T20:00:54.941549+00:00",
+            "summary": {
+                "candidate_id": "DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+                "symbol": "DIA",
+                "packet_status": "assembled_degraded",
+                "policy_outcome": "blocked",
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-02c82e43277a",
+            "stage_key": "orchestration",
+            "artifact_key": "decision_packet_summary",
+            "artifact_type": "decision_packet_summary",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T20:00:54.941572+00:00",
+            "summary": {
+                "stage_status": "degraded",
+                "total_assembled": 4,
+                "total_degraded": 4,
+                "total_failed": 0
+            }
+        },
+        {
+            "artifact_id": "art-dda05565ab7d",
+            "stage_key": "prompt_payload",
+            "artifact_key": "prompt_SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "artifact_type": "prompt_payload",
+            "candidate_id": "SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T20:11:24.911135+00:00",
+            "summary": {
+                "candidate_id": "SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "SPY",
+                "payload_status": "built_degraded",
+                "policy_outcome": "blocked",
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-bb264c242dbc",
+            "stage_key": "prompt_payload",
+            "artifact_key": "prompt_QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "artifact_type": "prompt_payload",
+            "candidate_id": "QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T20:11:24.928335+00:00",
+            "summary": {
+                "candidate_id": "QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "QQQ",
+                "payload_status": "built_degraded",
+                "policy_outcome": "blocked",
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-fc3fca197566",
+            "stage_key": "prompt_payload",
+            "artifact_key": "prompt_IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+            "artifact_type": "prompt_payload",
+            "candidate_id": "IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T20:11:24.928681+00:00",
+            "summary": {
+                "candidate_id": "IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+                "symbol": "IWM",
+                "payload_status": "built_degraded",
+                "policy_outcome": "blocked",
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-c8477fed2855",
+            "stage_key": "prompt_payload",
+            "artifact_key": "prompt_DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+            "artifact_type": "prompt_payload",
+            "candidate_id": "DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T20:11:24.928847+00:00",
+            "summary": {
+                "candidate_id": "DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+                "symbol": "DIA",
+                "payload_status": "built_degraded",
+                "policy_outcome": "blocked",
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-adbfadf45ffd",
+            "stage_key": "prompt_payload",
+            "artifact_key": "prompt_payload_summary",
+            "artifact_type": "prompt_payload_summary",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T20:11:24.928972+00:00",
+            "summary": {
+                "stage_status": "degraded",
+                "total_built": 4,
+                "total_degraded": 4,
+                "total_failed": 0
+            }
+        },
+        {
+            "artifact_id": "art-28e7e97b4ade",
+            "stage_key": "final_model_decision",
+            "artifact_key": "final_SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "artifact_type": "final_model_output",
+            "candidate_id": "SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T20:26:28.574825+00:00",
+            "summary": {
+                "candidate_id": "SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "SPY",
+                "final_status": "failed",
+                "decision": null,
+                "conviction": null,
+                "policy_outcome": "blocked",
+                "downstream_usable": false
+            }
+        },
+        {
+            "artifact_id": "art-32a88a9f2152",
+            "stage_key": "final_model_decision",
+            "artifact_key": "final_QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "artifact_type": "final_model_output",
+            "candidate_id": "QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T20:26:35.344676+00:00",
+            "summary": {
+                "candidate_id": "QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "QQQ",
+                "final_status": "completed_degraded",
+                "decision": "pass",
+                "conviction": 0.65,
+                "policy_outcome": "blocked",
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-51b4d8bd6eeb",
+            "stage_key": "final_model_decision",
+            "artifact_key": "final_IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+            "artifact_type": "final_model_output",
+            "candidate_id": "IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T20:26:39.406368+00:00",
+            "summary": {
+                "candidate_id": "IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+                "symbol": "IWM",
+                "final_status": "completed_degraded",
+                "decision": "pass",
+                "conviction": 0.85,
+                "policy_outcome": "blocked",
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-c2086d954f58",
+            "stage_key": "final_model_decision",
+            "artifact_key": "final_DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+            "artifact_type": "final_model_output",
+            "candidate_id": "DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+            "status": "active",
+            "created_at": "2026-03-14T20:26:46.265118+00:00",
+            "summary": {
+                "candidate_id": "DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+                "symbol": "DIA",
+                "final_status": "completed_degraded",
+                "decision": "pass",
+                "conviction": 0.3,
+                "policy_outcome": "blocked",
+                "downstream_usable": true
+            }
+        },
+        {
+            "artifact_id": "art-c7386119ae97",
+            "stage_key": "final_model_decision",
+            "artifact_key": "final_model_summary",
+            "artifact_type": "final_model_summary",
+            "candidate_id": null,
+            "status": "active",
+            "created_at": "2026-03-14T20:26:46.280130+00:00",
+            "summary": {
+                "stage_status": "degraded",
+                "total_completed": 3,
+                "total_degraded": 3,
+                "total_skipped": 0,
+                "total_failed": 1
+            }
+        }
+    ],
+    "artifact_store_summary": {
+        "run_id": "run-05072e625be2",
+        "artifact_store_version": "1.0",
+        "total_artifacts": 81,
+        "active_artifacts": 65,
+        "stages_with_artifacts": [
+            "candidate_enrichment",
+            "candidate_selection",
+            "events",
+            "final_model_decision",
+            "market_data",
+            "market_model_analysis",
+            "options_scanners",
+            "orchestration",
+            "policy",
+            "prompt_payload",
+            "shared_context",
+            "stock_scanners"
+        ],
+        "artifact_types_present": [
+            "candidate_enrichment_summary",
+            "candidate_selection_ledger",
+            "candidate_selection_summary",
+            "context_assembly_summary",
+            "decision_packet",
+            "decision_packet_summary",
+            "enriched_candidate",
+            "event_context",
+            "event_context_summary",
+            "final_model_output",
+            "final_model_summary",
+            "market_engine_output",
+            "market_model_output",
+            "market_stage_summary",
+            "policy_output",
+            "policy_stage_summary",
+            "prompt_payload",
+            "prompt_payload_summary",
+            "scanner_output",
+            "scanner_stage_summary",
+            "selected_candidate",
+            "shared_context"
+        ],
+        "candidates_tracked": 4,
+        "counts": {
+            "total": 81,
+            "by_stage": {
+                "stock_scanners": 8,
+                "market_data": 7,
+                "options_scanners": 24,
+                "market_model_analysis": 7,
+                "candidate_selection": 3,
+                "shared_context": 2,
+                "candidate_enrichment": 5,
+                "events": 5,
+                "policy": 5,
+                "orchestration": 5,
+                "prompt_payload": 5,
+                "final_model_decision": 5
+            },
+            "by_type": {
+                "scanner_output": 28,
+                "market_engine_output": 6,
+                "market_stage_summary": 1,
+                "scanner_stage_summary": 4,
+                "market_model_output": 7,
+                "selected_candidate": 1,
+                "candidate_selection_ledger": 1,
+                "candidate_selection_summary": 1,
+                "shared_context": 1,
+                "context_assembly_summary": 1,
+                "enriched_candidate": 4,
+                "candidate_enrichment_summary": 1,
+                "event_context": 4,
+                "event_context_summary": 1,
+                "policy_output": 4,
+                "policy_stage_summary": 1,
+                "decision_packet": 4,
+                "decision_packet_summary": 1,
+                "prompt_payload": 4,
+                "prompt_payload_summary": 1,
+                "final_model_output": 4,
+                "final_model_summary": 1
+            },
+            "active": 65,
+            "superseded": 16,
+            "invalid": 0
+        },
+        "module_role": "storage"
+    },
+    "ledger": null,
+    "events": [
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "",
+            "event_type": "run_started",
+            "timestamp": "2026-03-14T18:51:05.988000+00:00",
+            "level": "info",
+            "message": "Pipeline run 'run-05072e625be2' started",
+            "metadata": {}
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_data",
+            "event_type": "stage_started",
+            "timestamp": "2026-03-14T18:51:05.988805+00:00",
+            "level": "info",
+            "message": "Stage 'market_data' started",
+            "metadata": {}
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "stock_scanners",
+            "event_type": "stage_started",
+            "timestamp": "2026-03-14T18:51:05.989334+00:00",
+            "level": "info",
+            "message": "Stage 'stock_scanners' started",
+            "metadata": {}
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "options_scanners",
+            "event_type": "stage_started",
+            "timestamp": "2026-03-14T18:51:05.989589+00:00",
+            "level": "info",
+            "message": "Stage 'options_scanners' started",
+            "metadata": {}
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_data",
+            "event_type": "engine_started",
+            "timestamp": "2026-03-14T18:51:05.989860+00:00",
+            "level": "info",
+            "message": "Engine 'breadth_participation' starting",
+            "metadata": {
+                "engine_key": "breadth_participation"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_data",
+            "event_type": "engine_started",
+            "timestamp": "2026-03-14T18:51:05.990249+00:00",
+            "level": "info",
+            "message": "Engine 'volatility_options' starting",
+            "metadata": {
+                "engine_key": "volatility_options"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_data",
+            "event_type": "engine_started",
+            "timestamp": "2026-03-14T18:51:05.990856+00:00",
+            "level": "info",
+            "message": "Engine 'liquidity_financial_conditions' starting",
+            "metadata": {
+                "engine_key": "liquidity_financial_conditions"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_data",
+            "event_type": "engine_completed",
+            "timestamp": "2026-03-14T18:51:07.277627+00:00",
+            "level": "info",
+            "message": "Engine 'volatility_options' completed in 1287ms",
+            "metadata": {
+                "engine_key": "volatility_options",
+                "elapsed_ms": 1287,
+                "score": 57.47
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_data",
+            "event_type": "engine_started",
+            "timestamp": "2026-03-14T18:51:07.277730+00:00",
+            "level": "info",
+            "message": "Engine 'cross_asset_macro' starting",
+            "metadata": {
+                "engine_key": "cross_asset_macro"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_data",
+            "event_type": "engine_completed",
+            "timestamp": "2026-03-14T18:51:07.672787+00:00",
+            "level": "info",
+            "message": "Engine 'cross_asset_macro' completed in 395ms",
+            "metadata": {
+                "engine_key": "cross_asset_macro",
+                "elapsed_ms": 395,
+                "score": 59.18
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_data",
+            "event_type": "engine_started",
+            "timestamp": "2026-03-14T18:51:07.672876+00:00",
+            "level": "info",
+            "message": "Engine 'flows_positioning' starting",
+            "metadata": {
+                "engine_key": "flows_positioning"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_data",
+            "event_type": "engine_completed",
+            "timestamp": "2026-03-14T18:51:07.860342+00:00",
+            "level": "info",
+            "message": "Engine 'flows_positioning' completed in 187ms",
+            "metadata": {
+                "engine_key": "flows_positioning",
+                "elapsed_ms": 187,
+                "score": 61.37
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_data",
+            "event_type": "engine_started",
+            "timestamp": "2026-03-14T18:51:07.860896+00:00",
+            "level": "info",
+            "message": "Engine 'news_sentiment' starting",
+            "metadata": {
+                "engine_key": "news_sentiment"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_data",
+            "event_type": "engine_completed",
+            "timestamp": "2026-03-14T18:51:08.382852+00:00",
+            "level": "info",
+            "message": "Engine 'news_sentiment' completed in 521ms",
+            "metadata": {
+                "engine_key": "news_sentiment",
+                "elapsed_ms": 521,
+                "score": null
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_data",
+            "event_type": "engine_completed",
+            "timestamp": "2026-03-14T18:51:09.255644+00:00",
+            "level": "info",
+            "message": "Engine 'liquidity_financial_conditions' completed in 3264ms",
+            "metadata": {
+                "engine_key": "liquidity_financial_conditions",
+                "elapsed_ms": 3264,
+                "score": 50.6
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_data",
+            "event_type": "engine_completed",
+            "timestamp": "2026-03-14T18:51:23.703825+00:00",
+            "level": "info",
+            "message": "Engine 'breadth_participation' completed in 17713ms",
+            "metadata": {
+                "engine_key": "breadth_participation",
+                "elapsed_ms": 17713,
+                "score": 46.05
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_data",
+            "event_type": "stage_completed",
+            "timestamp": "2026-03-14T18:51:23.704341+00:00",
+            "level": "info",
+            "message": "Stage 'market_data' completed in 17715ms",
+            "metadata": {
+                "timing_ms": 17715
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "options_scanners",
+            "event_type": "stage_completed",
+            "timestamp": "2026-03-14T18:55:11.472740+00:00",
+            "level": "info",
+            "message": "Stage 'options_scanners' completed in 245482ms",
+            "metadata": {
+                "timing_ms": 245482
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "stock_scanners",
+            "event_type": "stage_completed",
+            "timestamp": "2026-03-14T18:56:10.906632+00:00",
+            "level": "info",
+            "message": "Stage 'stock_scanners' completed in 304902ms",
+            "metadata": {
+                "timing_ms": 304902
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_model_analysis",
+            "event_type": "stage_started",
+            "timestamp": "2026-03-14T18:57:35.748866+00:00",
+            "level": "info",
+            "message": "Stage 'market_model_analysis' started",
+            "metadata": {}
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_model_analysis",
+            "event_type": "handler_entered",
+            "timestamp": "2026-03-14T18:57:35.749451+00:00",
+            "level": "info",
+            "message": "market_model_stage_handler entered",
+            "metadata": {
+                "engine_key": ""
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_model_analysis",
+            "event_type": "model_analysis_started",
+            "timestamp": "2026-03-14T18:57:35.755980+00:00",
+            "level": "info",
+            "message": "Model analysis starting for 'breadth_participation'",
+            "metadata": {
+                "engine_key": "breadth_participation",
+                "source_artifact_ref": "art-21b2951fd08c"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_model_analysis",
+            "event_type": "model_analysis_completed",
+            "timestamp": "2026-03-14T18:57:47.990820+00:00",
+            "level": "info",
+            "message": "Model analysis completed for 'breadth_participation' in 12234ms",
+            "metadata": {
+                "engine_key": "breadth_participation",
+                "elapsed_ms": 12234,
+                "source_artifact_ref": "art-21b2951fd08c"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_model_analysis",
+            "event_type": "model_analysis_started",
+            "timestamp": "2026-03-14T18:57:47.991037+00:00",
+            "level": "info",
+            "message": "Model analysis starting for 'volatility_options'",
+            "metadata": {
+                "engine_key": "volatility_options",
+                "source_artifact_ref": "art-26fb9b0dc6eb"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_model_analysis",
+            "event_type": "model_analysis_completed",
+            "timestamp": "2026-03-14T18:58:03.118015+00:00",
+            "level": "info",
+            "message": "Model analysis completed for 'volatility_options' in 15126ms",
+            "metadata": {
+                "engine_key": "volatility_options",
+                "elapsed_ms": 15126,
+                "source_artifact_ref": "art-26fb9b0dc6eb"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_model_analysis",
+            "event_type": "model_analysis_started",
+            "timestamp": "2026-03-14T18:58:03.118173+00:00",
+            "level": "info",
+            "message": "Model analysis starting for 'liquidity_financial_conditions'",
+            "metadata": {
+                "engine_key": "liquidity_financial_conditions",
+                "source_artifact_ref": "art-b1ef92169d2a"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_model_analysis",
+            "event_type": "model_analysis_completed",
+            "timestamp": "2026-03-14T18:58:21.421484+00:00",
+            "level": "info",
+            "message": "Model analysis completed for 'liquidity_financial_conditions' in 18303ms",
+            "metadata": {
+                "engine_key": "liquidity_financial_conditions",
+                "elapsed_ms": 18303,
+                "source_artifact_ref": "art-b1ef92169d2a"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_model_analysis",
+            "event_type": "model_analysis_started",
+            "timestamp": "2026-03-14T18:58:21.433809+00:00",
+            "level": "info",
+            "message": "Model analysis starting for 'cross_asset_macro'",
+            "metadata": {
+                "engine_key": "cross_asset_macro",
+                "source_artifact_ref": "art-33e201bddf18"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_model_analysis",
+            "event_type": "model_analysis_completed",
+            "timestamp": "2026-03-14T18:59:37.409830+00:00",
+            "level": "info",
+            "message": "Model analysis completed for 'cross_asset_macro' in 75970ms",
+            "metadata": {
+                "engine_key": "cross_asset_macro",
+                "elapsed_ms": 75970,
+                "source_artifact_ref": "art-33e201bddf18"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_model_analysis",
+            "event_type": "model_analysis_started",
+            "timestamp": "2026-03-14T18:59:37.449805+00:00",
+            "level": "info",
+            "message": "Model analysis starting for 'flows_positioning'",
+            "metadata": {
+                "engine_key": "flows_positioning",
+                "source_artifact_ref": "art-d4afe36e31ba"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_model_analysis",
+            "event_type": "model_analysis_completed",
+            "timestamp": "2026-03-14T18:59:59.631373+00:00",
+            "level": "info",
+            "message": "Model analysis completed for 'flows_positioning' in 22178ms",
+            "metadata": {
+                "engine_key": "flows_positioning",
+                "elapsed_ms": 22178,
+                "source_artifact_ref": "art-d4afe36e31ba"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_model_analysis",
+            "event_type": "model_analysis_started",
+            "timestamp": "2026-03-14T18:59:59.647582+00:00",
+            "level": "info",
+            "message": "Model analysis starting for 'news_sentiment'",
+            "metadata": {
+                "engine_key": "news_sentiment",
+                "source_artifact_ref": "art-10d0d4263c7c"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_model_analysis",
+            "event_type": "model_analysis_completed",
+            "timestamp": "2026-03-14T19:00:48.204364+00:00",
+            "level": "info",
+            "message": "Model analysis completed for 'news_sentiment' in 48571ms",
+            "metadata": {
+                "engine_key": "news_sentiment",
+                "elapsed_ms": 48571,
+                "source_artifact_ref": "art-10d0d4263c7c"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "market_model_analysis",
+            "event_type": "stage_completed",
+            "timestamp": "2026-03-14T19:00:48.231713+00:00",
+            "level": "info",
+            "message": "Stage 'market_model_analysis' completed in 192481ms",
+            "metadata": {
+                "timing_ms": 192481
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "candidate_selection",
+            "event_type": "stage_started",
+            "timestamp": "2026-03-14T19:10:03.525282+00:00",
+            "level": "info",
+            "message": "Stage 'candidate_selection' started",
+            "metadata": {}
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "candidate_selection",
+            "event_type": "selection_started",
+            "timestamp": "2026-03-14T19:10:23.638893+00:00",
+            "level": "info",
+            "message": "Candidate selection started with 844299 candidates",
+            "metadata": {
+                "stage_key": "candidate_selection",
+                "total_loaded": 844299
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "candidate_selection",
+            "event_type": "selection_completed",
+            "timestamp": "2026-03-14T19:10:30.676373+00:00",
+            "level": "info",
+            "message": "Candidate selection completed: 4/844299 selected",
+            "metadata": {
+                "stage_key": "candidate_selection",
+                "total_loaded": 844299,
+                "total_eligible": 4,
+                "total_selected": 4,
+                "total_excluded_pre_ranking": 60,
+                "total_duplicates_excluded": 844235,
+                "total_cut_by_rank": 0,
+                "selection_cap": 20,
+                "stage_status": "success",
+                "selected_artifact_id": "art-98722cf2b74d",
+                "ledger_artifact_id": "art-d54acbc816fa",
+                "summary_artifact_id": "art-3c1e3855b930"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "candidate_selection",
+            "event_type": "stage_completed",
+            "timestamp": "2026-03-14T19:10:30.725345+00:00",
+            "level": "info",
+            "message": "Stage 'candidate_selection' completed in 27172ms",
+            "metadata": {
+                "timing_ms": 27172
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "shared_context",
+            "event_type": "stage_started",
+            "timestamp": "2026-03-14T19:18:31.530506+00:00",
+            "level": "info",
+            "message": "Stage 'shared_context' started",
+            "metadata": {}
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "shared_context",
+            "event_type": "context_assembly_started",
+            "timestamp": "2026-03-14T19:18:31.531974+00:00",
+            "level": "info",
+            "message": "Shared context assembly started",
+            "metadata": {
+                "stage_key": "shared_context"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "shared_context",
+            "event_type": "context_assembly_completed",
+            "timestamp": "2026-03-14T19:18:31.534209+00:00",
+            "level": "info",
+            "message": "Context assembly completed (full): 3 full, 0 degraded, 0 failed",
+            "metadata": {
+                "stage_key": "shared_context",
+                "overall_status": "full",
+                "modules_full": 3,
+                "modules_degraded": 0,
+                "modules_failed": 0,
+                "artifacts_written": 2,
+                "elapsed_ms": 1
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "shared_context",
+            "event_type": "stage_completed",
+            "timestamp": "2026-03-14T19:18:31.535385+00:00",
+            "level": "info",
+            "message": "Stage 'shared_context' completed in 3ms",
+            "metadata": {
+                "timing_ms": 3
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "candidate_enrichment",
+            "event_type": "stage_started",
+            "timestamp": "2026-03-14T19:26:14.915083+00:00",
+            "level": "info",
+            "message": "Stage 'candidate_enrichment' started",
+            "metadata": {}
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "candidate_enrichment",
+            "event_type": "candidate_enrichment_started",
+            "timestamp": "2026-03-14T19:26:14.918512+00:00",
+            "level": "info",
+            "message": "Candidate enrichment started",
+            "metadata": {
+                "stage_key": "candidate_enrichment"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "candidate_enrichment",
+            "event_type": "candidate_enrichment_completed",
+            "timestamp": "2026-03-14T19:26:14.923632+00:00",
+            "level": "info",
+            "message": "Candidate enrichment completed: 4/4 enriched",
+            "metadata": {
+                "stage_key": "candidate_enrichment",
+                "total_enriched": 4,
+                "total_full": 4,
+                "total_degraded": 0,
+                "total_failed": 0
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "candidate_enrichment",
+            "event_type": "stage_completed",
+            "timestamp": "2026-03-14T19:26:14.925813+00:00",
+            "level": "info",
+            "message": "Stage 'candidate_enrichment' completed in 5ms",
+            "metadata": {
+                "timing_ms": 5
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "events",
+            "event_type": "stage_started",
+            "timestamp": "2026-03-14T19:38:11.941475+00:00",
+            "level": "info",
+            "message": "Stage 'events' started",
+            "metadata": {}
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "events",
+            "event_type": "event_context_started",
+            "timestamp": "2026-03-14T19:38:11.945486+00:00",
+            "level": "info",
+            "message": "Event context stage started",
+            "metadata": {
+                "stage_key": "events"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "events",
+            "event_type": "event_context_completed",
+            "timestamp": "2026-03-14T19:38:11.952262+00:00",
+            "level": "info",
+            "message": "Event context completed: 4/4 processed (4 no events)",
+            "metadata": {
+                "stage_key": "events",
+                "total_processed": 4,
+                "total_enriched": 0,
+                "total_no_events": 4,
+                "total_degraded": 0,
+                "total_failed": 0,
+                "risk_flag_counts": {
+                    "no_event_coverage": 4
+                }
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "events",
+            "event_type": "stage_completed",
+            "timestamp": "2026-03-14T19:38:11.986392+00:00",
+            "level": "info",
+            "message": "Stage 'events' completed in 8ms",
+            "metadata": {
+                "timing_ms": 8
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "policy",
+            "event_type": "stage_started",
+            "timestamp": "2026-03-14T19:53:23.661092+00:00",
+            "level": "info",
+            "message": "Stage 'policy' started",
+            "metadata": {}
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "policy",
+            "event_type": "policy_evaluation_started",
+            "timestamp": "2026-03-14T19:53:23.664371+00:00",
+            "level": "info",
+            "message": "Policy evaluation stage started",
+            "metadata": {
+                "stage_key": "policy"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "policy",
+            "event_type": "policy_evaluation_completed",
+            "timestamp": "2026-03-14T19:53:23.691713+00:00",
+            "level": "info",
+            "message": "Policy evaluation completed: 4/4 evaluated (4 blocked)",
+            "metadata": {
+                "stage_key": "policy",
+                "total_evaluated": 4,
+                "total_eligible": 0,
+                "total_eligible_with_cautions": 0,
+                "total_restricted": 0,
+                "total_blocked": 4,
+                "total_failed": 0,
+                "outcome_counts": {
+                    "blocked": 4
+                }
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "policy",
+            "event_type": "stage_completed",
+            "timestamp": "2026-03-14T19:53:23.694145+00:00",
+            "level": "info",
+            "message": "Stage 'policy' completed in 28ms",
+            "metadata": {
+                "timing_ms": 28
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "orchestration",
+            "event_type": "stage_started",
+            "timestamp": "2026-03-14T20:00:54.937981+00:00",
+            "level": "info",
+            "message": "Stage 'orchestration' started",
+            "metadata": {}
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "orchestration",
+            "event_type": "decision_packet_started",
+            "timestamp": "2026-03-14T20:00:54.939616+00:00",
+            "level": "info",
+            "message": "Decision packet assembly stage started",
+            "metadata": {
+                "stage_key": "orchestration"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "orchestration",
+            "event_type": "decision_packet_completed",
+            "timestamp": "2026-03-14T20:00:54.941702+00:00",
+            "level": "info",
+            "message": "Decision packet assembly completed: 4/4 assembled (4 degraded)",
+            "metadata": {
+                "stage_key": "orchestration",
+                "total_assembled": 4,
+                "total_degraded": 4,
+                "total_failed": 0,
+                "policy_outcome_counts": {
+                    "blocked": 4
+                }
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "orchestration",
+            "event_type": "stage_completed",
+            "timestamp": "2026-03-14T20:00:54.956006+00:00",
+            "level": "info",
+            "message": "Stage 'orchestration' completed in 3ms",
+            "metadata": {
+                "timing_ms": 3
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "prompt_payload",
+            "event_type": "stage_started",
+            "timestamp": "2026-03-14T20:11:24.901112+00:00",
+            "level": "info",
+            "message": "Stage 'prompt_payload' started",
+            "metadata": {}
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "prompt_payload",
+            "event_type": "prompt_payload_started",
+            "timestamp": "2026-03-14T20:11:24.907947+00:00",
+            "level": "info",
+            "message": "Prompt payload build stage started",
+            "metadata": {
+                "stage_key": "prompt_payload"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "prompt_payload",
+            "event_type": "prompt_payload_completed",
+            "timestamp": "2026-03-14T20:11:24.929014+00:00",
+            "level": "info",
+            "message": "Prompt payload build completed: 4/4 built (4 degraded)",
+            "metadata": {
+                "stage_key": "prompt_payload",
+                "total_built": 4,
+                "total_degraded": 4,
+                "total_failed": 0,
+                "policy_outcome_counts": {
+                    "blocked": 4
+                },
+                "compression_stats": {
+                    "total_trimmed_fields": 4,
+                    "candidates_with_trimming": 4
+                }
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "prompt_payload",
+            "event_type": "stage_completed",
+            "timestamp": "2026-03-14T20:11:25.065861+00:00",
+            "level": "info",
+            "message": "Stage 'prompt_payload' completed in 22ms",
+            "metadata": {
+                "timing_ms": 22
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "final_model_decision",
+            "event_type": "stage_started",
+            "timestamp": "2026-03-14T20:26:24.212968+00:00",
+            "level": "info",
+            "message": "Stage 'final_model_decision' started",
+            "metadata": {}
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "final_model_decision",
+            "event_type": "final_model_started",
+            "timestamp": "2026-03-14T20:26:24.217609+00:00",
+            "level": "info",
+            "message": "Final model execution stage started",
+            "metadata": {
+                "stage_key": "final_model_decision"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "final_model_decision",
+            "event_type": "candidate_execution_started",
+            "timestamp": "2026-03-14T20:26:24.236484+00:00",
+            "level": "info",
+            "message": "Executing candidate 1/4: SPY (SPY|put_credit_spread|2026-03-16|505.0/500.0|0)",
+            "metadata": {
+                "stage_key": "final_model_decision",
+                "candidate_id": "SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "SPY",
+                "queue_position": 1,
+                "total_runnable": 4
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "final_model_decision",
+            "event_type": "candidate_execution_completed",
+            "timestamp": "2026-03-14T20:26:28.577878+00:00",
+            "level": "info",
+            "message": "Candidate 1/4 failed: SPY (SPY|put_credit_spread|2026-03-16|505.0/500.0|0) in 4336ms",
+            "metadata": {
+                "stage_key": "final_model_decision",
+                "candidate_id": "SPY|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "SPY",
+                "queue_position": 1,
+                "candidate_status": "failed",
+                "completed_count": 1,
+                "remaining_count": 3,
+                "elapsed_ms": 4336
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "final_model_decision",
+            "event_type": "candidate_execution_started",
+            "timestamp": "2026-03-14T20:26:28.578067+00:00",
+            "level": "info",
+            "message": "Executing candidate 2/4: QQQ (QQQ|put_credit_spread|2026-03-16|505.0/500.0|0)",
+            "metadata": {
+                "stage_key": "final_model_decision",
+                "candidate_id": "QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "QQQ",
+                "queue_position": 2,
+                "total_runnable": 4
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "final_model_decision",
+            "event_type": "candidate_execution_completed",
+            "timestamp": "2026-03-14T20:26:35.345053+00:00",
+            "level": "info",
+            "message": "Candidate 2/4 degraded: QQQ (QQQ|put_credit_spread|2026-03-16|505.0/500.0|0) in 6766ms",
+            "metadata": {
+                "stage_key": "final_model_decision",
+                "candidate_id": "QQQ|put_credit_spread|2026-03-16|505.0/500.0|0",
+                "symbol": "QQQ",
+                "queue_position": 2,
+                "candidate_status": "degraded",
+                "completed_count": 2,
+                "remaining_count": 2,
+                "elapsed_ms": 6766
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "final_model_decision",
+            "event_type": "candidate_execution_started",
+            "timestamp": "2026-03-14T20:26:35.357441+00:00",
+            "level": "info",
+            "message": "Executing candidate 3/4: IWM (IWM|put_credit_spread|2026-03-16|190.0/180.0|0)",
+            "metadata": {
+                "stage_key": "final_model_decision",
+                "candidate_id": "IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+                "symbol": "IWM",
+                "queue_position": 3,
+                "total_runnable": 4
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "final_model_decision",
+            "event_type": "candidate_execution_completed",
+            "timestamp": "2026-03-14T20:26:39.456946+00:00",
+            "level": "info",
+            "message": "Candidate 3/4 degraded: IWM (IWM|put_credit_spread|2026-03-16|190.0/180.0|0) in 4048ms",
+            "metadata": {
+                "stage_key": "final_model_decision",
+                "candidate_id": "IWM|put_credit_spread|2026-03-16|190.0/180.0|0",
+                "symbol": "IWM",
+                "queue_position": 3,
+                "candidate_status": "degraded",
+                "completed_count": 3,
+                "remaining_count": 1,
+                "elapsed_ms": 4048
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "final_model_decision",
+            "event_type": "candidate_execution_started",
+            "timestamp": "2026-03-14T20:26:39.457228+00:00",
+            "level": "info",
+            "message": "Executing candidate 4/4: DIA (DIA|put_credit_spread|2026-03-20|215.0/210.0|0)",
+            "metadata": {
+                "stage_key": "final_model_decision",
+                "candidate_id": "DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+                "symbol": "DIA",
+                "queue_position": 4,
+                "total_runnable": 4
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "final_model_decision",
+            "event_type": "candidate_execution_completed",
+            "timestamp": "2026-03-14T20:26:46.279708+00:00",
+            "level": "info",
+            "message": "Candidate 4/4 degraded: DIA (DIA|put_credit_spread|2026-03-20|215.0/210.0|0) in 6807ms",
+            "metadata": {
+                "stage_key": "final_model_decision",
+                "candidate_id": "DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+                "symbol": "DIA",
+                "queue_position": 4,
+                "candidate_status": "degraded",
+                "completed_count": 4,
+                "remaining_count": 0,
+                "elapsed_ms": 6807
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "final_model_decision",
+            "event_type": "final_model_completed",
+            "timestamp": "2026-03-14T20:26:46.280328+00:00",
+            "level": "info",
+            "message": "Final model execution completed: 3/4 completed (3 degraded)",
+            "metadata": {
+                "stage_key": "final_model_decision",
+                "total_completed": 3,
+                "total_degraded": 3,
+                "total_skipped": 0,
+                "total_failed": 1,
+                "provider_usage_counts": {
+                    "local": 4
+                }
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "final_model_decision",
+            "event_type": "stage_completed",
+            "timestamp": "2026-03-14T20:26:46.366649+00:00",
+            "level": "info",
+            "message": "Stage 'final_model_decision' completed in 22064ms",
+            "metadata": {
+                "timing_ms": 22064
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "final_response_normalization",
+            "event_type": "stage_started",
+            "timestamp": "2026-03-14T20:36:56.983630+00:00",
+            "level": "info",
+            "message": "Stage 'final_response_normalization' started",
+            "metadata": {}
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "final_response_normalization",
+            "event_type": "final_response_started",
+            "timestamp": "2026-03-14T20:36:56.989431+00:00",
+            "level": "info",
+            "message": "Final response normalization stage started",
+            "metadata": {
+                "stage_key": "final_response_normalization"
+            }
+        },
+        {
+            "run_id": "run-05072e625be2",
+            "stage_key": "final_response_normalization",
+            "event_type": "final_response_completed",
+            "timestamp": "2026-03-14T20:36:57.008481+00:00",
+            "level": "info",
+            "message": "Final response normalization completed: 0/4 ready (3 degraded)",
+            "metadata": {
+                "stage_key": "final_response_normalization",
+                "total_ready": 0,
+                "total_degraded": 3,
+                "total_skipped": 0,
+                "total_failed": 1,
+                "counts_by_action": {
+                    "unknown": 1,
+                    "pass": 3
+                }
+            }
+        }
+    ],
+    "candidate_progress": {
+        "candidate_id": "DIA|put_credit_spread|2026-03-20|215.0/210.0|0",
+        "symbol": "DIA",
+        "queue_position": 4,
+        "candidate_status": "degraded",
+        "completed_count": 4,
+        "remaining_count": 0,
+        "elapsed_ms": 6807
+    },
+    "scanner_liveness": null,
+    "summary": {},
+    "stored_at": "2026-03-14T20:36:57.008712+00:00",
+    "module_role": "service"
+}

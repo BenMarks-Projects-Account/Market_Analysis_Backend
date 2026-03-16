@@ -156,3 +156,61 @@ class TestFinalResultOverwritesActive:
         stages = {s["stage_key"]: s for s in detail["stages"]}
         for sk in PIPELINE_STAGES:
             assert stages[sk]["status"] == "completed"
+
+
+class TestArtifactStorePropagateMidRun:
+    """Verify update_active_run_precopied propagates artifact_store."""
+
+    def setup_method(self):
+        _cleanup()
+
+    def teardown_method(self):
+        _cleanup()
+
+    def test_initial_snapshot_has_empty_artifact_store(self):
+        run = _make_run()
+        run_id = run["run_id"]
+        pipeline_run_store.store_active_run(run_id, run)
+
+        snap = pipeline_run_store.get_run(run_id)
+        assert snap["artifact_store"] == {}
+
+    def test_artifact_store_copy_propagated(self):
+        """Passing artifact_store_copy updates the snapshot."""
+        run = _make_run()
+        run_id = run["run_id"]
+        pipeline_run_store.store_active_run(run_id, run)
+
+        fake_store = {
+            "artifacts": {"art-1": {"artifact_id": "art-1", "data": {}}},
+            "type_index": {"scanner_stage_summary": ["art-1"]},
+        }
+        pipeline_run_store.update_active_run_precopied(
+            run_id, copy.deepcopy(run),
+            artifact_store_copy=copy.deepcopy(fake_store),
+        )
+
+        snap = pipeline_run_store.get_run(run_id)
+        assert "art-1" in snap["artifact_store"]["artifacts"]
+        assert snap["artifact_store"]["type_index"]["scanner_stage_summary"] == ["art-1"]
+
+    def test_artifact_store_not_overwritten_when_none(self):
+        """When artifact_store_copy is None, existing store is preserved."""
+        run = _make_run()
+        run_id = run["run_id"]
+        pipeline_run_store.store_active_run(run_id, run)
+
+        # First update with store
+        fake_store = {"artifacts": {"art-1": {}}, "type_index": {}}
+        pipeline_run_store.update_active_run_precopied(
+            run_id, copy.deepcopy(run),
+            artifact_store_copy=copy.deepcopy(fake_store),
+        )
+
+        # Second update WITHOUT store
+        pipeline_run_store.update_active_run_precopied(
+            run_id, copy.deepcopy(run),
+        )
+
+        snap = pipeline_run_store.get_run(run_id)
+        assert "art-1" in snap["artifact_store"]["artifacts"]

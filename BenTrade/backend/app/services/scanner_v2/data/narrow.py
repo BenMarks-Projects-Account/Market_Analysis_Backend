@@ -122,7 +122,9 @@ def narrow_chain(
         far_buckets = narrow_strikes(
             far_contracts, req, underlying_price, diag=None,
         )
-        # Merge buckets (keys won't overlap since DTE windows are disjoint)
+        # Merge buckets (keys may overlap if DTE windows overlap —
+        # far_buckets values take precedence for shared keys since
+        # far-leg pricing matters more for multi-expiry strategies).
         all_buckets = {**near_buckets, **far_buckets}
 
         # Update diagnostics with merged counts

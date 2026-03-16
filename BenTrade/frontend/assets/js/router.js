@@ -184,6 +184,7 @@
     "calendar": { title: "Calendar Spread Analysis", group: "Analysis", subgroup: "Options", description: "Vol/term structure" },
     "income": { title: "Income Strategies", group: "Analysis", subgroup: "Options", description: "Income" },
     "active-trade": { title: "Active Trade Dashboard", group: "Trading", subgroup: "Execution & Monitoring", description: "Broker positions/orders" },
+    "active-trade-pipeline": { title: "Active Trade Pipeline", group: "Trading", subgroup: "Execution & Monitoring", description: "Position reassessment workflow" },
     "trade-testing": { title: "Trade Testing Workbench", group: "Trading", subgroup: "Execution & Monitoring", description: "What-if lab + scenarios" },
     "trade-management": { title: "Trade Management Center", group: "Trading", subgroup: "Execution & Monitoring", description: "Candidate review + execution" },
     "stock-analysis": { title: "Stock Analysis Dashboard", group: "Analysis", subgroup: "Equities", description: "Stock analysis" },
@@ -200,6 +201,7 @@
     "admin/data-workbench": { title: "Data Workbench", group: "Admin", subgroup: "Operations", description: "Trade JSON + card inspection" },
     "admin/tooltip-test": { title: "Tooltip Test", group: "Admin", subgroup: "Dev", description: "Tooltip regression sandbox" },
     "admin/pipeline-monitor": { title: "Pipeline Monitor", group: "Admin", subgroup: "Operations", description: "Pipeline run inspector" },
+    "admin/scanner-review": { title: "Scanner Review", group: "Admin", subgroup: "Operations", description: "V2 scanner diagnostics & verification" },
     "market/breadth": { title: "Breadth & Participation", group: "Market Picture", subgroup: "Internals", description: "Market breadth & participation depth" },
     "market/volatility": { title: "Volatility & Options Structure", group: "Market Picture", subgroup: "Volatility", description: "Vol regime & options posture" },
     "market/cross-asset": { title: "Cross-Asset / Macro", group: "Market Picture", subgroup: "Macro", description: "Cross-asset confirmation signals" },
@@ -262,6 +264,11 @@
       view: "dashboards/active_trades.html",
       init: () => window.BenTradePages?.initActiveTrades?.(document.getElementById('view')),
       title: routeMeta["active-trade"].title
+    },
+    "active-trade-pipeline": {
+      view: "dashboards/active_trade_pipeline.html",
+      init: () => window.BenTradePages?.initActiveTradesPipeline?.(document.getElementById('view')),
+      title: routeMeta["active-trade-pipeline"].title
     },
     "trade-testing": {
       view: "dashboards/trade_workbench.html",
@@ -342,6 +349,11 @@
       view: "dashboards/pipeline_monitor.html",
       init: () => window.BenTradePages?.initPipelineMonitor?.(document.getElementById('view')),
       title: routeMeta["admin/pipeline-monitor"].title
+    },
+    "admin/scanner-review": {
+      view: "dashboards/scanner_review.html",
+      init: () => window.BenTradePages?.initScannerReview?.(document.getElementById('view')),
+      title: routeMeta["admin/scanner-review"].title
     },
     "market/breadth": {
       view: "dashboards/breadth_participation.html",

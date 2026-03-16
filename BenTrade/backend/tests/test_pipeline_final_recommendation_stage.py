@@ -97,7 +97,7 @@ def _make_run_and_store(run_id="test-fm-001"):
     store = create_artifact_store(run_id)
     for stage in (
         "market_data", "market_model_analysis",
-        "scanners", "candidate_selection",
+        "stock_scanners", "options_scanners", "candidate_selection",
         "shared_context", "candidate_enrichment",
         "events", "policy", "orchestration",
         "prompt_payload",
@@ -123,7 +123,8 @@ def _all_stub_pipeline(**kwargs):
     handlers = kwargs.pop("handlers", {})
     handlers.setdefault("market_data", _success_handler)
     handlers.setdefault("market_model_analysis", _success_handler)
-    handlers.setdefault("scanners", _success_handler)
+    handlers.setdefault("stock_scanners", _success_handler)
+    handlers.setdefault("options_scanners", _success_handler)
     handlers.setdefault("candidate_selection", _success_handler)
     handlers.setdefault("shared_context", _success_handler)
     handlers.setdefault("candidate_enrichment", _success_handler)

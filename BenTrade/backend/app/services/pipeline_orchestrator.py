@@ -32,8 +32,10 @@ from __future__ import annotations
 
 import copy
 import logging
+import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -45,7 +47,8 @@ from app.services.pipeline_artifact_store import (
 )
 from app.services.pipeline_market_stage import market_stage_handler
 from app.services.pipeline_market_model_stage import market_model_stage_handler
-from app.services.pipeline_scanner_stage import scanner_stage_handler
+from app.services.pipeline_stock_scanners_stage import stock_scanners_stage_handler
+from app.services.pipeline_options_scanners_stage import options_scanners_stage_handler
 from app.services.pipeline_candidate_selection_stage import candidate_selection_handler
 from app.services.pipeline_context_assembly_stage import context_assembly_handler
 from app.services.pipeline_candidate_enrichment_stage import candidate_enrichment_handler
@@ -77,17 +80,26 @@ _ORCHESTRATOR_VERSION = "1.0"
 _COMPATIBLE_VERSIONS = frozenset({"1.0"})
 
 
+
+
 # =====================================================================
 #  Dependency map — canonical defaults
 # =====================================================================
 
 _DEFAULT_DEPENDENCY_MAP: dict[str, list[str]] = {
     "market_data":                  [],
-    "market_model_analysis":        ["market_data"],
-    "scanners":                     ["market_data"],
-    "candidate_selection":          ["scanners"],
-    "shared_context":               ["market_model_analysis"],
+    "stock_scanners":               [],
+    "options_scanners":             [],
+    "market_model_analysis":        ["market_data", "stock_scanners", "options_scanners"],
+    "candidate_selection":          ["market_data", "stock_scanners", "options_scanners"],
+    "shared_context":               ["market_data", "market_model_analysis", "candidate_selection"],
     "candidate_enrichment":         ["candidate_selection", "shared_context"],
+    # policy reads events artifacts opportunistically (handles None
+    # gracefully).  Not declared as a hard dependency because policy
+    # should run even if the events stage fails; the events stage is
+    # continuable and policy treats missing event data as a caution,
+    # not a blocker.  Both run in the same wave after
+    # candidate_enrichment.
     "policy":                       ["candidate_enrichment"],
     "events":                       ["candidate_enrichment"],
     "orchestration":                ["candidate_enrichment", "policy", "events"],
@@ -101,6 +113,11 @@ Each key maps to the list of stage_keys that must complete
 successfully before it can execute.  Empty list = no prereqs.
 """
 
+# ── Wave-level timeout (seconds) — INACTIVE ───────────────────
+# Retained for future parallel execution reintroduction.
+# Currently unused: sequential execution has no wave timeout.
+DEFAULT_WAVE_TIMEOUT_SECONDS: int = 900
+
 
 # =====================================================================
 #  Stop / continue policy
@@ -111,6 +128,8 @@ successfully before it can execute.  Empty list = no prereqs.
 # _CONTINUABLE_STAGES are allowed to fail without halting.
 _CONTINUABLE_STAGES: frozenset[str] = frozenset({
     "events",
+    "stock_scanners",
+    "options_scanners",
 })
 """Stages whose failure does NOT halt the pipeline.
 
@@ -194,7 +213,8 @@ def get_default_handlers() -> dict[str, StageHandler]:
     handlers = {stage: _stub_handler for stage in PIPELINE_STAGES}
     handlers["market_data"] = market_stage_handler
     handlers["market_model_analysis"] = market_model_stage_handler
-    handlers["scanners"] = scanner_stage_handler
+    handlers["stock_scanners"] = stock_scanners_stage_handler
+    handlers["options_scanners"] = options_scanners_stage_handler
     handlers["candidate_selection"] = candidate_selection_handler
     handlers["shared_context"] = context_assembly_handler
     handlers["candidate_enrichment"] = candidate_enrichment_handler
@@ -362,7 +382,8 @@ def _emit_event(
             event_callback(event)
         except Exception:
             logger.warning(
-                "Event callback raised an exception for %s/%s",
+                "event=callback_failed event_type=%s stage=%s "
+                "(event silently dropped)",
                 event_type, stage_key, exc_info=True,
             )
 
@@ -382,6 +403,7 @@ def execute_stage(
     dependency_map: dict[str, list[str]] | None = None,
     event_callback: Callable[..., None] | None = None,
     handler_kwargs: dict[str, Any] | None = None,
+    _run_lock: threading.Lock | None = None,
 ) -> dict[str, Any]:
     """Execute a single stage through the standard wrapper.
 
@@ -412,6 +434,10 @@ def execute_stage(
         Optional callback invoked for each event.
     handler_kwargs : dict | None
         Extra kwargs passed to the handler.
+    _run_lock : threading.Lock | None
+        Optional lock for thread-safe run-dict mutations during
+        parallel wave execution.  When None, no locking is used
+        (backwards-compatible with serial callers).
 
     Returns
     -------
@@ -422,11 +448,17 @@ def execute_stage(
     handler_fn = handler or _stub_handler
     extra_kwargs = handler_kwargs or {}
 
+    def _lock_run():
+        """Context manager: acquire _run_lock if provided."""
+        return _run_lock if _run_lock is not None else _noop_lock()
+
     # ── 1. Dependency check ─────────────────────────────────────
-    satisfied, dep_reason = _check_dependencies(run, stage_key, deps)
+    with _lock_run():
+        satisfied, dep_reason = _check_dependencies(run, stage_key, deps)
+        if not satisfied:
+            logger.info("Skipping stage '%s': %s", stage_key, dep_reason)
+            mark_stage_skipped(run, stage_key, reason=dep_reason)
     if not satisfied:
-        logger.info("Skipping stage '%s': %s", stage_key, dep_reason)
-        mark_stage_skipped(run, stage_key, reason=dep_reason)
         _emit_event(
             run, "stage_skipped", stage_key=stage_key,
             level="warning",
@@ -442,18 +474,22 @@ def execute_stage(
         )
 
     # ── 2. Transition to running ────────────────────────────────
-    mark_stage_running(run, stage_key)
+    with _lock_run():
+        mark_stage_running(run, stage_key)
     _emit_event(
         run, "stage_started", stage_key=stage_key,
         message=f"Stage '{stage_key}' started",
         event_callback=event_callback,
     )
 
-    # ── 3. Invoke handler (timed) ───────────────────────────────
+    # ── 3. Invoke handler ──────────────────────────────────────────
     # Inject event_callback into handler kwargs so stage handlers
     # can emit fine-grained events (e.g. per-candidate progress).
     if event_callback is not None and "event_callback" not in extra_kwargs:
         extra_kwargs["event_callback"] = event_callback
+
+    # Strip legacy timeout kwarg if present (no longer used).
+    extra_kwargs.pop("handler_timeout_seconds", None)
 
     t0 = time.monotonic()
     try:
@@ -464,10 +500,16 @@ def execute_stage(
         return _handle_stage_exception(
             run, artifact_store, stage_key, exc,
             t0=t0, event_callback=event_callback,
+            _run_lock=_run_lock,
         )
     elapsed_ms = int((time.monotonic() - t0) * 1000)
 
     # ── 4. Interpret handler result ─────────────────────────────
+    logger.info(
+        "event=handler_returned stage=%s elapsed_ms=%d outcome=%s",
+        stage_key, elapsed_ms,
+        handler_result.get("outcome", "?") if isinstance(handler_result, dict) else "non-dict",
+    )
     if not isinstance(handler_result, dict):
         return _handle_stage_exception(
             run, artifact_store, stage_key,
@@ -476,6 +518,7 @@ def execute_stage(
                 f"{type(handler_result).__name__}, expected dict"
             ),
             t0=t0, event_callback=event_callback,
+            _run_lock=_run_lock,
         )
 
     outcome = handler_result.get("outcome", "completed")
@@ -487,22 +530,51 @@ def execute_stage(
             handler_result=handler_result,
             elapsed_ms=elapsed_ms,
             event_callback=event_callback,
+            _run_lock=_run_lock,
         )
 
-    # ── 6. Write artifacts from handler ─────────────────────────
-    artifact_count = _write_handler_artifacts(
-        artifact_store, handler_result, run["run_id"], stage_key,
-    )
+    # ── 6-7. Write artifacts + transition to completed ─────────
+    # Wrapped in try/except: if artifact writing or stage transition
+    # raises, the stage MUST still reach a terminal state so the wave
+    # loop doesn't hang.
+    try:
+        artifact_count = _write_handler_artifacts(
+            artifact_store, handler_result, run["run_id"], stage_key,
+        )
 
-    # ── 7. Transition to completed ──────────────────────────────
-    summary_counts = handler_result.get("summary_counts", {})
-    mark_stage_completed(run, stage_key, summary_counts=summary_counts)
-    _emit_event(
-        run, "stage_completed", stage_key=stage_key,
-        message=f"Stage '{stage_key}' completed in {elapsed_ms}ms",
-        metadata={"timing_ms": elapsed_ms},
-        event_callback=event_callback,
-    )
+        summary_counts = handler_result.get("summary_counts", {})
+        with _lock_run():
+            mark_stage_completed(run, stage_key, summary_counts=summary_counts)
+            # Propagate well-known summary_counts into run-level
+            # candidate_counters so the monitor UI shows pipeline
+            # funnel progression.
+            _update_candidate_counters(run, stage_key, summary_counts)
+            logger.info(
+                "event=counters_committed stage=%s summary_counts=%s "
+                "candidate_counters=%s",
+                stage_key, summary_counts,
+                run.get("candidate_counters"),
+            )
+        _emit_event(
+            run, "stage_completed", stage_key=stage_key,
+            message=f"Stage '{stage_key}' completed in {elapsed_ms}ms",
+            metadata={"timing_ms": elapsed_ms},
+            event_callback=event_callback,
+        )
+        logger.info("event=stage_completed_emitted stage=%s", stage_key)
+    except Exception as finalize_exc:
+        logger.error(
+            "Stage '%s' finalization failed after handler returned "
+            "successfully: %s: %s",
+            stage_key, type(finalize_exc).__name__, finalize_exc,
+            exc_info=True,
+        )
+        # Fall through to stage_failed so the wave loop advances.
+        return _handle_stage_exception(
+            run, artifact_store, stage_key, finalize_exc,
+            t0=t0, event_callback=event_callback,
+            _run_lock=_run_lock,
+        )
 
     return build_stage_result(
         stage_key=stage_key,
@@ -513,6 +585,48 @@ def execute_stage(
         summary_counts=summary_counts,
         metadata=handler_result.get("metadata", {}),
     )
+
+
+# =====================================================================
+#  No-op context manager for optional locking
+# =====================================================================
+
+class _noop_lock:
+    """Context manager that does nothing — used when no lock is needed."""
+    def __enter__(self): return self
+    def __exit__(self, *args): pass
+
+
+# =====================================================================
+#  Candidate counter propagation
+# =====================================================================
+
+# Maps (stage_key, summary_counts_key) → candidate_counters_key.
+# When a stage completes, matching summary_counts values are copied
+# into run["candidate_counters"] so the monitor UI shows funnel stats.
+_COUNTER_MAP: dict[tuple[str, str], str] = {
+    ("stock_scanners", "total_candidates"): "stock_scanned",
+    ("options_scanners", "total_candidates"): "options_scanned",
+    ("candidate_selection", "selected_count"): "selected",
+    ("candidate_enrichment", "enriched_count"): "enriched",
+}
+
+
+def _update_candidate_counters(
+    run: dict[str, Any],
+    stage_key: str,
+    summary_counts: dict[str, Any],
+) -> None:
+    """Propagate summary_counts into run-level candidate_counters.
+
+    Must be called under _run_lock since it mutates run in place.
+    """
+    cc = run.get("candidate_counters")
+    if not isinstance(cc, dict):
+        return
+    for (sk, src_key), dst_key in _COUNTER_MAP.items():
+        if sk == stage_key and src_key in summary_counts:
+            cc[dst_key] = summary_counts[src_key]
 
 
 # =====================================================================
@@ -527,6 +641,7 @@ def _handle_stage_failure(
     handler_result: dict[str, Any],
     elapsed_ms: int,
     event_callback: Callable[..., None] | None = None,
+    _run_lock: threading.Lock | None = None,
 ) -> dict[str, Any]:
     """Handle a handler that returned outcome=failed cleanly."""
     error_dict = handler_result.get("error")
@@ -537,7 +652,9 @@ def _handle_stage_failure(
             source=stage_key,
         )
 
-    mark_stage_failed(run, stage_key, error=error_dict)
+    lk = _run_lock if _run_lock is not None else _noop_lock()
+    with lk:
+        mark_stage_failed(run, stage_key, error=error_dict)
     _emit_event(
         run, "stage_failed", stage_key=stage_key,
         level="error",
@@ -565,6 +682,7 @@ def _handle_stage_exception(
     *,
     t0: float,
     event_callback: Callable[..., None] | None = None,
+    _run_lock: threading.Lock | None = None,
 ) -> dict[str, Any]:
     """Handle an unhandled exception from a stage handler."""
     elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -582,7 +700,9 @@ def _handle_stage_exception(
         detail={"traceback": tb},
     )
 
-    mark_stage_failed(run, stage_key, error=error_dict)
+    lk = _run_lock if _run_lock is not None else _noop_lock()
+    with lk:
+        mark_stage_failed(run, stage_key, error=error_dict)
     _emit_event(
         run, "stage_failed", stage_key=stage_key,
         level="error",
@@ -796,17 +916,51 @@ def run_pipeline_with_handlers(
 
 
 # =====================================================================
-#  Core execution loop (private)
+#  Core execution loop (private) — wave-based parallel execution
 # =====================================================================
 
+# Lock to protect mutations of the shared ``run`` dict when multiple
+# stage threads call mark_stage_* concurrently.
+_run_lock = threading.Lock()
+
+
+def get_run_lock() -> threading.Lock:
+    """Return the run-dict mutation lock for external callers.
+
+    Exposed so that the live-event callback in the monitor route can
+    hold the lock while deep-copying the run dict, preventing races
+    with concurrent ``mark_stage_*`` calls.
+    """
+    return _run_lock
+
+
+def _identify_wave_zero(
+    dependency_map: dict[str, list[str]],
+) -> frozenset[str]:
+    """Return stage keys with no dependencies (Wave 0).
+
+    These stages can safely execute in parallel because they have
+    no upstream requirements.
+    """
+    return frozenset(
+        stage for stage, deps in dependency_map.items()
+        if not deps
+    )
+
+
 def _execute_pipeline(orch: dict[str, Any]) -> dict[str, Any]:
-    """Execute the full stage sequence and finalize.
+    """Execute stages with Wave 0 parallel launch, then sequential.
 
-    Iterates over PIPELINE_STAGES in canonical order, executing
-    each stage through execute_stage.  Stops early if a fatal
-    stage fails.
+    Wave 0 stages (those with no dependencies) are launched in
+    parallel via ThreadPoolExecutor.  All subsequent stages execute
+    sequentially in PIPELINE_STAGES order, with dependency checks.
 
-    Returns the final pipeline result dict.
+    This is a targeted partial-parallel approach: only zero-dependency
+    stages run concurrently.  Later waves remain sequential to avoid
+    the stability issues documented in the 2026-03-12 rollback (event
+    propagation failures, candidate counter races, downstream stage
+    advancement bugs).  Wave 0 stages are safe to parallelise because
+    they have no shared upstream state and no candidate counters.
     """
     run = orch["run"]
     store = orch["artifact_store"]
@@ -815,7 +969,8 @@ def _execute_pipeline(orch: dict[str, Any]) -> dict[str, Any]:
     callback = orch.get("event_callback")
     stage_results: list[dict[str, Any]] = orch["stage_results"]
 
-    halt = False  # set True by a fatal failure
+    halt = False
+    wave_zero = _identify_wave_zero(deps)
 
     _emit_event(
         run, "run_started",
@@ -823,34 +978,162 @@ def _execute_pipeline(orch: dict[str, Any]) -> dict[str, Any]:
         event_callback=callback,
     )
 
+    # ── Wave 0: launch all zero-dependency stages in parallel ───
+    wave_zero_ordered = [s for s in PIPELINE_STAGES if s in wave_zero]
+    wave_zero_results: dict[str, dict[str, Any]] = {}
+
+    if len(wave_zero_ordered) > 1:
+        logger.info(
+            "event=wave_zero_parallel stages=%s count=%d",
+            wave_zero_ordered, len(wave_zero_ordered),
+        )
+
+        def _run_wave_zero_stage(stage_key: str) -> tuple[str, dict[str, Any]]:
+            handler = handlers.get(stage_key) or _stub_handler
+            logger.info("event=stage_launch stage=%s parallel=true wave=0", stage_key)
+            result = execute_stage(
+                run, store, stage_key,
+                handler=handler,
+                dependency_map=deps,
+                event_callback=callback,
+                _run_lock=_run_lock,
+            )
+            return stage_key, result
+
+        pool = ThreadPoolExecutor(
+            max_workers=len(wave_zero_ordered),
+            thread_name_prefix="wave0",
+        )
+        fatal_early_exit = False
+        try:
+            futures = {
+                pool.submit(_run_wave_zero_stage, sk): sk
+                for sk in wave_zero_ordered
+            }
+            # Use as_completed to detect fatal failures early and
+            # cancel remaining futures instead of blocking on all.
+            for future in as_completed(futures):
+                stage_key = futures[future]
+                try:
+                    _, result = future.result()
+                    wave_zero_results[stage_key] = result
+                except Exception as exc:
+                    logger.error(
+                        "Wave 0 stage '%s' raised unexpected error: %s",
+                        stage_key, exc,
+                    )
+                    wave_zero_results[stage_key] = build_stage_result(
+                        stage_key=stage_key,
+                        handler_invoked=False,
+                        outcome="failed",
+                        dependency_status="satisfied",
+                    )
+                # If this result is a fatal failure, cancel remaining
+                # futures and mark them as skipped instead of waiting
+                # for them (they may involve real I/O with long timeouts).
+                r = wave_zero_results[stage_key]
+                if r["outcome"] == "failed" and _is_fatal_failure(stage_key):
+                    logger.warning(
+                        "Fatal Wave 0 failure in '%s'; cancelling "
+                        "remaining Wave 0 stages", stage_key,
+                    )
+                    for other_f, other_sk in futures.items():
+                        if other_sk not in wave_zero_results:
+                            other_f.cancel()
+                    # Mark un-completed stages as skipped (or failed
+                    # if already running — transition constraints).
+                    for sk2 in wave_zero_ordered:
+                        if sk2 not in wave_zero_results:
+                            reason = (
+                                f"Cancelled: fatal failure in Wave 0 "
+                                f"stage '{stage_key}'"
+                            )
+                            with _run_lock:
+                                current_status = run["stages"][sk2]["status"]
+                                if current_status == "pending":
+                                    mark_stage_skipped(
+                                        run, sk2, reason=reason,
+                                    )
+                                    outcome = "skipped"
+                                elif current_status == "running":
+                                    err = build_run_error(
+                                        code="WAVE_ZERO_CANCELLED",
+                                        message=reason,
+                                        source=sk2,
+                                    )
+                                    mark_stage_failed(
+                                        run, sk2, error=err,
+                                    )
+                                    outcome = "failed"
+                                else:
+                                    # Already terminal — skip
+                                    outcome = current_status
+                            wave_zero_results[sk2] = build_stage_result(
+                                stage_key=sk2,
+                                handler_invoked=outcome != "skipped",
+                                outcome=outcome,
+                                skipped_reason=reason if outcome == "skipped" else "",
+                                dependency_status="not_applicable",
+                            )
+                    fatal_early_exit = True
+                    break
+        finally:
+            # wait=False + cancel_futures=True on fatal exit prevents
+            # blocking on still-running handlers whose I/O may take
+            # minutes (e.g. real scanner stages).
+            pool.shutdown(
+                wait=not fatal_early_exit,
+                cancel_futures=fatal_early_exit,
+            )
+    elif wave_zero_ordered:
+        # Single Wave 0 stage — just run inline
+        sk = wave_zero_ordered[0]
+        handler = handlers.get(sk) or _stub_handler
+        logger.info("event=stage_launch stage=%s sequential=true", sk)
+        result = execute_stage(
+            run, store, sk,
+            handler=handler,
+            dependency_map=deps,
+            event_callback=callback,
+        )
+        wave_zero_results[sk] = result
+
+    # Append Wave 0 results in canonical order and check for fatal failures
+    for sk in wave_zero_ordered:
+        result = wave_zero_results[sk]
+        stage_results.append(result)
+        if result["outcome"] == "failed" and _is_fatal_failure(sk):
+            halt = True
+            logger.warning(
+                "Fatal failure in Wave 0 stage '%s'; halting pipeline", sk,
+            )
+
+    # ── Remaining stages: sequential execution ──────────────────
     for stage_key in PIPELINE_STAGES:
-        # ── Stop check ──────────────────────────────────────────
+        if stage_key in wave_zero:
+            continue  # already executed in Wave 0
+
         if halt:
-            reason = f"Pipeline halted due to prior fatal failure"
+            reason = "Pipeline halted due to prior fatal failure"
             mark_stage_skipped(run, stage_key, reason=reason)
             _emit_event(
                 run, "stage_skipped", stage_key=stage_key,
-                level="warning",
-                message=reason,
+                level="warning", message=reason,
                 event_callback=callback,
             )
             stage_results.append(build_stage_result(
-                stage_key=stage_key,
-                handler_invoked=False,
-                outcome="skipped",
-                skipped_reason=reason,
+                stage_key=stage_key, handler_invoked=False,
+                outcome="skipped", skipped_reason=reason,
                 dependency_status="not_applicable",
             ))
             continue
 
-        # ── Execute stage ───────────────────────────────────────
-        handler = handlers.get(stage_key)
-        if handler is None:
-            logger.warning(
-                "No handler registered for stage '%s'; using stub",
-                stage_key,
-            )
-            handler = _stub_handler
+        handler = handlers.get(stage_key) or _stub_handler
+
+        logger.info(
+            "event=stage_launch stage=%s sequential=true",
+            stage_key,
+        )
 
         result = execute_stage(
             run, store, stage_key,
@@ -858,9 +1141,9 @@ def _execute_pipeline(orch: dict[str, Any]) -> dict[str, Any]:
             dependency_map=deps,
             event_callback=callback,
         )
+
         stage_results.append(result)
 
-        # ── Evaluate stop/continue ──────────────────────────────
         if result["outcome"] == "failed" and _is_fatal_failure(stage_key):
             halt = True
             logger.warning(

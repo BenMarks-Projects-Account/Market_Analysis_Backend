@@ -151,6 +151,8 @@ def narrow_expirations_multi(
     drop_reasons: dict[str, int] = defaultdict(int)
     kept_exps: set[str] = set()
     dropped_exps: set[str] = set()
+    # Track contracts that appear in both windows (dual-role).
+    dual_role_count = 0
 
     for c in contracts:
         exp = c.expiration
@@ -166,7 +168,13 @@ def narrow_expirations_multi(
         in_near = near_min <= dte <= near_max
         in_far = far_min <= dte <= far_max
 
-        if in_near:
+        if in_near and in_far:
+            # Contract qualifies for both windows — allow dual-role.
+            near.append(c)
+            far.append(c)
+            kept_exps.add(exp)
+            dual_role_count += 1
+        elif in_near:
             near.append(c)
             kept_exps.add(exp)
         elif in_far:
@@ -191,5 +199,7 @@ def narrow_expirations_multi(
         diag.expirations_kept_list = sorted(kept_exps)
         diag.expirations_dropped_list = sorted(dropped_exps - kept_exps)
         diag.contracts_after_expiry_filter = len(near) + len(far)
+        if dual_role_count > 0:
+            diag.expiry_drop_reasons["dual_role_contracts"] = dual_role_count
 
     return near, far

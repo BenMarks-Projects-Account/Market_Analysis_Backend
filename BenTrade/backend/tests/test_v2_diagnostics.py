@@ -162,8 +162,8 @@ class TestReasonCodeRegistry:
     """Verify all reason codes are properly registered."""
 
     def test_reject_codes_count(self):
-        """All 27 reject codes registered (20 original + 5 hygiene + 1 IC + 1 BF)."""
-        assert len(all_reject_codes()) == 27
+        """All 28 reject codes registered (20 original + 5 hygiene + 1 IC + 1 BF + 1 CAL)."""
+        assert len(all_reject_codes()) == 28
 
     def test_warn_codes_count(self):
         """All 14 warn codes registered (9 original + 5 hygiene)."""
@@ -908,6 +908,8 @@ class TestContractStability:
         "v2_ic_invalid_geometry",
         # Prompt 11 — butterfly codes
         "v2_bf_invalid_geometry",
+        # Prompt 12 — calendar/diagonal codes
+        "v2_cal_invalid_geometry",
     }
 
     EXPECTED_WARN_CODES = {

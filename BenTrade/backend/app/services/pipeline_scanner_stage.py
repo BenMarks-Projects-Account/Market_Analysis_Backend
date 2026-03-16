@@ -31,10 +31,12 @@ It does NOT:
 
 from __future__ import annotations
 
+import copy
 import logging
+import threading
 import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -50,6 +52,82 @@ from app.services.pipeline_run_contract import (
 
 logger = logging.getLogger("bentrade.pipeline_scanner_stage")
 
+
+# ── Finalization checkpoint tracker ─────────────────────────────
+# Tracks explicit checkpoint states through the post-processing path.
+# Inspectable by tests and reproduction harnesses to pinpoint exactly
+# where the handler stalled.
+
+FINALIZATION_STATES = (
+    "not_started",
+    "results_collected",
+    "post_processing_started",
+    "artifact_loop_completed",
+    "summary_built",
+    "summary_artifact_written",
+    "outcome_determined",
+    "result_built",
+    "handler_returning",
+    "post_processing_failed",
+)
+
+
+class FinalizationCheckpoint:
+    """Thread-safe tracker for scanner-stage finalization progress.
+
+    Each checkpoint records the state name and monotonic timestamp.
+    Attach to the run dict so tests / diagnostics can inspect.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._state: str = "not_started"
+        self._history: list[dict[str, Any]] = []
+        self._t0: float = time.monotonic()
+
+    def advance(self, state: str) -> None:
+        with self._lock:
+            now = time.monotonic()
+            self._state = state
+            self._history.append({
+                "state": state,
+                "elapsed_ms": int((now - self._t0) * 1000),
+            })
+
+    @property
+    def state(self) -> str:
+        with self._lock:
+            return self._state
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "current_state": self._state,
+                "history": list(self._history),
+                "elapsed_ms": int((time.monotonic() - self._t0) * 1000),
+            }
+
+    # -- Deep-copy safety ---------------------------------------------------
+    # threading.Lock cannot be pickled / deep-copied.  The run dict that
+    # holds this checkpoint is deep-copied on every event callback, so we
+    # must provide a safe copy path.
+
+    def __deepcopy__(self, memo: dict) -> "FinalizationCheckpoint":
+        new = FinalizationCheckpoint()
+        with self._lock:
+            new._state = self._state
+            new._history = copy.deepcopy(self._history, memo)
+            new._t0 = self._t0
+        return new
+
+    def __copy__(self) -> "FinalizationCheckpoint":
+        new = FinalizationCheckpoint()
+        with self._lock:
+            new._state = self._state
+            new._history = list(self._history)
+            new._t0 = self._t0
+        return new
+
 # ── Module identity ─────────────────────────────────────────────
 _MODULE_ROLE = "stage_handler"
 _STAGE_KEY = "scanners"
@@ -59,6 +137,13 @@ DEFAULT_SCANNER_MAX_WORKERS: int = 3
 """Default concurrency limit for parallel scanner execution.
 
 Override via handler_kwargs['max_workers'].
+"""
+
+# ── Default generation cap ─────────────────────────────────────
+DEFAULT_GENERATION_CAP: int = 50_000
+"""Default per-symbol generation cap passed to V2 scanner families.
+Limits combinatorial explosion in Phase B construction loops.
+Override via handler_kwargs['generation_cap'].
 """
 
 # ── Scanner status vocabulary ───────────────────────────────────
@@ -156,6 +241,10 @@ def get_default_scanner_registry() -> dict[str, dict[str, Any]]:
             "stock", "volatility_expansion",
         ),
         # ── Options scanners ────────────────────────────────────
+        #
+        # All options scanners now route V2-forward (Prompt 13).
+        # New V2 families are added directly here.
+        #
         "put_credit_spread": _make_scanner_entry(
             "put_credit_spread", "Put Credit Spread",
             "options", "put_credit_spread",
@@ -172,6 +261,10 @@ def get_default_scanner_registry() -> dict[str, dict[str, Any]]:
             "butterfly_debit", "Debit Butterfly",
             "options", "butterfly_debit",
         ),
+        "iron_butterfly": _make_scanner_entry(
+            "iron_butterfly", "Iron Butterfly",
+            "options", "iron_butterfly",
+        ),
         "put_debit": _make_scanner_entry(
             "put_debit", "Put Debit Spread",
             "options", "put_debit",
@@ -179,6 +272,22 @@ def get_default_scanner_registry() -> dict[str, dict[str, Any]]:
         "call_debit": _make_scanner_entry(
             "call_debit", "Call Debit Spread",
             "options", "call_debit",
+        ),
+        "calendar_call_spread": _make_scanner_entry(
+            "calendar_call_spread", "Calendar Call Spread",
+            "options", "calendar_call_spread",
+        ),
+        "calendar_put_spread": _make_scanner_entry(
+            "calendar_put_spread", "Calendar Put Spread",
+            "options", "calendar_put_spread",
+        ),
+        "diagonal_call_spread": _make_scanner_entry(
+            "diagonal_call_spread", "Diagonal Call Spread",
+            "options", "diagonal_call_spread",
+        ),
+        "diagonal_put_spread": _make_scanner_entry(
+            "diagonal_put_spread", "Diagonal Put Spread",
+            "options", "diagonal_put_spread",
         ),
     }
 
@@ -381,7 +490,9 @@ def _make_per_scanner_clients(deps: dict[str, Any]) -> dict[str, Any]:
 
     settings = deps["settings"]
     cache = deps["cache"]
-    http_client = httpx.AsyncClient()
+    http_client = httpx.AsyncClient(
+        timeout=httpx.Timeout(45.0, connect=5.0, read=30.0),
+    )
 
     tradier_client = TradierClient(settings, http_client, cache)
     finnhub_client = FinnhubClient(settings, http_client, cache)
@@ -402,6 +513,221 @@ def _make_per_scanner_clients(deps: dict[str, Any]) -> dict[str, Any]:
 
 
 # =====================================================================
+#  Isolated scanner executors (Prompt 13 — V2-forward)
+# =====================================================================
+
+_STOCK_SERVICES: dict[str, tuple[str, str]] = {
+    "stock_pullback_swing": (
+        "app.services.pullback_swing_service", "PullbackSwingService",
+    ),
+    "stock_momentum_breakout": (
+        "app.services.momentum_breakout_service", "MomentumBreakoutService",
+    ),
+    "stock_mean_reversion": (
+        "app.services.mean_reversion_service", "MeanReversionService",
+    ),
+    "stock_volatility_expansion": (
+        "app.services.volatility_expansion_service", "VolatilityExpansionService",
+    ),
+}
+
+def _execute_stock_scanner(
+    scanner_key: str,
+    scanner_deps: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute a stock scanner via its service class."""
+    import asyncio
+
+    spec = _STOCK_SERVICES.get(scanner_key)
+    if spec is None:
+        raise ValueError(f"No stock scanner service for '{scanner_key}'")
+
+    async def _run() -> dict[str, Any]:
+        clients = _make_per_scanner_clients(scanner_deps)
+        try:
+            bds = clients["base_data_service"]
+            mod = __import__(spec[0], fromlist=[spec[1]])
+            service = getattr(mod, spec[1])(bds)
+            max_candidates = context.get("max_candidates", 30)
+            return await service.scan(max_candidates=max_candidates)
+        finally:
+            http = clients.get("http_client")
+            if http:
+                await http.aclose()
+
+    return asyncio.run(_run())
+
+
+def _execute_v2_options_scanner(
+    scanner_key: str,
+    scanner_deps: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute an options scanner via V2 pipeline (primary path).
+
+    This is the V2-forward execution path for all implemented options
+    families.  For each target symbol, fetches the options chain from
+    Tradier and runs the V2 scanner.
+    """
+    import asyncio
+
+    from app.services.scanner_v2.migration import execute_v2_scanner
+
+    symbols = context.get("symbols") or [
+        "SPY", "QQQ", "IWM", "DIA",
+    ]
+
+    async def _run() -> dict[str, Any]:
+        clients = _make_per_scanner_clients(scanner_deps)
+        try:
+            tc = clients["base_data_service"].tradier_client
+            all_candidates: list[dict[str, Any]] = []
+            total_constructed = 0
+            total_passed = 0
+
+            for sym in symbols:
+                try:
+                    quote = await tc.get_quote(sym)
+                    price = float(
+                        quote.get("last") or quote.get("close") or 0
+                    )
+                    if not price:
+                        logger.warning(
+                            "V2 %s/%s: no underlying price, skipped",
+                            scanner_key, sym,
+                        )
+                        continue
+
+                    expirations = await tc.get_expirations(sym)
+                    if not expirations:
+                        continue
+
+                    merged_contracts: list[dict[str, Any]] = []
+                    for exp in expirations:
+                        merged_contracts.extend(
+                            await tc.get_chain(sym, exp)
+                        )
+                    if not merged_contracts:
+                        continue
+
+                    chain = {
+                        "options": {"option": merged_contracts},
+                    }
+                    # Pass generation_cap and other context to V2 scanner
+                    v2_context = {
+                        "generation_cap": context.get(
+                            "generation_cap", DEFAULT_GENERATION_CAP,
+                        ),
+                    }
+                    result = execute_v2_scanner(
+                        scanner_key,
+                        symbol=sym,
+                        chain=chain,
+                        underlying_price=price,
+                        context=v2_context,
+                    )
+                    all_candidates.extend(
+                        result.get("candidates", [])
+                    )
+                    total_constructed += result.get(
+                        "candidate_count", 0
+                    )
+                    total_passed += result.get("accepted_count", 0)
+                except Exception as exc:
+                    logger.warning(
+                        "V2 scanner %s/%s failed: %s: %s",
+                        scanner_key, sym,
+                        type(exc).__name__, exc,
+                    )
+
+            return {
+                "candidates": all_candidates,
+                "candidate_count": total_constructed,
+                "accepted_count": total_passed,
+            }
+        finally:
+            http = clients.get("http_client")
+            if http:
+                await http.aclose()
+
+    return asyncio.run(_run())
+
+
+# ── Legacy options executor (RETIREMENT TARGET: Prompt 15) ──────
+#
+# This function is the ONLY remaining integration with legacy
+# StrategyService.  When all families are validated on V2, this
+# function and its _LEGACY_STRATEGY_MAP can be deleted entirely.
+
+_LEGACY_STRATEGY_MAP: dict[str, tuple[str, dict[str, Any]]] = {
+    "put_credit_spread":  ("credit_spread",  {}),
+    "call_credit_spread": ("credit_spread",  {}),
+    "iron_condor":        ("iron_condor",    {}),
+    "butterfly_debit":    ("butterflies",    {}),
+    "put_debit":          ("debit_spreads",  {"direction": "put"}),
+    "call_debit":         ("debit_spreads",  {"direction": "call"}),
+}
+
+
+def _execute_legacy_options_scanner(
+    scanner_key: str,
+    strategy_type: str,
+    scanner_deps: dict[str, Any],
+    context: dict[str, Any],
+    results_dir: Any,
+) -> dict[str, Any]:
+    """Execute an options scanner via legacy StrategyService.
+
+    RETIREMENT TARGET: This function and ``_LEGACY_STRATEGY_MAP``
+    should be deleted once all V2 families are validated and legacy
+    scanner code is retired (Prompt 15).
+    """
+    import asyncio
+
+    from app.services.strategy_service import StrategyService
+
+    mapped = _LEGACY_STRATEGY_MAP.get(strategy_type)
+    if mapped is None:
+        raise ValueError(
+            f"No legacy strategy plugin mapping for '{strategy_type}' "
+            f"(scanner_key='{scanner_key}'). "
+            f"This scanner has no V2 implementation and no legacy mapping."
+        )
+    plugin_id, extra_payload = mapped
+
+    if results_dir is None:
+        from pathlib import Path
+        results_dir = Path(__file__).resolve().parents[1] / "results"
+
+    symbols = context.get("symbols") or [
+        "SPY", "QQQ", "IWM", "DIA",
+    ]
+    preset = context.get("preset", "balanced")
+
+    async def _run() -> dict[str, Any]:
+        clients = _make_per_scanner_clients(scanner_deps)
+        try:
+            bds = clients["base_data_service"]
+            service = StrategyService(
+                base_data_service=bds,
+                results_dir=results_dir,
+            )
+            payload: dict[str, Any] = {
+                "symbols": symbols,
+                "preset": preset,
+                **extra_payload,
+            }
+            return await service.generate(plugin_id, payload)
+        finally:
+            http = clients.get("http_client")
+            if http:
+                await http.aclose()
+
+    return asyncio.run(_run())
+
+
+# =====================================================================
 #  Default scanner executor
 # =====================================================================
 
@@ -412,17 +738,15 @@ def _default_scanner_executor(
 ) -> dict[str, Any]:
     """Default scanner executor — dispatches to real scanner services.
 
+    Routing (Prompt 13 — V2-forward):
+    - Stock scanners: lazy-import service class → ``scan()``.
+    - Options scanners with V2 implementation: V2 path (default).
+    - Options scanners without V2: legacy ``StrategyService`` fallback.
+
     Each scanner runs inside ``asyncio.run()`` which creates its own
     event loop.  httpx.AsyncClient and the API clients wrapping it are
     event-loop-bound, so we construct per-scanner clients inside the
     coroutine via ``_make_per_scanner_clients()``.
-
-    Stock scanners: lazy-imports the service class, instantiates with
-    a fresh ``BaseDataService``, runs async ``scan()``.
-
-    Options scanners: maps scanner ``strategy_type`` to the
-    ``StrategyService`` plugin ID, lazy-imports ``StrategyService``,
-    calls ``generate(plugin_id, payload)``.
 
     Override via kwargs['scanner_executor'] for testing.
     """
@@ -434,176 +758,40 @@ def _default_scanner_executor(
     results_dir = context.get("results_dir")
 
     if family == "stock":
-        import asyncio
-
-        _STOCK_SERVICES: dict[str, tuple[str, str]] = {
-            "stock_pullback_swing": (
-                "app.services.pullback_swing_service", "PullbackSwingService",
-            ),
-            "stock_momentum_breakout": (
-                "app.services.momentum_breakout_service", "MomentumBreakoutService",
-            ),
-            "stock_mean_reversion": (
-                "app.services.mean_reversion_service", "MeanReversionService",
-            ),
-            "stock_volatility_expansion": (
-                "app.services.volatility_expansion_service", "VolatilityExpansionService",
-            ),
-        }
-
-        spec = _STOCK_SERVICES.get(scanner_key)
-        if spec is None:
-            raise ValueError(f"No stock scanner service for '{scanner_key}'")
-
-        async def _run_stock() -> dict[str, Any]:
-            clients = _make_per_scanner_clients(scanner_deps)
-            try:
-                bds = clients["base_data_service"]
-                mod = __import__(spec[0], fromlist=[spec[1]])
-                service = getattr(mod, spec[1])(bds)
-                max_candidates = context.get("max_candidates", 30)
-                return await service.scan(max_candidates=max_candidates)
-            finally:
-                http = clients.get("http_client")
-                if http:
-                    await http.aclose()
-
-        return asyncio.run(_run_stock())
+        return _execute_stock_scanner(scanner_key, scanner_deps, context)
 
     if family == "options":
-        import asyncio
-
         from app.services.scanner_v2.migration import should_run_v2
 
-        # ── V2 path: route through migration seam ───────────────
+        # ── V2 path (default for all implemented families) ──────
         if should_run_v2(scanner_key):
-            from app.services.scanner_v2.migration import execute_v2_scanner
-
-            symbols = context.get("symbols") or [
-                "SPY", "QQQ", "IWM", "DIA",
-            ]
-
-            async def _run_v2_options() -> dict[str, Any]:
-                clients = _make_per_scanner_clients(scanner_deps)
-                try:
-                    tc = clients["base_data_service"].tradier_client
-                    all_candidates: list[dict[str, Any]] = []
-                    total_constructed = 0
-                    total_passed = 0
-
-                    for sym in symbols:
-                        try:
-                            quote = await tc.get_quote(sym)
-                            price = float(
-                                quote.get("last") or quote.get("close") or 0
-                            )
-                            if not price:
-                                logger.warning(
-                                    "V2 %s/%s: no underlying price, skipped",
-                                    scanner_key, sym,
-                                )
-                                continue
-
-                            expirations = await tc.get_expirations(sym)
-                            if not expirations:
-                                continue
-
-                            # Merge all expirations into one chain dict
-                            merged_contracts: list[dict[str, Any]] = []
-                            for exp in expirations:
-                                merged_contracts.extend(
-                                    await tc.get_chain(sym, exp)
-                                )
-                            if not merged_contracts:
-                                continue
-
-                            chain = {
-                                "options": {"option": merged_contracts},
-                            }
-                            result = execute_v2_scanner(
-                                scanner_key,
-                                symbol=sym,
-                                chain=chain,
-                                underlying_price=price,
-                            )
-                            all_candidates.extend(
-                                result.get("candidates", [])
-                            )
-                            total_constructed += result.get(
-                                "candidate_count", 0
-                            )
-                            total_passed += result.get("accepted_count", 0)
-                        except Exception as exc:
-                            logger.warning(
-                                "V2 scanner %s/%s failed: %s: %s",
-                                scanner_key, sym,
-                                type(exc).__name__, exc,
-                            )
-
-                    return {
-                        "candidates": all_candidates,
-                        "candidate_count": total_constructed,
-                        "accepted_count": total_passed,
-                    }
-                finally:
-                    http = clients.get("http_client")
-                    if http:
-                        await http.aclose()
-
-            return asyncio.run(_run_v2_options())
-
-        # ── Legacy path: StrategyService ────────────────────────
-
-        from app.services.strategy_service import StrategyService
-
-        # Map scanner strategy_type → StrategyService plugin ID + payload overrides
-        # Plugin IDs: credit_spread, debit_spreads, iron_condor, butterflies
-        _STRATEGY_MAP: dict[str, tuple[str, dict[str, Any]]] = {
-            "put_credit_spread":  ("credit_spread",  {}),
-            "call_credit_spread": ("credit_spread",  {}),
-            "iron_condor":        ("iron_condor",    {}),
-            "butterfly_debit":    ("butterflies",    {}),
-            "put_debit":          ("debit_spreads",  {"direction": "put"}),
-            "call_debit":         ("debit_spreads",  {"direction": "call"}),
-        }
-
-        mapped = _STRATEGY_MAP.get(strategy_type)
-        if mapped is None:
-            raise ValueError(
-                f"No strategy plugin mapping for '{strategy_type}' "
-                f"(scanner_key='{scanner_key}')"
+            result = _execute_v2_options_scanner(
+                scanner_key, scanner_deps, context,
             )
-        plugin_id, extra_payload = mapped
+            result["_execution_path"] = "v2"
+            return result
 
-        if results_dir is None:
-            from pathlib import Path
-            results_dir = Path(__file__).resolve().parents[1] / "results"
-
-        symbols = context.get("symbols") or [
-            "SPY", "QQQ", "IWM", "DIA",
-        ]
-        preset = context.get("preset", "balanced")
-
-        async def _run_options() -> dict[str, Any]:
-            clients = _make_per_scanner_clients(scanner_deps)
-            try:
-                bds = clients["base_data_service"]
-                service = StrategyService(
-                    base_data_service=bds,
-                    results_dir=results_dir,
-                )
-                payload: dict[str, Any] = {
-                    "symbols": symbols,
-                    "preset": preset,
-                    **extra_payload,
-                }
-                return await service.generate(plugin_id, payload)
-            finally:
-                http = clients.get("http_client")
-                if http:
-                    await http.aclose()
-
-        return asyncio.run(_run_options())
+        # ── Legacy fallback (RETIREMENT TARGET: Prompt 15) ──────
+        #
+        # This path only runs for scanner_keys that have NO V2
+        # implementation, or that have been explicitly overridden
+        # to v1 via _SCANNER_VERSION_OVERRIDES in migration.py.
+        #
+        # As of Prompt 13, all four options families (vertical_spreads,
+        # iron_condors, butterflies, calendars) are V2-implemented.
+        # This legacy path should only execute if an override forces
+        # a key to v1 for emergency rollback.
+        logger.info(
+            "Scanner '%s' routing to legacy StrategyService "
+            "(no V2 implementation or v1 override active)",
+            scanner_key,
+        )
+        result = _execute_legacy_options_scanner(
+            scanner_key, strategy_type, scanner_deps, context,
+            results_dir,
+        )
+        result["_execution_path"] = "legacy"
+        return result
 
     raise ValueError(
         f"No executor for scanner family '{family}' (key='{scanner_key}')"
@@ -741,6 +929,7 @@ def _run_single_scanner(
     ],
     run_id: str,
     event_emitter: Callable[..., None] | None = None,
+    liveness_tracker: "ScannerLivenessTracker | None" = None,
 ) -> dict[str, Any]:
     """Execute a single scanner and capture timing/results.
 
@@ -762,6 +951,18 @@ def _run_single_scanner(
             metadata={"scanner_family": family},
         )
 
+    # Heartbeat right before the (potentially long) executor call so
+    # the liveness tracker and dashboard see fresh activity.
+    if liveness_tracker:
+        liveness_tracker.heartbeat(scanner_key)
+    if event_emitter:
+        event_emitter(
+            "scanner_executing",
+            scanner_key=scanner_key,
+            message=f"Scanner '{scanner_key}' executing",
+            metadata={"scanner_family": family},
+        )
+
     try:
         raw_result = scanner_executor(scanner_key, scanner_entry, context)
         elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -777,23 +978,34 @@ def _run_single_scanner(
         candidate_count = len(raw_candidates)
         status = "completed" if candidate_count > 0 else "completed_empty"
 
+        # Execution path marker (V2-forward, Prompt 13)
+        execution_path = raw_result.get("_execution_path", "unknown")
+
+        # Clear liveness BEFORE emitting scanner_completed so the
+        # event callback's deepcopy of run["_scanner_liveness"]
+        # captures the cleared state.  Without this ordering the
+        # monitor snapshot shows the scanner still in-flight even
+        # though scanner_completed already fired.
+        if liveness_tracker:
+            liveness_tracker.mark_completed(scanner_key)
+
         if event_emitter:
             event_emitter(
                 "scanner_completed",
                 scanner_key=scanner_key,
                 message=(
                     f"Scanner '{scanner_key}' completed in {elapsed_ms}ms "
-                    f"({candidate_count} candidates)"
+                    f"({candidate_count} candidates, path={execution_path})"
                 ),
                 metadata={
                     "scanner_family": family,
                     "elapsed_ms": elapsed_ms,
                     "candidate_count": candidate_count,
+                    "execution_path": execution_path,
                 },
             )
 
-        return {
-            "record": build_scanner_execution_record(
+        record = build_scanner_execution_record(
                 scanner_key=scanner_key,
                 scanner_family=family,
                 strategy_type=strategy_type,
@@ -804,7 +1016,11 @@ def _run_single_scanner(
                 candidate_count=candidate_count,
                 raw_result_present=True,
                 downstream_usable=True,
-            ),
+            )
+        record["execution_path"] = execution_path
+
+        return {
+            "record": record,
             "raw_result": raw_result,
         }
 
@@ -817,6 +1033,11 @@ def _run_single_scanner(
             "Scanner '%s' failed: %s: %s",
             scanner_key, type(exc).__name__, exc, exc_info=True,
         )
+
+        # Clear liveness BEFORE emitting scanner_failed (same
+        # ordering rationale as scanner_completed above).
+        if liveness_tracker:
+            liveness_tracker.mark_failed(scanner_key)
 
         if event_emitter:
             event_emitter(
@@ -851,8 +1072,131 @@ def _run_single_scanner(
 
 
 # =====================================================================
+#  Scanner liveness tracker
+# =====================================================================
+
+class ScannerLivenessTracker:
+    """Thread-safe tracker for in-flight scanner liveness.
+
+    Exposes a snapshot of currently-running scanners with elapsed time,
+    completed/failed/timed-out counts, and per-scanner diagnostics.
+    Attached to the run dict so the monitoring API can surface it.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._in_flight: dict[str, float] = {}  # scanner_key → start monotonic
+        self._completed: list[str] = []
+        self._failed: list[str] = []
+        self._timed_out: list[str] = []
+        self._cap_hit: list[str] = []
+        self._last_update: float = time.monotonic()
+
+    def mark_started(self, scanner_key: str) -> None:
+        with self._lock:
+            self._in_flight[scanner_key] = time.monotonic()
+            self._last_update = time.monotonic()
+
+    def mark_completed(self, scanner_key: str) -> None:
+        with self._lock:
+            self._in_flight.pop(scanner_key, None)
+            self._completed.append(scanner_key)
+            self._last_update = time.monotonic()
+
+    def mark_failed(self, scanner_key: str) -> None:
+        with self._lock:
+            self._in_flight.pop(scanner_key, None)
+            self._failed.append(scanner_key)
+            self._last_update = time.monotonic()
+
+    def mark_timed_out(self, scanner_key: str) -> None:
+        with self._lock:
+            self._in_flight.pop(scanner_key, None)
+            self._timed_out.append(scanner_key)
+            self._last_update = time.monotonic()
+
+    def mark_cap_hit(self, scanner_key: str) -> None:
+        with self._lock:
+            self._cap_hit.append(scanner_key)
+
+    def heartbeat(self, scanner_key: str) -> None:
+        """Update last_update timestamp without changing scanner state.
+
+        Called periodically during long-running scanners to signal
+        that the stage is still alive.
+        """
+        with self._lock:
+            self._last_update = time.monotonic()
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return a point-in-time liveness snapshot."""
+        now = time.monotonic()
+        with self._lock:
+            in_flight = {
+                k: round((now - start) * 1000)
+                for k, start in self._in_flight.items()
+            }
+            return {
+                "in_flight_scanners": in_flight,
+                "in_flight_count": len(in_flight),
+                "completed": list(self._completed),
+                "failed": list(self._failed),
+                "timed_out": list(self._timed_out),
+                "cap_hit": list(self._cap_hit),
+                "last_update_ms_ago": round((now - self._last_update) * 1000),
+            }
+
+    # -- Deep-copy safety ---------------------------------------------------
+    # threading.Lock cannot be pickled / deep-copied.  The run dict that
+    # holds this tracker is deep-copied on every event callback, so we
+    # must provide a safe copy path.
+
+    def __deepcopy__(self, memo: dict) -> "ScannerLivenessTracker":
+        new = ScannerLivenessTracker()
+        with self._lock:
+            new._in_flight = copy.deepcopy(self._in_flight, memo)
+            new._completed = list(self._completed)
+            new._failed = list(self._failed)
+            new._timed_out = list(self._timed_out)
+            new._cap_hit = list(self._cap_hit)
+            new._last_update = self._last_update
+        return new
+
+    def __copy__(self) -> "ScannerLivenessTracker":
+        new = ScannerLivenessTracker()
+        with self._lock:
+            new._in_flight = dict(self._in_flight)
+            new._completed = list(self._completed)
+            new._failed = list(self._failed)
+            new._timed_out = list(self._timed_out)
+            new._cap_hit = list(self._cap_hit)
+            new._last_update = self._last_update
+        return new
+
+    def reconcile(self, completed_keys: set[str]) -> set[str]:
+        """Force-clear any in-flight entries whose keys are in *completed_keys*.
+
+        Returns the set of scanner keys that were stale (had results but
+        were still listed in _in_flight).  An empty set means no stale
+        entries were found.
+        """
+        with self._lock:
+            stale = set(self._in_flight.keys()) & completed_keys
+            for key in stale:
+                self._in_flight.pop(key, None)
+                # Don't double-append to _completed/_failed — just clear
+                # the in-flight entry so the snapshot is accurate.
+                if key not in self._completed and key not in self._failed:
+                    self._completed.append(key)
+            if stale:
+                self._last_update = time.monotonic()
+            return stale
+
+
+# =====================================================================
 #  Bounded parallel execution
 # =====================================================================
+
 
 def _execute_scanners_parallel(
     work_items: list[dict[str, Any]],
@@ -863,6 +1207,8 @@ def _execute_scanners_parallel(
     run_id: str,
     max_workers: int,
     event_emitter: Callable[..., None] | None = None,
+    *,
+    liveness_tracker: ScannerLivenessTracker | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Run scanners with bounded parallelism.
 
@@ -880,6 +1226,8 @@ def _execute_scanners_parallel(
         Concurrency limit.
     event_emitter : callable | None
         Event callback.
+    liveness_tracker : ScannerLivenessTracker | None
+        Optional tracker for real-time liveness monitoring.
 
     Returns
     -------
@@ -891,40 +1239,61 @@ def _execute_scanners_parallel(
         return results
 
     actual_workers = min(max_workers, len(work_items))
+    tracker = liveness_tracker
 
-    with ThreadPoolExecutor(max_workers=actual_workers) as pool:
-        futures = {
-            pool.submit(
+    # ── Pool lifecycle ──────────────────────────────────────────
+    # We manage the pool explicitly (NOT via ``with`` context
+    # manager) because ``ThreadPoolExecutor.__exit__`` calls
+    # ``pool.shutdown(wait=True)`` which blocks until every worker
+    # thread fully exits.  Even after all futures are done, worker
+    # threads may be stuck in asyncio event-loop cleanup (every V2
+    # scanner runs ``asyncio.run()`` which calls
+    # ``loop.shutdown_default_executor()`` → inner
+    # ``shutdown(wait=True)``).  This caused the scanner-stage to
+    # hang indefinitely after all scanner_completed events fired.
+    #
+    # Fix: collect all results via ``as_completed``, then shut down
+    # with ``wait=False`` so lingering thread cleanup cannot block
+    # stage finalization.
+    pool = ThreadPoolExecutor(max_workers=actual_workers)
+    try:
+        futures = {}
+        for item in work_items:
+            key = item["scanner_key"]
+            if tracker:
+                tracker.mark_started(key)
+            fut = pool.submit(
                 _run_single_scanner,
-                item["scanner_key"],
+                key,
                 item,
                 context,
                 scanner_executor,
                 run_id,
                 event_emitter,
-            ): item["scanner_key"]
-            for item in work_items
-        }
+                tracker,
+            )
+            futures[fut] = item
 
-        for future in futures:
-            scanner_key = futures[future]
+        # Wait for all futures — no timeout.  Every scanner must
+        # complete (or raise) before the stage proceeds.
+        for future in as_completed(futures):
+            item = futures[future]
+            scanner_key = item["scanner_key"]
             try:
                 result = future.result()
                 results[scanner_key] = result
             except Exception as exc:
+                # future.result() itself raised — _run_single_scanner
+                # catches all exceptions so this is truly unexpected.
                 logger.error(
                     "Unexpected executor error for scanner '%s': %s",
                     scanner_key, exc, exc_info=True,
                 )
-                entry = next(
-                    (i for i in work_items if i["scanner_key"] == scanner_key),
-                    {},
-                )
                 results[scanner_key] = {
                     "record": build_scanner_execution_record(
                         scanner_key=scanner_key,
-                        scanner_family=entry.get("scanner_family", ""),
-                        strategy_type=entry.get("strategy_type", scanner_key),
+                        scanner_family=item.get("scanner_family", ""),
+                        strategy_type=item.get("strategy_type", scanner_key),
                         status="failed",
                         error=build_run_error(
                             code="SCANNER_EXECUTOR_ERROR",
@@ -937,6 +1306,43 @@ def _execute_scanners_parallel(
                     ),
                     "raw_result": None,
                 }
+                if tracker:
+                    tracker.mark_failed(scanner_key)
+    finally:
+        # Shut down WITHOUT waiting for worker threads to exit.
+        # All results have been collected above; lingering threads
+        # are doing asyncio event-loop cleanup and will finish on
+        # their own.
+        #
+        # IMPORTANT: Do NOT pass cancel_futures=True.  In Python
+        # 3.14+ the cancel path acquires _shutdown_lock and drains
+        # the work queue; if any worker thread is simultaneously in
+        # asyncio.run() cleanup (shutdown_default_executor →
+        # inner shutdown(wait=True)), the two shutdown codepaths
+        # can deadlock on the queue interaction.  Since all futures
+        # are already done (collected via as_completed), there is
+        # nothing to cancel.
+        try:
+            logger.debug("Scanner pool shutdown(wait=False) — %d results collected", len(results))
+            pool.shutdown(wait=False)
+        except Exception as _shutdown_exc:
+            logger.warning(
+                "pool.shutdown raised %s: %s (ignored — results already collected)",
+                type(_shutdown_exc).__name__, _shutdown_exc,
+            )
+
+    # ── Reconciliation safety net ───────────────────────────────
+    # If any scanner remains in _in_flight despite having a result,
+    # force-clear it and log the mismatch.  This prevents stale
+    # in-flight entries from polluting the liveness snapshot.
+    if tracker:
+        stale = tracker.reconcile(set(results.keys()))
+        if stale:
+            logger.warning(
+                "Liveness reconciliation cleared %d stale in-flight "
+                "scanner(s) after parallel execution: %s",
+                len(stale), sorted(stale),
+            )
 
     return results
 
@@ -954,6 +1360,7 @@ def build_scanner_stage_summary(
     artifact_refs: dict[str, str | None] | None = None,
     candidate_artifact_refs: dict[str, str | None] | None = None,
     candidate_index: dict[str, list[str]] | None = None,
+    scanner_diagnostics: dict[str, dict[str, Any]] | None = None,
     elapsed_ms: int | None = None,
 ) -> dict[str, Any]:
     """Build the scanner stage summary artifact payload.
@@ -974,6 +1381,9 @@ def build_scanner_stage_summary(
         scanner_key → candidate artifact_id.
     candidate_index : dict | None
         scanner_key → list of candidate_ids.
+    scanner_diagnostics : dict | None
+        scanner_key → diagnostics dict with filter_trace, phase_counts,
+        reject_reason_counts, candidate_count, accepted_count from V2.
     elapsed_ms : int | None
         Total wall-clock time for the stage.
     """
@@ -982,6 +1392,7 @@ def build_scanner_stage_summary(
     art_refs = artifact_refs or {}
     cand_art_refs = candidate_artifact_refs or {}
     cand_idx = candidate_index or {}
+    sc_diag = scanner_diagnostics or {}
 
     scanners_completed: list[str] = []
     scanners_completed_empty: list[str] = []
@@ -1000,10 +1411,12 @@ def build_scanner_stage_summary(
         else:
             scanners_failed.append(key)
 
+        diag = sc_diag.get(key)
         scanner_summaries[key] = {
             "status": status,
             "scanner_family": rec.get("scanner_family", ""),
             "strategy_type": rec.get("strategy_type", key),
+            "execution_path": rec.get("execution_path", "unknown"),
             "elapsed_ms": rec.get("elapsed_ms"),
             "candidate_count": cand_counts.get(key, rec.get("candidate_count", 0)),
             "usable_candidate_count": usable_counts.get(key, 0),
@@ -1011,6 +1424,7 @@ def build_scanner_stage_summary(
             "candidate_artifact_ref": cand_art_refs.get(key),
             "candidate_ids": cand_idx.get(key, []),
             "downstream_usable": rec.get("downstream_usable", False),
+            "diagnostics": diag,
         }
 
     # Process skipped scanners
@@ -1064,6 +1478,16 @@ def build_scanner_stage_summary(
     if scanners_failed:
         degraded_reasons.append(f"scanners_failed: {scanners_failed}")
 
+    # V2-forward routing summary (Prompt 13)
+    v2_scanners = [
+        k for k, s in scanner_summaries.items()
+        if s.get("execution_path") == "v2"
+    ]
+    legacy_scanners = [
+        k for k, s in scanner_summaries.items()
+        if s.get("execution_path") == "legacy"
+    ]
+
     return {
         "stage_key": _STAGE_KEY,
         "stage_status": stage_status,
@@ -1084,6 +1508,13 @@ def build_scanner_stage_summary(
         "candidate_index": dict(cand_idx),
         "degraded_reasons": degraded_reasons,
         "scanner_summaries": scanner_summaries,
+        # V2-forward routing summary (Prompt 13)
+        "routing_summary": {
+            "v2_scanners": v2_scanners,
+            "legacy_scanners": legacy_scanners,
+            "v2_count": len(v2_scanners),
+            "legacy_count": len(legacy_scanners),
+        },
         "elapsed_ms": elapsed_ms,
         "generated_at": _now_iso(),
     }
@@ -1300,12 +1731,18 @@ def scanner_stage_handler(
     t0 = time.monotonic()
     run_id = run["run_id"]
 
+    # ── Finalization checkpoint ───────────────────────────────────
+    finalization = FinalizationCheckpoint()
+    run["_finalization_checkpoint"] = finalization
+
     # ── 1. Resolve parameters ───────────────────────────────────
     registry = kwargs.get("scanner_registry") or get_default_scanner_registry()
     scanner_executor = kwargs.get("scanner_executor", _default_scanner_executor)
     max_workers = kwargs.get("max_workers", DEFAULT_SCANNER_MAX_WORKERS)
     event_callback = kwargs.get("event_callback")
     event_emitter = _make_event_emitter(run, event_callback)
+    if event_emitter is not None:
+        event_emitter("handler_entered", "", message="scanner_stage_handler entered")
     disabled_scanners: set[str] = set(kwargs.get("disabled_scanners") or [])
     selected_scanners: set[str] | None = (
         set(kwargs["selected_scanners"]) if kwargs.get("selected_scanners") else None
@@ -1316,6 +1753,12 @@ def scanner_stage_handler(
     scanner_results_override: dict[str, Any] | None = kwargs.get(
         "scanner_results_override",
     )
+    generation_cap = kwargs.get("generation_cap", DEFAULT_GENERATION_CAP)
+
+    # Liveness tracker — attached to run dict for monitoring API
+    liveness_tracker = ScannerLivenessTracker()
+    run.setdefault("_scanner_liveness", {})
+    run["_scanner_liveness"] = liveness_tracker
 
     # Scanner execution context — pass shared (loop-agnostic) deps;
     # per-scanner clients are created inside _default_scanner_executor.
@@ -1325,6 +1768,7 @@ def scanner_stage_handler(
         "symbols": kwargs.get("symbols"),
         "preset": kwargs.get("preset"),
         "max_candidates": kwargs.get("max_candidates"),
+        "generation_cap": generation_cap,
         "_scanner_deps": scanner_deps,
         "results_dir": scanner_deps["results_dir"],
     }
@@ -1350,193 +1794,353 @@ def scanner_stage_handler(
             artifact_store, run_id, skipped_records, t0,
         )
 
-    # ── 4. Execute scanners ─────────────────────────────────────
-    scanner_results: dict[str, dict[str, Any]]
+    # ── 4. Execute scanners + 5-9. Post-processing ───────────────
+    # The ENTIRE execution + finalization is wrapped in try/except
+    # so the stage ALWAYS returns a result, even if parallel execution
+    # hangs/raises or post-processing fails.  This guarantees the
+    # orchestrator receives a terminal outcome and can emit
+    # stage_completed/stage_failed — the pipeline NEVER stays stuck
+    # in "running" after scanner work finishes.
+    scanner_results: dict[str, dict[str, Any]] = {}
+    _t_post = t0  # default; updated after parallel execution
 
-    if scanner_results_override is not None:
-        # Test/replay mode: use pre-supplied results
-        scanner_results = {}
-        for entry in eligible:
-            key = entry["scanner_key"]
-            if key in scanner_results_override:
-                raw = scanner_results_override[key]
-                raw_candidates = raw.get("candidates", []) if isinstance(raw, dict) else []
-                scanner_results[key] = {
-                    "record": build_scanner_execution_record(
+    try:
+        if scanner_results_override is not None:
+            # Test/replay mode: use pre-supplied results
+            for entry in eligible:
+                key = entry["scanner_key"]
+                if key in scanner_results_override:
+                    raw = scanner_results_override[key]
+                    raw_candidates = raw.get("candidates", []) if isinstance(raw, dict) else []
+                    scanner_results[key] = {
+                        "record": build_scanner_execution_record(
+                            scanner_key=key,
+                            scanner_family=entry.get("scanner_family", ""),
+                            strategy_type=entry.get("strategy_type", key),
+                            status="completed" if raw_candidates else "completed_empty",
+                            started_at=_now_iso(),
+                            completed_at=_now_iso(),
+                            elapsed_ms=0,
+                            candidate_count=len(raw_candidates),
+                            raw_result_present=True,
+                            downstream_usable=bool(raw_candidates),
+                        ),
+                        "raw_result": raw,
+                    }
+                else:
+                    skipped_records[key] = build_scanner_execution_record(
                         scanner_key=key,
                         scanner_family=entry.get("scanner_family", ""),
                         strategy_type=entry.get("strategy_type", key),
-                        status="completed" if raw_candidates else "completed_empty",
-                        started_at=_now_iso(),
-                        completed_at=_now_iso(),
-                        elapsed_ms=0,
-                        candidate_count=len(raw_candidates),
-                        raw_result_present=True,
-                        downstream_usable=bool(raw_candidates),
-                    ),
-                    "raw_result": raw,
-                }
-            else:
-                skipped_records[key] = build_scanner_execution_record(
-                    scanner_key=key,
-                    scanner_family=entry.get("scanner_family", ""),
-                    strategy_type=entry.get("strategy_type", key),
-                    status="skipped_not_selected",
-                )
-        # Handle override keys for scanners not in eligible list
-        for key, override_result in scanner_results_override.items():
-            if key not in scanner_results and key not in skipped_records:
-                raw_candidates = (
-                    override_result.get("candidates", [])
-                    if isinstance(override_result, dict) else []
-                )
-                scanner_results[key] = {
-                    "record": build_scanner_execution_record(
-                        scanner_key=key,
-                        status="completed" if raw_candidates else "completed_empty",
-                        started_at=_now_iso(),
-                        completed_at=_now_iso(),
-                        elapsed_ms=0,
-                        candidate_count=len(raw_candidates),
-                        raw_result_present=True,
-                        downstream_usable=bool(raw_candidates),
-                    ),
-                    "raw_result": override_result,
-                }
-    else:
-        scanner_results = _execute_scanners_parallel(
-            eligible, scanner_executor, context,
-            run_id, max_workers, event_emitter,
+                        status="skipped_not_selected",
+                    )
+            # Handle override keys for scanners not in eligible list
+            for key, override_result in scanner_results_override.items():
+                if key not in scanner_results and key not in skipped_records:
+                    raw_candidates = (
+                        override_result.get("candidates", [])
+                        if isinstance(override_result, dict) else []
+                    )
+                    scanner_results[key] = {
+                        "record": build_scanner_execution_record(
+                            scanner_key=key,
+                            status="completed" if raw_candidates else "completed_empty",
+                            started_at=_now_iso(),
+                            completed_at=_now_iso(),
+                            elapsed_ms=0,
+                            candidate_count=len(raw_candidates),
+                            raw_result_present=True,
+                            downstream_usable=bool(raw_candidates),
+                        ),
+                        "raw_result": override_result,
+                    }
+        else:
+            finalization.advance("parallel_execution_starting")
+            logger.info("CHECKPOINT_0: parallel_execution_starting  eligible=%d", len(eligible))
+            scanner_results = _execute_scanners_parallel(
+                eligible, scanner_executor, context,
+                run_id, max_workers, event_emitter,
+                liveness_tracker=liveness_tracker,
+            )
+
+        # ── Finalization diagnostics ────────────────────────────
+        _t_post = time.monotonic()
+        _parallel_ms = int((_t_post - t0) * 1000)
+        finalization.advance("results_collected")
+        logger.info(
+            "CHECKPOINT_1: all_scanners_done  results=%d  parallel_ms=%d  "
+            "keys=%s",
+            len(scanner_results), _parallel_ms,
+            sorted(scanner_results.keys()),
         )
 
-    # ── 5. Process results: artifacts + candidate normalization ──
-    all_artifact_ids: list[str] = []
-    candidate_counts: dict[str, int] = {}
-    usable_candidate_counts: dict[str, int] = {}
-    raw_artifact_refs: dict[str, str | None] = {}
-    candidate_artifact_refs: dict[str, str | None] = {}
-    candidate_index: dict[str, list[str]] = {}
+        # ── 5. Process results: artifacts + candidate normalization
+        finalization.advance("post_processing_started")
+        logger.info("CHECKPOINT_2: post_processing_started")
+        all_artifact_ids: list[str] = []
+        candidate_counts: dict[str, int] = {}
+        usable_candidate_counts: dict[str, int] = {}
+        raw_artifact_refs: dict[str, str | None] = {}
+        candidate_artifact_refs: dict[str, str | None] = {}
+        candidate_index: dict[str, list[str]] = {}
 
-    for key, entry in scanner_results.items():
-        rec = entry.get("record", {})
-        raw_result = entry.get("raw_result")
+        _t_loop_start = time.monotonic()
+        for key, entry in scanner_results.items():
+            rec = entry.get("record", {})
+            raw_result = entry.get("raw_result")
 
-        # 5a. Write raw scanner output artifact
-        if raw_result is not None:
-            art_id = _write_scanner_output_artifact(
-                artifact_store, run_id, key, raw_result, rec,
-            )
-            rec["output_artifact_ref"] = art_id
-            raw_artifact_refs[key] = art_id
-            all_artifact_ids.append(art_id)
-        else:
-            raw_artifact_refs[key] = None
+            # 5a. Write raw scanner output artifact
+            if raw_result is not None:
+                art_id = _write_scanner_output_artifact(
+                    artifact_store, run_id, key, raw_result, rec,
+                )
+                rec["output_artifact_ref"] = art_id
+                raw_artifact_refs[key] = art_id
+                all_artifact_ids.append(art_id)
+            else:
+                raw_artifact_refs[key] = None
 
-        # 5b. Normalize candidates
-        if raw_result is not None and rec.get("status") in (
-            "completed", "completed_empty",
-        ):
-            # Find scanner entry for this key
-            scanner_entry = registry.get(key, {"scanner_key": key})
-            candidates, norm_warnings = normalize_scanner_candidates(
-                key, scanner_entry, raw_result,
-                run_id=run_id,
-                source_artifact_ref=raw_artifact_refs.get(key),
-            )
-
-            if norm_warnings:
-                rec.setdefault("warnings", []).extend(norm_warnings)
-
-            usable = [c for c in candidates if c.get("downstream_usable", False)]
-            candidate_counts[key] = len(candidates)
-            usable_candidate_counts[key] = len(usable)
-            candidate_index[key] = [
-                c.get("candidate_id", "") for c in candidates
-            ]
-
-            # 5c. Write candidate artifact
-            if candidates:
-                cand_art_id = _write_candidate_artifact(
-                    artifact_store, run_id, key, candidates,
+            # 5b. Normalize candidates
+            if raw_result is not None and rec.get("status") in (
+                "completed", "completed_empty",
+            ):
+                scanner_entry = registry.get(key, {"scanner_key": key})
+                candidates, norm_warnings = normalize_scanner_candidates(
+                    key, scanner_entry, raw_result,
+                    run_id=run_id,
                     source_artifact_ref=raw_artifact_refs.get(key),
                 )
-                rec["candidate_artifact_ref"] = cand_art_id
-                candidate_artifact_refs[key] = cand_art_id
-                all_artifact_ids.append(cand_art_id)
+
+                if norm_warnings:
+                    rec.setdefault("warnings", []).extend(norm_warnings)
+
+                usable = [c for c in candidates if c.get("downstream_usable", False)]
+                candidate_counts[key] = len(candidates)
+                usable_candidate_counts[key] = len(usable)
+                candidate_index[key] = [
+                    c.get("candidate_id", "") for c in candidates
+                ]
+
+                # 5c. Write candidate artifact
+                if candidates:
+                    cand_art_id = _write_candidate_artifact(
+                        artifact_store, run_id, key, candidates,
+                        source_artifact_ref=raw_artifact_refs.get(key),
+                    )
+                    rec["candidate_artifact_ref"] = cand_art_id
+                    candidate_artifact_refs[key] = cand_art_id
+                    all_artifact_ids.append(cand_art_id)
+                else:
+                    candidate_artifact_refs[key] = None
             else:
+                candidate_counts[key] = 0
+                usable_candidate_counts[key] = 0
                 candidate_artifact_refs[key] = None
-        else:
-            candidate_counts[key] = 0
-            usable_candidate_counts[key] = 0
-            candidate_artifact_refs[key] = None
 
-    # ── 6-7. Build and write stage summary ──────────────────────
-    elapsed_ms = int((time.monotonic() - t0) * 1000)
-
-    # Update execution records with final artifact refs
-    execution_recs = {
-        k: entry.get("record", {}) for k, entry in scanner_results.items()
-    }
-
-    summary = build_scanner_stage_summary(
-        execution_recs,
-        skipped_records,
-        candidate_counts=candidate_counts,
-        usable_candidate_counts=usable_candidate_counts,
-        artifact_refs=raw_artifact_refs,
-        candidate_artifact_refs=candidate_artifact_refs,
-        candidate_index=candidate_index,
-        elapsed_ms=elapsed_ms,
-    )
-    summary_art_id = _write_scanner_stage_summary_artifact(
-        artifact_store, run_id, summary,
-    )
-    all_artifact_ids.append(summary_art_id)
-
-    # ── 8. Determine stage outcome ──────────────────────────────
-    completed_count = summary["completed_count"]
-    failed_count = summary["failed_count"]
-    total_run = summary["total_run"]
-
-    if total_run > 0 and completed_count == 0:
-        outcome = "failed"
-        error = build_run_error(
-            code="ALL_SCANNERS_FAILED",
-            message=f"All {total_run} scanners failed",
-            source=_STAGE_KEY,
-            detail={"failed_count": failed_count},
+        _t_loop_end = time.monotonic()
+        finalization.advance("artifact_loop_completed")
+        logger.info(
+            "CHECKPOINT_3: artifact_loop_completed  scanners=%d  "
+            "loop_ms=%d",
+            len(scanner_results),
+            int((_t_loop_end - _t_loop_start) * 1000),
         )
-    else:
-        outcome = "completed"
-        error = None
 
-    # ── 9. Return handler result ────────────────────────────────
-    return {
-        "outcome": outcome,
-        "summary_counts": {
-            "scanners_run": total_run,
-            "scanners_completed": completed_count,
-            "scanners_failed": failed_count,
-            "scanners_skipped": summary["skipped_count"],
-            "total_candidates": summary["total_candidates"],
-            "total_usable_candidates": summary["total_usable_candidates"],
-        },
-        "artifacts": [],  # artifacts already written directly
-        "metadata": {
-            "stage_summary_artifact_id": summary_art_id,
-            "scanner_artifact_ids": {
-                k: v for k, v in raw_artifact_refs.items() if v
+        # ── 6-7. Build and write stage summary ──────────────────
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+
+        execution_recs = {
+            k: entry.get("record", {}) for k, entry in scanner_results.items()
+        }
+
+        # Extract per-scanner diagnostics from raw results
+        scanner_diag: dict[str, dict[str, Any]] = {}
+        for key, entry in scanner_results.items():
+            raw = entry.get("raw_result")
+            if not isinstance(raw, dict):
+                continue
+            ft = raw.get("filter_trace")
+            diag_entry: dict[str, Any] = {}
+            if isinstance(ft, dict):
+                diag_entry["stage_counts"] = ft.get("stage_counts", [])
+                diag_entry["rejection_reason_counts"] = ft.get(
+                    "rejection_reason_counts", {},
+                )
+                diag_entry["data_quality_counts"] = ft.get(
+                    "data_quality_counts", {},
+                )
+            diag_entry["candidate_count"] = raw.get("candidate_count", 0)
+            diag_entry["accepted_count"] = raw.get("accepted_count", 0)
+            scanner_diag[key] = diag_entry
+
+        liveness_snapshot = liveness_tracker.snapshot()
+
+        if liveness_snapshot["in_flight_count"] > 0:
+            logger.warning(
+                "Scanner stage finalization: %d scanner(s) still in "
+                "liveness in_flight after all results collected: %s",
+                liveness_snapshot["in_flight_count"],
+                sorted(liveness_snapshot["in_flight_scanners"].keys()),
+            )
+
+        logger.info("CHECKPOINT_4: summary_build_started")
+        summary = build_scanner_stage_summary(
+            execution_recs,
+            skipped_records,
+            candidate_counts=candidate_counts,
+            usable_candidate_counts=usable_candidate_counts,
+            artifact_refs=raw_artifact_refs,
+            candidate_artifact_refs=candidate_artifact_refs,
+            candidate_index=candidate_index,
+            scanner_diagnostics=scanner_diag,
+            elapsed_ms=elapsed_ms,
+        )
+        summary["liveness_snapshot"] = liveness_snapshot
+        finalization.advance("summary_built")
+        logger.info("CHECKPOINT_5: summary_built")
+        summary_art_id = _write_scanner_stage_summary_artifact(
+            artifact_store, run_id, summary,
+        )
+        all_artifact_ids.append(summary_art_id)
+        finalization.advance("summary_artifact_written")
+        logger.info(
+            "CHECKPOINT_6: summary_artifact_written  artifact=%s",
+            summary_art_id,
+        )
+
+        # ── 8. Determine stage outcome ──────────────────────────
+        completed_count = summary["completed_count"]
+        failed_count = summary["failed_count"]
+        total_run = summary["total_run"]
+
+        if total_run > 0 and completed_count == 0:
+            outcome = "failed"
+            error = build_run_error(
+                code="ALL_SCANNERS_FAILED",
+                message=f"All {total_run} scanners failed",
+                source=_STAGE_KEY,
+                detail={"failed_count": failed_count},
+            )
+        else:
+            outcome = "completed"
+            error = None
+
+        finalization.advance("outcome_determined")
+        logger.info(
+            "CHECKPOINT_7: outcome_determined  outcome=%s  "
+            "completed=%d  failed=%d  total=%d",
+            outcome, completed_count, failed_count, total_run,
+        )
+
+        # ── 9. Return handler result ────────────────────────────
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        _finalization_ms = int((time.monotonic() - _t_post) * 1000)
+        logger.info(
+            "CHECKPOINT_8: result_built  outcome=%s  total_ms=%d  "
+            "post_processing_ms=%d",
+            outcome, elapsed_ms, _finalization_ms,
+        )
+        finalization.advance("result_built")
+        if _finalization_ms > 30_000:
+            logger.warning(
+                "Scanner stage finalization took %dms (>30s threshold)",
+                _finalization_ms,
+            )
+        result = {
+            "outcome": outcome,
+            "summary_counts": {
+                "scanners_run": total_run,
+                "scanners_completed": completed_count,
+                "scanners_failed": failed_count,
+                "scanners_skipped": summary["skipped_count"],
+                "total_candidates": summary["total_candidates"],
+                "total_usable_candidates": summary["total_usable_candidates"],
             },
-            "candidate_artifact_ids": {
-                k: v for k, v in candidate_artifact_refs.items() if v
+            "artifacts": [],  # artifacts already written directly
+            "metadata": {
+                "stage_summary_artifact_id": summary_art_id,
+                "scanner_artifact_ids": {
+                    k: v for k, v in raw_artifact_refs.items() if v
+                },
+                "candidate_artifact_ids": {
+                    k: v for k, v in candidate_artifact_refs.items() if v
+                },
+                "stage_status": summary["stage_status"],
+                "elapsed_ms": elapsed_ms,
+                "scanner_records": execution_recs,
+                "degraded_reasons": summary.get("degraded_reasons", []),
+                "liveness_snapshot": liveness_snapshot,
+                "finalization_checkpoint": finalization.snapshot(),
+                "finalization_duration_ms": _finalization_ms,
             },
-            "stage_status": summary["stage_status"],
-            "elapsed_ms": elapsed_ms,
-            "scanner_records": execution_recs,
-            "degraded_reasons": summary.get("degraded_reasons", []),
-        },
-        "error": error,
-    }
+            "error": error,
+        }
+        finalization.advance("handler_returning")
+        logger.info("CHECKPOINT_9: handler_returning  outcome=%s", outcome)
+        return result
+
+    except Exception as post_exc:
+        # ── Guaranteed finalization ──────────────────────────────
+        # If parallel execution OR post-processing fails, the stage
+        # MUST still return a result so the orchestrator can emit
+        # stage_completed or stage_failed.  The pipeline MUST NOT
+        # remain stuck in "running" forever.
+        finalization.advance("post_processing_failed")
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        _finalization_ms = int((time.monotonic() - _t_post) * 1000)
+        logger.error(
+            "Scanner stage execution/post-processing failed: %s: %s",
+            type(post_exc).__name__, post_exc, exc_info=True,
+        )
+
+        # Count what we can from scanner_results
+        exec_records = {
+            k: entry.get("record", {})
+            for k, entry in scanner_results.items()
+        }
+        n_completed = sum(
+            1 for r in exec_records.values()
+            if r.get("status") in ("completed", "completed_empty")
+        )
+        n_failed = sum(
+            1 for r in exec_records.values()
+            if r.get("status") == "failed"
+        )
+        # Compute total_candidates from whatever results we DO have
+        _rescue_total = sum(
+            len(entry.get("raw_result", {}).get("candidates", []))
+            for entry in scanner_results.values()
+            if isinstance(entry.get("raw_result"), dict)
+        )
+
+        return {
+            "outcome": "failed" if n_completed == 0 else "completed",
+            "summary_counts": {
+                "scanners_run": len(exec_records),
+                "scanners_completed": n_completed,
+                "scanners_failed": n_failed,
+                "scanners_skipped": len(skipped_records),
+                "total_candidates": _rescue_total,
+                "total_usable_candidates": 0,
+            },
+            "artifacts": [],
+            "metadata": {
+                "stage_status": "degraded" if n_completed > 0 else "failed",
+                "elapsed_ms": elapsed_ms,
+                "scanner_records": exec_records,
+                "degraded_reasons": [
+                    f"Execution/post-processing error: {type(post_exc).__name__}: {post_exc}",
+                ],
+                "liveness_snapshot": liveness_tracker.snapshot(),
+                "finalization_checkpoint": finalization.snapshot(),
+                "finalization_duration_ms": _finalization_ms,
+            },
+            "error": build_run_error(
+                code="SCANNER_STAGE_POST_PROCESSING_ERROR",
+                message=f"Execution/post-processing failed: {type(post_exc).__name__}: {post_exc}",
+                source=_STAGE_KEY,
+            ),
+        }
 
 
 # =====================================================================

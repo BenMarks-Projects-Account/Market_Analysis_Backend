@@ -37,17 +37,23 @@
     </div>
   </section>
 
-  <!-- ═══ SECTION 2 — Active Trade Candidates (placeholder) ═══ -->
+  <!-- ═══ SECTION 2 — Active Trade Candidates ═══ -->
   <section class="tmc-section">
     <div class="tmc-section-header">
       <h3 class="tmc-section-title">Active Trade Candidates</h3>
-      <span class="tmc-count-badge tmc-count-muted">—</span>
+      <span id="tmcActiveCount" class="tmc-count-badge tmc-count-muted">—</span>
+      <div class="tmc-active-controls">
+        <button id="tmcRunActiveBtn" class="btn tmc-btn" title="Run Active Trade Pipeline">▶ Analyse Positions</button>
+        <button id="tmcRefreshActiveBtn" class="btn tmc-btn" title="Load latest results">↻ Latest</button>
+        <label class="tmc-label tmc-skip-model-label">
+          <input type="checkbox" id="tmcSkipModel" /> Engine only
+        </label>
+      </div>
     </div>
-    <div class="tmc-active-placeholder">
-      <div class="tmc-empty-icon">◉</div>
-      <div class="tmc-placeholder-text">
-        Active trade monitoring will connect to broker positions.<br>
-        <span class="tmc-placeholder-sub">Coming soon — bridge from execution to position management</span>
+    <div id="tmcActiveTradeGrid" class="tmc-candidate-grid">
+      <div class="tmc-empty-state" id="tmcActiveEmptyState">
+        <div class="tmc-empty-icon">◉</div>
+        <div class="tmc-empty-text">Click "Analyse Positions" to run the Active Trade Pipeline</div>
       </div>
     </div>
   </section>

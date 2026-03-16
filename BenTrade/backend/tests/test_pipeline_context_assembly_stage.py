@@ -100,7 +100,7 @@ def _make_run_and_store(run_id="test-ctx-001"):
     # Complete prerequisite stages
     for stage in (
         "market_data", "market_model_analysis",
-        "scanners", "candidate_selection",
+        "stock_scanners", "options_scanners", "candidate_selection",
     ):
         mark_stage_running(run, stage)
         mark_stage_completed(run, stage)
@@ -871,6 +871,49 @@ class TestHandlerContract:
         assert result["error"]["code"] == "CONTEXT_ASSEMBLY_FAILED"
         assert result["summary_counts"]["modules_failed"] == 3
 
+    def test_failed_result_includes_module_names(self):
+        """Error message and metadata include which modules failed."""
+        run, store = _make_run_and_store()
+        # Write only market and model — selection missing
+        _write_market_artifacts(store, run["run_id"])
+        _write_model_artifacts(store, run["run_id"])
+
+        mark_stage_running(run, "shared_context")
+        result = context_assembly_handler(run, store, "shared_context")
+
+        assert result["outcome"] == "failed"
+        # Error message should name the failing module
+        assert "candidate_selection" in result["error"]["message"]
+        # Metadata should list failed module names
+        assert "failed_module_names" in result["metadata"]
+        assert "candidate_selection" in result["metadata"]["failed_module_names"]
+        # Error detail should list failed modules
+        assert "candidate_selection" in result["error"]["detail"]["failed_modules"]
+
+    def test_failed_event_includes_module_names(self):
+        """The context_assembly_failed event names failing modules."""
+        run, store = _make_run_and_store()
+        _write_market_artifacts(store, run["run_id"])
+        _write_model_artifacts(store, run["run_id"])
+
+        events_captured: list[dict] = []
+
+        def _cb(event: dict) -> None:
+            events_captured.append(event)
+
+        mark_stage_running(run, "shared_context")
+        context_assembly_handler(
+            run, store, "shared_context", event_callback=_cb,
+        )
+
+        failed_events = [
+            e for e in events_captured
+            if e.get("event_type") == "context_assembly_failed"
+        ]
+        assert len(failed_events) == 1
+        msg = failed_events[0].get("message", "")
+        assert "candidate_selection" in msg
+
 
 # =====================================================================
 #  Degraded assembly tests
@@ -956,7 +999,8 @@ def _all_stub_pipeline(**kwargs):
     handlers = kwargs.pop("handlers", {})
     handlers.setdefault("market_data", _success_handler)
     handlers.setdefault("market_model_analysis", _success_handler)
-    handlers.setdefault("scanners", _success_handler)
+    handlers.setdefault("stock_scanners", _success_handler)
+    handlers.setdefault("options_scanners", _success_handler)
     handlers.setdefault("candidate_selection", _success_handler)
     handlers.setdefault("shared_context", _success_handler)
     handlers.setdefault("candidate_enrichment", _success_handler)
@@ -992,8 +1036,8 @@ def _all_stub_pipeline(**kwargs):
         assert result["artifact_count"] == 0  # handler writes directly
 
     def test_dependency_gating(self):
-        """shared_context depends on market_model_analysis.
-        If it's not completed, stage should be skipped."""
+        """shared_context depends on market_model_analysis AND candidate_selection.
+        If market_model_analysis is not completed, stage should be skipped."""
         run = create_pipeline_run(run_id="dep-test")
         store = create_artifact_store("dep-test")
         # Only complete market_data, not market_model_analysis
@@ -1006,6 +1050,36 @@ def _all_stub_pipeline(**kwargs):
         )
         assert result["outcome"] == "skipped"
         assert "unsatisfied" in result["skipped_reason"].lower()
+
+    def test_dependency_requires_candidate_selection(self):
+        """shared_context also depends on candidate_selection.
+        If candidate_selection is not completed, stage is skipped."""
+        run = create_pipeline_run(run_id="dep-sel-test")
+        store = create_artifact_store("dep-sel-test")
+        # Complete market_data AND market_model_analysis but NOT candidate_selection
+        for stage in ("market_data", "market_model_analysis", "stock_scanners", "options_scanners"):
+            mark_stage_running(run, stage)
+            mark_stage_completed(run, stage)
+
+        result = execute_stage(
+            run, store, "shared_context",
+            handler=context_assembly_handler,
+        )
+        assert result["outcome"] == "skipped"
+        assert "unsatisfied" in result["skipped_reason"].lower()
+
+    def test_dependency_satisfied_with_both_deps(self):
+        """shared_context runs when both market_model_analysis AND
+        candidate_selection are completed."""
+        run, store = _make_run_and_store()
+        _populate_all_upstream(store, run["run_id"])
+
+        result = execute_stage(
+            run, store, "shared_context",
+            handler=context_assembly_handler,
+        )
+        assert result["outcome"] == "completed"
+        assert result["dependency_status"] == "satisfied"
 
 
 # =====================================================================
