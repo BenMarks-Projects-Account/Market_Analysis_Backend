@@ -91,7 +91,10 @@ def build_stock_strategy_user_prompt(strategy_id: str, candidate: dict[str, Any]
 
     Args:
         strategy_id: e.g. 'stock_pullback_swing'
-        candidate: full candidate dict from the scanner (includes metrics, thesis, scores)
+        candidate: full candidate dict from the scanner (includes metrics, thesis, scores).
+                   If ``candidate["market_picture_context"]`` is present, it is
+                   appended to the prompt payload so the LLM can assess the trade
+                   in the context of the full market environment.
 
     Returns:
         JSON-serialized user prompt string
@@ -107,7 +110,23 @@ def build_stock_strategy_user_prompt(strategy_id: str, candidate: dict[str, Any]
     if builder is None:
         raise ValueError(f"Unknown stock strategy_id for prompt building: {strategy_id}")
 
-    return builder(candidate)
+    prompt_str = builder(candidate)
+
+    # Augment with Market Picture context if available.
+    market_picture = candidate.get("market_picture_context")
+    if market_picture:
+        prompt_dict = json.loads(prompt_str)
+        prompt_dict["market_picture"] = {
+            "description": (
+                "Current market environment from BenTrade's 6 intelligence modules. "
+                "Use this to contextualize your BUY/PASS decision against broader "
+                "market conditions."
+            ),
+            "engines": market_picture,
+        }
+        prompt_str = json.dumps(prompt_dict, ensure_ascii=False, indent=None)
+
+    return prompt_str
 
 
 def _safe_get(d: dict, *keys: str, default: Any = None) -> Any:

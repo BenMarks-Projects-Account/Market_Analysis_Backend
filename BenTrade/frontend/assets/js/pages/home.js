@@ -2205,7 +2205,10 @@ window.BenTradePages.initHome = function initHome(rootEl){
     }
   }
 
+  let _holdRefreshBadge = false;
+
   function setRefreshingBadge(isVisible){
+    if(!isVisible && _holdRefreshBadge) return; // held during data population boot
     refreshingBadgeEl.style.display = isVisible ? 'inline-flex' : 'none';
   }
 
@@ -2801,30 +2804,89 @@ window.BenTradePages.initHome = function initHome(rootEl){
     return _loadInFlight;
   }
 
-  /* ── Boot Choice: show modal on fresh session, otherwise use cached data ── */
+  /* ── Boot: welcome modal + sequential data pipeline ── */
   const bootModal = window.BenTradeBootChoiceModal;
   const hadCached = cacheStore.renderCachedImmediately();
   if(!hadCached){
     renderFallbackBlank();
   }
 
-  if(bootModal && !bootModal.alreadyChosen()){
-    /* First visit this session — present the boot choice before any loading */
-    const bootUI = bootModal.create(scope);
-    bootUI.show().then((choice) => {
-      bootUI.destroy();
-      if(choice === 'full'){
-        /* Full App Refresh: home data + scanners + opportunities */
-        runFullAppRefresh().catch((err) => {
-          setScanError(String(err?.message || err || 'Full App Refresh failed'));
-        });
-      } else {
-        /* Home Dashboard Refresh only — no scanners */
-        runLoadSequence({ force: true, showOverlay: true, homeOnly: true, reason: 'bootstrap' }).catch(() => {
-          bindRetry();
-        });
+  /**
+   * Poll backend data-population status until it completes or fails.
+   * Updates the welcome modal phase indicators if provided.
+   */
+  async function pollDataPopulation(bootUI){
+    const POLL_INTERVAL = 2000;
+    const MAX_POLLS = 150; // 5 min max
+    for(let i = 0; i < MAX_POLLS; i++){
+      try{
+        const status = await api.getDataPopulationStatus();
+        const phase = status?.phase || 'idle';
+        if(bootUI){
+          if(phase === 'market_data'){
+            bootUI.setPhaseActive('market_data');
+          } else if(phase === 'model_analysis'){
+            bootUI.setPhaseDone('market_data');
+            bootUI.setPhaseActive('model_analysis');
+            if(status.model_progress) bootUI.setModelProgress(status.model_progress);
+          } else if(phase === 'completed'){
+            bootUI.setPhaseDone('market_data');
+            bootUI.setPhaseDone('model_analysis');
+            if(status.model_progress) bootUI.setModelProgress(status.model_progress);
+            return status;
+          } else if(phase === 'failed'){
+            bootUI.setPhaseDone('market_data');
+            if(status.model_progress) bootUI.setModelProgress(status.model_progress);
+            return status;
+          }
+        }
+        if(phase === 'completed' || phase === 'failed') return status;
+      }catch(_err){
+        // Polling error — backend may not be ready yet, keep trying
       }
+      await new Promise(r => setTimeout(r, POLL_INTERVAL));
+    }
+    return { phase: 'timeout' };
+  }
+
+  if(bootModal && !bootModal.alreadyChosen()){
+    /* First visit this session — show welcome + kick off data pipeline */
+    const bootUI = bootModal.create(scope);
+    bootUI.show();
+
+    // Hold the refreshing badge visible for the entire data population cycle
+    _holdRefreshBadge = true;
+    setRefreshingBadge(true);
+    refreshingBadgeEl.innerHTML = '<span class="badge-spinner" aria-hidden="true"></span>Populating Data\u2026';
+
+    // 1. Trigger backend data population (market data → model analysis)
+    api.triggerDataPopulation().catch(() => {});
+    bootUI.setPhaseActive('market_data');
+
+    // 2. Poll data population — wait for backend MI + model analysis to finish
+    pollDataPopulation(bootUI).then(async (finalStatus) => {
+      console.log('[DATA_POP] Population complete:', finalStatus);
+
+      // 3. NOW load the dashboard with fresh market state data
+      bootUI.setPhaseActive('dashboard');
+      try {
+        await runLoadSequence({ force: true, showOverlay: false, homeOnly: true, reason: 'post_population' });
+        bootUI.setPhaseDone('dashboard');
+      } catch(_e) {
+        bindRetry();
+      }
+
+      // 4. Close welcome modal after a brief delay so user sees completion
+      setTimeout(() => {
+        bootUI.close();
+        setTimeout(() => bootUI.destroy(), 500);
+      }, 1500);
+
+      // 5. Release badge hold and hide it
+      _holdRefreshBadge = false;
+      setRefreshingBadge(false);
     });
+
   } else {
     /* Already chose this session (SPA re-mount) — render cached data,
        then kick off a silent background refresh if the cache is stale.

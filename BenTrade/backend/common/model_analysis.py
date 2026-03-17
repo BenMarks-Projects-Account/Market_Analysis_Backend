@@ -1079,6 +1079,425 @@ def analyze_stock_strategy(
     return normalized
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# TMC FINAL TRADE DECISION
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _coerce_tmc_final_decision_output(raw: Any) -> dict[str, Any] | None:
+    """Normalize the LLM response for a TMC final trade decision.
+
+    Output contract:
+      decision: "EXECUTE" | "PASS"
+      conviction: int 0-100
+      decision_summary: str
+      technical_analysis: { setup_quality_assessment, key_metrics_cited,
+        trend_context, momentum_read, volatility_read, volume_read } | None
+      factors_considered: [{ category, factor, assessment, weight, detail }]
+      market_alignment: { overall, detail }
+      risk_assessment: { primary_risks, biggest_concern, risk_reward_verdict }
+      what_would_change_my_mind: str
+      engine_comparison: { engine_score, model_score, agreement, reasoning }
+    """
+    if isinstance(raw, list) and raw:
+        raw = raw[0] if isinstance(raw[0], dict) else None
+    if not isinstance(raw, dict):
+        return None
+
+    # ── Decision ──
+    decision = str(raw.get("decision") or "PASS").strip().upper()
+    if decision not in {"EXECUTE", "PASS"}:
+        # Accept BUY as alias for EXECUTE
+        decision = "EXECUTE" if decision == "BUY" else "PASS"
+
+    # ── Conviction ──
+    conv_raw = raw.get("conviction")
+    try:
+        conviction = int(float(conv_raw))
+    except (TypeError, ValueError):
+        conviction = 50
+    if conviction <= 1:
+        conviction = int(conviction * 100)
+    conviction = max(0, min(conviction, 100))
+
+    # ── Decision Summary ──
+    decision_summary = str(
+        raw.get("decision_summary") or raw.get("summary") or "No summary provided."
+    ).strip()
+
+    # ── Factors Considered ──
+    raw_factors = raw.get("factors_considered") or []
+    factors_considered: list[dict[str, str]] = []
+    valid_categories = {"trade_setup", "market_environment", "risk_reward", "timing", "data_quality"}
+    valid_assessments = {"favorable", "unfavorable", "neutral", "concerning"}
+    valid_weights = {"high", "medium", "low"}
+    if isinstance(raw_factors, list):
+        for f in raw_factors:
+            if isinstance(f, dict):
+                cat = str(f.get("category") or "trade_setup").lower()
+                if cat not in valid_categories:
+                    cat = "trade_setup"
+                assess = str(f.get("assessment") or "neutral").lower()
+                if assess not in valid_assessments:
+                    assess = "neutral"
+                wt = str(f.get("weight") or "medium").lower()
+                if wt not in valid_weights:
+                    wt = "medium"
+                factors_considered.append({
+                    "category": cat,
+                    "factor": str(f.get("factor") or f.get("name") or ""),
+                    "assessment": assess,
+                    "weight": wt,
+                    "detail": str(f.get("detail") or f.get("evidence") or ""),
+                })
+
+    # ── Market Alignment ──
+    ma_raw = raw.get("market_alignment") or {}
+    if not isinstance(ma_raw, dict):
+        ma_raw = {}
+    overall = str(ma_raw.get("overall") or "neutral").lower()
+    if overall not in {"aligned", "neutral", "conflicting"}:
+        overall = "neutral"
+    market_alignment = {
+        "overall": overall,
+        "detail": str(ma_raw.get("detail") or ""),
+    }
+
+    # ── Risk Assessment ──
+    ra_raw = raw.get("risk_assessment") or raw.get("risk_review") or {}
+    if not isinstance(ra_raw, dict):
+        ra_raw = {}
+    primary_risks = [
+        str(r) for r in (ra_raw.get("primary_risks") or [])
+        if isinstance(r, str) and r.strip()
+    ]
+    biggest_concern = str(ra_raw.get("biggest_concern") or "").strip()
+    rrv = str(ra_raw.get("risk_reward_verdict") or "marginal").lower()
+    if rrv not in {"favorable", "marginal", "unfavorable"}:
+        rrv = "marginal"
+    risk_assessment = {
+        "primary_risks": primary_risks,
+        "biggest_concern": biggest_concern,
+        "risk_reward_verdict": rrv,
+    }
+
+    # ── What Would Change My Mind ──
+    change_mind = str(
+        raw.get("what_would_change_my_mind") or ""
+    ).strip()
+
+    # ── Engine Comparison ──
+    ec_raw = raw.get("engine_comparison") or raw.get("engine_vs_model") or {}
+    if not isinstance(ec_raw, dict):
+        ec_raw = {}
+    try:
+        ec_engine = float(ec_raw["engine_score"]) if ec_raw.get("engine_score") is not None else None
+    except (TypeError, ValueError):
+        ec_engine = None
+    try:
+        ec_model = float(ec_raw["model_score"]) if ec_raw.get("model_score") is not None else None
+    except (TypeError, ValueError):
+        ec_model = None
+    agreement = str(ec_raw.get("agreement") or "partial").lower()
+    if agreement not in {"agree", "disagree", "partial"}:
+        agreement = "partial"
+    engine_comparison = {
+        "engine_score": ec_engine,
+        "model_score": ec_model,
+        "agreement": agreement,
+        "reasoning": str(ec_raw.get("reasoning") or ec_raw.get("notes") or ""),
+    }
+
+    # ── Technical Analysis (structured metrics breakdown) ──
+    ta_raw = raw.get("technical_analysis") or {}
+    technical_analysis = None
+    if isinstance(ta_raw, dict) and ta_raw:
+        kmc = ta_raw.get("key_metrics_cited")
+        if isinstance(kmc, dict):
+            # Coerce all values to numeric where possible
+            cleaned_kmc: dict[str, Any] = {}
+            for k, v in kmc.items():
+                try:
+                    cleaned_kmc[str(k)] = float(v) if v is not None else None
+                except (TypeError, ValueError):
+                    cleaned_kmc[str(k)] = v
+            kmc = cleaned_kmc
+        else:
+            kmc = {}
+
+        technical_analysis = {
+            "setup_quality_assessment": str(ta_raw.get("setup_quality_assessment") or "").strip(),
+            "key_metrics_cited": kmc,
+            "trend_context": str(ta_raw.get("trend_context") or "").strip(),
+            "momentum_read": str(ta_raw.get("momentum_read") or "").strip(),
+            "volatility_read": str(ta_raw.get("volatility_read") or "").strip(),
+            "volume_read": str(ta_raw.get("volume_read") or "").strip(),
+        }
+
+    return {
+        "decision": decision,
+        "conviction": conviction,
+        "decision_summary": decision_summary,
+        "technical_analysis": technical_analysis,
+        "factors_considered": factors_considered,
+        "market_alignment": market_alignment,
+        "risk_assessment": risk_assessment,
+        "what_would_change_my_mind": change_mind,
+        "engine_comparison": engine_comparison,
+    }
+
+
+def _build_fallback_tmc_decision(
+    candidate: dict[str, Any],
+    reason: str,
+    raw_text: str | None = None,
+) -> dict[str, Any]:
+    """Build a valid PASS fallback when all JSON parsing/repair fails.
+
+    Derived fields:
+      - conviction: fixed 10 (very low — model produced no usable output)
+      - engine_score: candidate["composite_score"] or candidate["setup_quality"]
+    """
+    engine_score_raw = candidate.get("composite_score") or candidate.get("setup_quality")
+    try:
+        engine_score = float(engine_score_raw)
+    except (TypeError, ValueError):
+        engine_score = None
+
+    return {
+        "decision": "PASS",
+        "conviction": 10,
+        "decision_summary": f"Model output could not be parsed. Defaulting to PASS. Reason: {reason}",
+        "factors_considered": [],
+        "market_alignment": {
+            "overall": "neutral",
+            "detail": "Unable to assess — model parse failure.",
+        },
+        "risk_assessment": {
+            "primary_risks": ["Model parse failure — review manually"],
+            "biggest_concern": "Model did not produce a usable analysis",
+            "risk_reward_verdict": "unfavorable",
+        },
+        "what_would_change_my_mind": "",
+        "engine_comparison": {
+            "engine_score": engine_score,
+            "model_score": None,
+            "agreement": "partial",
+            "reasoning": f"Model analysis unavailable: {reason}",
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "_fallback": True,
+        "_raw_text_preview": (raw_text or "")[:500] if raw_text else None,
+    }
+
+
+def analyze_tmc_final_decision(
+    *,
+    candidate: dict[str, Any],
+    market_picture_context: dict[str, Any] | None = None,
+    strategy_id: str | None = None,
+    model_url: str | None = None,
+    retries: int = 0,
+    timeout: int = 180,
+) -> dict[str, Any]:
+    """Run TMC final trade decision analysis via LLM.
+
+    Uses the dedicated TMC final decision prompt which provides the model
+    with full trade setup data AND market picture context, asking for a
+    portfolio-manager-level decision.
+
+    Pipeline:
+      1. Build TMC final decision prompt with all available data.
+      2. Call LLM with dedicated system + user prompt.
+      3. Parse and coerce to TMC final decision output contract.
+      4. On parse failure: one retry asking LLM to fix its JSON.
+      5. On total failure: return a valid PASS fallback.
+
+    Args:
+        candidate: Full or compact candidate dict.
+        market_picture_context: Full 6-engine market picture context.
+        strategy_id: Strategy identifier.
+        model_url: LLM endpoint URL.  Defaults to model_router.
+        retries: Network retry count.
+        timeout: Request timeout in seconds.
+
+    Returns:
+        TMC final decision dict matching the output contract.
+
+    Raises:
+        LocalModelUnavailableError: if the LLM endpoint is unreachable.
+    """
+    import logging
+    import requests as _requests
+
+    if model_url is None:
+        from app.services.model_router import get_model_endpoint
+        model_url = get_model_endpoint()
+
+    from common.json_repair import REPAIR_METRICS, extract_and_repair_json
+    from common.tmc_final_decision_prompts import (
+        TMC_FINAL_DECISION_SYSTEM_PROMPT,
+        build_tmc_final_decision_prompt,
+    )
+
+    _log = logging.getLogger("bentrade.model_analysis")
+
+    # Build prompts
+    user_prompt = build_tmc_final_decision_prompt(
+        candidate=candidate,
+        market_picture_context=market_picture_context,
+        strategy_id=strategy_id,
+    )
+    symbol = candidate.get("symbol", "???")
+
+    _log.info(
+        "[TMC_FINAL_DECISION_TRACE] symbol=%s strategy=%s engine_score=%s",
+        symbol,
+        strategy_id or "unknown",
+        candidate.get("composite_score") or candidate.get("setup_quality"),
+    )
+
+    payload = {
+        "messages": [
+            {"role": "system", "content": TMC_FINAL_DECISION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        "max_tokens": 3000,
+        "temperature": 0.0,
+    }
+
+    def _call_llm(messages: list[dict], label: str) -> str | None:
+        try:
+            _log.info("[TMC_FINAL_DECISION] POST %s (%s, timeout=%ds)", model_url, label, timeout)
+            resp = _requests.post(
+                model_url,
+                json={"messages": messages, "max_tokens": 3000, "temperature": 0.0, "stream": False},
+                timeout=timeout,
+            )
+            _log.info(
+                "[TMC_FINAL_DECISION] response HTTP %d (%d bytes, %.1fs) [%s]",
+                resp.status_code, len(resp.content), resp.elapsed.total_seconds(), label,
+            )
+            resp.raise_for_status()
+        except RequestException as exc:
+            _log.warning("[TMC_FINAL_DECISION_TRACE] %s network error: %s", label, exc)
+            raise
+
+        response_json = None
+        try:
+            response_json = resp.json()
+        except Exception:
+            pass
+
+        assistant_text = None
+        if isinstance(response_json, dict):
+            choices = response_json.get("choices") or []
+            if choices and isinstance(choices, list) and isinstance(choices[0], dict):
+                first = choices[0]
+                message = first.get("message")
+                if isinstance(message, dict) and "content" in message:
+                    assistant_text = message.get("content")
+                elif "text" in first:
+                    assistant_text = first.get("text")
+        if assistant_text is None:
+            assistant_text = getattr(resp, "text", "")
+
+        return assistant_text
+
+    # ── Network retry loop ───────────────────────────────────────
+    last_error: Exception | None = None
+    assistant_text: str | None = None
+    attempt = 0
+    while attempt <= int(max(retries, 0)):
+        attempt += 1
+        try:
+            assistant_text = _call_llm(payload["messages"], f"attempt-{attempt}")
+            break
+        except RequestException as exc:
+            last_error = exc
+            _log.warning(
+                "[TMC_FINAL_DECISION_TRACE] attempt %d/%d network fail: %s",
+                attempt, retries + 1, exc,
+            )
+
+    if assistant_text is None:
+        if isinstance(last_error, RequestException):
+            raise LocalModelUnavailableError(
+                f"Local model endpoint unavailable at {model_url}: {last_error}"
+            ) from last_error
+        raise RuntimeError(f"TMC final decision model analysis failed: {last_error}")
+
+    _log.debug("[TMC_FINAL_DECISION_TRACE] raw_response_len=%d", len(assistant_text or ""))
+
+    # ── Parse + repair ───────────────────────────────────────────
+    parsed, parse_method = extract_and_repair_json(assistant_text)
+
+    if parse_method and parse_method != "direct":
+        _log.info(
+            "[TMC_FINAL_DECISION_TRACE] JSON required repair: method=%s symbol=%s",
+            parse_method, symbol,
+        )
+
+    normalized = _coerce_tmc_final_decision_output(parsed) if parsed is not None else None
+
+    # ── Retry-with-fix on parse failure ──────────────────────────
+    if normalized is None and assistant_text:
+        _log.warning(
+            "[TMC_FINAL_DECISION_TRACE] parse failed, attempting retry-with-fix symbol=%s",
+            symbol,
+        )
+        fix_messages = payload["messages"] + [
+            {"role": "assistant", "content": assistant_text},
+            {"role": "user", "content": (
+                "Your previous response was not valid JSON. "
+                "Please return ONLY the raw JSON object matching the schema "
+                "from the system prompt. No commentary, no fences. "
+                "Start with { and end with }."
+            )},
+        ]
+        try:
+            fix_text = _call_llm(fix_messages, "retry-fix")
+            if fix_text:
+                parsed2, parse_method2 = extract_and_repair_json(fix_text)
+                normalized = _coerce_tmc_final_decision_output(parsed2) if parsed2 is not None else None
+                if normalized is not None:
+                    parse_method = f"retry_fix+{parse_method2 or 'unknown'}"
+                    _log.info(
+                        "[TMC_FINAL_DECISION_TRACE] retry-with-fix SUCCEEDED symbol=%s method=%s",
+                        symbol, parse_method,
+                    )
+        except RequestException:
+            _log.warning("[TMC_FINAL_DECISION_TRACE] retry-fix network error, proceeding to fallback")
+
+    # ── Fallback on total failure ────────────────────────────────
+    if normalized is None:
+        _log.error(
+            "[TMC_FINAL_DECISION_TRACE] ALL PARSE FAILED — returning fallback symbol=%s",
+            symbol,
+        )
+        return _build_fallback_tmc_decision(
+            candidate,
+            reason="JSON extraction + repair + retry all failed",
+            raw_text=assistant_text,
+        )
+
+    # ── Success path ─────────────────────────────────────────────
+    normalized["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+    if parse_method and parse_method != "direct":
+        normalized.setdefault("_parse_method", parse_method)
+
+    _log.info(
+        "[TMC_FINAL_DECISION_TRACE] OK symbol=%s decision=%s conviction=%s parse=%s",
+        symbol,
+        normalized.get("decision"),
+        normalized.get("conviction"),
+        parse_method,
+    )
+
+    return normalized
+
+
 # ── News & Sentiment Model Analysis ─────────────────────────────────────
 
 

@@ -4,40 +4,53 @@
   <!-- ── Banner ──────────────────────────────────────────────── -->
   <div class="tmc-banner">
     <h2 class="tmc-banner-title">Trade Management Center</h2>
-    <p class="tmc-banner-subtitle">Pipeline candidates ready for review and execution</p>
+    <p class="tmc-banner-subtitle">Workflow-driven candidate review and execution</p>
   </div>
 
-  <!-- ── Run selector bar ────────────────────────────────────── -->
+  <!-- ── Workflow trigger bar ────────────────────────────────── -->
   <div class="tmc-control-bar">
     <div class="tmc-control-left">
-      <label class="tmc-label">Pipeline Run</label>
-      <select id="tmcRunPicker" class="tmc-select">
-        <option value="">— Select Run —</option>
-      </select>
-      <button id="tmcRefreshBtn" class="btn tmc-btn" title="Refresh run list">↻ Refresh</button>
-      <button id="tmcLatestBtn" class="btn tmc-btn" title="Load most recent run">Latest</button>
+      <button id="tmcRunStock" class="btn tmc-btn" title="Run stock opportunity workflow">▶ Run Stock</button>
+      <button id="tmcRunOptions" class="btn tmc-btn" title="Run options opportunity workflow">▶ Run Options</button>
+      <button id="tmcRefreshBtn" class="btn tmc-btn" title="Load latest results">↻ Refresh</button>
     </div>
     <div class="tmc-control-right">
-      <span id="tmcRunStatus" class="tmc-run-status"></span>
-      <span id="tmcRunMeta" class="tmc-run-meta"></span>
+      <span id="tmcStockStatus" class="tmc-run-status"></span>
+      <span id="tmcOptionsStatus" class="tmc-run-status"></span>
     </div>
   </div>
 
-  <!-- ═══ SECTION 1 — Trade Builder Candidates ═══ -->
+  <!-- ═══ SECTION 1 — Stock Opportunities ═══ -->
   <section class="tmc-section">
     <div class="tmc-section-header">
-      <h3 class="tmc-section-title">Trade Builder Candidates</h3>
-      <span id="tmcCandidateCount" class="tmc-count-badge">0</span>
+      <h3 class="tmc-section-title">Stock Opportunities</h3>
+      <span id="tmcStockCount" class="tmc-count-badge">0</span>
+      <span id="tmcStockQuality" class="tmc-quality-badge"></span>
     </div>
-    <div id="tmcCandidateGrid" class="tmc-candidate-grid">
-      <div class="tmc-empty-state" id="tmcEmptyState">
+    <div id="tmcStockGrid" class="tmc-candidate-grid">
+      <div class="tmc-empty-state">
         <div class="tmc-empty-icon">◎</div>
-        <div class="tmc-empty-text">Select a pipeline run to view candidates</div>
+        <div class="tmc-empty-text">Run or refresh to load stock opportunities</div>
       </div>
     </div>
   </section>
 
-  <!-- ═══ SECTION 2 — Active Trade Candidates ═══ -->
+  <!-- ═══ SECTION 2 — Options Opportunities ═══ -->
+  <section class="tmc-section">
+    <div class="tmc-section-header">
+      <h3 class="tmc-section-title">Options Opportunities</h3>
+      <span id="tmcOptionsCount" class="tmc-count-badge">0</span>
+      <span id="tmcOptionsQuality" class="tmc-quality-badge"></span>
+    </div>
+    <div id="tmcOptionsGrid" class="tmc-candidate-grid">
+      <div class="tmc-empty-state">
+        <div class="tmc-empty-icon">◎</div>
+        <div class="tmc-empty-text">Run or refresh to load options opportunities</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ SECTION 3 — Active Trade Candidates ═══ -->
   <section class="tmc-section">
     <div class="tmc-section-header">
       <h3 class="tmc-section-title">Active Trade Candidates</h3>

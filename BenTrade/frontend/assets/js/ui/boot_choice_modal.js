@@ -95,61 +95,98 @@ window.BenTradeBootChoiceModal = (function(){
     const root = doc.createElement('div');
     root.className = 'boot-choice-overlay';
     root.innerHTML = `
-      <div class="boot-choice-modal" role="dialog" aria-modal="true" aria-label="Choose startup mode">
+      <div class="boot-choice-modal" role="dialog" aria-modal="true" aria-label="Welcome to BenTrade">
         <div class="boot-choice-header">
           <div class="brand-badge" aria-hidden="true">
             <span class="bt">BT</span>
             <span class="brand-name">BenTrade</span>
           </div>
         </div>
-        <div class="boot-choice-subtitle">Choose how to start your session</div>
-        <div class="boot-choice-cards">
-          <button class="boot-choice-card boot-choice-card--home" type="button" data-choice="home">
-            <span class="boot-choice-card-label">Home Dashboard Refresh</span>
-            <span class="boot-choice-card-desc">
-              Load regime, playbook, market data, and portfolio risk.<br>
-              Scanners will <strong>not</strong> run — faster startup.
-            </span>
-          </button>
-          <button class="boot-choice-card boot-choice-card--full" type="button" data-choice="full">
-            <span class="boot-choice-card-label">Full App Refresh</span>
-            <span class="boot-choice-card-desc">
-              Home data <strong>+</strong> all scanners &amp; strategy analysis.<br>
-              Populates Opportunity Engine with top 5 picks.
-            </span>
-          </button>
+        <div class="boot-choice-subtitle">Welcome to BenTrade</div>
+        <div class="boot-welcome-body">
+          <div class="boot-welcome-status">
+            <span class="boot-welcome-spinner" aria-hidden="true"></span>
+            <span class="boot-welcome-text">BenTrade Data Population Has Begun</span>
+          </div>
+          <div class="boot-welcome-phases">
+            <div class="boot-phase" data-phase="market_data">
+              <span class="boot-phase-icon">&#9711;</span>
+              <span class="boot-phase-label">Market Data</span>
+            </div>
+            <div class="boot-phase" data-phase="model_analysis">
+              <div class="boot-phase-label">
+                <span class="boot-phase-icon">&#9711;</span>
+                Model Analysis
+              </div>
+              <div class="boot-model-engines" id="bootModelEngines"></div>
+            </div>
+            <div class="boot-phase" data-phase="dashboard">
+              <span class="boot-phase-icon">&#9711;</span>
+              <span class="boot-phase-label">Dashboard</span>
+            </div>
+          </div>
         </div>
         <div class="boot-choice-footer">
-          <span class="boot-choice-hint">This choice is only shown once per session.</span>
+          <span class="boot-choice-hint">Loading will continue in the background.</span>
         </div>
       </div>
     `;
 
     host.appendChild(root);
 
-    let _resolve = null;
+    const phaseEls = {
+      market_data: root.querySelector('[data-phase="market_data"]'),
+      model_analysis: root.querySelector('[data-phase="model_analysis"]'),
+      dashboard: root.querySelector('[data-phase="dashboard"]'),
+    };
+    const modelEnginesEl = root.querySelector('#bootModelEngines');
 
-    function handleClick(e){
-      const btn = e.target.closest('[data-choice]');
-      if(!btn) return;
-      const choice = btn.getAttribute('data-choice');
-      if(choice === 'home' || choice === 'full'){
-        markChosen();
-        close();
-        if(typeof _resolve === 'function'){
-          _resolve(choice);
-          _resolve = null;
+    function setPhaseActive(phase){
+      Object.entries(phaseEls).forEach(([key, el]) => {
+        if(!el) return;
+        el.classList.remove('active', 'done');
+        const icon = el.querySelector('.boot-phase-icon');
+        if(key === phase){
+          el.classList.add('active');
+          if(icon) icon.textContent = '\u25F7'; // spinning indicator
         }
-      }
+      });
     }
 
-    root.addEventListener('click', handleClick);
+    function setPhaseDone(phase){
+      const el = phaseEls[phase];
+      if(!el) return;
+      el.classList.remove('active');
+      el.classList.add('done');
+      const icon = el.querySelector('.boot-phase-icon');
+      if(icon) icon.textContent = '\u2713'; // checkmark
+    }
+
+    /** Update the per-engine model analysis sub-progress list.
+     *  @param {Object<string,string>} progress — e.g. {breadth_participation: "running", ...}
+     */
+    function setModelProgress(progress){
+      if(!modelEnginesEl || !progress) return;
+      const ENGINE_LABELS = {
+        breadth_participation: 'Breadth',
+        volatility_options: 'Volatility',
+        cross_asset_macro: 'Cross-Asset',
+        flows_positioning: 'Flows',
+        liquidity_conditions: 'Liquidity',
+        news_sentiment: 'News',
+      };
+      let html = '';
+      for(const [key, label] of Object.entries(ENGINE_LABELS)){
+        const st = progress[key] || 'pending';
+        const icon = st === 'done' ? '\u2713' : st === 'running' ? '\u25F7' : st === 'failed' ? '\u2717' : '\u00B7';
+        html += `<span class="boot-engine-item boot-engine-${st}"><span class="boot-engine-icon">${icon}</span>${label}</span>`;
+      }
+      modelEnginesEl.innerHTML = html;
+    }
 
     function show(){
+      markChosen();
       root.classList.add('is-open');
-      return new Promise(function(resolve){
-        _resolve = resolve;
-      });
     }
 
     function close(){
@@ -157,7 +194,6 @@ window.BenTradeBootChoiceModal = (function(){
     }
 
     function destroy(){
-      root.removeEventListener('click', handleClick);
       root.remove();
     }
 
@@ -165,6 +201,9 @@ window.BenTradeBootChoiceModal = (function(){
       show,
       close,
       destroy,
+      setPhaseActive,
+      setPhaseDone,
+      setModelProgress,
       isOpen: () => root.classList.contains('is-open'),
     };
   }

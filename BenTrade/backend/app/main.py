@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.routes_frontend import router as frontend_router
 from app.api.routes_admin import router as admin_router
+from app.api.routes_data_population import router as data_population_router
 from app.api.routes_dev import router as dev_router
 from app.api.routes_health import router as health_router
 from app.api.routes_snapshots import router as snapshots_router
@@ -40,6 +41,7 @@ from app.api.routes_news_sentiment import router as news_sentiment_router
 from app.api.routes_volatility_options import router as volatility_options_router
 # NOTE: routes_pipeline_monitor removed — deprecated as part of workflow pivot (Prompt 0)
 from app.api.routes_scanner_review import router as scanner_review_router
+from app.api.routes_tmc import router as tmc_router
 from app.clients.finnhub_client import FinnhubClient
 from app.clients.fred_client import FredClient
 from app.clients.polygon_client import PolygonClient
@@ -85,6 +87,10 @@ from app.services.news_sentiment_service import NewsSentimentService
 from app.services.market_context_service import MarketContextService
 from app.services.volatility_options_data_provider import VolatilityOptionsDataProvider
 from app.services.volatility_options_service import VolatilityOptionsService
+from app.services.data_population_service import DataPopulationService
+from app.services.model_router import async_model_request, model_request
+from app.workflows.market_intelligence_runner import MarketIntelligenceDeps
+from app.workflows.tmc_bootstrap import build_tmc_stock_deps, build_tmc_options_deps
 
 
 def _setup_logging() -> None:
@@ -331,6 +337,33 @@ def create_app() -> FastAPI:
     app.state.snapshot_dir = snapshot_dir
     app.state.platform_settings = platform_settings
 
+    # -- TMC workflow dependencies (Prompt 10.5) ----------------------------
+    app.state.tmc_stock_deps = build_tmc_stock_deps(
+        stock_engine_service=stock_engine_service,
+        model_request_fn=model_request,
+    )
+    app.state.tmc_options_deps = build_tmc_options_deps(
+        base_data_service=base_data_service,
+    )
+
+    # -- Data Population service (MI scheduler) ----------------------------
+    mi_deps = MarketIntelligenceDeps(
+        market_context_service=market_context_service,
+        breadth_service=breadth_service,
+        volatility_options_service=vol_service,
+        cross_asset_macro_service=cross_asset_macro_service,
+        flows_positioning_service=flows_positioning_service,
+        liquidity_conditions_service=liquidity_conditions_service,
+        news_sentiment_service=news_sentiment_service,
+        http_client=http_client,
+        model_request_fn=async_model_request,
+    )
+    data_population_service = DataPopulationService(
+        data_dir=data_dir,
+        mi_deps=mi_deps,
+    )
+    app.state.data_population_service = data_population_service
+
     app.include_router(health_router)
     app.include_router(options_router)
     app.include_router(underlying_router)
@@ -362,6 +395,8 @@ def create_app() -> FastAPI:
     app.include_router(snapshots_router)
     # NOTE: pipeline_monitor_router removed — deprecated as part of workflow pivot (Prompt 0)
     app.include_router(scanner_review_router)
+    app.include_router(tmc_router)
+    app.include_router(data_population_router)
     app.include_router(dev_router)
     app.include_router(frontend_router)
 
@@ -411,8 +446,13 @@ def create_app() -> FastAPI:
             },
         )
 
+    @app.on_event("startup")
+    async def _startup() -> None:
+        await app.state.data_population_service.start()
+
     @app.on_event("shutdown")
     async def _shutdown() -> None:
+        await app.state.data_population_service.stop()
         await app.state.http_client.aclose()
 
     return app

@@ -2072,6 +2072,13 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
   text-transform: lowercase;
 }
 
+/* ── TMC Stock Grid — standard trade card overrides ────────────────── */
+/* Trade cards rendered via renderFullCard inside the TMC grid need
+   spacing adjustments to fit the TMC candidate-grid layout. */
+.tmc-candidate-grid .trade-card {
+  margin-bottom: 0;
+}
+
 /* Detail metrics row */
 .tbp-detail-metrics {
   display: flex; flex-wrap: wrap; gap: 8px;

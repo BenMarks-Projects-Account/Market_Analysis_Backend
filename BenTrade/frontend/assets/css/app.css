@@ -37,7 +37,7 @@
             font-family: 'Inter', 'Segoe UI', Roboto, system-ui, -apple-system, sans-serif;
             color: var(--text);
             -webkit-font-smoothing:antialiased;
-            padding: 18px;
+            padding: 0;
             background:
               radial-gradient(900px 520px at 50% 18%, rgba(0,234,255,0.14), transparent 62%),
               radial-gradient(1200px 700px at 50% 120%, rgba(0,234,255,0.08), transparent 55%),
@@ -107,7 +107,7 @@
         .container{max-width:1480px;margin:0 auto;padding:10px 14px}
 
         /* App shell: pin to viewport so header/nav remain visible while main scrolls */
-        .shell{ display:flex; flex-direction:column; height: calc(100vh - 36px); overflow: hidden; }
+        .shell{ display:flex; flex-direction:column; height: 100vh; overflow: hidden; }
 
         /* Prevent header/banner from shrinking; let it size naturally */
         .shell > header, .shell > .banner, .shell > .topbar, .shell > .titlebar, .shell > .app-header { flex: 0 0 auto; }
@@ -140,7 +140,7 @@
             grid-template-columns: 280px 1fr;
             gap:18px;
             align-items:start;
-            margin-top: 10px;
+            margin-top: 6px;
             /* grow to fill remaining shell height; keep overflow confined */
             flex: 1 1 0;
             min-height: 0; /* allow children to use flex-based scrolling */
@@ -1993,6 +1993,8 @@ main.main{
     position: static;
     overflow: auto;
     padding: 16px;
+    display:flex;
+    flex-direction:column;
     border-radius: 18px;
     border: 1px solid rgba(128,170,202,0.34);
     background:
@@ -4828,6 +4830,7 @@ main.main{
     display:inline-flex;
     align-items:center;
     justify-content:center;
+    gap:6px;
     padding:2px 10px;
     border-radius:999px;
     border:1px solid rgba(0,234,255,0.28);
@@ -4836,6 +4839,16 @@ main.main{
     box-shadow: inset 0 0 0 1px rgba(0,234,255,0.1), 0 0 14px rgba(0,234,255,0.12);
     font-size:11px;
     letter-spacing:0.01em;
+}
+
+.home-refreshing-badge .badge-spinner{
+    display:inline-block;
+    width:11px;
+    height:11px;
+    border:2px solid rgba(0,234,255,0.2);
+    border-top-color: rgba(0,234,255,0.85);
+    border-radius:50%;
+    animation: homeLoadingSpin 0.7s linear infinite;
 }
 
 .home-loading-overlay{
@@ -4930,14 +4943,14 @@ main.main{
 }
 
 .boot-choice-modal{
-    width:min(560px, 92vw);
+    width:min(780px, 94vw);
     border:1px solid rgba(0,234,255,0.32);
     border-radius:16px;
     background: linear-gradient(180deg, rgba(8,13,22,0.97), rgba(4,8,14,0.99));
     box-shadow: inset 0 0 0 1px rgba(0,234,255,0.1), 0 28px 64px rgba(0,0,0,0.55), 0 0 32px rgba(0,234,255,0.10);
-    padding:28px 24px 20px;
+    padding:32px 32px 24px;
     display:grid;
-    gap:18px;
+    gap:20px;
 }
 
 .boot-choice-header{
@@ -4948,64 +4961,116 @@ main.main{
 
 .boot-choice-subtitle{
     text-align:center;
-    font-size:13px;
-    color: rgba(210,247,255,0.72);
-    letter-spacing:0.01em;
+    font-size:15px;
+    color: rgba(210,247,255,0.88);
+    letter-spacing:0.02em;
+    font-weight:600;
 }
 
-.boot-choice-cards{
+.boot-welcome-body{
+    display:grid;
+    gap:18px;
+    justify-items:center;
+}
+
+.boot-welcome-status{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-size:13px;
+    color: rgba(0,234,255,0.88);
+}
+
+.boot-welcome-spinner{
+    display:inline-block;
+    width:16px;
+    height:16px;
+    border:2px solid rgba(0,234,255,0.25);
+    border-top-color: rgba(0,234,255,0.9);
+    border-radius:50%;
+    animation: boot-spin 0.8s linear infinite;
+}
+
+@keyframes boot-spin{
+    to{ transform: rotate(360deg); }
+}
+
+.boot-welcome-phases{
+    display:grid;
+    grid-template-columns: 1fr 1.4fr 1fr;
+    grid-template-rows: auto auto;
+    gap:14px;
+    width:100%;
+}
+
+.boot-phase{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:12px 16px;
+    border-radius:10px;
+    border:1px solid rgba(0,234,255,0.15);
+    background: rgba(7,12,20,0.6);
+    font-size:13px;
+    color: rgba(210,247,255,0.55);
+    transition: border-color 0.2s, color 0.2s;
+}
+
+/* Model Analysis box spans its column + the row below for engine sub-items */
+.boot-phase[data-phase="model_analysis"]{
+    flex-direction:column;
+    align-items:flex-start;
+    grid-row: 1 / 3;
+    grid-column: 2;
+}
+.boot-phase[data-phase="model_analysis"] .boot-phase-label{
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+
+.boot-phase.active{
+    border-color: rgba(0,234,255,0.45);
+    color: rgba(0,234,255,0.9);
+}
+
+.boot-phase.active .boot-phase-icon{
+    animation: boot-spin 1s linear infinite;
+}
+
+.boot-phase.done{
+    border-color: rgba(126,247,184,0.35);
+    color: rgba(126,247,184,0.9);
+}
+
+.boot-phase-icon{
+    font-size:14px;
+    flex-shrink:0;
+}
+
+/* ── Per-engine model analysis sub-progress ── */
+.boot-model-engines{
     display:grid;
     grid-template-columns: 1fr 1fr;
-    gap:14px;
+    gap:5px 12px;
+    margin-top:8px;
+    width:100%;
+    padding-top:8px;
+    border-top:1px solid rgba(0,234,255,0.10);
 }
-
-.boot-choice-card{
-    display:grid;
-    gap:8px;
-    justify-items:center;
-    text-align:center;
-    padding:20px 14px;
-    border-radius:12px;
-    border:1px solid rgba(0,234,255,0.22);
-    background: linear-gradient(180deg, rgba(7,12,20,0.82), rgba(4,8,14,0.92));
-    cursor:pointer;
-    transition: border-color 0.18s, box-shadow 0.18s, transform 0.14s;
-    color: rgba(215,251,255,0.96);
-    font-family: inherit;
-    font-size: inherit;
+.boot-engine-item{
+    display:inline-flex;
+    align-items:center;
+    gap:4px;
+    font-size:11px;
+    color:rgba(210,247,255,0.45);
+    transition:color 0.2s;
 }
-
-.boot-choice-card:hover{
-    border-color: rgba(0,234,255,0.52);
-    box-shadow: 0 0 22px rgba(0,234,255,0.16), inset 0 0 0 1px rgba(0,234,255,0.12);
-    transform: translateY(-2px);
-}
-
-.boot-choice-card:focus-visible{
-    outline:2px solid rgba(0,234,255,0.7);
-    outline-offset:2px;
-}
-
-.boot-choice-card-label{
-    font-size:14px;
-    font-weight:700;
-    letter-spacing:0.02em;
-    color: rgba(0,234,255,0.96);
-}
-
-.boot-choice-card-desc{
-    font-size:11.5px;
-    line-height:1.5;
-    color: rgba(210,247,255,0.68);
-}
-
-.boot-choice-card--home:hover .boot-choice-card-label{
-    color: rgba(126,247,184,0.96);
-}
-
-.boot-choice-card--full:hover .boot-choice-card-label{
-    color: rgba(0,234,255,0.99);
-}
+.boot-engine-icon{ font-size:12px; flex-shrink:0; }
+.boot-engine-running{ color:rgba(0,234,255,0.85); }
+.boot-engine-running .boot-engine-icon{ animation: boot-spin 1s linear infinite; }
+.boot-engine-done{ color:rgba(126,247,184,0.85); }
+.boot-engine-failed{ color:rgba(255,110,110,0.85); }
 
 .boot-choice-footer{
     text-align:center;
@@ -6293,4 +6358,465 @@ main.main{
 @keyframes btToastIn{
     from{ opacity:0; transform:translateY(12px); }
     to{ opacity:1; transform:translateY(0); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   BenTrade Brand Beacon — right-rail animated identity panel
+   Composition: Hero Rocket · Launch Beam · Cyber-Earth Globe · Brand Footer
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.bt-brand-section{
+    overflow:hidden;
+    flex:1 1 auto;
+    display:flex;
+    flex-direction:column;
+}
+
+.bt-brand-panel{
+    position:relative;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding:0;
+    min-height:540px;
+    overflow:visible;
+    flex:1 1 auto;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   LAYER 1 — Hero Zone (rocket / launch vehicle)
+   ───────────────────────────────────────────────────────────────────── */
+
+.bt-hero-zone{
+    position:relative;
+    width:100%;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    padding:20px 0 0;
+    min-height:160px;
+    flex:0 0 auto;
+}
+
+/* Background aura */
+.bt-hero-glow{
+    position:absolute;
+    width:140px; height:140px;
+    border-radius:50%;
+    top:50%; left:50%;
+    transform:translate(-50%, -55%);
+    background:radial-gradient(circle, rgba(0,234,255,0.18) 0%, rgba(0,234,255,0.05) 45%, transparent 70%);
+    animation:btGlowPulse 4s ease-in-out infinite;
+    pointer-events:none;
+}
+
+@keyframes btGlowPulse{
+    0%,100%{ transform:translate(-50%, -55%) scale(1); opacity:0.7; }
+    50%{ transform:translate(-50%, -55%) scale(1.25); opacity:1; }
+}
+
+/* Orbital rings */
+.bt-hero-rings{
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    pointer-events:none;
+}
+.bt-ring{
+    position:absolute;
+    border-radius:50%;
+    border:1px solid transparent;
+}
+.bt-ring--outer{
+    width:160px; height:160px;
+    border-color:rgba(0,234,255,0.07);
+    animation:btRingSpin 28s linear infinite;
+}
+.bt-ring--outer::after{
+    content:'';
+    position:absolute;
+    top:-3px; left:50%;
+    width:6px; height:6px;
+    border-radius:50%;
+    background:var(--cyan);
+    box-shadow:0 0 10px var(--cyan), 0 0 24px rgba(0,234,255,0.5);
+    transform:translateX(-50%);
+}
+.bt-ring--mid{
+    width:120px; height:120px;
+    border-color:rgba(0,234,255,0.05);
+    animation:btRingSpin 20s linear infinite reverse;
+}
+.bt-ring--mid::after{
+    content:'';
+    position:absolute;
+    bottom:-2px; left:50%;
+    width:4px; height:4px;
+    border-radius:50%;
+    background:rgba(0,234,255,0.7);
+    box-shadow:0 0 8px rgba(0,234,255,0.5);
+    transform:translateX(-50%);
+}
+.bt-ring--inner{
+    width:80px; height:80px;
+    border-color:rgba(0,234,255,0.04);
+    animation:btRingSpin 14s linear infinite;
+}
+
+@keyframes btRingSpin{
+    from{ transform:rotate(0deg); }
+    to{ transform:rotate(360deg); }
+}
+
+/* Hero visual container */
+.bt-hero-visual{
+    position:relative;
+    z-index:2;
+    width:70px;
+    height:120px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    animation:btHeroFloat 5s ease-in-out infinite;
+}
+
+@keyframes btHeroFloat{
+    0%,100%{ transform:translateY(0); }
+    50%{ transform:translateY(-6px); }
+}
+
+.bt-hero-asset{
+    max-width:100%;
+    max-height:100%;
+    object-fit:contain;
+    border-radius:8px;
+    filter:drop-shadow(0 0 22px rgba(0,234,255,0.35));
+}
+
+.bt-hero-fallback{
+    display:none;
+    align-items:center;
+    justify-content:center;
+    width:100%;
+    height:100%;
+}
+
+.bt-rocket-svg{
+    width:56px;
+    height:105px;
+    filter:drop-shadow(0 0 16px rgba(0,234,255,0.4)) drop-shadow(0 6px 24px rgba(0,234,255,0.2));
+}
+
+.bt-thrust-plume{
+    animation:btThrustFlicker 1.2s ease-in-out infinite alternate;
+    transform-origin:center top;
+}
+
+@keyframes btThrustFlicker{
+    0%{ opacity:0.6; ry:16; }
+    50%{ opacity:1; ry:22; }
+    100%{ opacity:0.7; ry:18; }
+}
+
+/* Thrust trail dots */
+.bt-thrust-trail{
+    position:absolute;
+    bottom:-6px;
+    left:50%;
+    transform:translateX(-50%);
+    width:20px;
+    height:50px;
+    pointer-events:none;
+    z-index:1;
+}
+.bt-thrust-dot{
+    position:absolute;
+    left:50%;
+    width:3px; height:3px;
+    border-radius:50%;
+    background:var(--cyan);
+    transform:translateX(-50%);
+    opacity:0;
+}
+.bt-thrust-dot--1{ animation:btDotFall 2.4s 0s ease-in infinite; }
+.bt-thrust-dot--2{ animation:btDotFall 2.4s 0.8s ease-in infinite; }
+.bt-thrust-dot--3{ animation:btDotFall 2.4s 1.6s ease-in infinite; }
+
+@keyframes btDotFall{
+    0%{ top:0; opacity:0.9; transform:translateX(-50%) scale(1); }
+    60%{ opacity:0.5; }
+    100%{ top:45px; opacity:0; transform:translateX(-50%) scale(0.4); }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   LAUNCH BEAM — visual bridge between rocket exhaust and globe
+   ───────────────────────────────────────────────────────────────────── */
+
+.bt-launch-beam{
+    width:2px;
+    height:24px;
+    margin:-4px auto 0;
+    background:linear-gradient(180deg, rgba(0,234,255,0.35) 0%, rgba(0,234,255,0.08) 60%, transparent 100%);
+    border-radius:1px;
+    flex:0 0 auto;
+    animation:btBeamPulse 3s ease-in-out infinite;
+}
+
+@keyframes btBeamPulse{
+    0%,100%{ opacity:0.6; height:24px; }
+    50%{ opacity:1; height:30px; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   LAYER 2 — Full Cyber-Earth Globe
+   ───────────────────────────────────────────────────────────────────── */
+
+.bt-globe-zone{
+    position:relative;
+    width:100%;
+    flex:1 1 auto;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    min-height:240px;
+    overflow:visible;
+}
+
+.bt-globe-glow{
+    position:absolute;
+    width:260px; height:260px;
+    border-radius:50%;
+    top:50%; left:50%;
+    transform:translate(-50%, -50%);
+    background:radial-gradient(circle, rgba(0,234,255,0.12) 0%, rgba(0,234,255,0.04) 45%, transparent 72%);
+    pointer-events:none;
+    animation:btGlobeGlow 6s ease-in-out infinite;
+}
+
+@keyframes btGlobeGlow{
+    0%,100%{ opacity:0.6; transform:translate(-50%,-50%) scale(1); }
+    50%{ opacity:1; transform:translate(-50%,-50%) scale(1.06); }
+}
+
+.bt-globe-svg{
+    width:240px;
+    height:240px;
+    flex-shrink:0;
+}
+
+/* Continent silhouettes */
+.bt-continent{
+    fill:rgba(0,234,255,0.055);
+    stroke:rgba(0,234,255,0.18);
+    stroke-width:0.6;
+    stroke-linejoin:round;
+    filter:url(#continentGlow);
+}
+.bt-continent--minor{
+    fill:rgba(0,234,255,0.04);
+    stroke:rgba(0,234,255,0.12);
+    stroke-width:0.5;
+}
+
+/* Hub node pulse animation */
+.bt-hub{
+    animation:btHubPulse 3s ease-in-out infinite;
+}
+.bt-hub--ny{   animation-delay:0s; }
+.bt-hub--ldn{  animation-delay:0.5s; }
+.bt-hub--sao{  animation-delay:1.0s; }
+.bt-hub--ffm{  animation-delay:1.5s; }
+.bt-hub--lag{  animation-delay:2.0s; }
+.bt-hub--jnb{  animation-delay:2.5s; }
+.bt-hub--s1{   animation-delay:0.3s; }
+.bt-hub--s2{   animation-delay:0.8s; }
+.bt-hub--s3{   animation-delay:1.3s; }
+.bt-hub--s4{   animation-delay:0.2s; }
+.bt-hub--s5{   animation-delay:0.7s; }
+.bt-hub--s6{   animation-delay:1.8s; }
+.bt-hub--s7{   animation-delay:2.3s; }
+.bt-hub--s8{   animation-delay:1.1s; }
+.bt-hub--s9{   animation-delay:2.8s; }
+.bt-hub--s10{  animation-delay:1.6s; }
+.bt-hub--s11{  animation-delay:0.4s; }
+.bt-hub--s12{  animation-delay:1.9s; }
+.bt-hub--s13{  animation-delay:2.1s; }
+.bt-hub--s14{  animation-delay:0.9s; }
+
+@keyframes btHubPulse{
+    0%,100%{ opacity:0.5; }
+    50%{ opacity:1; }
+}
+
+/* Network arc draw animation */
+.bt-arc-path{
+    fill:none;
+    stroke:#00eaff;
+    stroke-width:0.8;
+    stroke-dasharray:120;
+    stroke-dashoffset:120;
+    animation:btArcDraw 2s ease-in-out infinite;
+}
+.bt-arc-path--1{  animation-delay:0s; }
+.bt-arc-path--2{  animation-delay:0.15s; stroke:rgba(0,234,255,0.85); }
+.bt-arc-path--3{  animation-delay:0.30s; stroke:rgba(0,234,255,0.80); }
+.bt-arc-path--4{  animation-delay:0.45s; stroke:rgba(0,234,255,0.75); }
+.bt-arc-path--5{  animation-delay:0.60s; stroke:rgba(0,234,255,0.70); }
+.bt-arc-path--6{  animation-delay:0.75s; stroke:rgba(0,234,255,0.70); }
+.bt-arc-path--7{  animation-delay:0.90s; stroke:rgba(0,234,255,0.65); }
+.bt-arc-path--8{  animation-delay:1.05s; stroke:rgba(0,234,255,0.65); }
+.bt-arc-path--9{  animation-delay:1.20s; stroke:rgba(0,234,255,0.70); }
+.bt-arc-path--10{ animation-delay:0.10s; stroke:rgba(0,234,255,0.65); }
+.bt-arc-path--11{ animation-delay:0.50s; stroke:rgba(0,234,255,0.70); }
+.bt-arc-path--12{ animation-delay:0.80s; stroke:rgba(0,234,255,0.65); }
+.bt-arc-path--13{ animation-delay:1.10s; stroke:rgba(0,234,255,0.65); }
+.bt-arc-path--14{ animation-delay:0.20s; stroke:rgba(0,234,255,0.65); }
+.bt-arc-path--15{ animation-delay:0.55s; stroke:rgba(0,234,255,0.65); }
+.bt-arc-path--16{ animation-delay:0.35s; stroke:rgba(0,234,255,0.65); }
+.bt-arc-path--17{ animation-delay:0.70s; stroke:rgba(0,234,255,0.65); }
+
+@keyframes btArcDraw{
+    0%{ stroke-dashoffset:120; opacity:0; }
+    10%{ opacity:1; }
+    45%{ stroke-dashoffset:0; opacity:1; }
+    75%{ opacity:0.3; }
+    100%{ stroke-dashoffset:-120; opacity:0; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   BRAND FOOTER
+   ───────────────────────────────────────────────────────────────────── */
+
+.bt-brand-footer{
+    flex:0 0 auto;
+    text-align:center;
+    padding:10px 0 8px;
+    margin-top:20px;
+    border-top:1px solid rgba(0,234,255,0.06);
+    width:80%;
+}
+
+.bt-brand-label{
+    font-family:'Orbitron', sans-serif;
+    font-size:18px;
+    font-weight:700;
+    letter-spacing:0.20em;
+    color:var(--cyan);
+    text-shadow:0 0 24px rgba(0,234,255,0.45), 0 0 48px rgba(0,234,255,0.15);
+    margin-bottom:3px;
+}
+
+.bt-brand-tagline{
+    font-size:8.5px;
+    letter-spacing:0.16em;
+    color:var(--muted);
+    opacity:0.65;
+    text-transform:uppercase;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   DATA STREAM — chart lines & status
+   ───────────────────────────────────────────────────────────────────── */
+
+.bt-data-stream{
+    flex:1 1 auto;
+    width:90%;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    padding:12px 0 8px;
+    border-top:1px solid rgba(0,234,255,0.04);
+}
+
+.bt-chart-line{
+    width:100%;
+    height:40px;
+    overflow:hidden;
+}
+.bt-chart-line--sm{ height:28px; }
+.bt-chart-line svg{ width:100%; height:100%; }
+
+.bt-chart-path{
+    stroke-dasharray:80;
+    stroke-dashoffset:0;
+    animation:btChartScroll 4s linear infinite;
+}
+.bt-chart-path--2{ animation-delay:1s; animation-duration:5s; }
+.bt-chart-path--3{ animation-delay:0.3s; animation-duration:3.5s; }
+.bt-chart-path--4{ animation-delay:1.5s; animation-duration:4.5s; }
+
+@keyframes btChartScroll{
+    0%{ stroke-dashoffset:0; }
+    100%{ stroke-dashoffset:-160; }
+}
+
+.bt-status-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:2px 4px;
+    font-size:9px;
+    letter-spacing:0.12em;
+    color:var(--muted);
+    opacity:0.6;
+}
+
+.bt-status-dot{
+    width:5px; height:5px;
+    border-radius:50%;
+    flex-shrink:0;
+}
+.bt-status-dot--live{
+    background:#00eaff;
+    box-shadow:0 0 6px rgba(0,234,255,0.6);
+    animation:btDotBlink 1.5s ease-in-out infinite;
+}
+.bt-status-dot--ok{
+    background:#00cc88;
+    box-shadow:0 0 4px rgba(0,204,136,0.4);
+}
+@keyframes btDotBlink{
+    0%,100%{ opacity:1; }
+    50%{ opacity:0.3; }
+}
+
+.bt-status-text{
+    flex:1;
+    font-family:'Orbitron', monospace;
+    text-transform:uppercase;
+}
+.bt-status-val{
+    font-family:'Orbitron', monospace;
+    color:rgba(0,234,255,0.7);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   SCANLINE shimmer (full panel)
+   ───────────────────────────────────────────────────────────────────── */
+
+.bt-brand-scanline{
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+    overflow:hidden;
+    border-radius:14px;
+    z-index:4;
+}
+.bt-brand-scanline::after{
+    content:'';
+    position:absolute;
+    left:0; right:0;
+    height:1px;
+    background:linear-gradient(90deg, transparent, rgba(0,234,255,0.10), transparent);
+    animation:btScanline 7s linear infinite;
+}
+
+@keyframes btScanline{
+    0%{ top:-1px; opacity:0; }
+    10%{ opacity:1; }
+    90%{ opacity:1; }
+    100%{ top:100%; opacity:0; }
 }

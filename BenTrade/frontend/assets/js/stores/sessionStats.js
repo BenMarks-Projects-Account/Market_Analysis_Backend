@@ -187,91 +187,10 @@ window.BenTradeSessionStatsStore = (function(){
   }
 
   /** Delegate to the shared format lib for canonical score display. */
-  function fmtScore(raw){
-    const lib = window.BenTradeUtils && window.BenTradeUtils.format;
-    if(lib && lib.formatScore) return lib.formatScore(raw, 1);
-    const n = toNumber(raw);
-    return n === null ? 'N/A' : `${n.toFixed(1)}%`;
-  }
 
-  function renderPanel(){
-    const grid = document.getElementById('reportStatsGrid');
-    const title = document.getElementById('sessionStatsTitle');
-    const meta = document.getElementById('sessionStatsMeta');
-    if(!grid) return;
-
-    const snapshot = computeViewState();
-
-    if(title){
-      title.textContent = 'SESSION STATS';
-    }
-
-    if(meta){
-      const startedText = snapshot.session_started_at ? new Date(snapshot.session_started_at).toLocaleString() : 'N/A';
-      const updatedText = snapshot.last_updated_at ? new Date(snapshot.last_updated_at).toLocaleString() : 'N/A';
-      const homeRefreshText = snapshot.last_home_refresh_at ? new Date(snapshot.last_home_refresh_at).toLocaleTimeString() : '--';
-      meta.textContent = `Runs: ${snapshot.runs} • Home refreshes: ${snapshot.home_refresh_count} (${homeRefreshText}) • Started: ${startedText} • Updated: ${updatedText}`;
-    }
-
-    const stats = [
-      ['Total candidates', String(snapshot.total_candidates), 'total_candidates'],
-      ['Accepted trades/ideas', String(snapshot.accepted_trades), 'accepted_trades'],
-      ['Rejected', String(snapshot.rejected_trades), 'rejected_count'],
-      ['Acceptance rate', fmtPercent(snapshot.acceptance_rate, 1), 'acceptance_rate'],
-      ['Best score', snapshot.best_score === null ? 'N/A' : fmtScore(snapshot.best_score), 'best_score'],
-      ['Avg quality score', snapshot.avg_quality_score === null ? 'N/A' : fmtScore(snapshot.avg_quality_score), 'avg_quality_score'],
-      ['Avg return on risk', snapshot.avg_return_on_risk === null ? 'N/A' : fmtPercent(snapshot.avg_return_on_risk, 1), 'avg_return_on_risk'],
-      ['Session runs', String(snapshot.runs), 'session_runs'],
-    ];
-
-    grid.innerHTML = stats.map(([label, value, metric]) => `
-      <div class="statTile">
-        <div class="statLabel" data-metric="${metric}">${label}</div>
-        <div class="statValue">${value}</div>
-      </div>
-    `).join('');
-
-    const resetBtn = document.getElementById('sessionStatsResetBtn');
-    if(resetBtn && !resetBtn.dataset.bound){
-      resetBtn.dataset.bound = '1';
-      resetBtn.addEventListener('click', () => {
-        const ok = window.confirm('Reset session stats? This clears accumulated totals.');
-        if(ok) reset();
-      });
-    }
-  }
-
-  /* ── Strategy Leaderboard (global right info bar) ── */
-  const LEADERBOARD_LABELS = {
-    credit_put: 'Credit Put', credit_call: 'Credit Call', debit_spreads: 'Debit Spreads',
-    iron_condor: 'Iron Condor', butterflies: 'Butterflies', calendar: 'Calendar',
-    income: 'Income', stock_scanner: 'Stock Scanner',
-  };
-
-  function renderLeaderboard(){
-    const rowsEl = document.getElementById('globalStrategyRows');
-    const miniEl = document.getElementById('globalStrategyMini');
-    if(!rowsEl) return;
-    const snapshot = computeViewState();
-    const byModule = snapshot.by_module || {};
-    const rows = MODULE_IDS.map(id => [LEADERBOARD_LABELS[id] || id, byModule[id]]);
-
-    rowsEl.innerHTML = rows.map(([label, row]) => {
-      const quality = toNumber(row?.avg_quality_score);
-      const qualityText = quality === null ? 'N/A' : fmtScore(quality);
-      const rorVal = toNumber(row?.avg_return_on_risk);
-      const rorText = rorVal === null ? 'N/A' : fmtPercent(rorVal, 1);
-      return `<tr><td>${label}</td><td>${qualityText}</td><td>${rorText}</td><td>${clampNonNegative(row?.accepted_trades || 0)}</td></tr>`;
-    }).join('');
-
-    if(miniEl){
-      miniEl.innerHTML = rows.map(([label, row]) => {
-        const score = toNumber(row?.avg_quality_score) ?? 0;
-        const width = Math.max(2, Math.round(Math.min(Math.max(score, 0), 100)));
-        return `<div class="home-mini-row"><span>${label}</span><div class="home-mini-track"><div class="home-mini-fill" style="width:${width}%;"></div></div></div>`;
-      }).join('');
-    }
-  }
+  /* renderPanel / renderLeaderboard removed — sidebar only shows Source Health */
+  function renderPanel(){}
+  function renderLeaderboard(){}
 
   function notify(){
     renderPanel();

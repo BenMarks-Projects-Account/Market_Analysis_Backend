@@ -150,6 +150,17 @@ window.BenTradeApi = (function(){
     });
   }
 
+  function tmcFinalDecision(candidate, strategyId){
+    return modelFetch('/api/tmc/workflows/model/final-decision', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        candidate: (candidate && typeof candidate === 'object') ? candidate : {},
+        strategy_id: strategyId || null,
+      }),
+    });
+  }
+
   function modelAnalyzeRegime(regime, playbook){
     return modelFetch('/api/model/analyze_regime', {
       method: 'POST',
@@ -438,49 +449,6 @@ window.BenTradeApi = (function(){
     return jsonFetch('/api/trading/orders/' + encodeURIComponent(orderId) + '/tradier-status');
   }
 
-  /* ── Pipeline Monitor ──────────────────────────────────── */
-  function getPipelineRuns(){
-    return jsonFetch('/api/pipeline/runs');
-  }
-  function getPipelineRunDetail(runId){
-    return jsonFetch('/api/pipeline/runs/' + encodeURIComponent(runId));
-  }
-  function getPipelineArtifact(runId, artifactId){
-    return jsonFetch('/api/pipeline/runs/' + encodeURIComponent(runId) + '/artifacts/' + encodeURIComponent(artifactId));
-  }
-  function getPipelineEvents(runId, opts){
-    var params = [];
-    if (opts && opts.level) params.push('level=' + encodeURIComponent(opts.level));
-    if (opts && opts.stage_key) params.push('stage_key=' + encodeURIComponent(opts.stage_key));
-    var qs = params.length ? '?' + params.join('&') : '';
-    return jsonFetch('/api/pipeline/runs/' + encodeURIComponent(runId) + '/events' + qs);
-  }
-  function createPipelineDemoRun(){
-    return jsonFetch('/api/pipeline/demo-run', { method: 'POST' });
-  }
-  function getPipelineStatus(){
-    return jsonFetch('/api/pipeline/status');
-  }
-  function getPipelineDependencyMap(){
-    return jsonFetch('/api/pipeline/dependency-map');
-  }
-  function startPipelineRun(opts){
-    return jsonFetch('/api/pipeline/runs/start', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(opts || {}),
-    });
-  }
-  function pausePipelineRun(runId){
-    return jsonFetch('/api/pipeline/runs/' + encodeURIComponent(runId) + '/pause', { method: 'POST' });
-  }
-  function resumePipelineRun(runId){
-    return jsonFetch('/api/pipeline/runs/' + encodeURIComponent(runId) + '/resume', { method: 'POST' });
-  }
-  function cancelPipelineRun(runId){
-    return jsonFetch('/api/pipeline/runs/' + encodeURIComponent(runId) + '/cancel', { method: 'POST' });
-  }
-
   /* ── Active Trade Pipeline ────────────────────────────────── */
   function runActiveTradesPipeline(opts){
     var params = [];
@@ -497,6 +465,47 @@ window.BenTradeApi = (function(){
   }
   function listActiveTradeRuns(){
     return jsonFetch('/api/active-trade-pipeline/runs');
+  }
+
+  /* ── TMC Workflow Endpoints ───────────────────────────────── */
+  function tmcRunStock(opts){
+    var body = {};
+    if (opts && opts.top_n != null) body.top_n = opts.top_n;
+    return jsonFetch('/api/tmc/workflows/stock/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+  function tmcRunOptions(opts){
+    var body = {};
+    if (opts && opts.top_n != null) body.top_n = opts.top_n;
+    if (opts && opts.symbols) body.symbols = opts.symbols;
+    return jsonFetch('/api/tmc/workflows/options/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+  function tmcGetLatestStock(){
+    return jsonFetch('/api/tmc/workflows/stock/latest');
+  }
+  function tmcGetLatestOptions(){
+    return jsonFetch('/api/tmc/workflows/options/latest');
+  }
+  function tmcGetStockSummary(){
+    return jsonFetch('/api/tmc/workflows/stock/summary');
+  }
+  function tmcGetOptionsSummary(){
+    return jsonFetch('/api/tmc/workflows/options/summary');
+  }
+
+  /* ── Data Population ── */
+  function getDataPopulationStatus(){
+    return jsonFetch('/api/data-population/status');
+  }
+  function triggerDataPopulation(){
+    return jsonFetch('/api/data-population/trigger', { method: 'POST' });
   }
 
   return {
@@ -553,21 +562,19 @@ window.BenTradeApi = (function(){
     getMonitorResults,
     getMonitorNarrative,
     analyzeActiveTrade,
-    getPipelineRuns,
-    getPipelineRunDetail,
-    getPipelineArtifact,
-    getPipelineEvents,
-    createPipelineDemoRun,
-    getPipelineStatus,
-    getPipelineDependencyMap,
-    startPipelineRun,
-    pausePipelineRun,
-    resumePipelineRun,
-    cancelPipelineRun,
     runActiveTradesPipeline,
     getLatestActiveTradeResults,
     getActiveTradeRunDetail,
     listActiveTradeRuns,
+    tmcRunStock,
+    tmcRunOptions,
+    tmcGetLatestStock,
+    tmcGetLatestOptions,
+    tmcGetStockSummary,
+    tmcGetOptionsSummary,
+    tmcFinalDecision,
+    getDataPopulationStatus,
+    triggerDataPopulation,
     MODEL_TIMEOUT_MS: MODEL_TIMEOUT_MS,
     modelFetch: modelFetch,
   };

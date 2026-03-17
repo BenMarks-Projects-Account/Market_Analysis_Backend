@@ -1,45 +1,27 @@
 /**
- * BenTrade — Trade Management Center
+ * BenTrade -- Trade Management Center (Prompt 10 consolidation)
  *
- * Candidate review + execution hub.
- * Loads pipeline run data (Step 15 ledger + response artifacts),
- * renders candidate cards with recommendation details, and wires
- * Execute Trade buttons to the Trade Ticket modal.
+ * Depends on compact /api/tmc/workflows/... endpoints (Prompt 8/9).
+ * Old trade-building pipeline payload assumptions are gone.
+ * Active Trade section remains separate (uses /api/active-trade-pipeline).
+ *
+ * Section 1: Stock Opportunities  (TMC workflow endpoints)
+ * Section 2: Options Opportunities (TMC workflow endpoints)
+ * Section 3: Active Trade Candidates (active-trade-pipeline -- unchanged)
  */
 (function () {
   'use strict';
 
-  /* ── State ─────────────────────────────────────────────────── */
-
-  var currentRunId = null;
-  var loadedCandidates = [];
-  var artifactIndex = {};
-  var _pollTimer = null;
+  /* -- State --------------------------------------------------------- */
+  var _pollTimer     = null;
   var _activeRunning = false;
 
-  /* ── API helpers ───────────────────────────────────────────── */
+  /* -- API ref -------------------------------------------------------- */
+  var api = window.BenTradeApi;
 
-  function apiFetch(url) {
-    return fetch(url).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    });
-  }
-
-  /* ── Formatting helpers ────────────────────────────────────── */
-
-  function fmtPct(v) {
-    if (v == null) return '—';
-    return (Number(v) * 100).toFixed(0) + '%';
-  }
-
-  function fmtDate(iso) {
-    if (!iso) return '—';
-    try {
-      var d = new Date(iso);
-      return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    } catch (_) { return iso; }
-  }
+  /* =================================================================
+   *  SHARED HELPERS
+   * ================================================================= */
 
   function esc(s) {
     if (s == null) return '';
@@ -48,381 +30,1026 @@
     return d.innerHTML;
   }
 
-  function statusClass(status) {
-    switch (status) {
-      case 'ready': return 'tmc-status-ready';
-      case 'ready_degraded': return 'tmc-status-degraded';
-      case 'failed': return 'tmc-status-failed';
-      case 'skipped': return 'tmc-status-skipped';
-      default: return 'tmc-status-unknown';
-    }
+  function fmtPct(v) {
+    if (v == null) return '--';
+    return (v * 100).toFixed(1) + '%';
+  }
+
+  function fmtDollar(v) {
+    if (v == null) return '--';
+    return '$' + Number(v).toFixed(2);
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return '--';
+    try { return new Date(iso).toLocaleString(); } catch (_) { return iso; }
+  }
+
+  /* -- Status vocabulary --------------------------------------------- */
+
+  /**
+   * TMC status vocabulary -- single source of truth for UI mapping.
+   * Maps TMCStatus string to { css, label, isError, isEmpty }.
+   */
+  var TMC_STATUS_MAP = {
+    completed:   { css: 'tmc-run-completed',  label: 'COMPLETED',   isError: false, isEmpty: false },
+    degraded:    { css: 'tmc-run-degraded',   label: 'DEGRADED',    isError: false, isEmpty: false },
+    failed:      { css: 'tmc-run-failed',      label: 'FAILED',      isError: true,  isEmpty: false },
+    no_output:   { css: 'tmc-run-no-output',   label: 'NO OUTPUT',   isError: false, isEmpty: true  },
+    unavailable: { css: 'tmc-run-unavailable', label: 'UNAVAILABLE', isError: true,  isEmpty: true  },
+  };
+
+  function getStatusInfo(status) {
+    return TMC_STATUS_MAP[status] || { css: 'tmc-run-unknown', label: (status || 'UNKNOWN').toUpperCase(), isError: false, isEmpty: true };
+  }
+
+  /** Update a status badge element with consistent styling. */
+  function updateStatusBadge(el, status) {
+    if (!el) return;
+    var info = getStatusInfo(status);
+    el.textContent = info.label;
+    el.className = 'tmc-run-status ' + info.css;
   }
 
   function actionClass(action) {
-    switch (action) {
-      case 'buy': return 'tmc-action-buy';
+    switch ((action || '').toLowerCase()) {
+      case 'buy':  return 'tmc-action-buy';
       case 'hold': return 'tmc-action-hold';
       case 'pass': return 'tmc-action-pass';
-      default: return 'tmc-action-unknown';
+      default:     return 'tmc-action-unknown';
     }
   }
 
-  /* ── Load run list ─────────────────────────────────────────── */
+  /* -- DOM builders -------------------------------------------------- */
 
-  function loadRuns() {
-    var picker = document.getElementById('tmcRunPicker');
-    if (!picker) return;
+  function buildMetric(label, value) {
+    return '<div class="tmc-metric"><span class="tmc-metric-label">' +
+      esc(label) + '</span><span class="tmc-metric-value">' +
+      esc(value) + '</span></div>';
+  }
 
-    apiFetch('/api/pipeline/runs')
-      .then(function (data) {
-        var runs = data.runs || [];
-        picker.innerHTML = '<option value="">— Select Run —</option>';
-        runs.forEach(function (r) {
-          var opt = document.createElement('option');
-          opt.value = r.run_id || '';
-          var label = (r.run_id || '').substring(0, 12) + '… — ' + (r.status || '?') + ' — ' + fmtDate(r.started_at);
-          opt.textContent = label;
-          picker.appendChild(opt);
-        });
-        // Auto-select if there is a current run
-        if (currentRunId) picker.value = currentRunId;
+  function buildListSection(items, title, cls) {
+    if (!items || items.length === 0) return '';
+    var html = '<div class="' + cls + '"><div class="tmc-points-label">' +
+      esc(title) + '</div><ul class="tmc-points-list">';
+    items.forEach(function (item) { html += '<li>' + esc(item) + '</li>'; });
+    html += '</ul></div>';
+    return html;
+  }
+
+  function showEmptyGrid(grid, countEl, msg) {
+    if (grid) {
+      grid.innerHTML =
+        '<div class="tmc-empty-state">' +
+          '<div class="tmc-empty-icon">&#9678;</div>' +
+          '<div class="tmc-empty-text">' + esc(msg) + '</div>' +
+        '</div>';
+    }
+    if (countEl) countEl.textContent = '0';
+  }
+
+  /* -- Unified workflow response handler ----------------------------- */
+
+  /**
+   * Handles a TMC workflow response envelope { status, data }.
+   * Returns { ok, status, data, candidates } or calls showEmpty and returns null.
+   *
+   * @param {object} resp       - Response from /api/tmc/workflows/.../latest
+   * @param {Element} grid      - Grid element to clear/populate
+   * @param {Element} countEl   - Count badge element
+   * @param {Element} qualEl    - Quality badge element
+   * @param {Element} statusEl  - Status badge element
+   * @param {string}  label     - "stock" or "options" for messages
+   * @returns {object|null}     - { status, data, candidates } or null
+   */
+  function handleWorkflowResponse(resp, grid, countEl, qualEl, statusEl, label) {
+    var info = getStatusInfo(resp.status);
+    updateStatusBadge(statusEl, resp.status);
+
+    // Failed / unavailable
+    if (info.isError) {
+      showEmptyGrid(grid, countEl, 'Workflow ' + label + ': ' + info.label.toLowerCase());
+      if (qualEl) qualEl.textContent = '';
+      return null;
+    }
+
+    // No output yet
+    if (info.isEmpty || !resp.data) {
+      showEmptyGrid(grid, countEl, 'No ' + label + ' opportunities available yet');
+      if (qualEl) qualEl.textContent = '';
+      return null;
+    }
+
+    var data = resp.data;
+    if (qualEl) qualEl.textContent = data.quality_level || '';
+
+    var candidates = data.candidates || [];
+    if (countEl) countEl.textContent = String(candidates.length);
+
+    if (candidates.length === 0) {
+      showEmptyGrid(grid, countEl, 'No ' + label + ' candidates found');
+      return null;
+    }
+
+    return { status: resp.status, data: data, candidates: candidates };
+  }
+
+  /* =================================================================
+   *  NORMALIZATION LAYER
+   *
+   *  Small mapping helpers that absorb field-name variation between
+   *  backend compact read models and the card builders.  Prevents
+   *  brittle direct coupling to exact backend field names.
+   * ================================================================= */
+
+  /**
+   * Normalize a raw stock candidate from the compact read model.
+   *
+   * Input fields (from compact stock candidate in output.json — Prompt 12C):
+   *   symbol, scanner_key, scanner_name, setup_type, direction,
+   *   source_scanners (list[str]),
+   *   setup_quality (0-100), confidence (0-1), rank,
+   *   thesis_summary (list[str]), supporting_signals (list[str]),
+   *   risk_flags (list[str]), entry_context, market_regime,
+   *   risk_environment, market_state_ref, vix, regime_tags, support_state,
+   *   market_picture_summary { engines_available, engines_total, engine_summaries },
+   *   top_metrics, review_summary,
+   *   model_recommendation, model_confidence, model_score,
+   *   model_review_summary, model_key_factors (list[str]),
+   *   model_caution_notes (list[str])
+   */
+  function normalizeStockCandidate(raw) {
+    // Derive action badge from direction field.
+    var dir = (raw.direction || '').toLowerCase();
+    var action = dir === 'long' ? 'buy' : dir === 'short' ? 'sell' : dir || null;
+
+    return {
+      symbol:          raw.symbol || null,
+      action:          action,
+      setupQuality:    raw.setup_quality != null ? raw.setup_quality : null,
+      confidence:      raw.confidence != null ? raw.confidence : null,
+      rank:            raw.rank != null ? raw.rank : null,
+      rationale:       raw.review_summary || null,
+      thesis:          Array.isArray(raw.thesis_summary) ? raw.thesis_summary : [],
+      points:          Array.isArray(raw.supporting_signals) ? raw.supporting_signals : [],
+      risks:           Array.isArray(raw.risk_flags) ? raw.risk_flags : [],
+      scannerName:     raw.scanner_name || raw.scanner_key || null,
+      setupType:       raw.setup_type || null,
+      topMetrics:      raw.top_metrics || {},
+      marketRegime:    raw.market_regime || null,
+      riskEnvironment: raw.risk_environment || null,
+      // Multi-scanner provenance (12C)
+      sourceScanners:  Array.isArray(raw.source_scanners) ? raw.source_scanners : [],
+      // Market Picture summary (12C)
+      marketPictureSummary: raw.market_picture_summary || null,
+      // Market state context (12C)
+      marketStateRef:  raw.market_state_ref || null,
+      vix:             raw.vix != null ? raw.vix : null,
+      regimeTags:      Array.isArray(raw.regime_tags) ? raw.regime_tags : [],
+      supportState:    raw.support_state || null,
+      // Model review (12C)
+      modelRecommendation: raw.model_recommendation || null,
+      modelConfidence:     raw.model_confidence != null ? raw.model_confidence : null,
+      modelScore:          raw.model_score != null ? raw.model_score : null,
+      modelReviewSummary:  raw.model_review_summary || null,
+      modelKeyFactors:     Array.isArray(raw.model_key_factors) ? raw.model_key_factors : [],
+      modelCautionNotes:   Array.isArray(raw.model_caution_notes) ? raw.model_caution_notes : [],
+    };
+  }
+
+  /**
+   * Normalize a raw options candidate from the compact read model.
+   *
+   * Input fields (from OptionsOpportunityReadModel.candidates[*]):
+   *   underlying | symbol, strategy_id | strategy_type | family,
+   *   ev, pop, max_loss, credit | net_premium | debit,
+   *   dte, width, legs[]
+   */
+  function normalizeOptionsCandidate(raw) {
+    return {
+      symbol:   raw.underlying || raw.symbol || null,
+      strategy: raw.strategy_id || raw.strategy_type || raw.family || null,
+      ev:       raw.ev != null ? Number(raw.ev) : null,
+      pop:      raw.pop != null ? Number(raw.pop) : null,
+      maxLoss:  raw.max_loss != null ? Number(raw.max_loss) : null,
+      credit:   raw.credit != null ? Number(raw.credit)
+                : raw.net_premium != null ? Number(raw.net_premium)
+                : raw.debit != null ? Number(raw.debit)
+                : null,
+      dte:      raw.dte != null ? raw.dte : null,
+      width:    raw.width != null ? Number(raw.width) : null,
+      legs:     Array.isArray(raw.legs) ? raw.legs : [],
+    };
+  }
+
+  /* =================================================================
+   *  SECTION 1 -- Stock Opportunities
+   *
+   *  Uses the standard BenTradeStockTradeCardMapper.renderStockCard()
+   *  pipeline so TMC stock cards are identical to every other stock
+   *  dashboard in the app.  The TMC compact candidate is converted to
+   *  the scanner-like shape that candidateToTradeShape() expects.
+   * ================================================================= */
+
+  /** Keep rendered rows for action handler lookups (same as other dashboards). */
+  var _stockRenderedRows = [];
+  var _stockExpandState  = {};
+
+  function loadStockOpportunities() {
+    var grid     = document.getElementById('tmcStockGrid');
+    var countEl  = document.getElementById('tmcStockCount');
+    var qualEl   = document.getElementById('tmcStockQuality');
+    var statusEl = document.getElementById('tmcStockStatus');
+
+    updateStatusBadge(statusEl, null); // shows "loading"
+    if (statusEl) statusEl.textContent = 'Loading...';
+
+    api.tmcGetLatestStock()
+      .then(function (resp) {
+        var result = handleWorkflowResponse(resp, grid, countEl, qualEl, statusEl, 'stock');
+        if (!result) return;
+        renderStockCandidates(grid, result.candidates, result.data);
       })
       .catch(function (err) {
-        console.error('[TMC] Failed to load runs:', err);
+        console.error('[TMC] Failed to load stock opportunities:', err);
+        updateStatusBadge(statusEl, 'failed');
+        showEmptyGrid(grid, countEl, 'Failed to load stock opportunities');
       });
   }
 
-  /* ── Load run detail + candidates ──────────────────────────── */
+  /**
+   * Convert a TMC compact stock candidate into the scanner-row shape
+   * that BenTradeStockTradeCardMapper.candidateToTradeShape() expects.
+   *
+   * The standard pipeline reads: symbol, composite_score, price,
+   * strategy_id, plus a flat metrics sub-object. We map from the
+   * TMC compact fields.
+   */
+  function tmcStockToScannerShape(raw) {
+    var tm = raw.top_metrics || {};
+    return {
+      symbol:          raw.symbol || '',
+      composite_score: tm.composite_score != null ? tm.composite_score : (raw.setup_quality || null),
+      price:           tm.price != null ? tm.price : null,
+      rank:            raw.rank,
+      trend_state:     tm.trend_state || null,
+      thesis:          Array.isArray(raw.thesis_summary) ? raw.thesis_summary : [],
+      confidence:      raw.confidence,
+      metrics: {
+        rsi:           tm.rsi != null ? tm.rsi : null,
+        atr_pct:       tm.atr_pct != null ? tm.atr_pct : null,
+        composite_score: tm.composite_score != null ? tm.composite_score : null,
+        volume_ratio:  tm.volume_ratio != null ? tm.volume_ratio : null,
+      },
+      // Preserve raw for TMC-specific enrichment injection
+      _tmc_raw: raw,
+    };
+  }
 
-  function loadRunDetail(runId) {
-    if (!runId) {
-      clearCandidates();
+  function renderStockCandidates(grid, candidates, data) {
+    if (!grid) return;
+    var stockMapper = window.BenTradeStockTradeCardMapper;
+
+    // If the standard mapper is not available, fall back to basic rendering
+    if (!stockMapper || !stockMapper.renderStockCard) {
+      grid.innerHTML = '';
+      _stockRenderedRows = [];
+      candidates.forEach(function (raw) {
+        grid.appendChild(buildStockCardFallback(normalizeStockCandidate(raw), data));
+      });
       return;
     }
 
-    currentRunId = runId;
-    var statusEl = document.getElementById('tmcRunStatus');
-    var metaEl = document.getElementById('tmcRunMeta');
-    if (statusEl) statusEl.textContent = 'Loading…';
-    if (metaEl) metaEl.textContent = '';
+    _stockRenderedRows = candidates.slice();
+    var html = '';
+    candidates.forEach(function (raw, idx) {
+      var strategyId = raw.scanner_key || raw.setup_type || 'stock_opportunity';
+      var scannerShape = tmcStockToScannerShape(raw);
 
-    apiFetch('/api/pipeline/runs/' + encodeURIComponent(runId))
-      .then(function (detail) {
-        // Update run status
-        if (statusEl) {
-          statusEl.textContent = (detail.status || 'unknown').toUpperCase();
-          statusEl.className = 'tmc-run-status tmc-run-' + (detail.status || 'unknown');
-        }
-        if (metaEl) {
-          var parts = [];
-          if (detail.started_at) parts.push(fmtDate(detail.started_at));
-          if (detail.duration_ms != null) parts.push(Math.round(detail.duration_ms / 1000) + 's');
-          metaEl.textContent = parts.join(' · ');
-        }
+      try {
+        var cardHtml = stockMapper.renderStockCard(scannerShape, idx, strategyId, _stockExpandState);
 
-        // Build artifact index for this run
-        artifactIndex = {};
-        (detail.artifacts || []).forEach(function (a) {
-          artifactIndex[a.artifact_key || ''] = a;
-        });
+        // Build TMC enrichment (split into collapsible body + always-visible warnings)
+        var enrichment = buildTmcEnrichmentHtml(raw);
 
-        // Extract candidate ledger
-        var ledger = detail.ledger;
-        if (!ledger) {
-          showEmpty('No candidate ledger found in this run');
-          return;
+        // 1. Inject body content INSIDE the <details> collapsible (before </details>)
+        if (enrichment.body) {
+          cardHtml = cardHtml.replace(
+            '</details>',
+            enrichment.body + '</details>'
+          );
         }
 
-        var rows = ledger.ledger_rows || [];
-        if (rows.length === 0) {
-          showEmpty('No candidates in ledger');
-          return;
+        // 2. Remove the "Run Model Analysis" button row and model output div from TMC cards
+        cardHtml = cardHtml.replace(/<div class="run-row">.*?<\/div>/s, '');
+        cardHtml = cardHtml.replace(/<div class="trade-model-output"[^>]*>.*?<\/div>/s, '');
+
+        // 3. Inject warnings (caution, model-not-available) before the action buttons (always visible)
+        if (enrichment.warnings) {
+          cardHtml = cardHtml.replace(
+            '<div class="trade-actions">',
+            enrichment.warnings + '<div class="trade-actions">'
+          );
         }
 
-        // Load full response data for each candidate
-        loadCandidateResponses(runId, rows);
+        html += cardHtml;
+      } catch (cardErr) {
+        console.warn('[TMC] Stock card render error for candidate ' + idx, cardErr);
+        html += '<div class="trade-card" style="margin-bottom:12px;padding:10px;border:1px solid rgba(255,120,100,0.3);border-radius:10px;background:rgba(8,18,26,0.9);color:rgba(255,180,160,0.8);font-size:12px;">\u26A0 Render error for ' + esc((raw && raw.symbol) || '#' + idx) + '</div>';
+      }
+    });
+
+    grid.innerHTML = html;
+
+    // ── Wire delegated action handlers (same pattern as all stock dashboards) ──
+    grid.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      var action   = btn.dataset.action;
+      var tradeKey = btn.dataset.tradeKey || '';
+      var symbol   = btn.dataset.symbol || '';
+      var row      = _findStockRowByTradeKey(tradeKey);
+      var scannerRow = row ? tmcStockToScannerShape(row) : null;
+      var strategyId = row ? (row.scanner_key || row.setup_type || 'stock_opportunity') : '';
+
+      if (action === 'model-analysis' && row) {
+        // TMC uses dedicated final-decision prompt, NOT the per-strategy one
+        runTmcFinalDecision(btn, tradeKey, row, strategyId);
+      } else if (action === 'execute' && scannerRow) {
+        stockMapper.executeStockTrade(btn, tradeKey, scannerRow, strategyId);
+      } else if (action === 'reject' && tradeKey) {
+        var cardEl = btn.closest('.trade-card');
+        if (cardEl) {
+          cardEl.style.opacity = '0.35';
+          cardEl.style.pointerEvents = 'none';
+        }
+      } else if (action === 'data-workbench' && scannerRow) {
+        stockMapper.openDataWorkbenchForStock(scannerRow, strategyId);
+      } else if (action === 'stock-analysis') {
+        stockMapper.openStockAnalysis(symbol || (row && row.symbol));
+      } else if (action === 'workbench') {
+        console.log('[TMC] Testing Workbench stub for:', tradeKey);
+      }
+    });
+
+    // Wire expand state persistence
+    grid.querySelectorAll('details.trade-card-collapse').forEach(function (details) {
+      details.addEventListener('toggle', function () {
+        var tk = details.dataset.tradeKey || '';
+        if (tk) _stockExpandState[tk] = details.open;
+      });
+    });
+
+    // Hydrate cached model analysis results
+    if (window.BenTradeModelAnalysisStore && window.BenTradeModelAnalysisStore.hydrateContainer) {
+      window.BenTradeModelAnalysisStore.hydrateContainer(grid);
+    }
+  }
+
+  /**
+   * Format a value that is ALREADY a 0-100 percentage.
+   * Unlike fmtPct() which expects decimals, this just appends '%'.
+   */
+  function fmtPctDirect(v) {
+    if (v == null) return '--';
+    return Number(v).toFixed(1) + '%';
+  }
+
+  /** Assessment/impact color map for factor rendering. */
+  var _assessColors = {
+    favorable: '#00dc78', positive: '#00dc78',
+    unfavorable: '#ff5a5a', negative: '#ff5a5a',
+    concerning: '#ffc83c',
+    neutral: '#8899aa',
+  };
+
+  /**
+   * Build TMC-specific enrichment HTML to inject into the standard card.
+   * Returns { body, warnings } where:
+   *   - body: goes INSIDE the <details> collapsible (hidden when collapsed)
+   *   - warnings: stays OUTSIDE the collapsible (visible when collapsed)
+   *
+   * Rendering rules:
+   *   - If model analysis ran successfully → body gets MODEL REVIEW + tech analysis + factors + engine summary.
+   *   - If model analysis is absent → warnings gets "MODEL ANALYSIS NOT AVAILABLE" banner.
+   *   - CAUTION notes always go to warnings (visible when collapsed).
+   *   - Key factors render as structured cards (factor + impact + evidence).
+   *   - Confidence is displayed directly as 0-100% (not re-multiplied).
+   */
+  function buildTmcEnrichmentHtml(raw) {
+    var bodyParts = [];    // inside collapsible
+    var warningParts = []; // always visible (between header and buttons)
+    var hasModelReview = !!(raw.model_review_summary || raw.model_recommendation);
+
+    // ── Model review section (collapsible body) ──
+    if (hasModelReview) {
+      var recText = raw.model_recommendation
+        ? esc(String(raw.model_recommendation).toUpperCase())
+        : '';
+      // model_confidence is already 0-100 from backend — do NOT multiply by 100
+      var confText = raw.model_confidence != null
+        ? 'Conf: ' + fmtPctDirect(raw.model_confidence)
+        : '';
+      var scoreText = raw.model_score != null
+        ? 'Score: ' + Math.round(raw.model_score)
+        : '';
+      var headerBadges = [recText, confText, scoreText].filter(Boolean).join(' \u00B7 ');
+
+      // Determine recommendation color
+      var recColor = '#b4b4c8';
+      if (recText === 'BUY' || recText === 'EXECUTE') recColor = '#00dc78';
+      else if (recText === 'PASS' || recText === 'REJECT') recColor = '#ff5a5a';
+
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:8px;padding:8px 10px;border-radius:6px;border:1px solid ' + recColor + '33;background:' + recColor + '08;">' +
+          '<div class="section-title" style="margin-bottom:6px;">MODEL REVIEW' +
+            (headerBadges ? ' \u2014 <span style="color:' + recColor + ';">' + headerBadges + '</span>' : '') +
+          '</div>' +
+          (raw.model_review_summary
+            ? '<div style="font-size:12px;color:var(--text,#d7fbff);line-height:1.6;">' + esc(raw.model_review_summary) + '</div>'
+            : '') +
+        '</div>'
+      );
+    }
+
+    // ── Technical Analysis (collapsible body) ──
+    var ta = raw.model_technical_analysis;
+    if (ta && typeof ta === 'object') {
+      var taHtml = '<div class="section" style="margin-bottom:8px;padding:8px 10px;background:rgba(0,220,255,0.03);border-radius:6px;border:1px solid rgba(0,220,255,0.12);">';
+      taHtml += '<div class="section-title" style="color:var(--accent-cyan,#00dcff);">TECHNICAL ANALYSIS</div>';
+      if (ta.setup_quality_assessment) {
+        taHtml += '<div style="font-size:11px;color:var(--text,#d7fbff);line-height:1.5;margin-bottom:6px;">' + esc(ta.setup_quality_assessment) + '</div>';
+      }
+      if (ta.key_metrics_cited && typeof ta.key_metrics_cited === 'object') {
+        var mKeys = Object.keys(ta.key_metrics_cited);
+        if (mKeys.length > 0) {
+          taHtml += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;">';
+          mKeys.forEach(function (mk) {
+            var mv = ta.key_metrics_cited[mk];
+            taHtml += '<span style="font-size:10px;padding:2px 6px;background:rgba(255,255,255,0.04);border-radius:3px;border:1px solid rgba(255,255,255,0.08);"><span style="color:var(--muted);">' + esc(mk.replace(/_/g, ' ')) + ':</span> <b style="color:var(--text,#d7fbff);">' + esc(String(mv != null ? mv : '\u2014')) + '</b></span>';
+          });
+          taHtml += '</div>';
+        }
+      }
+      var rows = [
+        { label: 'Trend', val: ta.trend_context, icon: '\u2197' },
+        { label: 'Momentum', val: ta.momentum_read, icon: '\u26A1' },
+        { label: 'Volatility', val: ta.volatility_read, icon: '\u223C' },
+        { label: 'Volume', val: ta.volume_read, icon: '\u25A3' },
+      ].filter(function (r) { return !!r.val; });
+      rows.forEach(function (r) {
+        taHtml += '<div style="font-size:10px;line-height:1.4;padding:2px 0 2px 8px;border-left:2px solid rgba(0,220,255,0.25);margin-bottom:2px;"><span style="color:var(--accent-cyan,#00dcff);font-weight:600;">' + r.icon + ' ' + esc(r.label) + ':</span> <span style="color:var(--text-secondary,#bbb);">' + esc(r.val) + '</span></div>';
+      });
+      taHtml += '</div>';
+      bodyParts.push(taHtml);
+    }
+
+    // ── Caution notes (collapsible body) ──
+    var cautions = Array.isArray(raw.model_caution_notes) ? raw.model_caution_notes : [];
+    if (cautions.length > 0) {
+      var cautionLis = cautions.map(function (c) { return '<li style="margin-bottom:2px;">' + esc(c) + '</li>'; }).join('');
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:6px;padding:6px 10px;border-radius:6px;border:1px solid rgba(244,200,95,0.2);background:rgba(244,200,95,0.04);">' +
+          '<div class="section-title" style="color:var(--warn,#f4c85f);">CAUTION</div>' +
+          '<ul style="margin:0;padding-left:16px;font-size:11px;line-height:1.5;">' + cautionLis + '</ul>' +
+        '</div>'
+      );
+    }
+
+    // ── Key factors (collapsible body) ──
+    var factors = Array.isArray(raw.model_key_factors) ? raw.model_key_factors : [];
+    if (factors.length > 0) {
+      var factorsHtml = '';
+      factors.forEach(function (f) {
+        if (typeof f === 'string') {
+          factorsHtml += '<div style="font-size:11px;color:var(--text-secondary,#bbb);line-height:1.4;padding:3px 0 3px 8px;border-left:2px solid #8899aa;margin-bottom:3px;">' + esc(f) + '</div>';
+        } else if (f && typeof f === 'object') {
+          var factorName = f.factor || f.name || '';
+          var impact = String(f.impact || f.assessment || 'neutral').toLowerCase();
+          var evidence = f.evidence || f.detail || '';
+          var impColor = _assessColors[impact] || '#8899aa';
+          var impLabel = impact.charAt(0).toUpperCase() + impact.slice(1);
+
+          factorsHtml += '<div style="font-size:11px;line-height:1.4;padding:4px 0 4px 8px;border-left:2px solid ' + impColor + ';margin-bottom:4px;">';
+          factorsHtml += '<div style="display:flex;align-items:center;gap:6px;">';
+          factorsHtml += '<span style="color:' + impColor + ';font-weight:600;">' + esc(factorName) + '</span>';
+          factorsHtml += '<span style="font-size:9px;padding:1px 5px;border-radius:3px;border:1px solid ' + impColor + '44;color:' + impColor + ';text-transform:uppercase;letter-spacing:0.3px;">' + esc(impLabel) + '</span>';
+          factorsHtml += '</div>';
+          if (evidence) {
+            factorsHtml += '<div style="font-size:10px;color:var(--muted,#6a8da8);margin-top:2px;">' + esc(evidence) + '</div>';
+          }
+          factorsHtml += '</div>';
+        }
+      });
+
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:8px;">' +
+          '<div class="section-title">KEY FACTORS</div>' +
+          factorsHtml +
+        '</div>'
+      );
+    }
+
+    // ── Engine summary (collapsible body) ──
+    if (raw.review_summary) {
+      if (!hasModelReview) {
+        // Model analysis absent — warning banner (always visible)
+        warningParts.unshift(
+          '<div style="margin-bottom:6px;padding:5px 10px;font-size:11px;font-weight:600;color:#ff8a5a;background:rgba(255,138,90,0.08);border:1px solid rgba(255,138,90,0.2);border-radius:5px;text-align:center;">' +
+            '\u26A0 MODEL ANALYSIS NOT AVAILABLE \u2014 expand for engine output' +
+          '</div>'
+        );
+      }
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:8px;padding:6px 10px;border-radius:6px;border:1px solid rgba(100,149,237,0.12);background:rgba(100,149,237,0.04);">' +
+          '<div class="section-title">ENGINE SUMMARY</div>' +
+          '<div style="font-size:12px;color:var(--text,#d7fbff);line-height:1.6;">' + esc(raw.review_summary) + '</div>' +
+        '</div>'
+      );
+    }
+
+    return { body: bodyParts.join(''), warnings: warningParts.join('') };
+  }
+
+  /* ── TMC Final Trade Decision ──────────────────────────────────────
+   *
+   *  Calls the dedicated TMC final-decision endpoint which gives the
+   *  model full trade setup + fresh market picture context and asks
+   *  for a portfolio-manager-level decision.
+   *
+   *  This replaces the per-strategy runModelAnalysisForStock() used
+   *  on the other stock dashboards.
+   * ────────────────────────────────────────────────────────────────── */
+
+  function runTmcFinalDecision(btn, tradeKey, rawCandidate, strategyId) {
+    var modelStore = window.BenTradeModelAnalysisStore;
+
+    if (!api || !api.tmcFinalDecision) {
+      console.error('[TMC] BenTradeApi.tmcFinalDecision not available');
+      return;
+    }
+
+    // Dedupe guard
+    if (tradeKey && modelStore) {
+      var existing = modelStore.get(tradeKey);
+      if (existing && existing.status === 'running') return;
+      modelStore.setRunning(tradeKey);
+    }
+
+    // Loading state
+    var cardEl = btn ? btn.closest('.trade-card') : null;
+    var outputEl = cardEl ? cardEl.querySelector('[data-model-output]') : null;
+
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="home-scan-spinner" aria-hidden="true" style="margin-right:4px;"></span>Analyzing\u2026';
+    }
+    if (outputEl) {
+      outputEl.style.display = 'block';
+      outputEl.innerHTML = '<div style="padding:8px;font-size:11px;color:var(--muted);">Running TMC final decision analysis\u2026</div>';
+    }
+
+    api.tmcFinalDecision(rawCandidate, strategyId)
+      .then(function (result) {
+        var analysis = (result && result.analysis) || {};
+
+        // Store for hydration
+        if (tradeKey && modelStore) {
+          var bridged = {
+            status: 'success',
+            model_evaluation: {
+              model_recommendation: analysis.decision === 'EXECUTE' ? 'BUY' : 'PASS',
+              recommendation: analysis.decision || 'PASS',
+              score_0_100: analysis.engine_comparison ? analysis.engine_comparison.model_score : null,
+              confidence_0_1: analysis.conviction != null ? analysis.conviction / 100 : null,
+              thesis: analysis.decision_summary || '',
+              key_drivers: (analysis.factors_considered || []).map(function (f) {
+                return { factor: f.factor || '', impact: f.assessment || 'neutral', evidence: f.detail || '' };
+              }),
+              risk_review: {
+                primary_risks: analysis.risk_assessment ? (analysis.risk_assessment.primary_risks || []) : [],
+                volatility_risk: null,
+                timing_risk: null,
+                data_quality_flag: null,
+              },
+            },
+          };
+          var modelUI = window.BenTradeModelAnalysis;
+          var parsed = modelUI ? modelUI.parse(bridged) : bridged;
+           // Attach full TMC analysis for rich rendering
+          parsed._tmc_analysis = analysis;
+          modelStore.setSuccess(tradeKey, parsed);
+        }
+
+        // Render
+        if (outputEl) {
+          outputEl.style.display = 'block';
+          outputEl.innerHTML = renderTmcFinalDecisionResult(analysis);
+        }
+
+        // Reset button
+        if (btn) {
+          btn.disabled = false;
+          var ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          btn.innerHTML = '\u21BB Re-run Analysis <span style="font-size:9px;color:var(--muted);margin-left:4px;">' + ts + '</span>';
+        }
       })
       .catch(function (err) {
-        console.error('[TMC] Failed to load run detail:', err);
-        if (statusEl) statusEl.textContent = 'ERROR';
-        showEmpty('Failed to load run: ' + err.message);
+        var errMsg = (err && err.message) || 'TMC final decision analysis failed';
+        console.error('[TMC] final decision error:', err);
+
+        if (tradeKey && modelStore) {
+          modelStore.setError(tradeKey, errMsg);
+        }
+        if (outputEl) {
+          outputEl.style.display = 'block';
+          outputEl.innerHTML = '<div style="padding:8px;font-size:11px;color:#ff5a5a;">\u26A0 ' + esc(errMsg) + '</div>';
+        }
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Run Model Analysis';
+        }
       });
   }
 
-  function loadCandidateResponses(runId, ledgerRows) {
-    // Find response artifact IDs from the artifact index
-    var fetches = ledgerRows.map(function (row) {
-      var artKey = 'response_' + (row.candidate_id || '');
-      var artInfo = artifactIndex[artKey];
-      if (!artInfo || !artInfo.artifact_id) {
-        return Promise.resolve({ row: row, detail: null });
+  /**
+   * Render TMC final decision analysis into rich HTML.
+   *
+   * Output contract fields:
+   *   decision, conviction, decision_summary, factors_considered,
+   *   technical_analysis { setup_quality_assessment, key_metrics_cited,
+   *     trend_context, momentum_read, volatility_read, volume_read },
+   *   market_alignment, risk_assessment, what_would_change_my_mind,
+   *   engine_comparison
+   */
+  function renderTmcFinalDecisionResult(analysis) {
+    if (!analysis) return '';
+
+    // ── Detect fallback / parse failure ──
+    if (analysis._fallback) {
+      return '<div style="padding:10px 0;">'
+        + '<div style="padding:8px 10px;font-size:12px;color:#ff8a5a;background:rgba(255,138,90,0.08);border:1px solid rgba(255,138,90,0.2);border-radius:6px;margin-bottom:8px;">'
+        + '\u26A0 <strong>MODEL ANALYSIS FAILED</strong> \u2014 ' + esc(analysis.decision_summary || 'Parse failure')
+        + '</div>'
+        + (analysis._raw_text_preview
+          ? '<details style="margin-bottom:8px;"><summary style="font-size:10px;color:var(--muted);cursor:pointer;">Raw model output (debug)</summary>'
+            + '<pre style="font-size:9px;color:var(--muted);white-space:pre-wrap;max-height:150px;overflow:auto;padding:6px;background:rgba(0,0,0,0.3);border-radius:4px;margin-top:4px;">' + esc(analysis._raw_text_preview) + '</pre></details>'
+          : '')
+        + '</div>';
+    }
+
+    var decision = analysis.decision || 'PASS';
+    var conviction = analysis.conviction != null ? analysis.conviction : 0;
+    var decColor = decision === 'EXECUTE' ? '#00dc78' : '#ff5a5a';
+    var convColor = conviction >= 70 ? '#00dc78' : conviction >= 40 ? '#ffc83c' : '#ff5a5a';
+
+    var html = '<div style="padding:10px 0;">';
+
+    // ── Decision Header ──
+    html += '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px;padding:8px 10px;border-radius:6px;border:1px solid ' + decColor + '33;background:' + decColor + '08;">';
+    html += '<span style="font-size:14px;font-weight:800;padding:3px 12px;border-radius:4px;border:1px solid ' + decColor + '55;color:' + decColor + ';letter-spacing:1px;text-shadow:0 0 8px ' + decColor + '44;">' + esc(decision) + '</span>';
+    html += '<span style="font-size:12px;color:' + convColor + ';font-weight:700;">Conviction: ' + conviction + '%</span>';
+    if (analysis.engine_comparison && analysis.engine_comparison.model_score != null) {
+      var msColor = analysis.engine_comparison.model_score >= 60 ? '#00dc78' : analysis.engine_comparison.model_score >= 40 ? '#ffc83c' : '#ff5a5a';
+      html += '<span style="font-size:12px;color:' + msColor + ';font-weight:700;">Score: ' + Math.round(analysis.engine_comparison.model_score) + '<span style="font-size:10px;color:var(--muted);font-weight:400;">/100</span></span>';
+    }
+    html += '</div>';
+
+    // ── Decision Summary (structured) ──
+    if (analysis.decision_summary) {
+      html += '<div style="font-size:12px;color:var(--text,#d7fbff);line-height:1.6;margin-bottom:10px;padding:6px 10px;border-radius:5px;border-left:3px solid ' + decColor + ';">' + esc(analysis.decision_summary) + '</div>';
+    }
+
+    // ── Technical Analysis (new detailed metrics section) ──
+    var ta = analysis.technical_analysis;
+    if (ta && typeof ta === 'object') {
+      html += '<div style="margin-bottom:10px;padding:8px 10px;background:rgba(0,220,255,0.03);border-radius:6px;border:1px solid rgba(0,220,255,0.12);">';
+      html += '<div style="font-size:10px;font-weight:700;color:var(--accent-cyan,#00dcff);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px;">Technical Analysis</div>';
+
+      // Setup Quality Assessment
+      if (ta.setup_quality_assessment) {
+        html += '<div style="font-size:11px;color:var(--text,#d7fbff);line-height:1.5;margin-bottom:6px;">' + esc(ta.setup_quality_assessment) + '</div>';
       }
-      return apiFetch(
-        '/api/pipeline/runs/' + encodeURIComponent(runId) +
-        '/artifacts/' + encodeURIComponent(artInfo.artifact_id)
-      ).then(function (artData) {
-        return { row: row, detail: artData.data || artData };
-      }).catch(function () {
-        return { row: row, detail: null };
+
+      // Key Metrics Cited grid
+      var metricsCited = ta.key_metrics_cited;
+      if (metricsCited && typeof metricsCited === 'object') {
+        var mKeys = Object.keys(metricsCited);
+        if (mKeys.length > 0) {
+          html += '<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(130px, 1fr));gap:4px 10px;margin-bottom:6px;">';
+          mKeys.forEach(function (mk) {
+            var mv = metricsCited[mk];
+            var mStr = mv != null ? String(mv) : '\u2014';
+            html += '<div style="font-size:10px;padding:3px 6px;background:rgba(255,255,255,0.04);border-radius:3px;border:1px solid rgba(255,255,255,0.06);">';
+            html += '<span style="color:var(--muted);text-transform:uppercase;font-size:9px;">' + esc(mk.replace(/_/g, ' ')) + '</span><br>';
+            html += '<span style="color:var(--text,#d7fbff);font-weight:600;">' + esc(mStr) + '</span>';
+            html += '</div>';
+          });
+          html += '</div>';
+        }
+      }
+
+      // Technical context rows (trend, momentum, volatility, volume)
+      var techRows = [
+        { label: 'Trend', value: ta.trend_context, icon: '\u2197' },
+        { label: 'Momentum', value: ta.momentum_read, icon: '\u26A1' },
+        { label: 'Volatility', value: ta.volatility_read, icon: '\u223C' },
+        { label: 'Volume', value: ta.volume_read, icon: '\u25A3' },
+      ].filter(function (r) { return !!r.value; });
+
+      if (techRows.length > 0) {
+        techRows.forEach(function (r) {
+          html += '<div style="font-size:11px;line-height:1.4;padding:2px 0 2px 8px;border-left:2px solid rgba(0,220,255,0.25);margin-bottom:3px;">';
+          html += '<span style="color:var(--accent-cyan,#00dcff);font-weight:600;">' + r.icon + ' ' + esc(r.label) + ':</span> ';
+          html += '<span style="color:var(--text-secondary,#bbb);">' + esc(r.value) + '</span>';
+          html += '</div>';
+        });
+      }
+
+      html += '</div>';
+    }
+
+    // ── Factors Considered ──
+    var factors = analysis.factors_considered || [];
+    if (factors.length > 0) {
+      html += '<div style="margin-bottom:10px;">';
+      html += '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px;">Factors Considered</div>';
+
+      // Group by category
+      var groups = {};
+      factors.forEach(function (f) {
+        var cat = f.category || 'trade_setup';
+        if (!groups[cat]) groups[cat] = [];
+        groups[cat].push(f);
       });
-    });
 
-    Promise.all(fetches).then(function (results) {
-      loadedCandidates = results;
-      renderCandidates(results);
-    });
-  }
+      var catLabels = {
+        trade_setup: 'Trade Setup',
+        market_environment: 'Market Environment',
+        risk_reward: 'Risk / Reward',
+        timing: 'Timing',
+        data_quality: 'Data Quality',
+      };
+      var assessColors = {
+        favorable: '#00dc78',
+        unfavorable: '#ff5a5a',
+        concerning: '#ffc83c',
+        neutral: '#8899aa',
+      };
 
-  /* ── Render candidates ─────────────────────────────────────── */
+      Object.keys(groups).forEach(function (cat) {
+        html += '<div style="margin-bottom:8px;">';
+        html += '<div style="font-size:9px;font-weight:700;color:#6a8da8;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;padding-bottom:2px;border-bottom:1px solid rgba(106,141,168,0.15);">' + esc(catLabels[cat] || cat) + '</div>';
+        groups[cat].forEach(function (f) {
+          var aColor = assessColors[f.assessment] || '#8899aa';
+          var aLabel = (f.assessment || 'neutral').charAt(0).toUpperCase() + (f.assessment || 'neutral').slice(1);
+          var wBadge = f.weight === 'high' ? '\u25CF' : f.weight === 'low' ? '\u25CB' : '\u25D0';
+          html += '<div style="padding:3px 0 3px 8px;border-left:2px solid ' + aColor + ';margin-bottom:3px;">';
+          html += '<div style="display:flex;gap:6px;align-items:center;font-size:11px;line-height:1.4;">';
+          html += '<span style="color:' + aColor + ';font-size:8px;" title="Weight: ' + esc(f.weight || 'medium') + '">' + wBadge + '</span>';
+          html += '<span style="color:var(--text,#d7fbff);font-weight:600;">' + esc(f.factor || '') + '</span>';
+          html += '<span style="font-size:9px;padding:1px 4px;border-radius:2px;border:1px solid ' + aColor + '33;color:' + aColor + ';">' + esc(aLabel) + '</span>';
+          html += '</div>';
+          if (f.detail) {
+            html += '<div style="font-size:10px;color:var(--muted);margin-top:1px;padding-left:14px;">' + esc(f.detail) + '</div>';
+          }
+          html += '</div>';
+        });
+        html += '</div>';
+      });
 
-  function clearCandidates() {
-    currentRunId = null;
-    loadedCandidates = [];
-    artifactIndex = {};
-    var grid = document.getElementById('tmcCandidateGrid');
-    if (grid) {
-      grid.innerHTML = '';
-      showEmpty('Select a pipeline run to view candidates');
+      html += '</div>';
     }
-    var count = document.getElementById('tmcCandidateCount');
-    if (count) count.textContent = '0';
-  }
 
-  function showEmpty(msg) {
-    var grid = document.getElementById('tmcCandidateGrid');
-    if (!grid) return;
-    grid.innerHTML =
-      '<div class="tmc-empty-state">' +
-        '<div class="tmc-empty-icon">◎</div>' +
-        '<div class="tmc-empty-text">' + esc(msg) + '</div>' +
-      '</div>';
-    var count = document.getElementById('tmcCandidateCount');
-    if (count) count.textContent = '0';
-  }
-
-  function renderCandidates(results) {
-    var grid = document.getElementById('tmcCandidateGrid');
-    var countEl = document.getElementById('tmcCandidateCount');
-    if (!grid) return;
-
-    // Sort: buy first, then hold, then pass; within bucket by conviction desc
-    var sorted = results.slice().sort(function (a, b) {
-      var pa = actionPriority(a), pb = actionPriority(b);
-      if (pa !== pb) return pa - pb;
-      return (convictionOf(b) || 0) - (convictionOf(a) || 0);
-    });
-
-    if (countEl) countEl.textContent = String(sorted.length);
-    grid.innerHTML = '';
-
-    sorted.forEach(function (item, idx) {
-      grid.appendChild(buildCandidateCard(item, idx));
-    });
-  }
-
-  function actionPriority(item) {
-    var action = (item.row && item.row.action) || 'unknown';
-    switch (action) {
-      case 'buy': return 1;
-      case 'hold': return 2;
-      case 'pass': return 3;
-      default: return 4;
+    // ── Market Alignment ──
+    if (analysis.market_alignment) {
+      var ma = analysis.market_alignment;
+      var maColor = ma.overall === 'aligned' ? '#00dc78' : ma.overall === 'conflicting' ? '#ff5a5a' : '#ffc83c';
+      html += '<div style="margin-bottom:10px;padding:8px 10px;background:rgba(100,149,237,0.04);border-radius:6px;border:1px solid rgba(100,149,237,0.12);">';
+      html += '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px;">Market Alignment</div>';
+      html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">';
+      html += '<span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid ' + maColor + '44;color:' + maColor + ';font-weight:700;letter-spacing:0.3px;">' + esc(String(ma.overall || 'neutral').toUpperCase()) + '</span>';
+      html += '</div>';
+      if (ma.detail) {
+        html += '<div style="font-size:11px;color:var(--text-secondary,#bbb);line-height:1.5;">' + esc(ma.detail) + '</div>';
+      }
+      html += '</div>';
     }
+
+    // ── Risk Assessment ──
+    if (analysis.risk_assessment) {
+      var ra = analysis.risk_assessment;
+      var rvColor = ra.risk_reward_verdict === 'favorable' ? '#00dc78' : ra.risk_reward_verdict === 'unfavorable' ? '#ff5a5a' : '#ffc83c';
+      html += '<div style="margin-bottom:10px;padding:8px 10px;background:rgba(255,90,90,0.03);border-radius:6px;border:1px solid rgba(255,90,90,0.1);">';
+      html += '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px;">Risk Assessment';
+      html += ' <span style="font-size:9px;padding:1px 6px;border-radius:3px;border:1px solid ' + rvColor + '44;color:' + rvColor + ';margin-left:6px;font-weight:700;">' + esc(String(ra.risk_reward_verdict || 'marginal').toUpperCase()) + '</span>';
+      html += '</div>';
+
+      if (ra.biggest_concern) {
+        html += '<div style="font-size:11px;color:#ffc83c;line-height:1.5;margin-bottom:5px;padding:4px 8px;background:rgba(255,200,60,0.06);border-radius:4px;border-left:3px solid #ffc83c;">\u26A0 <strong>Key concern:</strong> ' + esc(ra.biggest_concern) + '</div>';
+      }
+
+      var risks = ra.primary_risks || [];
+      if (risks.length > 0) {
+        html += '<ul style="margin:0;padding-left:18px;font-size:11px;color:var(--text-secondary,#bbb);line-height:1.5;">';
+        risks.forEach(function (r) { html += '<li style="margin-bottom:2px;">' + esc(r) + '</li>'; });
+        html += '</ul>';
+      }
+      html += '</div>';
+    }
+
+    // ── Engine Comparison ──
+    if (analysis.engine_comparison) {
+      var ec = analysis.engine_comparison;
+      var agreeColor = ec.agreement === 'agree' ? '#00dc78' : ec.agreement === 'disagree' ? '#ff5a5a' : '#ffc83c';
+      html += '<div style="margin-bottom:10px;padding:8px 10px;background:rgba(100,149,237,0.04);border-radius:6px;border:1px solid rgba(100,149,237,0.12);">';
+      html += '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px;">Engine vs Model</div>';
+      html += '<div style="display:flex;gap:16px;align-items:center;font-size:11px;margin-bottom:4px;">';
+      if (ec.engine_score != null) {
+        var esColor = ec.engine_score >= 60 ? '#00dc78' : ec.engine_score >= 40 ? '#ffc83c' : '#ff5a5a';
+        html += '<span style="color:var(--text-secondary,#bbb);">Engine: <b style="color:' + esColor + ';">' + Math.round(ec.engine_score) + '</b></span>';
+      }
+      if (ec.model_score != null) {
+        var ms2Color = ec.model_score >= 60 ? '#00dc78' : ec.model_score >= 40 ? '#ffc83c' : '#ff5a5a';
+        html += '<span style="color:var(--text-secondary,#bbb);">Model: <b style="color:' + ms2Color + ';">' + Math.round(ec.model_score) + '</b></span>';
+      }
+      html += '<span style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid ' + agreeColor + '44;color:' + agreeColor + ';font-weight:700;">' + esc(String(ec.agreement || 'partial').toUpperCase()) + '</span>';
+      html += '</div>';
+      if (ec.reasoning) {
+        html += '<div style="font-size:10px;color:var(--text-secondary,#bbb);line-height:1.5;padding-left:8px;border-left:2px solid ' + agreeColor + ';">' + esc(ec.reasoning) + '</div>';
+      }
+      html += '</div>';
+    }
+
+    // ── What Would Change My Mind ──
+    if (analysis.what_would_change_my_mind) {
+      html += '<div style="margin-bottom:8px;padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);">';
+      html += '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:3px;">\u21BB What Would Change My Mind</div>';
+      html += '<div style="font-size:11px;color:var(--text-secondary,#bbb);line-height:1.5;font-style:italic;">' + esc(analysis.what_would_change_my_mind) + '</div>';
+      html += '</div>';
+    }
+
+    // ── Fallback/Parse info (debug) ──
+    if (analysis._parse_method && analysis._parse_method !== 'direct') {
+      html += '<div style="font-size:9px;color:var(--muted);opacity:0.6;padding-top:4px;border-top:1px solid rgba(255,255,255,0.06);">Parse method: ' + esc(analysis._parse_method) + '</div>';
+    }
+
+    html += '</div>';
+    return html;
   }
 
-  function convictionOf(item) {
-    return item.row && item.row.conviction;
+  /** Find a raw TMC candidate by trade key for action handlers. */
+  function _findStockRowByTradeKey(tradeKey) {
+    if (!tradeKey) return null;
+    var stockMapper = window.BenTradeStockTradeCardMapper;
+    for (var i = 0; i < _stockRenderedRows.length; i++) {
+      var row = _stockRenderedRows[i];
+      var strategyId = row.scanner_key || row.setup_type || 'stock_opportunity';
+      var rk = stockMapper
+        ? stockMapper.buildStockTradeKey(row.symbol, strategyId)
+        : '';
+      if (rk === tradeKey) return row;
+    }
+    return null;
   }
 
-  /* ── Build candidate card ──────────────────────────────────── */
-
-  function buildCandidateCard(item, idx) {
-    var row = item.row || {};
-    var detail = item.detail || {};
-    var rec = detail.recommendation_summary || {};
-    var policy = detail.policy_summary || {};
-    var exec = detail.execution_summary || {};
-    var identity = detail.candidate_identity || {};
-    var quality = detail.quality_summary || {};
-
-    var symbol = row.symbol || identity.symbol || '???';
-    var action = row.action || rec.action || '—';
-    var conviction = row.conviction != null ? row.conviction : rec.conviction;
-    var status = row.response_status || detail.response_status || 'unknown';
-    var policyOutcome = row.policy_outcome || policy.overall_outcome || '—';
-    var rationale = rec.rationale_summary || '';
-    var points = rec.key_supporting_points || [];
-    var risks = rec.key_risks || [];
-    var provider = row.provider || exec.provider || '—';
-    var modelName = row.model_name || exec.model_name || '—';
-    var latency = exec.latency_ms;
-    var eventSens = rec.event_sensitivity || '—';
-    var portfolioFit = rec.portfolio_fit || '—';
-    var sizing = rec.sizing_guidance || '—';
-    var scannerKey = row.scanner_key || identity.scanner_key || '';
-    var strategyType = identity.strategy_type || '';
-
+  /**
+   * Fallback card builder when BenTradeStockTradeCardMapper is unavailable.
+   * Produces a minimal readable card — should never appear in practice.
+   */
+  function buildStockCardFallback(c, data) {
     var card = document.createElement('div');
-    card.className = 'tmc-card';
-    card.dataset.candidateIdx = idx;
-
-    // Header
-    var header =
+    card.className = 'tmc-card tmc-stock-card';
+    var symbol = c.symbol || '???';
+    var action = c.action || '--';
+    card.innerHTML =
       '<div class="tmc-card-header">' +
         '<div class="tmc-card-symbol">' + esc(symbol) + '</div>' +
-        '<div class="tmc-card-action ' + actionClass(action) + '">' + esc(action.toUpperCase()) + '</div>' +
-        '<div class="tmc-card-status ' + statusClass(status) + '">' + esc(status) + '</div>' +
-      '</div>';
-
-    // Conviction bar
-    var convPct = conviction != null ? Math.round(conviction * 100) : 0;
-    var convBar =
-      '<div class="tmc-conviction-row">' +
-        '<span class="tmc-label">Conviction</span>' +
-        '<div class="tmc-conviction-bar-wrap">' +
-          '<div class="tmc-conviction-bar" style="width:' + convPct + '%"></div>' +
-        '</div>' +
-        '<span class="tmc-conviction-value">' + fmtPct(conviction) + '</span>' +
-      '</div>';
-
-    // Metrics grid
-    var metrics =
-      '<div class="tmc-metrics">' +
-        '<div class="tmc-metric"><span class="tmc-metric-label">Policy</span><span class="tmc-metric-value">' + esc(policyOutcome) + '</span></div>' +
-        '<div class="tmc-metric"><span class="tmc-metric-label">Event Risk</span><span class="tmc-metric-value">' + esc(eventSens) + '</span></div>' +
-        '<div class="tmc-metric"><span class="tmc-metric-label">Portfolio Fit</span><span class="tmc-metric-value">' + esc(portfolioFit) + '</span></div>' +
-        '<div class="tmc-metric"><span class="tmc-metric-label">Sizing</span><span class="tmc-metric-value">' + esc(sizing) + '</span></div>' +
-      '</div>';
-
-    // Rationale
-    var rationaleHtml = '';
-    if (rationale) {
-      rationaleHtml =
-        '<div class="tmc-rationale">' +
-          '<div class="tmc-rationale-label">Rationale</div>' +
-          '<div class="tmc-rationale-text">' + esc(rationale) + '</div>' +
-        '</div>';
-    }
-
-    // Supporting points + risks
-    var pointsHtml = '';
-    if (points.length > 0) {
-      pointsHtml = '<div class="tmc-points"><div class="tmc-points-label">Supporting Points</div><ul class="tmc-points-list">';
-      points.forEach(function (p) { pointsHtml += '<li>' + esc(p) + '</li>'; });
-      pointsHtml += '</ul></div>';
-    }
-
-    var risksHtml = '';
-    if (risks.length > 0) {
-      risksHtml = '<div class="tmc-risks"><div class="tmc-risks-label">Risks</div><ul class="tmc-risks-list">';
-      risks.forEach(function (r) { risksHtml += '<li>' + esc(r) + '</li>'; });
-      risksHtml += '</ul></div>';
-    }
-
-    // Model metadata
-    var modelMeta =
-      '<div class="tmc-model-meta">' +
-        '<span class="tmc-meta-item">' + esc(provider) + '</span>' +
-        '<span class="tmc-meta-sep">·</span>' +
-        '<span class="tmc-meta-item">' + esc(modelName) + '</span>' +
-        (latency != null ? '<span class="tmc-meta-sep">·</span><span class="tmc-meta-item">' + latency + 'ms</span>' : '') +
-      '</div>';
-
-    // Footer with Execute Trade button
-    var canExecute = action === 'buy' && status === 'ready';
-    var footer =
-      '<div class="tmc-card-footer">' +
-        '<button class="btn tmc-btn-execute' + (canExecute ? '' : ' tmc-btn-disabled') + '" ' +
-          'data-candidate-idx="' + idx + '"' +
-          (canExecute ? '' : ' disabled') +
-          ' title="' + (canExecute ? 'Open trade ticket for execution' : 'Only BUY + ready candidates can be executed') + '">' +
-          '⚡ Execute Trade' +
-        '</button>' +
-        '<span class="tmc-scanner-badge">' + esc(scannerKey || strategyType || '—') + '</span>' +
-      '</div>';
-
-    card.innerHTML = header + convBar + metrics + rationaleHtml + pointsHtml + risksHtml + modelMeta + footer;
-
-    // Wire execute button
-    var btn = card.querySelector('.tmc-btn-execute');
-    if (btn && canExecute) {
-      btn.addEventListener('click', function () {
-        executeCandidate(item);
-      });
-    }
-
+        '<div class="tmc-card-action ' + actionClass(action) + '">' + esc(String(action).toUpperCase()) + '</div>' +
+      '</div>' +
+      (c.rationale ? '<div class="tmc-rationale"><div class="tmc-rationale-text">' + esc(c.rationale) + '</div></div>' : '') +
+      '<div class="tmc-card-footer"><span class="tmc-scanner-badge">' + esc(c.scannerName || '--') + '</span></div>';
     return card;
   }
 
-  /* ── Execute candidate → Trade Ticket ──────────────────────── */
+  function triggerStockRun() {
+    var statusEl = document.getElementById('tmcStockStatus');
+    if (statusEl) { statusEl.textContent = 'Running...'; statusEl.className = 'tmc-run-status'; }
 
-  function executeCandidate(item) {
-    var row = item.row || {};
-    var detail = item.detail || {};
-    var identity = detail.candidate_identity || {};
-    var rec = detail.recommendation_summary || {};
-
-    // Adapt pipeline candidate data to trade ticket format.
-    // The trade ticket model normalizer can synthesize legs from header strikes.
-    var tradeData = {
-      underlying:    row.symbol || identity.symbol || '',
-      symbol:        row.symbol || identity.symbol || '',
-      strategyId:    identity.strategy_type || row.scanner_key || '',
-      strategyLabel: (identity.strategy_type || row.scanner_key || '').replace(/_/g, ' '),
-      quantity:      1,
-      orderType:     'limit',
-      tif:           'day',
-      limitPrice:    null,
-      maxProfit:     null,
-      maxLoss:       null,
-      pop:           null,
-      ev:            null,
-      ror:           null,
-      conviction:    row.conviction,
-      rationale:     rec.rationale_summary || '',
-      // Pipeline doesn't carry detailed strike/expiry — trade ticket will
-      // prompt for these or they can be sourced from candidate data
-      expiration:    null,
-      dte:           null,
-      shortStrike:   null,
-      longStrike:    null,
-      width:         null,
-      netPremium:    null,
-      legs:          [],
-    };
-
-    // Open trade ticket if available
-    if (window.BenTradeTradeTicket && typeof window.BenTradeTradeTicket.open === 'function') {
-      window.BenTradeTradeTicket.open(tradeData, { source: 'trade_management_center' });
-    } else {
-      console.warn('[TMC] Trade Ticket module not available');
-      alert('Trade Ticket module is not loaded. Cannot execute trade.');
-    }
-  }
-
-  /* ── Latest run shortcut ───────────────────────────────────── */
-
-  function loadLatestRun() {
-    apiFetch('/api/pipeline/runs')
-      .then(function (data) {
-        var runs = data.runs || [];
-        if (runs.length === 0) {
-          showEmpty('No pipeline runs found');
-          return;
-        }
-        var latest = runs[0];
-        var picker = document.getElementById('tmcRunPicker');
-        if (picker) picker.value = latest.run_id || '';
-        loadRunDetail(latest.run_id);
+    api.tmcRunStock()
+      .then(function (result) {
+        updateStatusBadge(statusEl, result.status);
+        loadStockOpportunities();
       })
       .catch(function (err) {
-        console.error('[TMC] Failed to load latest run:', err);
+        console.error('[TMC] Stock workflow run failed:', err);
+        updateStatusBadge(statusEl, 'failed');
       });
   }
 
-  /* ═══════════════════════════════════════════════════════════════
-   *  Active Trade Pipeline — Section 2
-   * ═══════════════════════════════════════════════════════════════ */
+  /* =================================================================
+   *  SECTION 2 -- Options Opportunities
+   * ================================================================= */
+
+  function loadOptionsOpportunities() {
+    var grid     = document.getElementById('tmcOptionsGrid');
+    var countEl  = document.getElementById('tmcOptionsCount');
+    var qualEl   = document.getElementById('tmcOptionsQuality');
+    var statusEl = document.getElementById('tmcOptionsStatus');
+
+    updateStatusBadge(statusEl, null);
+    if (statusEl) statusEl.textContent = 'Loading...';
+
+    api.tmcGetLatestOptions()
+      .then(function (resp) {
+        var result = handleWorkflowResponse(resp, grid, countEl, qualEl, statusEl, 'options');
+        if (!result) return;
+        renderOptionsCandidates(grid, result.candidates, result.data);
+      })
+      .catch(function (err) {
+        console.error('[TMC] Failed to load options opportunities:', err);
+        updateStatusBadge(statusEl, 'failed');
+        showEmptyGrid(grid, countEl, 'Failed to load options opportunities');
+      });
+  }
+
+  function renderOptionsCandidates(grid, candidates, data) {
+    if (!grid) return;
+    grid.innerHTML = '';
+    candidates.forEach(function (raw) {
+      grid.appendChild(buildOptionsCard(normalizeOptionsCandidate(raw), data));
+    });
+  }
+
+  function buildOptionsCard(c, data) {
+    var card = document.createElement('div');
+    card.className = 'tmc-card tmc-options-card';
+
+    var symbol = c.symbol || '???';
+    var strategyLabel = c.strategy ? c.strategy.replace(/_/g, ' ') : '--';
+
+    var header =
+      '<div class="tmc-card-header">' +
+        '<div class="tmc-card-symbol">' + esc(symbol) + '</div>' +
+        '<div class="tmc-card-strategy">' + esc(strategyLabel) + '</div>' +
+      '</div>';
+
+    var metrics =
+      '<div class="tmc-metrics">' +
+        buildMetric('EV', fmtDollar(c.ev)) +
+        buildMetric('POP', fmtPct(c.pop)) +
+        buildMetric('Max Loss', c.maxLoss != null ? fmtDollar(Math.abs(c.maxLoss)) : '--') +
+        buildMetric('Credit', fmtDollar(c.credit)) +
+        buildMetric('DTE', c.dte != null ? c.dte + 'd' : '--') +
+        buildMetric('Width', fmtDollar(c.width)) +
+      '</div>';
+
+    var legsHtml = '';
+    if (c.legs.length > 0) {
+      legsHtml = '<div class="tmc-legs">';
+      c.legs.forEach(function (leg) {
+        var side = (leg.side || '').toUpperCase();
+        var strike = leg.strike != null ? String(leg.strike) : '?';
+        var type = leg.option_type || leg.type || '';
+        var exp = leg.expiration || '';
+        legsHtml +=
+          '<span class="tmc-leg-item">' +
+            esc(side) + ' ' + esc(strike) + ' ' + esc(type) +
+            (exp ? ' ' + esc(exp) : '') +
+          '</span>';
+      });
+      legsHtml += '</div>';
+    }
+
+    var footer =
+      '<div class="tmc-card-footer">' +
+        '<span class="tmc-scanner-badge">' + esc(c.strategy || '--') + '</span>' +
+        '<span class="tmc-meta-item tmc-meta-muted">' + esc(data.run_id || '') + '</span>' +
+      '</div>';
+
+    card.innerHTML = header + metrics + legsHtml + footer;
+    return card;
+  }
+
+  function triggerOptionsRun() {
+    var statusEl = document.getElementById('tmcOptionsStatus');
+    if (statusEl) { statusEl.textContent = 'Running...'; statusEl.className = 'tmc-run-status'; }
+
+    api.tmcRunOptions()
+      .then(function (result) {
+        updateStatusBadge(statusEl, result.status);
+        loadOptionsOpportunities();
+      })
+      .catch(function (err) {
+        console.error('[TMC] Options workflow run failed:', err);
+        updateStatusBadge(statusEl, 'failed');
+      });
+  }
+
+  /* =================================================================
+   *  SECTION 3 -- Active Trade Candidates (unchanged -- uses
+   *  /api/active-trade-pipeline, separate from TMC workflow endpoints)
+   * ================================================================= */
 
   function recClass(recommendation) {
     switch ((recommendation || '').toUpperCase()) {
@@ -455,7 +1082,7 @@
     _activeRunning = true;
 
     var btn = document.getElementById('tmcRunActiveBtn');
-    if (btn) { btn.textContent = '⏳ Running…'; btn.disabled = true; }
+    if (btn) { btn.textContent = 'Running...'; btn.disabled = true; }
 
     var skipModel = false;
     var cb = document.getElementById('tmcSkipModel');
@@ -467,7 +1094,7 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         _activeRunning = false;
-        if (btn) { btn.textContent = '▶ Analyse Positions'; btn.disabled = false; }
+        if (btn) { btn.textContent = 'Analyse Positions'; btn.disabled = false; }
         if (data.ok === false) {
           showActiveEmpty('Pipeline error: ' + ((data.error || {}).message || 'unknown'));
           return;
@@ -476,14 +1103,18 @@
       })
       .catch(function (err) {
         _activeRunning = false;
-        if (btn) { btn.textContent = '▶ Analyse Positions'; btn.disabled = false; }
+        if (btn) { btn.textContent = 'Analyse Positions'; btn.disabled = false; }
         console.error('[TMC] Active pipeline failed:', err);
         showActiveEmpty('Failed to run pipeline: ' + err.message);
       });
   }
 
   function loadLatestActiveResults() {
-    apiFetch('/api/active-trade-pipeline/results')
+    fetch('/api/active-trade-pipeline/results')
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
       .then(function (data) {
         if (data.ok === false) {
           showActiveEmpty((data.error || {}).message || 'No results available');
@@ -502,12 +1133,12 @@
     if (grid) {
       grid.innerHTML =
         '<div class="tmc-empty-state">' +
-          '<div class="tmc-empty-icon">◉</div>' +
+          '<div class="tmc-empty-icon">&#9673;</div>' +
           '<div class="tmc-empty-text">' + esc(msg) + '</div>' +
         '</div>';
     }
     var count = document.getElementById('tmcActiveCount');
-    if (count) { count.textContent = '—'; count.className = 'tmc-count-badge tmc-count-muted'; }
+    if (count) { count.textContent = '--'; count.className = 'tmc-count-badge tmc-count-muted'; }
   }
 
   function renderActiveResults(data) {
@@ -522,7 +1153,6 @@
       return;
     }
 
-    // Sort: urgent first, then by urgency desc, then conviction desc
     var sorted = recs.slice().sort(function (a, b) {
       var ua = a.urgency || 0, ub = b.urgency || 0;
       if (ua !== ub) return ub - ua;
@@ -539,23 +1169,25 @@
       grid.appendChild(buildActiveTradeCard(rec));
     });
 
-    // Show run metadata
     var summary = data.summary || {};
     var metaHtml =
       '<div class="tmc-active-run-meta">' +
         '<span class="tmc-meta-item">Run ' + esc((data.run_id || '').substring(0, 16)) + '</span>' +
-        '<span class="tmc-meta-sep">·</span>' +
+        '<span class="tmc-meta-sep">|</span>' +
         '<span class="tmc-meta-item">' + (data.duration_ms || 0) + 'ms</span>' +
-        '<span class="tmc-meta-sep">·</span>' +
+        '<span class="tmc-meta-sep">|</span>' +
         '<span class="tmc-meta-item">' + (summary.hold_count || 0) + ' hold</span>' +
-        '<span class="tmc-meta-sep">·</span>' +
+        '<span class="tmc-meta-sep">|</span>' +
         '<span class="tmc-meta-item">' + (summary.reduce_count || 0) + ' reduce</span>' +
-        '<span class="tmc-meta-sep">·</span>' +
+        '<span class="tmc-meta-sep">|</span>' +
         '<span class="tmc-meta-item">' + (summary.close_count || 0) + ' close</span>' +
         (summary.urgent_review_count > 0
-          ? '<span class="tmc-meta-sep">·</span><span class="tmc-meta-item tmc-urgency-high">' + summary.urgent_review_count + ' urgent</span>'
+          ? '<span class="tmc-meta-sep">|</span><span class="tmc-meta-item tmc-urgency-high">' + summary.urgent_review_count + ' urgent</span>'
           : '') +
       '</div>';
+
+    var oldMeta = document.getElementById('tmcActiveRunMeta');
+    if (oldMeta) oldMeta.remove();
 
     grid.insertAdjacentHTML('beforebegin',
       '<div id="tmcActiveRunMeta">' + metaHtml + '</div>'
@@ -564,7 +1196,7 @@
 
   function buildActiveTradeCard(rec) {
     var symbol = rec.symbol || '???';
-    var recommendation = (rec.recommendation || '—').toUpperCase();
+    var recommendation = (rec.recommendation || '--').toUpperCase();
     var conviction = rec.conviction;
     var urgency = rec.urgency || 1;
     var rationale = rec.rationale_summary || '';
@@ -576,10 +1208,7 @@
     var posSnap = rec.position_snapshot || {};
     var strategy = rec.strategy || '';
     var dte = rec.dte;
-    var marketAlign = rec.market_alignment || '—';
-    var portfolioFit = rec.portfolio_fit || '—';
-    var eventSens = rec.event_sensitivity || '—';
-    var nextMove = rec.suggested_next_move || '';
+    var marketAlign = rec.market_alignment || '--';
     var healthScore = engineSummary.trade_health_score;
     var riskFlags = rec.internal_engine_flags || [];
     var isDegraded = rec.is_degraded;
@@ -588,7 +1217,6 @@
     var card = document.createElement('div');
     card.className = 'tmc-card tmc-active-card';
 
-    // Header
     var header =
       '<div class="tmc-card-header">' +
         '<div class="tmc-card-symbol">' + esc(symbol) + '</div>' +
@@ -596,7 +1224,6 @@
         '<div class="tmc-card-status ' + urgencyClass(urgency) + '">' + esc(urgencyLabel(urgency)) + '</div>' +
       '</div>';
 
-    // Conviction bar
     var convPct = conviction != null ? Math.round(conviction * 100) : 0;
     var convBar =
       '<div class="tmc-conviction-row">' +
@@ -607,36 +1234,32 @@
         '<span class="tmc-conviction-value">' + fmtPct(conviction) + '</span>' +
       '</div>';
 
-    // P&L snapshot
     var pnlVal = posSnap.unrealized_pnl;
     var pnlPct = posSnap.unrealized_pnl_pct;
     var pnlClass = pnlVal != null ? (pnlVal >= 0 ? 'tmc-pnl-positive' : 'tmc-pnl-negative') : '';
-    var pnlText = pnlVal != null ? '$' + pnlVal.toFixed(2) : '—';
+    var pnlText = pnlVal != null ? '$' + pnlVal.toFixed(2) : '--';
     var pnlPctText = pnlPct != null ? '(' + (pnlPct * 100).toFixed(1) + '%)' : '';
 
-    // Metrics grid — active trade version
     var metrics =
       '<div class="tmc-metrics">' +
         '<div class="tmc-metric"><span class="tmc-metric-label">P&L</span><span class="tmc-metric-value ' + pnlClass + '">' + pnlText + ' ' + pnlPctText + '</span></div>' +
-        '<div class="tmc-metric"><span class="tmc-metric-label">Health</span><span class="tmc-metric-value">' + (healthScore != null ? healthScore + '/100' : '—') + '</span></div>' +
-        '<div class="tmc-metric"><span class="tmc-metric-label">DTE</span><span class="tmc-metric-value">' + (dte != null ? dte + 'd' : '—') + '</span></div>' +
+        '<div class="tmc-metric"><span class="tmc-metric-label">Health</span><span class="tmc-metric-value">' + (healthScore != null ? healthScore + '/100' : '--') + '</span></div>' +
+        '<div class="tmc-metric"><span class="tmc-metric-label">DTE</span><span class="tmc-metric-value">' + (dte != null ? dte + 'd' : '--') + '</span></div>' +
         '<div class="tmc-metric"><span class="tmc-metric-label">Market</span><span class="tmc-metric-value">' + esc(marketAlign) + '</span></div>' +
       '</div>';
 
-    // Engine component scores
     var engineHtml = '';
     var compKeys = Object.keys(engineMetrics);
     if (compKeys.length > 0) {
       engineHtml = '<div class="tmc-engine-scores"><div class="tmc-points-label">Engine Scores</div><div class="tmc-engine-grid">';
       compKeys.forEach(function (k) {
         var v = engineMetrics[k];
-        var displayVal = v != null ? Math.round(v) : '—';
+        var displayVal = v != null ? Math.round(v) : '--';
         engineHtml += '<span class="tmc-engine-item">' + esc(k.replace(/_/g, ' ')) + ': <strong>' + displayVal + '</strong></span>';
       });
       engineHtml += '</div></div>';
     }
 
-    // Risk flags
     var flagsHtml = '';
     if (riskFlags.length > 0) {
       flagsHtml = '<div class="tmc-risk-flags">';
@@ -646,7 +1269,6 @@
       flagsHtml += '</div>';
     }
 
-    // Rationale
     var rationaleHtml = '';
     if (rationale) {
       rationaleHtml =
@@ -656,22 +1278,10 @@
         '</div>';
     }
 
-    // Supporting points + risks
-    var pointsHtml = '';
-    if (points.length > 0) {
-      pointsHtml = '<div class="tmc-points"><div class="tmc-points-label">Supporting Points</div><ul class="tmc-points-list">';
-      points.forEach(function (p) { pointsHtml += '<li>' + esc(p) + '</li>'; });
-      pointsHtml += '</ul></div>';
-    }
+    var pointsHtml = buildListSection(points, 'Supporting Points', 'tmc-points');
+    var risksHtml  = buildListSection(risks, 'Risks', 'tmc-risks');
 
-    var risksHtml = '';
-    if (risks.length > 0) {
-      risksHtml = '<div class="tmc-risks"><div class="tmc-risks-label">Risks</div><ul class="tmc-risks-list">';
-      risks.forEach(function (r) { risksHtml += '<li>' + esc(r) + '</li>'; });
-      risksHtml += '</ul></div>';
-    }
-
-    // Next move
+    var nextMove = rec.suggested_next_move || '';
     var nextMoveHtml = '';
     if (nextMove) {
       nextMoveHtml =
@@ -681,30 +1291,27 @@
         '</div>';
     }
 
-    // Model metadata
     var modelMeta = '';
     if (modelSummary.model_available) {
       modelMeta =
         '<div class="tmc-model-meta">' +
-          '<span class="tmc-meta-item">' + esc(modelSummary.provider || '—') + '</span>' +
-          '<span class="tmc-meta-sep">·</span>' +
-          '<span class="tmc-meta-item">' + esc(modelSummary.model_name || '—') + '</span>' +
-          (modelSummary.latency_ms != null ? '<span class="tmc-meta-sep">·</span><span class="tmc-meta-item">' + modelSummary.latency_ms + 'ms</span>' : '') +
+          '<span class="tmc-meta-item">' + esc(modelSummary.provider || '--') + '</span>' +
+          '<span class="tmc-meta-sep">|</span>' +
+          '<span class="tmc-meta-item">' + esc(modelSummary.model_name || '--') + '</span>' +
+          (modelSummary.latency_ms != null ? '<span class="tmc-meta-sep">|</span><span class="tmc-meta-item">' + modelSummary.latency_ms + 'ms</span>' : '') +
         '</div>';
     } else {
       modelMeta = '<div class="tmc-model-meta"><span class="tmc-meta-item tmc-meta-degraded">Engine only (model unavailable)</span></div>';
     }
 
-    // Degraded indicator
     var degradedHtml = '';
     if (isDegraded && degradedReasons.length > 0) {
       degradedHtml =
         '<div class="tmc-degraded-notice">' +
-          '<span class="tmc-degraded-icon">⚠</span> Degraded: ' + esc(degradedReasons.slice(0, 3).join(', ')) +
+          '<span class="tmc-degraded-icon">Warning</span> Degraded: ' + esc(degradedReasons.slice(0, 3).join(', ')) +
         '</div>';
     }
 
-    // Footer with action buttons
     var isClose = recommendation === 'CLOSE' || recommendation === 'URGENT_REVIEW';
     var isReduce = recommendation === 'REDUCE';
     var footer =
@@ -713,16 +1320,16 @@
           'data-symbol="' + esc(symbol) + '" ' +
           'data-action="execute" ' +
           'title="Open trade ticket for adjustment">' +
-          '⚡ Execute' +
+          'Execute' +
         '</button>' +
         '<button class="btn tmc-btn-close' + (isClose || isReduce ? '' : ' tmc-btn-disabled') + '" ' +
           'data-symbol="' + esc(symbol) + '" ' +
           'data-action="close" ' +
           (isClose || isReduce ? '' : 'disabled ') +
           'title="' + (isClose || isReduce ? 'Close or reduce this position' : 'Position not flagged for closing') + '">' +
-          '✕ Close' +
+          'Close' +
         '</button>' +
-        '<span class="tmc-scanner-badge">' + esc(strategy || '—') + '</span>' +
+        '<span class="tmc-scanner-badge">' + esc(strategy || '--') + '</span>' +
         (rec.recommendation_source ? '<span class="tmc-source-badge">via ' + esc(rec.recommendation_source) + '</span>' : '') +
       '</div>';
 
@@ -730,7 +1337,6 @@
       rationaleHtml + pointsHtml + risksHtml + nextMoveHtml +
       modelMeta + degradedHtml + footer;
 
-    // Wire action buttons
     var execBtn = card.querySelector('[data-action="execute"]');
     if (execBtn) {
       execBtn.addEventListener('click', function () {
@@ -746,8 +1352,6 @@
 
     return card;
   }
-
-  /* ── Execute active position → Trade Ticket ─────────────── */
 
   function executeActivePosition(rec, action) {
     var symbol = rec.symbol || '';
@@ -774,68 +1378,71 @@
     if (window.TradeTicket && typeof window.TradeTicket.open === 'function') {
       window.TradeTicket.open(tradeData);
     } else {
-      console.warn('[TMC] TradeTicket not available — trade data:', tradeData);
+      console.warn('[TMC] TradeTicket not available -- trade data:', tradeData);
       alert('Trade Ticket module not loaded. Trade data logged to console.');
     }
   }
 
-  /* ── Page init ─────────────────────────────────────────────── */
+  /* -- Page init ----------------------------------------------------- */
 
   function initTradeManagementCenter(viewEl) {
     if (!viewEl) return;
 
-    // Wire controls
-    var picker = document.getElementById('tmcRunPicker');
-    var refreshBtn = document.getElementById('tmcRefreshBtn');
-    var latestBtn = document.getElementById('tmcLatestBtn');
+    // Workflow trigger buttons
+    var runStockBtn   = document.getElementById('tmcRunStock');
+    var runOptionsBtn = document.getElementById('tmcRunOptions');
+    var refreshBtn    = document.getElementById('tmcRefreshBtn');
 
-    if (picker) {
-      picker.addEventListener('change', function () {
-        loadRunDetail(picker.value);
-      });
+    if (runStockBtn) {
+      runStockBtn.addEventListener('click', function () { triggerStockRun(); });
+    }
+    if (runOptionsBtn) {
+      runOptionsBtn.addEventListener('click', function () { triggerOptionsRun(); });
     }
     if (refreshBtn) {
       refreshBtn.addEventListener('click', function () {
-        loadRuns();
-      });
-    }
-    if (latestBtn) {
-      latestBtn.addEventListener('click', function () {
-        loadLatestRun();
+        loadStockOpportunities();
+        loadOptionsOpportunities();
       });
     }
 
-    // Active trade pipeline controls
-    var runActiveBtn = document.getElementById('tmcRunActiveBtn');
+    // Active trade controls (unchanged)
+    var runActiveBtn     = document.getElementById('tmcRunActiveBtn');
     var refreshActiveBtn = document.getElementById('tmcRefreshActiveBtn');
 
     if (runActiveBtn) {
-      runActiveBtn.addEventListener('click', function () {
-        runActivePipeline();
-      });
+      runActiveBtn.addEventListener('click', function () { runActivePipeline(); });
     }
     if (refreshActiveBtn) {
-      refreshActiveBtn.addEventListener('click', function () {
-        loadLatestActiveResults();
-      });
+      refreshActiveBtn.addEventListener('click', function () { loadLatestActiveResults(); });
     }
 
-    // Initial load
-    loadRuns();
+    // Load latest workflow outputs on page entry
+    loadStockOpportunities();
+    loadOptionsOpportunities();
 
-    // Cleanup
+    // Cleanup handler for SPA navigation
     window.BenTradeActiveViewCleanup = function () {
       if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
-      currentRunId = null;
-      loadedCandidates = [];
-      artifactIndex = {};
       _activeRunning = false;
       var metaEl = document.getElementById('tmcActiveRunMeta');
       if (metaEl) metaEl.remove();
     };
   }
 
-  /* ── Register ──────────────────────────────────────────────── */
+  /* -- Expose for testing -------------------------------------------- */
+
+  window._tmcInternals = {
+    normalizeStockCandidate: normalizeStockCandidate,
+    normalizeOptionsCandidate: normalizeOptionsCandidate,
+    tmcStockToScannerShape: tmcStockToScannerShape,
+    buildTmcEnrichmentHtml: buildTmcEnrichmentHtml,
+    renderTmcFinalDecisionResult: renderTmcFinalDecisionResult,
+    getStatusInfo: getStatusInfo,
+    TMC_STATUS_MAP: TMC_STATUS_MAP,
+  };
+
+  /* -- Register ------------------------------------------------------ */
 
   window.BenTradePages = window.BenTradePages || {};
   window.BenTradePages.initTradeManagementCenter = initTradeManagementCenter;
