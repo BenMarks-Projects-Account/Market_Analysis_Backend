@@ -1041,7 +1041,8 @@ async def _stage_run_final_model_analysis(
     so that transient network / model-cold-start issues do not leave
     candidates without analysis.
 
-    Uses ``analyze_tmc_final_decision`` from common.model_analysis.
+    Uses ``routed_tmc_final_decision`` from model_routing_integration (Step 8).
+    Falls back to legacy ``analyze_tmc_final_decision`` if routing unavailable.
     The LLM call is synchronous and runs in an executor to avoid
     blocking the event loop.
 
@@ -1056,6 +1057,7 @@ async def _stage_run_final_model_analysis(
     """
     import asyncio
     import functools
+    from concurrent.futures import ThreadPoolExecutor
 
     started = _now_iso()
     selected: list[dict[str, Any]] = stage_data.get("selected_candidates", [])
@@ -1080,7 +1082,7 @@ async def _stage_run_final_model_analysis(
         )
 
     try:
-        from common.model_analysis import analyze_tmc_final_decision
+        from app.services.model_routing_integration import routed_tmc_final_decision
 
         raw_by_key = stage_data.get("raw_candidates_by_key", {})
         loop = asyncio.get_running_loop()
@@ -1088,6 +1090,16 @@ async def _stage_run_final_model_analysis(
         succeeded = 0
         failed = 0
         failed_candidates: list[dict[str, str]] = []
+
+        # Concurrent dispatch: limit in-flight model calls to avoid
+        # overwhelming providers.  The per-provider execution gate
+        # handles routing; this pool + semaphore cap total thread usage.
+        total_candidates = len(selected)
+        _max_concurrent = min(total_candidates, 4) if total_candidates else 1
+        _model_pool = ThreadPoolExecutor(
+            max_workers=_max_concurrent,
+            thread_name_prefix="model_dispatch",
+        )
 
         async def _analyze_one(cand: dict[str, Any]) -> bool:
             """Run model analysis for a single candidate. Returns True on success."""
@@ -1119,9 +1131,9 @@ async def _stage_run_final_model_analysis(
 
             try:
                 model_result = await loop.run_in_executor(
-                    None,
+                    _model_pool,
                     functools.partial(
-                        analyze_tmc_final_decision,
+                        routed_tmc_final_decision,
                         candidate=raw_cand,
                         market_picture_context=mpc,
                         strategy_id=scanner_key,
@@ -1155,12 +1167,33 @@ async def _stage_run_final_model_analysis(
                 )
                 return False
 
-        # ── First pass: analyze all candidates ───────────────────
+        # ── First pass: concurrent model analysis ────────────────
         first_pass_failures: list[dict[str, Any]] = []
-        for cand in selected:
-            attempted += 1
-            ok = await _analyze_one(cand)
-            if ok:
+        _sem = asyncio.Semaphore(_max_concurrent)
+
+        async def _guarded_analyze(idx: int, cand: dict[str, Any]) -> bool:
+            """Dispatch a single candidate under the concurrency semaphore."""
+            async with _sem:
+                logger.info(
+                    "[model_analysis] Dispatching candidate %d/%d: %s",
+                    idx, total_candidates, cand.get("symbol", "?"),
+                )
+                return await _analyze_one(cand)
+
+        gather_tasks = [
+            _guarded_analyze(i + 1, c) for i, c in enumerate(selected)
+        ]
+        gather_results = await asyncio.gather(*gather_tasks, return_exceptions=True)
+
+        attempted = total_candidates
+        for cand, result in zip(selected, gather_results):
+            if isinstance(result, Exception):
+                logger.warning(
+                    "[model_analysis] Unexpected error for %s: %s",
+                    cand.get("symbol", "?"), result,
+                )
+                first_pass_failures.append(cand)
+            elif result:
                 succeeded += 1
             else:
                 first_pass_failures.append(cand)
@@ -1172,7 +1205,12 @@ async def _stage_run_final_model_analysis(
                 len(first_pass_failures), attempted,
             )
             await asyncio.sleep(3)
-            for cand in first_pass_failures:
+            for idx, cand in enumerate(first_pass_failures, start=1):
+                symbol = cand.get("symbol", "?")
+                logger.info(
+                    "[model_analysis] Retry %d/%d: %s",
+                    idx, len(first_pass_failures), symbol,
+                )
                 ok = await _analyze_one(cand)
                 if ok:
                     succeeded += 1
@@ -1184,12 +1222,19 @@ async def _stage_run_final_model_analysis(
                         "scanner_key": cand.get("scanner_key", ""),
                     })
 
+        _model_pool.shutdown(wait=False)
+
         stage_data["model_analysis_counts"] = {
             "attempted": attempted,
             "succeeded": succeeded,
             "failed": failed,
             "failed_candidates": failed_candidates,
         }
+
+        logger.info(
+            "[model_analysis] Complete: %d attempted, %d succeeded, %d failed, %d retried",
+            attempted, succeeded, failed, len(first_pass_failures),
+        )
 
         status = "completed" if failed == 0 else "degraded"
         if succeeded == 0 and attempted > 0:
@@ -1204,6 +1249,10 @@ async def _stage_run_final_model_analysis(
     except Exception as exc:
         # Total failure (e.g., import error) — degrade, don't abort.
         logger.error("run_final_model_analysis failed: %s", exc, exc_info=True)
+        try:
+            _model_pool.shutdown(wait=False)
+        except (NameError, UnboundLocalError):
+            pass
         for cand in selected:
             cand["model_review"] = None
         stage_data["model_analysis_counts"] = {

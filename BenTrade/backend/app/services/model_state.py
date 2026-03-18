@@ -1,5 +1,12 @@
 """Runtime model source state — persisted to data/runtime_config.json.
 
+Compatibility layer — controls which LLM endpoint non-routed callers
+(model_router, model_health_service, active_trade_pipeline) target.
+
+For routed execution (Step 8+), the authoritative mode is managed by
+``execution_mode_state.get_execution_mode()`` and persisted separately
+as ``execution_mode`` in runtime_config.json.
+
 Functions:
     get_model_source() -> str       # e.g. "local"
     set_model_source(source: str)   # validates and persists

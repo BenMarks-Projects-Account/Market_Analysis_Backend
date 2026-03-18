@@ -21,16 +21,19 @@
     <!-- General error banner (used by setError in home.js) -->
     <div id="homeError" class="active-error" style="display:none;margin-bottom:6px;"></div>
 
-    <!-- ═══ Market Regime + Playbook ═══ -->
+    <!-- ═══ 1. Market Regime ═══ -->
     <section class="stock-card home-regime-panel">
       <div class="stock-card-title bt-panel-title">Market Regime</div>
-      <div class="home-regime-panel-grid">
-        <div>
-          <div id="homeRegimeStrip" class="home-regime-strip"></div>
+      <!-- Hero: regime status + environment read -->
+      <div id="homeRegimeStrip" class="home-regime-strip"></div>
+      <!-- Factor bars + regime guidance -->
+      <div class="home-regime-body">
+        <div class="home-regime-factors-col">
+          <div class="home-regime-factors-header">Factor Breakdown</div>
           <div id="homeRegimeComponents" class="home-regime-components"></div>
         </div>
-        <div>
-          <div class="stock-card-title" style="margin:0 0 8px 0;">Suggested Playbook</div>
+        <div class="home-regime-guidance-col">
+          <div class="home-regime-factors-header">Regime Guidance</div>
           <div id="homePlaybookChips" class="home-playbook-chips"></div>
           <button id="homeRegimeModelBtn" class="btn qtButton home-regime-model-btn" type="button">Model Analysis</button>
           <div id="homeRegimeComparisonTable" class="home-regime-comparison-table" style="display:none;"></div>
@@ -39,51 +42,65 @@
       </div>
     </section>
 
-    <!-- ═══ Strategy Playbook ═══ -->
-    <section class="stock-card home-playbook-panel">
-      <div class="stock-card-title bt-panel-title">Strategy Playbook</div>
-      <div id="homeStrategyPlaybook" class="home-strategy-playbook"></div>
-    </section>
-
-    <!-- ═══ Market Snapshot ═══ -->
-    <section class="stock-card home-market-snapshot-panel">
-      <div class="stock-card-title bt-panel-title">Market Snapshot</div>
-      <div class="home-market-snapshot-body">
-        <div class="home-data-row">
-          <div class="stock-card home-nested-card">
-            <div class="stock-card-title">Major Index Panel</div>
-            <div id="homeIndexTiles" class="home-index-tiles"></div>
+    <!-- ═══ 2. Market Picture Overview ═══ -->
+    <section class="stock-card home-scoreboard-panel">
+      <div class="stock-card-title bt-panel-title">Market Picture Overview</div>
+      <div id="homeScoreboard" class="home-scoreboard-body">
+        <!-- Engine score cards rendered by home.js -->
+        <div id="homeScoreboardCards" class="home-scoreboard-cards"></div>
+        <!-- Detail strip: indexes, charts, sectors, signals -->
+        <div class="home-scoreboard-detail-strip">
+          <div class="home-scoreboard-grid">
+            <div class="stock-card home-nested-card">
+              <div class="stock-card-title">Major Indexes</div>
+              <div id="homeIndexTiles" class="home-index-tiles"></div>
+            </div>
+            <div class="stock-card home-nested-card">
+              <div class="stock-card-title">Macro Indicators</div>
+              <div id="homeMacroTiles" class="home-macro-tiles"></div>
+            </div>
           </div>
-          <div class="stock-card home-nested-card">
-            <div class="stock-card-title">Macro Indicators</div>
-            <div id="homeMacroTiles" class="home-macro-tiles"></div>
+          <div class="home-scoreboard-grid">
+            <div class="stock-card home-nested-card">
+              <div class="stock-card-title">SPY Price Chart (6M)</div>
+              <svg id="homeSpyChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
+            </div>
+            <div class="stock-card home-nested-card">
+              <div class="stock-card-title">VIX Chart (3M)</div>
+              <svg id="homeVixChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
+            </div>
           </div>
-        </div>
-        <div class="home-data-row">
-          <div class="stock-card home-nested-card">
-            <div class="stock-card-title">SPY Price Chart (6M)</div>
-            <svg id="homeSpyChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
-          </div>
-          <div class="stock-card home-nested-card">
-            <div class="stock-card-title">VIX Chart (3M)</div>
-            <svg id="homeVixChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
-          </div>
-        </div>
-
-        <div class="home-data-row">
-          <div class="stock-card home-nested-card">
-            <div class="stock-card-title">Sector Performance</div>
-            <div id="homeSectorBars" class="home-sector-bars"></div>
-          </div>
-          <div class="stock-card home-nested-card">
-            <div class="stock-card-title">Signal Hub</div>
-            <div id="homeSignalHub" class="home-signal-hub"></div>
+          <div class="home-scoreboard-grid">
+            <div class="stock-card home-nested-card">
+              <div class="stock-card-title">Sector Performance</div>
+              <div id="homeSectorBars" class="home-sector-bars"></div>
+            </div>
+            <div class="stock-card home-nested-card">
+              <div class="stock-card-title">Signal Hub</div>
+              <div id="homeSignalHub" class="home-signal-hub"></div>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ═══ Portfolio Snapshot ═══ -->
+    <!-- ═══ 3. Strategy Playbooks ═══ -->
+    <div class="home-playbooks-row">
+      <section class="stock-card home-playbook-standalone">
+        <div class="stock-card-title bt-panel-title">Stock Strategy Playbook</div>
+        <div id="homeStockStrategyPlaybook" class="home-strategy-playbook-body">
+          <div class="stock-note home-playbook-placeholder">Stock strategy recommendations will appear here based on market regime.</div>
+        </div>
+      </section>
+      <section class="stock-card home-playbook-standalone">
+        <div class="stock-card-title bt-panel-title">Options Strategy Playbook</div>
+        <div id="homeOptionsStrategyPlaybook" class="home-strategy-playbook-body">
+          <div class="stock-note home-playbook-placeholder">Options strategy recommendations will appear here based on market regime.</div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ═══ 4. Portfolio Snapshot ═══ -->
     <section class="stock-card home-portfolio-snapshot-panel">
       <div class="stock-card-title bt-panel-title">Portfolio Snapshot</div>
       <div class="home-portfolio-snapshot-body">
@@ -96,7 +113,6 @@
           <div id="homeRiskTiles" class="home-risk-tiles"></div>
         </div>
       </div>
-      <!-- Equity Curve — full width beneath Active Trades + Risk row -->
       <div class="stock-card home-nested-card home-equity-curve-card">
         <div class="stock-card-title">Equity Curve</div>
         <div id="homeEquityCurveEmpty" class="home-equity-curve-empty">No equity curve data yet — run scans / connect brokerage</div>
@@ -104,56 +120,15 @@
       </div>
     </section>
 
-    <!-- ═══ Opportunity Engine ═══ -->
-    <section class="stock-card home-opportunity-engine-card">
-      <div class="stock-card-title bt-panel-title">Opportunity Engine</div>
-
-      <!-- ─── Options Engine ─── -->
-      <div class="home-engine-section">
-        <div class="home-engine-section-header">Options Engine</div>
-
-        <!-- Controls subpanel -->
-        <div class="home-opp-controls">
-          <div class="home-opp-controls-row">
-            <label for="homeScanPreset" class="stock-note home-queue-label">Filter Level</label>
-            <select id="homeScanPreset" class="home-queue-select" aria-label="Scan Queue filter level">
-              <option value="strict">Strict</option>
-              <option value="conservative">Conservative</option>
-              <option value="balanced" selected>Balanced</option>
-              <option value="wide">Wide</option>
-            </select>
-            <button id="homeRunQueueBtn" class="btn qtButton" type="button">Run Scan</button>
-            <button id="homeClearScanResultsBtn" class="btn" type="button" style="padding:6px 10px;font-size:11px;opacity:0.75;display:none;">Clear Results</button>
-            <span id="homeScanLastRun" class="stock-note" style="font-size:11px;color:rgba(190,236,244,0.6);"></span>
-          </div>
-          <div id="homeSymbolUniverse" style="margin-top:8px;"></div>
-        </div>
-
-        <div id="homeQueueProgress" class="home-queue-progress" style="display:none;">
-          <span id="homeQueueSpinner" class="home-scan-spinner" style="display:none;" aria-hidden="true"></span>
-          <span id="homeQueueCurrent" class="stock-note">Idle</span>
-          <span id="homeQueueCount" class="stock-note">0/0</span>
-        </div>
-        <div id="homeQueueLog" class="home-queue-log" style="display:none;"></div>
-        <div id="homeScanStatus" class="stock-note" style="margin-bottom:6px;display:none;"></div>
-        <div id="homeScanError" class="active-error" style="display:none;margin-bottom:6px;"></div>
-        <div id="homeScannerOpportunities" class="home-scanner-opportunities"></div>
+    <!-- ═══ 5. Market Picture History ═══ -->
+    <section class="stock-card home-mp-history-panel">
+      <div class="stock-card-title bt-panel-title">Market Picture History</div>
+      <div id="homeMPHistoryEmpty" class="home-mp-history-empty" style="display:none;">Not enough market-picture history yet for a 2-week engine view</div>
+      <div id="homeMPHistoryChart" class="home-mp-history-chart-wrap" style="display:none;">
+        <svg id="homeMPHistorySvg" class="home-mp-history-svg" viewBox="0 0 900 300" preserveAspectRatio="none"></svg>
+        <div id="homeMPHistoryLegend" class="home-mp-history-legend"></div>
       </div>
+    </section>
 
-      <!-- ─── Stock Engine ─── -->
-      <div class="home-engine-section home-stock-engine-section">
-        <div class="home-engine-section-header">Stock Engine</div>
-
-        <div class="home-stock-engine-controls">
-          <button id="homeStockEngineRunBtn" class="btn qtButton" type="button">Run Stock Scan</button>
-          <span id="homeStockEngineLastUpdated" class="stock-note" style="font-size:11px;color:rgba(190,236,244,0.6);">Last updated: --</span>
-          <span id="homeStockEngineWarning" class="stock-note" style="font-size:11px;color:rgba(255,180,60,0.85);display:none;"></span>
-        </div>
-
-        <div id="homeStockEngineLoading" class="home-stock-engine-loading" style="display:none;">
-          <span class="home-scan-spinner" aria-hidden="true"></span>
-          <span class="stock-note">Running all stock scanners… this may take 1-2 minutes.</span>
-        </div>
-        <div id="homeStockEngineError" class="active-error" style="display:none;margin-bottom:6px;"></div>
-        <div id="homeStockEngineCandidates" class="home-scanner-opportunities"></div>
-      </div>
+  </div><!-- .home-page -->
+</div><!-- .view-wrap -->

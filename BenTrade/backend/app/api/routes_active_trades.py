@@ -820,31 +820,67 @@ async def get_monitor_narrative(
         symbol, status, score,
     )
 
-    # ── LLM call ─────────────────────────────────────────────────
+    # ── LLM call (routed with legacy fallback) ──────────────────
     try:
-        from app.services.model_router import get_model_endpoint
-        llm_response = await request.app.state.http_client.post(
-            get_model_endpoint(),
-            json={
-                "model": "local-model",
-                "messages": [
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": user_msg},
-                ],
-                "temperature": 0.2,
-                "max_tokens": 600,
-                "stream": False,
-            },
-            timeout=90.0,
-        )
+        import asyncio as _asyncio
+        from app.services.model_routing_integration import execute_routed_model, RoutingDisabledError
 
-        if llm_response.status_code != 200:
-            msg = f"LLM returned HTTP {llm_response.status_code}"
-            logger.warning("[monitor-narrative] %s symbol=%s", msg, symbol)
-            return {"ok": False, "symbol": symbol, "error": {"message": msg}}
+        raw_content = None
 
-        data = llm_response.json()
-        raw_content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        # Routed execution — participates in gate + provider rotation
+        try:
+            _loop = _asyncio.get_running_loop()
+            _routed_result, _routed_trace = await _loop.run_in_executor(
+                None,
+                lambda: execute_routed_model(
+                    task_type="monitor_narrative",
+                    messages=[{"role": "user", "content": user_msg}],
+                    system_prompt=system_msg,
+                    timeout=90.0,
+                    max_tokens=600,
+                    temperature=0.2,
+                    metadata={"symbol": symbol},
+                ),
+            )
+            if _routed_result["status"] == "success":
+                raw_content = _routed_result.get("content", "")
+                logger.info(
+                    "[monitor-narrative] routed OK provider=%s symbol=%s",
+                    _routed_trace.selected_provider, symbol,
+                )
+            else:
+                logger.warning(
+                    "[monitor-narrative] routed call failed: %s — trying legacy symbol=%s",
+                    _routed_result.get("error"), symbol,
+                )
+        except RoutingDisabledError:
+            logger.info("[monitor-narrative] routing disabled — legacy fallback symbol=%s", symbol)
+        except Exception as _routing_exc:
+            logger.warning("[monitor-narrative] routing error (%s) — legacy fallback symbol=%s", _routing_exc, symbol)
+
+        # Legacy fallback if routed execution didn't produce content
+        if raw_content is None:
+            from app.services.model_router import get_model_endpoint
+            llm_response = await request.app.state.http_client.post(
+                get_model_endpoint(),
+                json={
+                    "model": "local-model",
+                    "messages": [
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    "temperature": 0.2,
+                    "max_tokens": 600,
+                    "stream": False,
+                },
+                timeout=90.0,
+            )
+            if llm_response.status_code != 200:
+                msg = f"LLM returned HTTP {llm_response.status_code}"
+                logger.warning("[monitor-narrative] %s symbol=%s", msg, symbol)
+                return {"ok": False, "symbol": symbol, "error": {"message": msg}}
+            data = llm_response.json()
+            raw_content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
 
         logger.info(
             "[monitor-narrative] response len=%d think_detected=%s symbol=%s",
@@ -1291,25 +1327,62 @@ Produce a concise position review memo as JSON. Be decisive."""
 
     try:
         for attempt in range(1, MAX_ATTEMPTS + 1):
-            from app.services.model_router import get_model_endpoint
-            llm_response = await request.app.state.http_client.post(
-                get_model_endpoint(),
-                json={**llm_payload, "stream": False},
-                timeout=90.0,
-            )
-            if llm_response.status_code != 200:
-                msg = f"LLM returned HTTP {llm_response.status_code}"
-                logger.warning("[model-analysis] %s (attempt %d)", msg, attempt)
-                if attempt < MAX_ATTEMPTS:
-                    continue
-                return {"ok": False, "symbol": symbol, "error": {"message": msg}}
+            import asyncio as _asyncio
+            from app.services.model_routing_integration import execute_routed_model, RoutingDisabledError
 
-            data = llm_response.json()
-            raw_content = (
-                (data.get("choices") or [{}])[0]
-                .get("message", {})
-                .get("content", "")
-            )
+            raw_content = None
+
+            # Routed execution — participates in gate + provider rotation
+            try:
+                _loop = _asyncio.get_running_loop()
+                _routed_result, _routed_trace = await _loop.run_in_executor(
+                    None,
+                    lambda attempt=attempt: execute_routed_model(
+                        task_type="active_trade_model_analysis",
+                        messages=[{"role": "user", "content": user_msg}],
+                        system_prompt=_MODEL_ANALYSIS_SYSTEM_MSG,
+                        timeout=90.0,
+                        max_tokens=900,
+                        temperature=0.2,
+                        metadata={"symbol": symbol, "attempt": attempt},
+                    ),
+                )
+                if _routed_result["status"] == "success":
+                    raw_content = _routed_result.get("content", "")
+                    logger.info(
+                        "[model-analysis] routed OK provider=%s (attempt %d) symbol=%s",
+                        _routed_trace.selected_provider, attempt, symbol,
+                    )
+                else:
+                    logger.warning(
+                        "[model-analysis] routed call failed: %s — trying legacy (attempt %d) symbol=%s",
+                        _routed_result.get("error"), attempt, symbol,
+                    )
+            except RoutingDisabledError:
+                logger.info("[model-analysis] routing disabled — legacy fallback (attempt %d) symbol=%s", attempt, symbol)
+            except Exception as _routing_exc:
+                logger.warning("[model-analysis] routing error (%s) — legacy fallback (attempt %d) symbol=%s", _routing_exc, attempt, symbol)
+
+            # Legacy fallback if routed execution didn't produce content
+            if raw_content is None:
+                from app.services.model_router import get_model_endpoint
+                llm_response = await request.app.state.http_client.post(
+                    get_model_endpoint(),
+                    json={**llm_payload, "stream": False},
+                    timeout=90.0,
+                )
+                if llm_response.status_code != 200:
+                    msg = f"LLM returned HTTP {llm_response.status_code}"
+                    logger.warning("[model-analysis] %s (attempt %d)", msg, attempt)
+                    if attempt < MAX_ATTEMPTS:
+                        continue
+                    return {"ok": False, "symbol": symbol, "error": {"message": msg}}
+                data = llm_response.json()
+                raw_content = (
+                    (data.get("choices") or [{}])[0]
+                    .get("message", {})
+                    .get("content", "")
+                )
 
             # Log raw content for debugging (never exposed to UI)
             logger.debug(

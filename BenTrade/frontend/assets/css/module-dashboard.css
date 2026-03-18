@@ -2157,3 +2157,201 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
   .tbp-node { min-width: 70px; padding: 8px 4px; }
   .tbp-node-label { font-size: 8px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Data Health — diagnostic pills + routing dashboard (Step 13)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Diagnostic pills (shared by data health + routing) ──────────────────── */
+.diag-pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.6;
+}
+.diag-pill-green {
+  background: rgba(46,204,113,0.14);
+  color: #2ecc71;
+  border: 1px solid rgba(46,204,113,0.3);
+}
+.diag-pill-yellow {
+  background: rgba(244,200,95,0.14);
+  color: var(--warn, #f4c85f);
+  border: 1px solid rgba(244,200,95,0.3);
+}
+.diag-pill-red {
+  background: rgba(255,79,102,0.14);
+  color: var(--danger, #ff4f66);
+  border: 1px solid rgba(255,79,102,0.3);
+}
+.diag-pill-grey {
+  background: rgba(170,210,224,0.08);
+  color: rgba(170,210,224,0.55);
+  border: 1px solid rgba(170,210,224,0.15);
+}
+
+/* ── Routing system meta grid ────────────────────────────────────────────── */
+.dh-routing-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  padding: 4px 0;
+}
+.dh-routing-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text, #d7fbff);
+}
+.dh-routing-meta-label {
+  color: var(--muted, #93a7b6);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── Routing provider tile meta ──────────────────────────────────────────── */
+.dh-routing-tile-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted, #93a7b6);
+}
+
+/* ── Routing operator controls (Step 15) ────────────────────────────────── */
+.dh-routing-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(170,210,224,0.08);
+  flex-wrap: wrap;
+}
+.dh-routing-ctrl-btn {
+  padding: 5px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-radius: 6px;
+  border: 1px solid rgba(170,210,224,0.18);
+  background: rgba(170,210,224,0.06);
+  color: var(--text, #d7fbff);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+.dh-routing-ctrl-btn:hover:not(:disabled) {
+  background: rgba(170,210,224,0.12);
+  border-color: rgba(170,210,224,0.3);
+}
+.dh-routing-ctrl-btn--primary {
+  border-color: rgba(0,234,255,0.3);
+  background: rgba(0,234,255,0.08);
+  color: var(--cyan, #00eaff);
+}
+.dh-routing-ctrl-btn--primary:hover:not(:disabled) {
+  background: rgba(0,234,255,0.16);
+  border-color: rgba(0,234,255,0.45);
+}
+.dh-routing-ctrl-btn:disabled,
+.dh-routing-ctrl-btn--loading {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Routing action feedback (Step 15) ──────────────────────────────────── */
+.dh-routing-feedback {
+  margin-top: 8px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.dh-routing-feedback--ok {
+  background: rgba(46,204,113,0.10);
+  color: #2ecc71;
+  border: 1px solid rgba(46,204,113,0.25);
+}
+.dh-routing-feedback--warn {
+  background: rgba(244,200,95,0.10);
+  color: var(--warn, #f4c85f);
+  border: 1px solid rgba(244,200,95,0.25);
+}
+.dh-routing-feedback--error {
+  background: rgba(255,79,102,0.10);
+  color: var(--danger, #ff4f66);
+  border: 1px solid rgba(255,79,102,0.25);
+}
+
+/* ── Provider health detail text + threshold hint (Step 16) ─────────────── */
+.dh-routing-detail-text {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted, #93a7b6);
+  font-style: italic;
+}
+.dh-routing-threshold-hint {
+  font-size: 11px;
+  color: var(--muted, #93a7b6);
+  opacity: 0.75;
+}
+
+/* ── Execution mode selector (Step 17) ──────────────────────────────────── */
+.dh-exec-mode-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 0;
+}
+.dh-exec-mode-group-label {
+  display: block;
+  width: 100%;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted, #93a7b6);
+  margin-top: 4px;
+  margin-bottom: 2px;
+  opacity: 0.7;
+}
+.dh-exec-mode-group-label:first-child {
+  margin-top: 0;
+}
+.dh-exec-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+  color: var(--muted, #93a7b6);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.dh-exec-mode-btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.2);
+  color: var(--text, #e0e6ed);
+}
+.dh-exec-mode-btn--active {
+  background: rgba(0,234,255,0.10);
+  border-color: var(--cyan, #00eaff);
+  color: var(--text, #e0e6ed);
+  box-shadow: 0 0 8px rgba(0,234,255,0.15);
+}
+.dh-exec-mode-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

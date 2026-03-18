@@ -2009,11 +2009,11 @@ main.main{
 }
 
 .diagnosticSection{
-    border: 1px solid rgba(124,168,198,0.3);
-    border-radius: 14px;
-    padding: 12px;
-    background: linear-gradient(180deg, rgba(220,238,255,0.05), rgba(220,238,255,0.0) 24%), linear-gradient(180deg, rgba(10,14,22,0.78), rgba(7,10,16,0.86));
-    box-shadow: 0 10px 20px rgba(2,6,18,0.4), inset 0 1px 0 rgba(220,238,255,0.14), inset 0 -1px 0 rgba(0,0,0,0.34), inset 0 0 0 1px rgba(0,234,255,0.05);
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    background: none;
+    box-shadow: none;
 }
 
 .diagnosticSection + .diagnosticSection{
@@ -4778,21 +4778,370 @@ main.main{
 }
 
 .home-regime-panel,
-.home-playbook-panel{
+.home-playbook-panel,
+.home-scoreboard-panel{
     width:100%;
 }
 
-.home-regime-panel-grid{
+/* ── Market Picture Scoreboard ── */
+.home-scoreboard-body{
     margin-top:8px;
+}
+.home-scoreboard-grid{
     display:grid;
     gap:12px;
-    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+    margin-bottom:12px;
+}
+@media (max-width:720px){
+    .home-scoreboard-grid{ grid-template-columns:1fr; }
 }
 
-.home-regime-banner{
+/* ── Engine Score Cards (paired engine vs model) ── */
+.home-engine-cards-grid{
     display:grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-    gap:12px;
+    gap:10px;
+    grid-template-columns:repeat(3, minmax(0, 1fr));
+    margin-bottom:14px;
+}
+@media (max-width:960px){
+    .home-engine-cards-grid{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width:600px){
+    .home-engine-cards-grid{ grid-template-columns:1fr; }
+}
+.home-engine-card{
+    padding:12px 14px;
+    border-left:3px solid rgba(0,234,255,0.25);
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+}
+.home-engine-card-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+}
+.home-engine-card-name{
+    font-size:12px;
+    font-weight:600;
+    color:rgba(255,255,255,0.92);
+    letter-spacing:0.3px;
+}
+.home-engine-card-label{
+    font-size:11px;
+    font-weight:500;
+    color:rgba(255,255,255,0.7);
+    margin-top:1px;
+}
+
+/* ── Paired score row ── */
+.home-engine-scores-row{
+    display:flex;
+    gap:8px;
+    margin-top:4px;
+}
+.home-engine-score-box{
+    display:flex;
+    align-items:center;
+    gap:5px;
+    flex:1;
+    min-width:0;
+}
+.home-engine-score-tag{
+    font-size:10px;
+    font-weight:600;
+    color:rgba(255,255,255,0.5);
+    text-transform:uppercase;
+    letter-spacing:0.3px;
+    flex-shrink:0;
+}
+.home-engine-score-pill{
+    font-size:13px;
+    font-weight:700;
+    padding:2px 10px;
+    border-radius:10px;
+    color:#0e111a;
+    min-width:38px;
+    text-align:center;
+    flex-shrink:0;
+}
+.home-engine-score-na{
+    background:#888 !important;
+    opacity:0.5;
+}
+.home-engine-score-stale{
+    opacity:0.65;
+}
+.home-model-freshness-badge{
+    font-size:9px;
+    font-weight:600;
+    letter-spacing:0.2px;
+    padding:1px 6px;
+    border-radius:6px;
+    margin-top:2px;
+    display:inline-block;
+}
+.home-model-badge-na{
+    background:rgba(136,136,136,0.25);
+    color:rgba(255,255,255,0.45);
+}
+.home-model-badge-stale{
+    background:rgba(255,199,88,0.2);
+    color:#ffc758;
+}
+
+/* ── Paired summary sections ── */
+.home-engine-summaries{
+    display:flex;
+    flex-direction:column;
+    gap:5px;
+    margin-top:4px;
+}
+.home-engine-summary-section{
+    display:flex;
+    gap:6px;
+    align-items:flex-start;
+}
+.home-engine-summary-tag{
+    font-size:10px;
+    font-weight:600;
+    color:rgba(255,255,255,0.45);
+    text-transform:uppercase;
+    letter-spacing:0.3px;
+    min-width:40px;
+    flex-shrink:0;
+    padding-top:1px;
+}
+.home-engine-summary-text{
+    font-size:11px;
+    line-height:1.45;
+    color:rgba(255,255,255,0.55);
+}
+.home-engine-summary-na{
+    font-style:italic;
+    opacity:0.5;
+}
+.home-engine-summary-clamp{
+    display:-webkit-box;
+    -webkit-line-clamp:4;
+    -webkit-box-orient:vertical;
+    overflow:hidden;
+}
+
+/* ── Composite overview row ── */
+.home-scoreboard-composite{
+    padding:10px 14px;
+    background:rgba(0,0,0,0.18);
+    border-radius:8px;
+    margin-bottom:14px;
+}
+.home-composite-pills{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    margin-bottom:6px;
+}
+.home-composite-pill{
+    font-size:11px;
+    padding:2px 8px;
+    border-radius:6px;
+    background:rgba(255,255,255,0.08);
+    color:rgba(255,255,255,0.8);
+    border:1px solid rgba(255,255,255,0.1);
+}
+.home-composite-summary{
+    font-size:11px;
+    line-height:1.5;
+    color:rgba(255,255,255,0.55);
+}
+.home-composite-timestamp{
+    font-size:10px;
+    color:rgba(255,255,255,0.35);
+    margin-top:4px;
+}
+
+/* ── Detail strip (indexes/charts/sectors below engine cards) ── */
+.home-scoreboard-detail-strip{
+    margin-top:6px;
+}
+
+/* ── Strategy Playbooks (standalone panels) ── */
+.home-playbooks-row{
+    display:grid;
+    gap:18px;
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+}
+@media (max-width:720px){
+    .home-playbooks-row{ grid-template-columns:1fr; }
+}
+.home-playbook-standalone{
+    display:flex;
+    flex-direction:column;
+}
+.home-playbook-standalone .bt-panel-title{
+    font-size:15px;
+}
+.home-strategy-playbook-body{
+    flex:1;
+    min-height:120px;
+}
+.home-playbook-placeholder{
+    padding:18px 12px;
+    text-align:center;
+    color:rgba(0,234,255,0.35);
+    font-size:12px;
+}
+
+/* ── Playbook Panel Content (Stock + Options) ── */
+.home-pb-header{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-bottom:12px;
+    padding-bottom:10px;
+    border-bottom:1px solid rgba(0,234,255,0.10);
+}
+.home-pb-posture{
+    font-size:10px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.08em;
+    padding:3px 10px;
+    border-radius:6px;
+    white-space:nowrap;
+    border:1px solid rgba(0,234,255,0.25);
+    background:rgba(0,234,255,0.06);
+    color:var(--cyan);
+    flex-shrink:0;
+}
+.home-pb-posture.bullish{
+    color:#7ef7b8;
+    border-color:rgba(126,247,184,0.35);
+    background:rgba(126,247,184,0.08);
+}
+.home-pb-posture.riskoff{
+    color:#ff6b6b;
+    border-color:rgba(255,107,107,0.35);
+    background:rgba(255,107,107,0.08);
+}
+.home-pb-posture.neutral{
+    color:var(--cyan);
+    border-color:rgba(0,234,255,0.25);
+    background:rgba(0,234,255,0.06);
+}
+.home-pb-summary{
+    flex:1;
+    font-size:12px;
+    color:rgba(215,251,255,0.72);
+    line-height:1.4;
+}
+.home-pb-strats{
+    display:grid;
+    gap:6px;
+}
+.home-pb-strat{
+    padding:8px 10px;
+    border-radius:8px;
+    border:1px solid rgba(0,234,255,0.12);
+    background:linear-gradient(180deg, rgba(7,12,20,0.60), rgba(4,8,14,0.72));
+    transition: border-color 0.15s ease;
+}
+.home-pb-strat:hover{
+    border-color:rgba(0,234,255,0.28);
+}
+.home-pb-strat-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+}
+.home-pb-strat-name{
+    font-size:12.5px;
+    font-weight:600;
+    color:var(--text);
+}
+.home-pb-conviction{
+    font-size:9px;
+    font-weight:700;
+    letter-spacing:0.10em;
+    text-transform:uppercase;
+    flex-shrink:0;
+    padding:2px 6px;
+    border-radius:4px;
+}
+.home-pb-conviction-high{
+    color:#7ef7b8;
+    background:rgba(126,247,184,0.10);
+    border:1px solid rgba(126,247,184,0.20);
+}
+.home-pb-conviction-moderate{
+    color:var(--cyan);
+    background:rgba(0,234,255,0.08);
+    border:1px solid rgba(0,234,255,0.18);
+}
+.home-pb-conviction-low{
+    color:var(--muted);
+    background:rgba(255,255,255,0.04);
+    border:1px solid rgba(255,255,255,0.10);
+}
+.home-pb-strat-reason{
+    font-size:11px;
+    color:rgba(215,251,255,0.45);
+    margin-top:4px;
+    line-height:1.35;
+}
+.home-pb-caution{
+    display:flex;
+    align-items:flex-start;
+    gap:8px;
+    margin-top:10px;
+    padding:8px 10px;
+    border-radius:8px;
+    border:1px solid rgba(255,107,107,0.25);
+    background:linear-gradient(180deg, rgba(24,8,8,0.55), rgba(14,5,5,0.65));
+}
+.home-pb-caution-icon{
+    color:#ff6b6b;
+    font-size:13px;
+    flex-shrink:0;
+    margin-top:1px;
+}
+.home-pb-caution-text{
+    font-size:11px;
+    color:rgba(255,180,180,0.78);
+    line-height:1.4;
+}
+.home-pb-fallback{
+    padding:18px 12px;
+    text-align:center;
+    color:rgba(0,234,255,0.35);
+    font-size:12px;
+    font-style:italic;
+}
+
+/* ── Regime panel body (factors + guidance) ── */
+.home-regime-body{
+    margin-top:6px;
+    display:grid;
+    gap:16px;
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+}
+@media (max-width:720px){
+    .home-regime-body{ grid-template-columns:1fr; }
+}
+.home-regime-factors-col,
+.home-regime-guidance-col{
+    min-width:0;
+}
+.home-regime-factors-header{
+    font-size:10px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.10em;
+    color:rgba(0,234,255,0.55);
+    margin-bottom:8px;
 }
 
 .home-banner-toolbar{
@@ -5082,8 +5431,151 @@ main.main{
     letter-spacing:0.01em;
 }
 
-.home-regime-strip,
-.home-session-strip,
+/* ── Market Regime: Hero Strip ── */
+.home-regime-strip{
+    display:block;
+    margin-bottom:6px;
+}
+.home-regime-hero{
+    display:flex;
+    align-items:stretch;
+    gap:0;
+    border-radius:10px;
+    background: linear-gradient(135deg, rgba(0,234,255,0.05) 0%, rgba(0,8,18,0.60) 100%);
+    border:1px solid rgba(0,234,255,0.18);
+    overflow:hidden;
+}
+.home-regime-hero-left{
+    display:flex;
+    align-items:center;
+    gap:16px;
+    flex:1 1 auto;
+    min-width:0;
+    padding:12px 16px;
+}
+.home-regime-hero-right{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-end;
+    justify-content:center;
+    gap:6px;
+    padding:10px 14px;
+    border-left:1px solid rgba(0,234,255,0.10);
+    background:rgba(0,234,255,0.02);
+    flex:0 0 auto;
+}
+.home-regime-pill{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    min-width:80px;
+    padding:10px 14px;
+    border-radius:10px;
+    border:1px solid rgba(0,234,255,0.25);
+    background: radial-gradient(ellipse at 50% 30%, rgba(0,234,255,0.10) 0%, transparent 70%);
+    cursor:help;
+    transition: box-shadow 0.18s ease, filter 0.18s ease;
+}
+.home-regime-pill:hover{
+    box-shadow: 0 0 20px rgba(0,234,255,0.25), inset 0 0 0 1px rgba(0,234,255,0.15);
+    filter: brightness(1.08);
+}
+.home-regime-pill-label{
+    font-size:16px;
+    font-weight:800;
+    letter-spacing:0.03em;
+    color:var(--cyan);
+}
+.home-regime-pill-score{
+    font-size:20px;
+    font-weight:700;
+    color:var(--text);
+    margin-top:2px;
+    font-family:'Orbitron',sans-serif;
+    letter-spacing:0.06em;
+}
+.home-regime-pill.bullish{ border-color:rgba(126,247,184,0.40); }
+.home-regime-pill.bullish .home-regime-pill-label{ color:#7ef7b8; }
+.home-regime-pill.riskoff{ border-color:rgba(255,107,107,0.40); }
+.home-regime-pill.riskoff .home-regime-pill-label{ color:#ff6b6b; }
+.home-regime-pill.neutral{ border-color:rgba(0,234,255,0.30); }
+.home-regime-pill.neutral .home-regime-pill-label{ color:var(--cyan); }
+
+/* ── Environment summary beside pill ── */
+.home-regime-env{
+    flex:1 1 auto;
+    min-width:0;
+    padding-top:0;
+}
+.home-regime-env-label{
+    font-size:14px;
+    font-weight:700;
+    color:var(--text);
+    letter-spacing:0.02em;
+    margin-bottom:4px;
+}
+.home-regime-env-summary{
+    font-size:12px;
+    line-height:1.45;
+    color:rgba(215,251,255,0.65);
+}
+
+/* ── Index change chips ── */
+.home-regime-idx-strip{
+    display:flex;
+    gap:5px;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+}
+.home-regime-idx-chip{
+    font-size:10px;
+    font-weight:700;
+    padding:2px 6px;
+    border-radius:4px;
+    background:rgba(0,234,255,0.04);
+    border:1px solid rgba(0,234,255,0.12);
+    color:var(--muted);
+    white-space:nowrap;
+    font-family:'Consolas','Menlo',monospace;
+}
+.home-regime-idx-chip.bullish{ color:#7ef7b8; border-color:rgba(126,247,184,0.25); }
+.home-regime-idx-chip.riskoff{ color:#ff6b6b; border-color:rgba(255,107,107,0.25); }
+
+/* ── Tone chips (vol / breadth / rates / curve / momentum) ── */
+.home-regime-tone-chips{
+    display:flex;
+    gap:4px;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+}
+.home-regime-tone-chip{
+    font-size:9.5px;
+    font-weight:600;
+    padding:1px 5px;
+    border-radius:4px;
+    background:rgba(0,234,255,0.03);
+    border:1px solid rgba(0,234,255,0.10);
+    color:var(--muted);
+    white-space:nowrap;
+    text-transform:capitalize;
+}
+.home-regime-tone-chip.bullish{ color:#7ef7b8; border-color:rgba(126,247,184,0.20); }
+.home-regime-tone-chip.riskoff{ color:#ff6b6b; border-color:rgba(255,107,107,0.20); }
+
+@media (max-width:720px){
+    .home-regime-hero{ flex-direction:column; }
+    .home-regime-hero-right{ align-items:flex-start; }
+}
+
+/* Session strip (sidebar) */
+.home-session-strip{
+    display:grid;
+    gap:10px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Index / risk / macro tiles in scoreboard */
 .home-index-tiles,
 .home-risk-tiles,
 .home-macro-tiles{
@@ -5092,56 +5584,58 @@ main.main{
     grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.home-session-strip{
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
+/* ── Market regime factor bars ── */
 .home-regime-components{
-    margin-top:8px;
+    margin-top:2px;
     display:grid;
     gap:6px;
 }
 
 .home-regime-row{
     display:grid;
-    grid-template-columns: 80px minmax(0, 1fr) 48px;
+    grid-template-columns: 80px minmax(0, 1fr) 28px;
     gap:8px;
     align-items:center;
 }
 
-.home-regime-name,
+.home-regime-name{
+    font-size:11px;
+    font-weight:700;
+    color:rgba(0,234,255,0.75);
+    text-transform:uppercase;
+    letter-spacing:0.04em;
+}
 .home-regime-score{
     font-size:12px;
+    font-weight:700;
     color:var(--text);
+    text-align:right;
+    font-family:'Consolas','Menlo',monospace;
+}
+.home-regime-signal{
+    grid-column: 1 / -1;
+    font-size:10.5px;
+    color:rgba(215,251,255,0.45);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    padding-left:88px;
 }
 
 .home-regime-track{
-    height:8px;
+    height:7px;
     border-radius:999px;
-    border:1px solid rgba(0,234,255,0.20);
-    background: rgba(255,255,255,0.03);
+    border:1px solid rgba(0,234,255,0.14);
+    background: rgba(0,234,255,0.03);
     overflow:hidden;
 }
 
 .home-regime-fill{
     height:100%;
     border-radius:999px;
-    background: linear-gradient(90deg, rgba(0,234,255,0.78), rgba(126,247,184,0.72));
-    box-shadow: 0 0 14px rgba(0,234,255,0.24);
-}
-
-.home-regime-note{
-    grid-column: 1 / -1;
-    margin-top:-2px;
-
-.home-regime-note-stack{
-    display:grid;
-    gap:2px;
-}
-
-.home-regime-note-line{
-    line-height:1.25;
-}
+    background: linear-gradient(90deg, rgba(0,234,255,0.85), rgba(0,220,255,0.65));
+    box-shadow: 0 0 12px rgba(0,234,255,0.22);
+    transition: width 0.3s ease;
 }
 
 /* ── Freshness tags (live / eod) ── */
@@ -5178,22 +5672,31 @@ main.main{
 
 .home-playbook-chips{
     display:grid;
-    gap:8px;
+    gap:10px;
     margin-top:2px;
     justify-items:start;
 }
 
 .home-chip-group{
     display:flex;
-    gap:6px;
+    gap:5px;
     align-items:center;
     flex-wrap:wrap;
     justify-content:flex-start;
 }
+.home-chip-group .stock-note{
+    font-size:10px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.08em;
+    color:rgba(0,234,255,0.55);
+    margin-right:2px;
+}
 
 .qtPill-warn{
-    border-color: rgba(255,126,166,0.42);
-    box-shadow: inset 0 0 0 1px rgba(255,126,166,0.16), 0 0 14px rgba(255,126,166,0.18);
+    border-color: rgba(255,107,107,0.42);
+    box-shadow: inset 0 0 0 1px rgba(255,107,107,0.16), 0 0 10px rgba(255,107,107,0.12);
+    color: #ff6b6b;
 }
 
 .home-playbook-notes{
@@ -5204,102 +5707,6 @@ main.main{
 .home-strategy-playbook{
     display:grid;
     gap:10px;
-}
-
-.home-playbook-grid{
-    display:grid;
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
-    gap:10px;
-}
-
-.home-playbook-summary{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:8px;
-    flex-wrap:wrap;
-}
-
-.home-playbook-lane{
-    border:1px solid rgba(0,234,255,0.18);
-    border-radius:10px;
-    padding:8px;
-    background: linear-gradient(180deg, rgba(7,12,20,0.72), rgba(4,8,14,0.82));
-    display:grid;
-    gap:8px;
-}
-
-.home-playbook-lane.avoid{
-    border-color: rgba(255,126,166,0.28);
-    background: linear-gradient(180deg, rgba(24,10,16,0.72), rgba(13,6,9,0.86));
-}
-
-.home-playbook-lane-title{
-    font-size:12px;
-    letter-spacing:0.08em;
-    text-transform:uppercase;
-    color:var(--muted);
-}
-
-.home-playbook-item{
-    display:grid;
-    gap:4px;
-}
-
-.home-playbook-head{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:8px;
-}
-
-.home-playbook-link{
-    appearance:none;
-    background:transparent;
-    cursor:pointer;
-}
-
-.home-playbook-track{
-    height:8px;
-    border-radius:999px;
-    border:1px solid rgba(0,234,255,0.20);
-    background: rgba(255,255,255,0.03);
-    overflow:hidden;
-}
-
-.home-playbook-fill{
-    height:100%;
-    border-radius:999px;
-}
-
-.home-playbook-fill.primary,
-.home-playbook-fill.secondary{
-    background: linear-gradient(90deg, rgba(0,234,255,0.78), rgba(126,247,184,0.72));
-    box-shadow: 0 0 14px rgba(0,234,255,0.24);
-}
-
-.home-playbook-fill.avoid{
-    background: linear-gradient(90deg, rgba(255,126,166,0.80), rgba(255,204,121,0.72));
-    box-shadow: 0 0 14px rgba(255,126,166,0.25);
-}
-
-.home-playbook-why{
-    font-size:12px;
-    color:var(--muted);
-}
-
-.home-playbook-why-list{
-    margin:0;
-    padding-left:16px;
-    display:grid;
-    gap:3px;
-}
-
-.home-playbook-fallback{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:8px;
 }
 
 /* ── Regime Model Analysis ─────────────────────────────── */
@@ -5474,6 +5881,75 @@ main.main{
     gap:14px;
 }
 
+/* ── Market Picture History chart ── */
+.home-mp-history-panel{
+    margin-top:14px;
+}
+.home-mp-history-chart-wrap{
+    position:relative;
+}
+.home-mp-history-svg{
+    width:100%;
+    height:300px;
+    border:1px solid rgba(0,234,255,0.14);
+    border-radius:10px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.008));
+}
+.home-mp-history-legend{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px 18px;
+    padding:8px 4px 0;
+}
+.home-mp-legend-item{
+    display:flex;
+    align-items:center;
+    gap:5px;
+    font-size:11px;
+    color:var(--muted);
+    font-family:'Orbitron',sans-serif;
+    letter-spacing:0.05em;
+}
+.home-mp-legend-swatch{
+    width:14px;
+    height:3px;
+    border-radius:2px;
+    flex-shrink:0;
+}
+.home-mp-legend-band{
+    height:8px;
+    width:14px;
+    border-radius:2px;
+    opacity:0.9;
+}
+.home-mp-legend-dash{
+    width:14px;
+    height:0;
+    border-top:2px dashed rgba(215,251,255,0.5);
+    border-radius:0;
+}
+.home-mp-legend-sep{
+    width:1px;
+    height:12px;
+    background:rgba(0,234,255,0.15);
+    margin:0 4px;
+    align-self:center;
+}
+.home-mp-history-empty{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    height:180px;
+    color:rgba(215,251,255,0.45);
+    font-size:13px;
+    font-family:'Orbitron',sans-serif;
+    letter-spacing:0.06em;
+    text-align:center;
+    border:1px dashed rgba(0,234,255,0.18);
+    border-radius:10px;
+    background:rgba(255,255,255,0.01);
+}
+
 /* ── Equity Curve chart ── */
 .home-equity-curve-card{
     margin-top:14px;
@@ -5535,17 +6011,7 @@ main.main{
     background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.008));
 }
 
-.home-regime-pill.bullish .statValue{
-    color:#7ef7b8;
-}
-
-.home-regime-pill.riskoff .statValue{
-    color:#ff7ea6;
-}
-
-.home-regime-pill.neutral .statValue{
-    color:#ffd77a;
-}
+/* Regime pill tones are now handled by .home-regime-pill.bullish/riskoff/neutral above */
 
 .home-index-tile .stock-note{
     margin-top:2px;
@@ -5868,10 +6334,10 @@ main.main{
 }
 
 @media (max-width: 1100px){
-    .home-regime-panel-grid{
+    .home-regime-body{
         grid-template-columns: 1fr;
     }
-    .home-playbook-grid{
+    .home-playbooks-row{
         grid-template-columns: 1fr;
     }
     .home-data-row{
@@ -6395,6 +6861,7 @@ main.main{
     align-items:center;
     justify-content:center;
     padding:20px 0 0;
+    margin-top:60px;
     min-height:160px;
     flex:0 0 auto;
 }
@@ -6582,6 +7049,7 @@ main.main{
     align-items:center;
     justify-content:center;
     min-height:240px;
+    margin-top:40px;
     overflow:visible;
 }
 
@@ -6687,6 +7155,19 @@ main.main{
 }
 
 /* ─────────────────────────────────────────────────────────────────────
+   BRAND HEADER  (label + tagline at TOP of brand panel)
+   ───────────────────────────────────────────────────────────────────── */
+
+.bt-brand-header{
+    flex:0 0 auto;
+    text-align:center;
+    padding:12px 0 10px;
+    margin-bottom:12px;
+    border-bottom:1px solid rgba(0,234,255,0.06);
+    width:80%;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
    BRAND FOOTER
    ───────────────────────────────────────────────────────────────────── */
 
@@ -6722,13 +7203,20 @@ main.main{
    ───────────────────────────────────────────────────────────────────── */
 
 .bt-data-stream{
-    flex:1 1 auto;
+    flex:0 0 auto;
     width:90%;
     display:flex;
     flex-direction:column;
-    gap:8px;
-    padding:12px 0 8px;
+    gap:6px;
+    padding:10px 0 8px;
     border-top:1px solid rgba(0,234,255,0.04);
+    border-bottom:1px solid rgba(0,234,255,0.04);
+}
+
+#btSourceHealthRows{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
 }
 
 .bt-chart-line{
@@ -6777,6 +7265,14 @@ main.main{
 .bt-status-dot--ok{
     background:#00cc88;
     box-shadow:0 0 4px rgba(0,204,136,0.4);
+}
+.bt-status-dot--warn{
+    background:#ffc758;
+    box-shadow:0 0 4px rgba(255,199,88,0.4);
+}
+.bt-status-dot--down{
+    background:#ff6b6b;
+    box-shadow:0 0 4px rgba(255,107,107,0.5);
 }
 @keyframes btDotBlink{
     0%,100%{ opacity:1; }

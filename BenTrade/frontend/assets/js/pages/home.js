@@ -12,22 +12,23 @@ window.BenTradePages.initHome = function initHome(rootEl){
   const regimeStripEl = scope.querySelector('#homeRegimeStrip');
   const regimeComponentsEl = scope.querySelector('#homeRegimeComponents');
   const playbookChipsEl = scope.querySelector('#homePlaybookChips');
-  const scanPresetEl = scope.querySelector('#homeScanPreset');
-  const runQueueBtnEl = scope.querySelector('#homeRunQueueBtn');
-  const stopQueueBtnEl = scope.querySelector('#homeStopQueueBtn');  // may be null (removed from DOM)
-  const queueProgressEl = scope.querySelector('#homeQueueProgress');
-  const queueCurrentEl = scope.querySelector('#homeQueueCurrent');
-  const queueCountEl = scope.querySelector('#homeQueueCount');
-  const queueSpinnerEl = scope.querySelector('#homeQueueSpinner');
-  const queueLogEl = scope.querySelector('#homeQueueLog');
-  const scanStatusEl = scope.querySelector('#homeScanStatus');
-  const scanErrorEl = scope.querySelector('#homeScanError');
+  const scanPresetEl = scope.querySelector('#homeScanPreset');           // null — OE removed from home
+  const runQueueBtnEl = scope.querySelector('#homeRunQueueBtn');         // null — OE removed from home
+  const stopQueueBtnEl = scope.querySelector('#homeStopQueueBtn');      // null — removed
+  const queueProgressEl = scope.querySelector('#homeQueueProgress');    // null — OE removed from home
+  const queueCurrentEl = scope.querySelector('#homeQueueCurrent');      // null — OE removed from home
+  const queueCountEl = scope.querySelector('#homeQueueCount');          // null — OE removed from home
+  const queueSpinnerEl = scope.querySelector('#homeQueueSpinner');      // null — OE removed from home
+  const queueLogEl = scope.querySelector('#homeQueueLog');              // null — OE removed from home
+  const scanStatusEl = scope.querySelector('#homeScanStatus');          // null — OE removed from home
+  const scanErrorEl = scope.querySelector('#homeScanError');            // null — OE removed from home
   const signalHubEl = scope.querySelector('#homeSignalHub');
   const indexTilesEl = scope.querySelector('#homeIndexTiles');
+  const scoreboardCardsEl = scope.querySelector('#homeScoreboardCards');
   const spyChartEl = scope.querySelector('#homeSpyChart');
   const sectorBarsEl = scope.querySelector('#homeSectorBars');
-  const scannerOpportunitiesEl = scope.querySelector('#homeScannerOpportunities');
-  const symbolUniverseEl = scope.querySelector('#homeSymbolUniverse');
+  const scannerOpportunitiesEl = scope.querySelector('#homeScannerOpportunities'); // null — OE removed
+  const symbolUniverseEl = scope.querySelector('#homeSymbolUniverse');  // null — OE removed from home
   const riskTilesEl = scope.querySelector('#homeRiskTiles');
   const macroTilesEl = scope.querySelector('#homeMacroTiles');
   const strategyPlaybookEl = scope.querySelector('#homeStrategyPlaybook');
@@ -43,18 +44,29 @@ window.BenTradePages.initHome = function initHome(rootEl){
   const activeTradesCountEl = scope.querySelector('#homeActiveTradesCount');
   const equityCurveEl = scope.querySelector('#homeEquityCurve');
   const equityCurveEmptyEl = scope.querySelector('#homeEquityCurveEmpty');
-  const clearScanResultsBtnEl = scope.querySelector('#homeClearScanResultsBtn');
-  const scanLastRunEl = scope.querySelector('#homeScanLastRun');
+  const clearScanResultsBtnEl = scope.querySelector('#homeClearScanResultsBtn'); // null — OE removed
+  const scanLastRunEl = scope.querySelector('#homeScanLastRun');                 // null — OE removed
 
-  /* ── Stock Engine DOM references ── */
-  const stockEngineRunBtnEl = scope.querySelector('#homeStockEngineRunBtn');
-  const stockEngineLastUpdatedEl = scope.querySelector('#homeStockEngineLastUpdated');
-  const stockEngineWarningEl = scope.querySelector('#homeStockEngineWarning');
-  const stockEngineLoadingEl = scope.querySelector('#homeStockEngineLoading');
-  const stockEngineErrorEl = scope.querySelector('#homeStockEngineError');
-  const stockEngineCandidatesEl = scope.querySelector('#homeStockEngineCandidates');
+  /* ── Stock Engine DOM references (removed from home layout) ── */
+  const stockEngineRunBtnEl = scope.querySelector('#homeStockEngineRunBtn');       // null
+  const stockEngineLastUpdatedEl = scope.querySelector('#homeStockEngineLastUpdated'); // null
+  const stockEngineWarningEl = scope.querySelector('#homeStockEngineWarning');     // null
+  const stockEngineLoadingEl = scope.querySelector('#homeStockEngineLoading');     // null
+  const stockEngineErrorEl = scope.querySelector('#homeStockEngineError');         // null
+  const stockEngineCandidatesEl = scope.querySelector('#homeStockEngineCandidates'); // null
 
-  if(!regimeStripEl || !regimeComponentsEl || !playbookChipsEl || !scanPresetEl || !runQueueBtnEl || !queueProgressEl || !queueCurrentEl || !queueCountEl || !queueSpinnerEl || !queueLogEl || !scanStatusEl || !scanErrorEl || !signalHubEl || !indexTilesEl || !spyChartEl || !sectorBarsEl || !scannerOpportunitiesEl || !riskTilesEl || !macroTilesEl || !strategyPlaybookEl || !fullRefreshBtnEl || !refreshBtnEl || !refreshingBadgeEl || !lastUpdatedEl || !vixChartEl || !errorEl){
+  /* ── Strategy Playbooks — new subsection refs ── */
+  const stockStrategyPlaybookEl = scope.querySelector('#homeStockStrategyPlaybook');
+  const optionsStrategyPlaybookEl = scope.querySelector('#homeOptionsStrategyPlaybook');
+
+  /* ── Market Picture History refs ── */
+  const mpHistoryEmptyEl = scope.querySelector('#homeMPHistoryEmpty');
+  const mpHistoryChartEl = scope.querySelector('#homeMPHistoryChart');
+  const mpHistorySvgEl = scope.querySelector('#homeMPHistorySvg');
+  const mpHistoryLegendEl = scope.querySelector('#homeMPHistoryLegend');
+
+  /* Guard: only require elements that are actually in the new layout */
+  if(!regimeStripEl || !regimeComponentsEl || !playbookChipsEl || !signalHubEl || !indexTilesEl || !spyChartEl || !sectorBarsEl || !riskTilesEl || !macroTilesEl || !fullRefreshBtnEl || !refreshBtnEl || !refreshingBadgeEl || !lastUpdatedEl || !vixChartEl || !errorEl){
     return;
   }
 
@@ -96,7 +108,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
       cacheStore.setSnapshot({ ...snap, data });
     }
     latestOpportunities = [];
-    scannerOpportunitiesEl.innerHTML = '';
+    if(scannerOpportunitiesEl) scannerOpportunitiesEl.innerHTML = '';
     renderScannerOpportunities([]);
     updateHomeScanCacheUI();
     setScanStatus('');
@@ -345,6 +357,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
   let _regimeModelInflight = null;   // Promise | null — guards duplicate clicks
 
   function setScanError(text){
+    if(!scanErrorEl) return;
     if(!text){
       scanErrorEl.style.display = 'none';
       scanErrorEl.textContent = '';
@@ -355,6 +368,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   function setScanStatus(text, isBusy = false){
+    if(!scanStatusEl) return;
     if(!text){
       scanStatusEl.style.display = 'none';
       scanStatusEl.innerHTML = '';
@@ -1335,10 +1349,10 @@ window.BenTradePages.initHome = function initHome(rootEl){
   /* ── Dynamic Regime Summary Tooltip Builder ─────────────────── */
 
   const FACTOR_NAMES = {
-    trend:      'Trend strength',
-    volatility: 'Volatility',
-    breadth:    'Breadth',
-    rates:      'Rates pressure',
+    trend:      'Trend & Structure',
+    volatility: 'Volatility & Options Tone',
+    breadth:    'Breadth & Participation',
+    rates:      'Rates & Macro Pressure',
     momentum:   'Momentum',
   };
 
@@ -1357,6 +1371,100 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   /**
+   * Synthesize a concise market-picture read from the 5-factor regime data + macro.
+   *
+   * Inputs:
+   *   regimeState:  'RISK_ON' | 'NEUTRAL' | 'RISK_OFF'
+   *   regimeScore:  0-100 composite
+   *   components:   { trend:{score,signals}, volatility:{score,signals}, ... }
+   *   vix:          number | null
+   *   tenYear:      number | null
+   *   macro:        flat macro object (yield_curve_spread, oil_wti, etc.)
+   *
+   * Returns: { envLabel, envSummary, driverLine, toneChips: [{label,tone}] }
+   *   envLabel    — short environment phrase (e.g. "Constructive risk-on tape")
+   *   envSummary  — one-sentence market read
+   *   driverLine  — what's driving the current regime
+   *   toneChips   — compact signal chips for supporting metadata
+   */
+  function _synthesizeMarketPicture(regimeState, regimeScore, components, vix, tenYear, macro){
+    const comps = components || {};
+    const score = (k) => { const v = toNumber(comps[k]?.score); return v !== null ? Math.max(0, Math.min(100, v)) : 50; };
+    const trendScore = score('trend');
+    const volScore = score('volatility');
+    const breadthScore = score('breadth');
+    const ratesScore = score('rates');
+    const momentumScore = score('momentum');
+
+    /* ── Environment label ── */
+    let envLabel;
+    if(regimeState === 'RISK_ON'){
+      envLabel = regimeScore >= 80 ? 'Strong risk-on tape' : 'Constructive risk-on tape';
+    } else if(regimeState === 'RISK_OFF'){
+      envLabel = regimeScore < 25 ? 'Broad risk-off conditions' : 'Risk-off bias';
+    } else {
+      envLabel = regimeScore >= 55 ? 'Mixed-to-constructive environment' : 'Mixed / range-bound environment';
+    }
+
+    /* ── Sort factors for driver / weakness identification ── */
+    const factors = [
+      { key: 'trend', score: trendScore },
+      { key: 'volatility', score: volScore },
+      { key: 'breadth', score: breadthScore },
+      { key: 'rates', score: ratesScore },
+      { key: 'momentum', score: momentumScore },
+    ].sort((a, b) => b.score - a.score);
+    const top = factors[0];
+    const weak = factors[factors.length - 1];
+
+    /* ── Environment summary ── */
+    let envSummary;
+    if(regimeState === 'RISK_ON'){
+      envSummary = `Market structure supports risk assets. ${FACTOR_NAMES[top.key]} anchors the read` +
+        (weak.score < 55 ? ` while ${FACTOR_NAMES[weak.key]} is the main watch item.` : '.');
+    } else if(regimeState === 'RISK_OFF'){
+      envSummary = `Conditions less supportive for risk. ${FACTOR_NAMES[weak.key]} is the primary pressure point` +
+        (top.score > 60 ? ` though ${FACTOR_NAMES[top.key]} provides some offset.` : '.');
+    } else {
+      envSummary = `Directional edge is limited. ` +
+        `${FACTOR_NAMES[top.key]} offers strength but ${FACTOR_NAMES[weak.key]} limits confidence.`;
+    }
+
+    /* ── Driver line ── */
+    const driverLine = `Led by ${FACTOR_NAMES[top.key]} (${Math.round(top.score)})` +
+      (weak.score < 55 ? ` · Watch ${FACTOR_NAMES[weak.key]} (${Math.round(weak.score)})` : '');
+
+    /* ── Tone chips — derived from existing data ── */
+    const chips = [];
+
+    // Volatility tone
+    const volInterp = _volInterpretation(vix);
+    chips.push({ label: `Vol: ${volInterp}`, tone: vix !== null && vix < 18 ? 'bullish' : (vix !== null && vix > 25 ? 'riskoff' : 'neutral') });
+
+    // Breadth tone
+    const breadthTone = breadthScore >= 65 ? 'bullish' : (breadthScore < 40 ? 'riskoff' : 'neutral');
+    const breadthLabel = breadthScore >= 65 ? 'broad' : (breadthScore < 40 ? 'narrow' : 'selective');
+    chips.push({ label: `Breadth: ${breadthLabel}`, tone: breadthTone });
+
+    // Rates / macro tone
+    const ratesInterp = _ratesInterpretation(tenYear);
+    chips.push({ label: `Rates: ${ratesInterp}`, tone: ratesScore >= 60 ? 'bullish' : (ratesScore < 40 ? 'riskoff' : 'neutral') });
+
+    // Yield curve if available
+    const ycSpread = toNumber(macro?.yield_curve_spread);
+    if(ycSpread !== null){
+      const ycLabel = ycSpread < 0 ? 'inverted' : (ycSpread < 0.25 ? 'flat' : 'normal');
+      chips.push({ label: `Curve: ${ycLabel}`, tone: ycSpread < 0 ? 'riskoff' : (ycSpread < 0.25 ? 'neutral' : 'bullish') });
+    }
+
+    // Momentum tone
+    const momTone = momentumScore >= 60 ? 'bullish' : (momentumScore < 40 ? 'riskoff' : 'neutral');
+    chips.push({ label: `Momentum: ${momentumScore >= 60 ? 'favorable' : (momentumScore < 40 ? 'fading' : 'mixed')}`, tone: momTone });
+
+    return { envLabel, envSummary, driverLine, toneChips: chips };
+  }
+
+  /**
    * Build a dynamic regime tooltip from live data.
    *
    * Inputs:
@@ -1371,58 +1479,41 @@ window.BenTradePages.initHome = function initHome(rootEl){
   function _buildRegimeSummaryTip(regimeState, regimeScore, components, vix, tenYear){
     const factors = ['trend', 'volatility', 'breadth', 'rates', 'momentum'];
     const scored = factors.map((k) => {
-      const item = components[k] || {};
+      const item = (components || {})[k] || {};
       const score = toNumber(item?.score);
       const signals = Array.isArray(item?.signals) ? item.signals : [];
       return { key: k, score: score !== null ? Math.max(0, Math.min(100, score)) : 0, signals };
     });
-    // Sort descending for drivers / ascending for weakness
     const sorted = scored.slice().sort((a, b) => b.score - a.score);
     const top1 = sorted[0];
-    const top2 = sorted[1];
     const weak = sorted[sorted.length - 1];
-
-    const trendItem = scored.find((s) => s.key === 'trend');
-    const trendFact = (trendItem && trendItem.signals.length) ? trendItem.signals[0] : 'alignment data unavailable';
-
-    const breadthItem = scored.find((s) => s.key === 'breadth');
-    const breadthFact = (breadthItem && breadthItem.signals.length) ? breadthItem.signals[0] : 'sector data unavailable';
 
     const volInterp = _volInterpretation(vix);
     const ratesInterp = _ratesInterpretation(tenYear);
+    const breadthItem = scored.find((s) => s.key === 'breadth');
+    const breadthFact = (breadthItem && breadthItem.signals.length) ? breadthItem.signals[0] : 'participation data unavailable';
 
     const lines = [];
 
     if(regimeState === 'RISK_ON'){
-      lines.push('Market conditions favor risk assets and trend continuation.');
-      lines.push(`Drivers: ${FACTOR_NAMES[top1.key]} (${Math.round(top1.score)}) and ${FACTOR_NAMES[top2.key]} (${Math.round(top2.score)}).`);
-      lines.push(`Trend: ${trendFact}`);
-      lines.push(`Vol: VIX ${vix !== null && vix !== undefined ? fmt(vix) : '—'} (${volInterp})`);
-      lines.push(`Breadth: ${breadthFact}`);
-      if(weak.score < 60){
-        lines.push(`Watch: ${FACTOR_NAMES[weak.key]} (${Math.round(weak.score)}) is the main vulnerability.`);
-      }
+      lines.push('Market picture supports risk assets across trend, breadth, and positioning.');
+      lines.push(`Lead factors: ${FACTOR_NAMES[top1.key]} (${Math.round(top1.score)}).`);
+      if(weak.score < 60) lines.push(`Watch: ${FACTOR_NAMES[weak.key]} (${Math.round(weak.score)}).`);
     } else if(regimeState === 'RISK_OFF'){
-      lines.push('Conditions are less supportive for risk assets.');
-      lines.push(`Stress drivers: ${FACTOR_NAMES[weak.key]} (${Math.round(weak.score)}) and ${FACTOR_NAMES[sorted[sorted.length - 2].key]} (${Math.round(sorted[sorted.length - 2].score)}).`);
-      lines.push(`Vol: VIX ${vix !== null && vix !== undefined ? fmt(vix) : '—'} (${volInterp})`);
-      lines.push(`Rates: 10Y ${tenYear !== null && tenYear !== undefined ? fmt(tenYear, 2) + '%' : '—'} (${ratesInterp})`);
-      lines.push(`Breadth: ${breadthFact}`);
-      lines.push('Approach: reduce exposure, prioritize protection.');
+      lines.push('Market picture is less supportive — multiple factors under pressure.');
+      lines.push(`Pressure: ${FACTOR_NAMES[weak.key]} (${Math.round(weak.score)}).`);
     } else {
-      /* NEUTRAL */
-      lines.push('Signals are mixed — directional edge is weaker.');
-      lines.push(`Strength: ${FACTOR_NAMES[top1.key]} (${Math.round(top1.score)}) but ${FACTOR_NAMES[weak.key]} (${Math.round(weak.score)}) limits confidence.`);
-      lines.push(`Trend: ${trendFact}`);
-      lines.push(`Vol: VIX ${vix !== null && vix !== undefined ? fmt(vix) : '—'} (${volInterp})`);
-      lines.push(`Breadth: ${breadthFact}`);
-      lines.push('Approach: smaller size, defined risk, avoid chasing.');
+      lines.push('Market picture is mixed — limited directional conviction.');
+      lines.push(`Strength: ${FACTOR_NAMES[top1.key]} (${Math.round(top1.score)}) · Drag: ${FACTOR_NAMES[weak.key]} (${Math.round(weak.score)}).`);
     }
+    lines.push(`Vol tone: VIX ${vix != null ? fmt(vix) : '—'} (${volInterp})`);
+    lines.push(`Rates: 10Y ${tenYear != null ? fmt(tenYear, 2) + '%' : '—'} (${ratesInterp})`);
+    lines.push(`Breadth: ${breadthFact}`);
 
     const labelMap = { RISK_ON: 'Risk-On', RISK_OFF: 'Risk-Off', NEUTRAL: 'Neutral' };
     return {
-      title: `${labelMap[regimeState] || 'Regime'} — Score ${fmt(regimeScore, 1)}/100`,
-      lines: lines,
+      title: `Market Picture — ${labelMap[regimeState] || 'Regime'} (${fmt(regimeScore, 1)}/100)`,
+      lines,
     };
   }
 
@@ -1437,75 +1528,85 @@ window.BenTradePages.initHome = function initHome(rootEl){
     });
   }
 
-  function renderRegime(regimePayload, spySummary, macro){
-    const spyLast = toNumber(spySummary?.price?.last);
+  function renderRegime(regimePayload, spySummary, macro, indexSummaries){
     const vix = toNumber(macro?.vix ?? spySummary?.options_context?.vix);
-    const vixFreshness = macro?._freshness?.vix;
-    var vixTag = '';
-    var mc = window.BenTradeMarketContext;
-    if(mc && vixFreshness){
-      var norm = mc.normalizeFromFlatMacro({ vix: vix, _freshness: { vix: vixFreshness } });
-      if(norm && norm.vix) vixTag = mc.freshnessTag(norm.vix);
-    } else if(vixFreshness){
-      vixTag = vixFreshness.is_intraday
-        ? '<span class="home-freshness-tag home-freshness-live" title="Intraday">live</span>'
-        : '<span class="home-freshness-tag home-freshness-eod" title="EOD close">eod</span>';
-    }
     const tenYear = toNumber(macro?.ten_year_yield);
     const regimeScore = toNumber(regimePayload?.regime_score) ?? 50;
     const regimeLabelRaw = String(regimePayload?.regime_label || 'NEUTRAL').toUpperCase();
     const regimeLabelText = regimeLabelRaw === 'RISK_ON' ? 'Risk-On' : (regimeLabelRaw === 'RISK_OFF' ? 'Risk-Off' : 'Neutral');
     const tone = regimeLabelRaw === 'RISK_ON' ? 'bullish' : (regimeLabelRaw === 'RISK_OFF' ? 'riskoff' : 'neutral');
 
+    /* ── Market-picture synthesis from existing regime + macro data ── */
+    const mp = _synthesizeMarketPicture(regimeLabelRaw, regimeScore, regimePayload?.components || {}, vix, tenYear, macro || {});
+
+    /* ── Multi-index one-liner: SPY QQQ IWM DIA changes ── */
+    const idxSums = indexSummaries || {};
+    const idxChips = INDEX_SYMBOLS.map((sym) => {
+      const pct = toNumber(idxSums[sym]?.price?.change_pct);
+      const sign = pct !== null && pct >= 0 ? '+' : '';
+      const pctStr = pct !== null ? sign + pct.toFixed(2) + '%' : '—';
+      const chipTone = pct !== null ? (pct >= 0 ? 'bullish' : 'riskoff') : 'neutral';
+      return `<span class="home-regime-idx-chip ${chipTone}">${sym} ${pctStr}</span>`;
+    }).join('');
+
+    /* ── Hero strip: regime pill + environment summary + index chips ── */
     regimeStripEl.innerHTML = `
-      <div class="statTile"><div class="statLabel" data-metric="spy_price">SPY</div><div class="statValue">${fmt(spyLast)}</div><div class="stock-note">${fmtPct(spySummary?.price?.change_pct)}</div></div>
-      <div class="statTile"><div class="statLabel" data-metric="vix_level">VIX ${vixTag}</div><div class="statValue">${fmt(vix)}</div></div>
-      <div class="statTile"><div class="statLabel" data-metric="ten_year_yield">10Y Yield</div><div class="statValue">${fmt(tenYear, 2)}%</div></div>
-      <div class="statTile home-regime-pill ${tone}" data-ben-tip="regime_summary"><div class="statLabel" data-metric="regime">Regime</div><div class="statValue">${regimeLabelText}</div><div class="stock-note">Score ${fmt(regimeScore, 1)}/100</div></div>
+      <div class="home-regime-hero">
+        <div class="home-regime-hero-left">
+          <div class="home-regime-pill ${tone}" data-ben-tip="regime_summary">
+            <span class="home-regime-pill-label">${regimeLabelText}</span>
+            <span class="home-regime-pill-score">${fmt(regimeScore, 0)}</span>
+          </div>
+          <div class="home-regime-env">
+            <div class="home-regime-env-label">${mp.envLabel}</div>
+            <div class="home-regime-env-summary stock-note">${mp.envSummary}</div>
+          </div>
+        </div>
+        <div class="home-regime-hero-right">
+          <div class="home-regime-idx-strip">${idxChips}</div>
+          <div class="home-regime-tone-chips">${mp.toneChips.map((c) => `<span class="home-regime-tone-chip ${c.tone}">${c.label}</span>`).join('')}</div>
+        </div>
+      </div>
     `;
 
     /* ── Register dynamic regime-summary tooltip ── */
     _registerRegimeSummaryTooltip(regimeLabelRaw, regimeScore, regimePayload?.components || {}, vix, tenYear);
 
+    /* ── Factor bars (market regime factors) ── */
+    const FACTOR_SHORT = {
+      trend: 'Trend',
+      volatility: 'Vol',
+      breadth: 'Breadth',
+      rates: 'Rates',
+      momentum: 'Momentum',
+    };
     const componentOrder = ['trend', 'volatility', 'breadth', 'rates', 'momentum'];
     const components = regimePayload?.components || {};
     const _debugRegime = window.BENTRADE_DEBUG_REGIME;
     regimeComponentsEl.innerHTML = componentOrder.map((key) => {
       const item = components[key] || {};
       const rawScore = toNumber(item?.score);
-      /* Score is already 0–100 from backend _normalize_component.
-         Clamp to [0, 100] for both display and fill width. */
       const score = rawScore !== null ? Math.max(0, Math.min(100, rawScore)) : 0;
       const fillWidth = Math.max(2, Math.round(score));
       const signals = Array.isArray(item?.signals) ? item.signals : [];
-      const label = key.charAt(0).toUpperCase() + key.slice(1);
-      let detailHtml = '';
 
       if(_debugRegime){
         console.info(`[REGIME_BAR] ${key}: raw=${rawScore}, clamped=${score}, fill=${fillWidth}%`);
       }
 
-      if(key === 'trend'){
-        if(signals.length){
-          const detailLines = signals.slice(0, 3).map((line) => `<div class="stock-note home-regime-note-line">• ${String(line)}</div>`).join('');
-          detailHtml = `<div class="home-regime-note-stack">${detailLines}</div>`;
-        } else {
-          detailHtml = '<span class="home-missing-wrap">Trend data unavailable <span class="home-missing-hint" title="Trend data unavailable">?</span></span>';
-        }
-      } else {
-        detailHtml = signals[0] ? String(signals[0]) : 'No signal detail';
-      }
+      const signalText = signals[0] ? String(signals[0]) : '';
 
       return `
         <div class="home-regime-row">
-          <div class="home-regime-name" data-ben-tip="regime_${key}">${label}</div>
+          <div class="home-regime-name" data-ben-tip="regime_${key}">${FACTOR_SHORT[key]}</div>
           <div class="home-regime-track"><div class="home-regime-fill" style="width:${fillWidth}%;"></div></div>
-          <div class="home-regime-score">${Math.round(score)}%</div>
-          <div class="stock-note home-regime-note">${detailHtml}</div>
+          <div class="home-regime-score">${Math.round(score)}</div>
         </div>
+        ${signalText ? `<div class="home-regime-signal stock-note">${signalText}</div>` : ''}
       `;
     }).join('');
 
+    /* ── Regime guidance chips (Primary / Avoid / Notes) ── */
     const playbook = regimePayload?.suggested_playbook || {};
     const primary = Array.isArray(playbook?.primary) ? playbook.primary : [];
     const avoid = Array.isArray(playbook?.avoid) ? playbook.avoid : [];
@@ -1521,6 +1622,135 @@ window.BenTradePages.initHome = function initHome(rootEl){
       </div>
       <div class="home-playbook-notes">${notes.length ? notes.map((note) => `<div class="stock-note">• ${String(note)}</div>`).join('') : '<div class="stock-note">• No playbook notes.</div>'}</div>
     `;
+  }
+
+  /* ── Scoreboard: engine vs model score cards ── */
+
+  function _scoreColor(score){
+    if(score == null) return '#888';
+    if(score >= 70) return '#7ef7b8';
+    if(score >= 50) return '#ffc758';
+    return '#ff6b6b';
+  }
+
+  function _fmtScore(val){
+    if(val == null) return '—';
+    return Number(val).toFixed(1);
+  }
+
+  /**
+   * Build a human-readable model freshness badge.
+   * Returns { text, cssClass } for the stale/missing indicator.
+   */
+  function _modelFreshnessBadge(eng){
+    if(eng.model_score == null){
+      return { text: 'Not available', cssClass: 'home-model-badge-na' };
+    }
+    if(eng.model_fresh === false){
+      // Stale — show how old
+      var capturedAt = eng.model_captured_at;
+      var ageText = '';
+      if(capturedAt){
+        try{
+          var ageMs = Date.now() - new Date(capturedAt).getTime();
+          var ageHours = Math.floor(ageMs / (1000 * 60 * 60));
+          if(ageHours >= 24){
+            ageText = Math.floor(ageHours / 24) + 'd ago';
+          } else if(ageHours >= 1){
+            ageText = ageHours + 'h ago';
+          } else {
+            ageText = Math.max(1, Math.floor(ageMs / (1000 * 60))) + 'm ago';
+          }
+        }catch(_e){}
+      }
+      return { text: 'Stale' + (ageText ? ' (' + ageText + ')' : ''), cssClass: 'home-model-badge-stale' };
+    }
+    return { text: '', cssClass: '' };
+  }
+
+  function renderScoreboard(scoreboardPayload){
+    if(!scoreboardCardsEl) return;
+    const sb = (scoreboardPayload && typeof scoreboardPayload === 'object') ? scoreboardPayload : {};
+    const engines = Array.isArray(sb.engines) ? sb.engines : [];
+    const composite = sb.composite || {};
+    const modelStatus = sb.model_status || null;
+    const generatedAt = sb.generated_at || null;
+
+    if(!sb.ok || !engines.length){
+      scoreboardCardsEl.innerHTML = '<div class="stock-note" style="padding:12px;">Engine scoreboard data unavailable — run a market picture workflow to populate.</div>';
+      return;
+    }
+
+    // Model scores are now provided by the backend from the durable store — no sessionStorage hydration needed
+
+    // Build engine cards with paired engine vs model layout
+    let html = '<div class="home-engine-cards-grid">';
+    engines.forEach(function(eng){
+      const eScore = _fmtScore(eng.engine_score);
+      const mScore = _fmtScore(eng.model_score);
+      const eColor = _scoreColor(eng.engine_score);
+      const mColor = _scoreColor(eng.model_score);
+      const eLabel = eng.engine_label || '';
+      const eSummary = eng.engine_summary || 'No engine summary available.';
+      const mSummary = eng.model_summary || null;
+      const statusBadge = eng.status === 'ok' || eng.status === 'missing' ? '' : `<span class="qtPill qtPill-warn" style="font-size:10px;margin-left:6px;">${eng.status}</span>`;
+      const freshBadge = _modelFreshnessBadge(eng);
+      const modelBadgeHtml = freshBadge.text ? `<span class="home-model-freshness-badge ${freshBadge.cssClass}">${freshBadge.text}</span>` : '';
+
+      html += `
+        <div class="stock-card home-engine-card">
+          <div class="home-engine-card-header">
+            <span class="home-engine-card-name">${eng.name || eng.key}${statusBadge}</span>
+          </div>
+          ${eLabel ? `<div class="home-engine-card-label">${eLabel}</div>` : ''}
+          <div class="home-engine-scores-row">
+            <div class="home-engine-score-box">
+              <span class="home-engine-score-tag">Engine</span>
+              <span class="home-engine-score-pill" style="background:${eColor};">${eScore}</span>
+            </div>
+            <div class="home-engine-score-box">
+              <span class="home-engine-score-tag">Model</span>
+              <span class="home-engine-score-pill ${eng.model_score == null ? 'home-engine-score-na' : (eng.model_fresh === false ? 'home-engine-score-stale' : '')}" style="background:${mColor};">${mScore}</span>
+              ${modelBadgeHtml}
+            </div>
+          </div>
+          <div class="home-engine-summaries">
+            <div class="home-engine-summary-section">
+              <span class="home-engine-summary-tag">Engine</span>
+              <div class="home-engine-summary-text stock-note">${eSummary}</div>
+            </div>
+            <div class="home-engine-summary-section">
+              <span class="home-engine-summary-tag">Model</span>
+              <div class="home-engine-summary-text stock-note ${mSummary ? 'home-engine-summary-clamp' : 'home-engine-summary-na'}">${mSummary || (eng.model_score != null ? 'Model score available, but no stored summary.' : 'No model analysis yet')}</div>
+            </div>
+          </div>
+        </div>
+      `;
+    });
+    html += '</div>';
+
+    // Composite overview row
+    const cState = composite.market_state || '—';
+    const cSupport = composite.support_state || '—';
+    const cStability = composite.stability_state || '—';
+    const cConf = composite.confidence != null ? (composite.confidence * 100).toFixed(0) + '%' : '—';
+    const cSummary = composite.summary || '';
+
+    html += `
+      <div class="home-scoreboard-composite">
+        <div class="home-composite-pills">
+          <span class="qtPill home-composite-pill">State: ${cState}</span>
+          <span class="qtPill home-composite-pill">Support: ${cSupport}</span>
+          <span class="qtPill home-composite-pill">Stability: ${cStability}</span>
+          <span class="qtPill home-composite-pill">Confidence: ${cConf}</span>
+          ${modelStatus ? `<span class="qtPill home-composite-pill ${modelStatus === 'succeeded' ? '' : 'qtPill-warn'}">Model: ${modelStatus}</span>` : ''}
+        </div>
+        ${cSummary ? `<div class="home-composite-summary stock-note">${cSummary}</div>` : ''}
+        ${generatedAt ? `<div class="home-composite-timestamp stock-note">Generated: ${new Date(generatedAt).toLocaleString()}</div>` : ''}
+      </div>
+    `;
+
+    scoreboardCardsEl.innerHTML = html;
   }
 
   function renderIndexes(indexSummaries){
@@ -1572,6 +1802,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   function renderScannerOpportunities(ideas){
+    if(!scannerOpportunitiesEl) return;
     latestOpportunities = Array.isArray(ideas) ? ideas.slice() : [];
     const tc = _card;              // BenTradeTradeCard building blocks
     const TOP = window.BenTradeScannerOrchestrator?.TOP_N || 9;
@@ -2011,74 +2242,127 @@ window.BenTradePages.initHome = function initHome(rootEl){
     }
   }
 
-  function renderStrategyPlaybook(payload){
-    const regime = payload?.regime || {};
-    const playbook = payload?.playbook || {};
-    const regimeLabel = String(regime?.label || 'NEUTRAL').replaceAll('_', '-');
-    const regimeScore = toNumber(regime?.score) ?? 50;
-
-    const laneConfigs = [
-      { key: 'primary', label: 'Primary', pillClass: 'qtPill' },
-      { key: 'secondary', label: 'Secondary', pillClass: 'qtPill' },
-      { key: 'avoid', label: 'Avoid', pillClass: 'qtPill qtPill-warn' },
-    ];
-
-    const laneHtml = laneConfigs.map((lane) => {
-      const rows = Array.isArray(playbook?.[lane.key]) ? playbook[lane.key] : [];
-      const list = rows.length ? rows.map((row) => {
-        const strategy = String(row?.strategy || '').trim();
-        const label = String(row?.label || strategy || 'N/A');
-        const confidence = Math.max(0, Math.min(1, Number(row?.confidence || 0)));
-        const width = Math.max(4, Math.round(confidence * 100));
-        const why = Array.isArray(row?.why) ? row.why.slice(0, 3) : [];
-        const route = PLAYBOOK_ROUTES[strategy] || '#/credit-spread';
-        return `
-          <div class="home-playbook-item">
-            <div class="home-playbook-head">
-              <button type="button" class="${lane.pillClass} home-playbook-link" data-route="${route}">${label}</button>
-              <span class="stock-note">${(confidence * 100).toFixed(0)}%</span>
-            </div>
-            <div class="home-playbook-track"><div class="home-playbook-fill ${lane.key}" style="width:${width}%;"></div></div>
-            <ul class="home-playbook-why home-playbook-why-list">${why.length ? why.map((item) => `<li>${String(item)}</li>`).join('') : '<li>No rationale available.</li>'}</ul>
-          </div>
-        `;
-      }).join('') : '<div class="stock-note">No strategy recommendations.</div>';
-
-      return `
-        <div class="home-playbook-lane ${lane.key}">
-          <div class="home-playbook-lane-title">${lane.label}</div>
-          ${list}
-        </div>
-      `;
-    }).join('');
-
-    const notes = Array.isArray(playbook?.notes) ? playbook.notes.slice(0, 2) : [];
-    strategyPlaybookEl.innerHTML = `
-      <div class="home-playbook-summary">
-        <span class="qtPill">Regime ${regimeLabel}</span>
-        <span class="stock-note">Score ${fmt(regimeScore, 1)}/100</span>
-      </div>
-      <div class="home-playbook-grid">${laneHtml}</div>
-      <div class="home-playbook-notes">
-        ${notes.length ? notes.map((note) => `<div class="stock-note">• ${String(note)}</div>`).join('') : '<div class="stock-note">• No playbook notes.</div>'}
-      </div>
-    `;
-
-    strategyPlaybookEl.querySelectorAll('button.home-playbook-link[data-route]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const route = String(btn.getAttribute('data-route') || '#/credit-spread');
-        location.hash = route.startsWith('#/') ? route : '#/credit-spread';
-      });
-    });
+  /* ── Playbook shaping: extract component score ── */
+  function _compScore(components, key){
+    const v = toNumber((components || {})[key]?.score);
+    return v !== null ? Math.max(0, Math.min(100, v)) : 50;
   }
 
-  function renderPlaybookFallback(message){
-    strategyPlaybookEl.innerHTML = `
-      <div class="home-playbook-fallback">
-        <div class="stock-note">${String(message || 'Playbook unavailable')}</div>
-        <button class="btn qtButton" type="button" data-action="retry-playbook">Retry</button>
-      </div>
-    `;
+  /* ── Stock Strategy Playbook — equity tactical posture ── */
+  function _shapeStockPlaybook(regimeState, regimeScore, components, vix){
+    const trend = _compScore(components, 'trend');
+    const breadth = _compScore(components, 'breadth');
+    const momentum = _compScore(components, 'momentum');
+    const vol = _compScore(components, 'volatility');
+    const vixVal = toNumber(vix);
+
+    let posture, summary;
+    const strategies = [];
+    let caution = null;
+
+    if(regimeState === 'RISK_ON'){
+      posture = regimeScore >= 75 ? 'aggressive' : 'constructive';
+      summary = regimeScore >= 75
+        ? 'Broad risk-on environment supports active equity positioning.'
+        : 'Constructive tape favors selective long exposure with trend.';
+      strategies.push({ name: 'Trend Continuation', conviction: trend >= 60 && momentum >= 55 ? 'high' : 'moderate', reason: 'Trend and momentum factors support sustained equity moves.' });
+      if(breadth >= 60) strategies.push({ name: 'Broad Participation', conviction: breadth >= 70 ? 'high' : 'moderate', reason: 'Wide breadth supports broader selection beyond leaders.' });
+      if(momentum >= 55) strategies.push({ name: 'Breakout Entries', conviction: momentum >= 70 ? 'high' : 'moderate', reason: 'Favorable momentum supports breakout continuation setups.' });
+      strategies.push({ name: 'Dip Buying on Pullbacks', conviction: (vixVal !== null ? vixVal < 20 : vol > 55) ? 'moderate' : 'low', reason: 'Contained volatility supports reentry on dips to structure.' });
+      if(momentum >= 75) caution = 'Avoid chasing extended names — look for consolidation entries.';
+    } else if(regimeState === 'RISK_OFF'){
+      posture = 'defensive';
+      summary = 'Market structure is under pressure — prioritize capital preservation.';
+      strategies.push({ name: 'Reduce Exposure / Raise Cash', conviction: 'high', reason: 'Risk-off conditions favor smaller, selective positioning.' });
+      strategies.push({ name: 'Defensive Quality Names Only', conviction: trend < 40 ? 'high' : 'moderate', reason: 'Focus on low-beta, high-quality equities if adding exposure.' });
+      if(momentum < 40) strategies.push({ name: 'Wait for Momentum Recovery', conviction: 'high', reason: 'Weak momentum signals suggest patience, not urgency.' });
+      strategies.push({ name: 'Mean Reversion (Selective)', conviction: 'low', reason: 'Only with clear confirmation in oversold, high-quality names.' });
+      caution = 'Avoid bottom-fishing in broad weakness — wait for breadth confirmation.';
+    } else {
+      posture = 'selective';
+      summary = regimeScore >= 55
+        ? 'Mixed-to-constructive conditions — be selective, favor quality setups.'
+        : 'Range-bound environment limits directional confidence — reduce aggression.';
+      strategies.push({ name: 'Selective Pullback Entries', conviction: trend >= 50 ? 'moderate' : 'low', reason: 'Favor entries at support with confirmation, not aggressive chasing.' });
+      strategies.push({ name: 'Quality Over Quantity', conviction: 'moderate', reason: 'Prioritize strong relative-strength leaders over broad positioning.' });
+      if(breadth >= 50) strategies.push({ name: 'Sector Rotation Themes', conviction: 'moderate', reason: 'Adequate breadth supports tactical sector-based entries.' });
+      if(momentum < 45) strategies.push({ name: 'Reduce Position Sizing', conviction: 'moderate', reason: 'Low momentum reduces conviction — smaller bets until clarity.' });
+      strategies.push({ name: 'Range / Mean Reversion', conviction: (vixVal !== null ? vixVal < 20 : vol > 55) ? 'moderate' : 'low', reason: 'Range-bound conditions suit mean-reversion setups at extremes.' });
+      if(regimeScore < 45) caution = 'Avoid aggressive directional bets in low-conviction environment.';
+    }
+    return { posture, summary, strategies: strategies.slice(0, 5), caution };
+  }
+
+  /* ── Options Strategy Playbook — structure selection ── */
+  function _shapeOptionsPlaybook(regimeState, regimeScore, components, vix, scoreboard){
+    const vol = _compScore(components, 'volatility');
+    const trend = _compScore(components, 'trend');
+    const breadth = _compScore(components, 'breadth');
+    const vixVal = toNumber(vix);
+    const volHigh = vixVal !== null ? vixVal > 22 : vol < 40;
+    const volLow  = vixVal !== null ? vixVal < 16 : vol > 65;
+    const composite = (scoreboard && typeof scoreboard === 'object') ? (scoreboard.composite || {}) : {};
+    const stability = composite.stability_state || '';
+
+    let posture, summary;
+    const strategies = [];
+    let caution = null;
+
+    if(regimeState === 'RISK_ON'){
+      posture = regimeScore >= 75 ? 'aggressive' : 'constructive';
+      summary = volHigh
+        ? 'Risk-on with elevated vol — prime conditions for premium capture.'
+        : 'Constructive tape supports both premium selling and directional structures.';
+      strategies.push({ name: 'Put Credit Spreads', conviction: volHigh ? 'high' : 'moderate', reason: volHigh ? 'Elevated premium with bullish bias creates ideal credit conditions.' : 'Premium capture in supportive trend environment.' });
+      strategies.push({ name: 'Covered Calls / Income', conviction: 'moderate', reason: 'Income overlay appropriate with risk-on drift and time decay.' });
+      if(trend >= 60 && !volHigh) strategies.push({ name: 'Call Debit Spreads', conviction: 'moderate', reason: 'Strong trend supports directional upside with defined risk.' });
+      if(stability === 'orderly' || !volHigh) strategies.push({ name: 'Iron Condors (Wide Wings)', conviction: 'moderate', reason: 'Orderly conditions support range-bound premium harvesting.' });
+      caution = 'Avoid uncapped short calls — risk-on tapes can extend sharply.';
+    } else if(regimeState === 'RISK_OFF'){
+      posture = 'defensive';
+      summary = volHigh
+        ? 'Risk-off with elevated vol — protective structures and selective premium only.'
+        : 'Risk-off bias — favor protective structures over premium selling.';
+      strategies.push({ name: 'Put Debit Spreads / Protection', conviction: 'high', reason: 'Defined-risk bearish structures preferred in risk-off conditions.' });
+      if(volHigh) strategies.push({ name: 'Cash-Secured Puts (Far OTM)', conviction: 'moderate', reason: 'Premium is rich — sell far OTM only with strict sizing.' });
+      strategies.push({ name: 'Calendar Spreads', conviction: 'moderate', reason: 'Term-structure expression with reduced directional dependency.' });
+      strategies.push({ name: 'Portfolio Hedges', conviction: 'high', reason: 'Protective structures reduce portfolio tail risk in stress.' });
+      caution = 'Avoid selling premium near spot — gap and assignment risk elevated.';
+    } else {
+      posture = 'selective';
+      summary = volHigh
+        ? 'Neutral with elevated vol — favor defined-risk neutral structures.'
+        : (volLow ? 'Neutral in low vol — debit structures and calendars gain edge.' : 'Mixed conditions favor balanced, risk-defined options structures.');
+      strategies.push({ name: 'Iron Condors', conviction: !volLow ? 'high' : 'moderate', reason: 'Range-bound conditions favor neutral premium harvesting.' });
+      strategies.push({ name: 'Credit Spreads (Wider Strikes)', conviction: 'moderate', reason: 'Wider risk bands maintain cushion in mixed tape.' });
+      if(volLow) strategies.push({ name: 'Debit Spreads (Selective)', conviction: 'moderate', reason: 'Low vol makes debit structures more cost-efficient.' });
+      strategies.push({ name: 'Calendars / Time Spreads', conviction: 'moderate', reason: 'Term-structure opportunities remain in range conditions.' });
+      strategies.push({ name: 'Butterflies', conviction: breadth < 50 ? 'moderate' : 'low', reason: 'Defined-risk mean reversion for range-bound underlyings.' });
+      if(regimeScore < 45) caution = 'Avoid aggressive directional debit spreads in low-conviction tape.';
+    }
+    return { posture, summary, strategies: strategies.slice(0, 5), caution };
+  }
+
+  /* ── Render a playbook panel (shared renderer for both stock & options) ── */
+  function _renderPlaybookPanel(el, shaped){
+    if(!el) return;
+    if(!shaped){
+      el.innerHTML = '<div class="home-pb-fallback">Playbook unavailable — insufficient market context.</div>';
+      return;
+    }
+    const postureTone = shaped.posture === 'aggressive' || shaped.posture === 'constructive'
+      ? 'bullish' : (shaped.posture === 'defensive' ? 'riskoff' : 'neutral');
+
+    let html = `<div class="home-pb-header"><span class="home-pb-posture ${postureTone}">${shaped.posture}</span><span class="home-pb-summary stock-note">${shaped.summary}</span></div><div class="home-pb-strats">`;
+    shaped.strategies.forEach(function(s){
+      const convClass = s.conviction === 'high' ? 'home-pb-conviction-high' : (s.conviction === 'moderate' ? 'home-pb-conviction-moderate' : 'home-pb-conviction-low');
+      html += `<div class="home-pb-strat"><div class="home-pb-strat-head"><span class="home-pb-strat-name">${s.name}</span><span class="home-pb-conviction ${convClass}">${s.conviction.toUpperCase()}</span></div><div class="home-pb-strat-reason stock-note">${s.reason}</div></div>`;
+    });
+    html += '</div>';
+    if(shaped.caution){
+      html += `<div class="home-pb-caution"><span class="home-pb-caution-icon">⚠</span><span class="home-pb-caution-text stock-note">${shaped.caution}</span></div>`;
+    }
+    el.innerHTML = html;
   }
 
   function emptySummary(symbol){
@@ -2098,6 +2382,320 @@ window.BenTradePages.initHome = function initHome(rootEl){
     lastUpdatedEl.textContent = `Last updated: ${text}`;
   }
 
+  /* ═══════════════════════════════════════════════════════════════
+   * Market Picture History — 2-week engine-line chart
+   * ═══════════════════════════════════════════════════════════════ */
+
+  /**
+   * ENGINE_HISTORY_SERIES — stable engine keys, display labels and line colors.
+   * Must match ENGINE_DISPLAY in routes_market_picture.py.
+   */
+  const ENGINE_HISTORY_SERIES = [
+    { key: 'breadth_participation',   label: 'Breadth & Participation',      color: 'rgba(0,234,255,0.9)'   },
+    { key: 'volatility_options',      label: 'Volatility & Options',         color: 'rgba(255,199,88,0.9)'  },
+    { key: 'cross_asset_macro',       label: 'Cross-Asset Macro',            color: 'rgba(126,247,184,0.9)' },
+    { key: 'flows_positioning',       label: 'Flows & Positioning',          color: 'rgba(255,79,102,0.9)'  },
+    { key: 'liquidity_conditions',    label: 'Liquidity & Financial Conds',  color: 'rgba(181,126,255,0.9)' },
+    { key: 'news_sentiment',          label: 'News & Sentiment',             color: 'rgba(255,156,68,0.9)'  },
+  ];
+
+  /**
+   * _shapeHistoryEngineSeries — transforms raw history snapshots into
+   * per-engine time-series arrays suitable for charting.
+   *
+   * Plotted-score rule (documented per requirement):
+   *   plotted_score = average(engine_score, model_score)  when BOTH are numbers
+   *   plotted_score = engine_score                        when model_score is null/missing
+   *   plotted_score = null                                when engine_score is also null
+   *
+   * @param {Array<Object>} entries — raw history snapshots from /api/market-picture/history
+   * @param {number} [daysBack=14] — how many days of history to include
+   * @returns {Object} { series: [{key, label, color, points: [{ts, plotted_score, engine_score, model_score, had_model}]}], regimeBands: [{tStart, tEnd, regime}], postureMarkers: [{ts, stock, options}], tooFew: boolean }
+   */
+  function _shapeHistoryEngineSeries(entries, daysBack){
+    daysBack = daysBack || 14;
+    var now = Date.now();
+    var cutoff = now - daysBack * 86400000;
+
+    // Filter to last N days and sort ascending by captured_at
+    var filtered = [];
+    for(var i = 0; i < entries.length; i++){
+      var e = entries[i];
+      var ts = e.captured_at ? new Date(e.captured_at).getTime() : 0;
+      if(ts >= cutoff && ts <= now) filtered.push(e);
+    }
+    filtered.sort(function(a, b){
+      return new Date(a.captured_at).getTime() - new Date(b.captured_at).getTime();
+    });
+
+    // Build per-engine series
+    var series = [];
+    for(var s = 0; s < ENGINE_HISTORY_SERIES.length; s++){
+      var def = ENGINE_HISTORY_SERIES[s];
+      var points = [];
+      for(var j = 0; j < filtered.length; j++){
+        var snap = filtered[j];
+        var engines = snap.engines || [];
+        var eng = null;
+        for(var k = 0; k < engines.length; k++){
+          if(engines[k].key === def.key){ eng = engines[k]; break; }
+        }
+        var eScore = eng ? (typeof eng.engine_score === 'number' ? eng.engine_score : null) : null;
+        var mScore = eng ? (typeof eng.model_score === 'number' ? eng.model_score : null) : null;
+
+        // Plotted-score rule:
+        // avg(engine, model) if both present; engine_score alone if model missing; null if both null
+        var plotted;
+        if(eScore !== null && mScore !== null){
+          plotted = (eScore + mScore) / 2;
+        } else if(eScore !== null){
+          plotted = eScore;
+        } else {
+          plotted = null;
+        }
+
+        points.push({
+          ts: new Date(snap.captured_at).getTime(),
+          plotted_score: plotted,
+          engine_score: eScore,
+          model_score: mScore,
+          had_model: mScore !== null,
+        });
+      }
+      series.push({
+        key: def.key,
+        label: def.label,
+        color: def.color,
+        points: points,
+      });
+    }
+
+    // tooFew: need at least 2 data points to draw any line
+    var hasEnoughPoints = filtered.length >= 2;
+
+    // ── Regime bands: contiguous time spans sharing the same regime label ──
+    var regimeBands = [];
+    var curBand = null;
+    for(var ri = 0; ri < filtered.length; ri++){
+      var rSnap = filtered[ri];
+      var rTs = new Date(rSnap.captured_at).getTime();
+      var rLabel = String(rSnap.consumer_regime_label || rSnap.regime_state || 'NEUTRAL').toUpperCase();
+      // Normalize to canonical three: RISK_ON, RISK_OFF, NEUTRAL
+      if(rLabel !== 'RISK_ON' && rLabel !== 'RISK_OFF') rLabel = 'NEUTRAL';
+
+      if(!curBand || curBand.regime !== rLabel){
+        if(curBand) curBand.tEnd = rTs;
+        curBand = { tStart: rTs, tEnd: rTs, regime: rLabel };
+        regimeBands.push(curBand);
+      } else {
+        curBand.tEnd = rTs;
+      }
+    }
+
+    // ── Posture change markers: derive posture from regime label + score ──
+    // Posture derivation mirrors _shapeStockPlaybook / _shapeOptionsPlaybook logic:
+    //   RISK_ON  + score >= 75 → aggressive, else constructive
+    //   RISK_OFF → defensive
+    //   NEUTRAL  → selective
+    // Options posture follows same mapping.
+    function _derivePosture(regimeLabel, regimeScore){
+      if(regimeLabel === 'RISK_ON') return regimeScore >= 75 ? 'aggressive' : 'constructive';
+      if(regimeLabel === 'RISK_OFF') return 'defensive';
+      return 'selective';
+    }
+    var postureMarkers = [];
+    var prevStockPosture = null;
+    var prevOptionsPosture = null;
+    for(var pi2 = 0; pi2 < filtered.length; pi2++){
+      var pSnap = filtered[pi2];
+      var pTs = new Date(pSnap.captured_at).getTime();
+      var pLabel = String(pSnap.consumer_regime_label || pSnap.regime_state || 'NEUTRAL').toUpperCase();
+      if(pLabel !== 'RISK_ON' && pLabel !== 'RISK_OFF') pLabel = 'NEUTRAL';
+      var pScore = typeof pSnap.consumer_regime_score === 'number' ? pSnap.consumer_regime_score : 50;
+      var stockP = _derivePosture(pLabel, pScore);
+      var optionsP = _derivePosture(pLabel, pScore);
+      if(stockP !== prevStockPosture || optionsP !== prevOptionsPosture){
+        postureMarkers.push({ ts: pTs, stock: stockP, options: optionsP });
+        prevStockPosture = stockP;
+        prevOptionsPosture = optionsP;
+      }
+    }
+
+    return { series: series, regimeBands: regimeBands, postureMarkers: postureMarkers, tooFew: !hasEnoughPoints };
+  }
+
+  /**
+   * renderMarketPictureHistory — draw the 6-line engine chart via SVG.
+   *
+   * @param {Object} shaped — output of _shapeHistoryEngineSeries
+   */
+  function renderMarketPictureHistory(shaped){
+    if(!mpHistorySvgEl || !mpHistoryEmptyEl || !mpHistoryChartEl || !mpHistoryLegendEl) return;
+
+    if(!shaped || shaped.tooFew){
+      mpHistoryEmptyEl.style.display = '';
+      mpHistoryChartEl.style.display = 'none';
+      return;
+    }
+
+    mpHistoryEmptyEl.style.display = 'none';
+    mpHistoryChartEl.style.display = '';
+
+    var series = shaped.series;
+    var width = 900;
+    var height = 300;
+    var margin = { top: 14, right: 14, bottom: 38, left: 50 };
+    var plotW = width - margin.left - margin.right;
+    var plotH = height - margin.top - margin.bottom;
+
+    // Determine global time range and score range (0–100 fixed for consistency)
+    var tMin = Infinity, tMax = -Infinity;
+    for(var s = 0; s < series.length; s++){
+      var pts = series[s].points;
+      for(var p = 0; p < pts.length; p++){
+        if(pts[p].ts < tMin) tMin = pts[p].ts;
+        if(pts[p].ts > tMax) tMax = pts[p].ts;
+      }
+    }
+    if(tMax <= tMin) tMax = tMin + 1;
+    var scoreMin = 0, scoreMax = 100;
+    var scoreSpan = scoreMax - scoreMin;
+
+    var xFor = function(ts){ return margin.left + ((ts - tMin) / (tMax - tMin)) * plotW; };
+    var yFor = function(val){ return margin.top + (1 - ((val - scoreMin) / scoreSpan)) * plotH; };
+
+    // Y-axis gridlines and labels (0, 25, 50, 75, 100)
+    var yTicks = [0, 25, 50, 75, 100];
+    var yGrid = '';
+    var yLabels = '';
+    for(var t = 0; t < yTicks.length; t++){
+      var yy = yFor(yTicks[t]);
+      yGrid += '<line x1="' + margin.left + '" y1="' + yy.toFixed(1) + '" x2="' + (width - margin.right) + '" y2="' + yy.toFixed(1) + '" stroke="rgba(0,234,255,0.10)" stroke-width="1"></line>';
+      yLabels += '<text x="' + (margin.left - 8) + '" y="' + (yy + 3).toFixed(1) + '" text-anchor="end" fill="rgba(215,251,255,0.7)" font-size="10">' + yTicks[t] + '</text>';
+    }
+
+    // X-axis date labels (daily ticks, skip to every 2 days if > 10)
+    var xLabels = '';
+    var xGrid = '';
+    var dayMs = 86400000;
+    var dayStart = new Date(tMin);
+    dayStart.setHours(0,0,0,0);
+    var dayStep = ((tMax - tMin) / dayMs) > 10 ? 2 : 1;
+    var monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var cursor = new Date(dayStart.getTime() + dayMs);
+    while(cursor.getTime() <= tMax){
+      var dayNum = Math.round((cursor.getTime() - dayStart.getTime()) / dayMs);
+      if(dayNum % dayStep === 0){
+        var px = xFor(cursor.getTime());
+        if(px >= margin.left && px <= width - margin.right){
+          var yBottom = height - margin.bottom;
+          xGrid += '<line x1="' + px.toFixed(1) + '" y1="' + margin.top + '" x2="' + px.toFixed(1) + '" y2="' + yBottom.toFixed(1) + '" stroke="rgba(0,234,255,0.06)" stroke-width="1"></line>';
+          xLabels += '<text x="' + px.toFixed(1) + '" y="' + (yBottom + 14).toFixed(1) + '" text-anchor="middle" fill="rgba(215,251,255,0.55)" font-size="9">' + monthNames[cursor.getMonth()] + ' ' + cursor.getDate() + '</text>';
+        }
+      }
+      cursor = new Date(cursor.getTime() + dayMs);
+    }
+
+    // Draw paths for each engine series
+    var paths = '';
+    for(var si = 0; si < series.length; si++){
+      var sr = series[si];
+      var d = '';
+      var started = false;
+      for(var pi = 0; pi < sr.points.length; pi++){
+        var pt = sr.points[pi];
+        if(pt.plotted_score === null) continue;
+        var xx = xFor(pt.ts);
+        var yy2 = yFor(pt.plotted_score);
+        d += (started ? ' L ' : 'M ') + xx.toFixed(2) + ' ' + yy2.toFixed(2);
+        started = true;
+      }
+      if(d){
+        paths += '<path d="' + d + '" fill="none" stroke="' + sr.color + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.9"></path>';
+      }
+    }
+
+    // Axes
+    var axes = '<line x1="' + margin.left + '" y1="' + margin.top + '" x2="' + margin.left + '" y2="' + (height - margin.bottom) + '" stroke="rgba(0,234,255,0.35)" stroke-width="1"></line>'
+             + '<line x1="' + margin.left + '" y1="' + (height - margin.bottom) + '" x2="' + (width - margin.right) + '" y2="' + (height - margin.bottom) + '" stroke="rgba(0,234,255,0.35)" stroke-width="1"></line>';
+
+    mpHistorySvgEl.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+
+    // ── Regime background bands (drawn first, behind everything) ──
+    var REGIME_BAND_COLORS = {
+      RISK_ON:  'rgba(126,247,184,0.07)',   // faint green
+      RISK_OFF: 'rgba(255,79,102,0.07)',    // faint red
+      NEUTRAL:  'rgba(255,199,88,0.04)',    // very faint gold
+    };
+    var bandsSvg = '';
+    var bands = shaped.regimeBands || [];
+    for(var bi = 0; bi < bands.length; bi++){
+      var band = bands[bi];
+      var bx1 = xFor(band.tStart);
+      var bx2 = xFor(band.tEnd);
+      // Extend first/last bands to plot edges for visual continuity
+      if(bi === 0) bx1 = margin.left;
+      if(bi === bands.length - 1) bx2 = width - margin.right;
+      var bw = Math.max(bx2 - bx1, 1);
+      var bColor = REGIME_BAND_COLORS[band.regime] || REGIME_BAND_COLORS.NEUTRAL;
+      bandsSvg += '<rect x="' + bx1.toFixed(1) + '" y="' + margin.top + '" width="' + bw.toFixed(1) + '" height="' + plotH + '" fill="' + bColor + '"></rect>';
+    }
+
+    // ── Posture change markers (vertical dashed lines with label) ──
+    var POSTURE_COLORS = {
+      aggressive:   'rgba(126,247,184,0.55)',
+      constructive: 'rgba(126,247,184,0.40)',
+      selective:    'rgba(255,199,88,0.45)',
+      defensive:    'rgba(255,79,102,0.50)',
+    };
+    var posturesSvg = '';
+    var markers = shaped.postureMarkers || [];
+    for(var mi = 0; mi < markers.length; mi++){
+      var m = markers[mi];
+      // Skip the very first marker (initial state, not a "change")
+      if(mi === 0) continue;
+      var mx = xFor(m.ts);
+      if(mx < margin.left || mx > width - margin.right) continue;
+      var mColor = POSTURE_COLORS[m.stock] || 'rgba(215,251,255,0.3)';
+      posturesSvg += '<line x1="' + mx.toFixed(1) + '" y1="' + margin.top + '" x2="' + mx.toFixed(1) + '" y2="' + (height - margin.bottom) + '" stroke="' + mColor + '" stroke-width="1" stroke-dasharray="4,3" opacity="0.7"></line>';
+      // Small posture label at top
+      posturesSvg += '<text x="' + (mx + 3).toFixed(1) + '" y="' + (margin.top + 10) + '" fill="' + mColor + '" font-size="8" font-family="Orbitron,sans-serif" letter-spacing="0.05em">' + m.stock.charAt(0).toUpperCase() + m.stock.slice(1) + '</text>';
+    }
+
+    mpHistorySvgEl.innerHTML = bandsSvg + yGrid + xGrid + axes + yLabels + xLabels + posturesSvg + paths;
+
+    // Legend — engine lines + regime bands + posture markers
+    var legendHtml = '';
+    for(var li = 0; li < ENGINE_HISTORY_SERIES.length; li++){
+      var ls = ENGINE_HISTORY_SERIES[li];
+      legendHtml += '<span class="home-mp-legend-item"><span class="home-mp-legend-swatch" style="background:' + ls.color + ';"></span>' + ls.label + '</span>';
+    }
+    // Regime band legend
+    legendHtml += '<span class="home-mp-legend-sep"></span>';
+    legendHtml += '<span class="home-mp-legend-item"><span class="home-mp-legend-swatch home-mp-legend-band" style="background:rgba(126,247,184,0.35);"></span>Risk-On</span>';
+    legendHtml += '<span class="home-mp-legend-item"><span class="home-mp-legend-swatch home-mp-legend-band" style="background:rgba(255,199,88,0.30);"></span>Neutral</span>';
+    legendHtml += '<span class="home-mp-legend-item"><span class="home-mp-legend-swatch home-mp-legend-band" style="background:rgba(255,79,102,0.35);"></span>Risk-Off</span>';
+    // Posture marker legend
+    legendHtml += '<span class="home-mp-legend-item"><span class="home-mp-legend-swatch home-mp-legend-dash"></span>Posture Change</span>';
+    mpHistoryLegendEl.innerHTML = legendHtml;
+  }
+
+  /**
+   * loadAndRenderMarketPictureHistory — fetch + shape + render.
+   * Called once per dashboard load, fire-and-forget.
+   */
+  function loadAndRenderMarketPictureHistory(){
+    if(!mpHistorySvgEl) return;
+    api.getMarketPictureHistory(2000).then(function(resp){
+      var entries = (resp && Array.isArray(resp.entries)) ? resp.entries : [];
+      var shaped = _shapeHistoryEngineSeries(entries, 14);
+      renderMarketPictureHistory(shaped);
+    }).catch(function(err){
+      console.warn('[MarketPictureHistory] fetch failed:', err?.message || err);
+      renderMarketPictureHistory(null);
+    });
+  }
+
   function renderSnapshot(snapshot){
     const payload = (snapshot && typeof snapshot === 'object') ? snapshot : {};
     const data = (payload.data && typeof payload.data === 'object') ? payload.data : {};
@@ -2114,21 +2712,26 @@ window.BenTradePages.initHome = function initHome(rootEl){
     const ideas = Array.isArray(data.opportunities) ? data.opportunities : [];
     const indexSummaries = data.indexSummaries || Object.fromEntries(INDEX_SYMBOLS.map((symbol) => [symbol, emptySummary(symbol)]));
     const sectorSummaries = data.sectors || {};
+    const scoreboardPayload = data.scoreboard || {};
 
     // Stash regime + playbook for on-demand model analysis (auto-refresh safe)
     _latestRegimePayload = regimePayload;
     _latestPlaybookPayload = playbookPayload;
 
-    renderRegime(regimePayload, spySummary, macro);
+    renderRegime(regimePayload, spySummary, macro, indexSummaries);
+    renderScoreboard(scoreboardPayload);
     renderIndexes(indexSummaries);
     renderSectors(sectorSummaries);
     renderScannerOpportunities(ideas);
     renderSignalHub(signalUniversePayload);
-    if(playbookPayload){
-      renderStrategyPlaybook(playbookPayload);
-    } else {
-      renderPlaybookFallback('Playbook unavailable');
-    }
+
+    // Shape and render Stock + Options playbooks from market-picture context
+    const _regimeLabelRaw = String(regimePayload?.regime_label || 'NEUTRAL').toUpperCase();
+    const _regimeScoreNum = toNumber(regimePayload?.regime_score) ?? 50;
+    const _regimeComps = regimePayload?.components || {};
+    const _vixForPB = macro?.vix;
+    _renderPlaybookPanel(stockStrategyPlaybookEl, _shapeStockPlaybook(_regimeLabelRaw, _regimeScoreNum, _regimeComps, _vixForPB));
+    _renderPlaybookPanel(optionsStrategyPlaybookEl, _shapeOptionsPlaybook(_regimeLabelRaw, _regimeScoreNum, _regimeComps, _vixForPB, scoreboardPayload));
     /* Source Health / Session Stats / Strategy Leaderboard are global-only — not rendered here */
     renderRisk(riskSnapshot, activeTradesPayload);
     renderActiveTradesCount(activeTradesPayload);
@@ -2137,6 +2740,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
     renderChart(spyChartEl, spySummary?.history || [], { stroke: 'rgba(0,234,255,0.95)' });
     renderChart(vixChartEl, vixSummary?.history || [], { stroke: 'rgba(255,199,88,0.95)' });
+
+    // Market Picture History — fire-and-forget async fetch + render
+    loadAndRenderMarketPictureHistory();
 
     // VIX canary: compare chart last price (VIXY ETF) with macro card VIX value
     var mc = window.BenTradeMarketContext;
@@ -2175,6 +2781,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
         opportunities: [],
         indexSummaries: Object.fromEntries(INDEX_SYMBOLS.map((symbol) => [symbol, emptySummary(symbol)])),
         sectors: {},
+        scoreboard: {},
       },
       meta: { last_success_at: null, errors: [], partial: false },
     };
@@ -2182,9 +2789,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   function bindRetry(){
-    strategyPlaybookEl.querySelector('[data-action="retry-playbook"]')?.addEventListener('click', () => {
-      runLoadSequence({ force: true, showOverlay: true, reason: 'manual_retry' }).catch(() => {});
-    });
+    // Legacy retry is no longer needed — playbooks render from available context
   }
 
   const LOG_HISTORY_LIMIT = 500;
@@ -2226,6 +2831,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
   };
 
   function renderQueueLog(){
+    if(!queueLogEl) return;
     if(!queueLogLines.length){
       queueLogEl.style.display = 'none';
       queueLogEl.innerHTML = '';
@@ -2246,17 +2852,17 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   function setQueueProgress({ current, completed, total, running }){
-    queueProgressEl.style.display = 'flex';
-    queueCurrentEl.textContent = String(current || 'Idle');
-    queueCountEl.textContent = `${Number(completed || 0)}/${Number(total || 0)}`;
-    queueSpinnerEl.style.display = running ? 'inline-block' : 'none';
+    if(queueProgressEl) queueProgressEl.style.display = 'flex';
+    if(queueCurrentEl) queueCurrentEl.textContent = String(current || 'Idle');
+    if(queueCountEl) queueCountEl.textContent = `${Number(completed || 0)}/${Number(total || 0)}`;
+    if(queueSpinnerEl) queueSpinnerEl.style.display = running ? 'inline-block' : 'none';
   }
 
   function resetQueueProgress(){
-    queueProgressEl.style.display = 'none';
-    queueCurrentEl.textContent = 'Idle';
-    queueCountEl.textContent = '0/0';
-    queueSpinnerEl.style.display = 'none';
+    if(queueProgressEl) queueProgressEl.style.display = 'none';
+    if(queueCurrentEl) queueCurrentEl.textContent = 'Idle';
+    if(queueCountEl) queueCountEl.textContent = '0/0';
+    if(queueSpinnerEl) queueSpinnerEl.style.display = 'none';
     queueLogLines.splice(0, queueLogLines.length);
     renderQueueLog();
   }
@@ -2606,7 +3212,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
       return;
     }
 
-    const preset = String(scanPresetEl.value || 'balanced');
+    const preset = String((scanPresetEl && scanPresetEl.value) || 'balanced');
     const filterLevel = preset;   // dropdown now selects filter strictness level
     const scannerIds = orchestrator.presetToScannerIds(preset);
     const total = scannerIds.length;
@@ -2617,9 +3223,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
     queueState.isRunning = true;
     queueState.stopRequested = false;
-    runQueueBtnEl.disabled = true;
+    if(runQueueBtnEl) runQueueBtnEl.disabled = true;
     if(stopQueueBtnEl) stopQueueBtnEl.disabled = false;
-    scanPresetEl.disabled = true;
+    if(scanPresetEl) scanPresetEl.disabled = true;
     setScanError('');
     setScanStatus('');
     queueLogLines.splice(0, queueLogLines.length);
@@ -2687,9 +3293,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
       if(runId === queueState.runId){
         queueState.isRunning = false;
         queueState.stopRequested = false;
-        runQueueBtnEl.disabled = false;
+        if(runQueueBtnEl) runQueueBtnEl.disabled = false;
         if(stopQueueBtnEl) stopQueueBtnEl.disabled = true;
-        scanPresetEl.disabled = false;
+        if(scanPresetEl) scanPresetEl.disabled = false;
       }
     }
   }
@@ -2699,7 +3305,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
     queueState.stopRequested = true;
     setScanStatus('Stopping queue...');
     appendQueueLog('Stop requested');
-    setQueueProgress({ current: 'Stopping...', completed: Number((queueCountEl.textContent || '0/0').split('/')[0] || 0), total: Number((queueCountEl.textContent || '0/0').split('/')[1] || 0), running: true });
+    const countText = (queueCountEl && queueCountEl.textContent) || '0/0';
+    setQueueProgress({ current: 'Stopping...', completed: Number(countText.split('/')[0] || 0), total: Number(countText.split('/')[1] || 0), running: true });
   }
 
   const cacheStore = window.BenTradeHomeCacheStore;
@@ -2933,12 +3540,14 @@ window.BenTradePages.initHome = function initHome(rootEl){
     });
   });
 
-  runQueueBtnEl.addEventListener('click', () => {
-    runScanQueue().catch((err) => {
-      setScanError(String(err?.message || err || 'Queue failed'));
-      setScanStatus('');
+  if(runQueueBtnEl){
+    runQueueBtnEl.addEventListener('click', () => {
+      runScanQueue().catch((err) => {
+        setScanError(String(err?.message || err || 'Queue failed'));
+        setScanStatus('');
+      });
     });
-  });
+  }
 
   if(stopQueueBtnEl){
     stopQueueBtnEl.addEventListener('click', () => {

@@ -31,21 +31,69 @@
     </div>
   </div>
 
-  <!-- Model Source Toggle -->
+  <!-- Model & Routing Mode (Step 18 — unified selector) -->
   <div class="stock-card" id="dhModelSourceCard">
-    <div class="stock-card-title">Model Source</div>
+    <div class="stock-card-title">Model &amp; Routing Mode</div>
     <div id="dhModelSourcePanel" class="dh-ds-panel">
-      <div class="dh-ds-row">
-        <div id="dhModelSourceToggle" class="dh-ds-toggle" role="radiogroup" aria-label="Model Source">
-        </div>
+      <div id="dhModelSourceToggle" class="dh-exec-mode-toggle" role="radiogroup" aria-label="Model & Routing Mode">
       </div>
       <div id="dhModelSourceMeta" class="dh-ds-meta"></div>
+      <div id="dhModelSourceFeedback" class="dh-routing-feedback" style="display:none;"></div>
     </div>
   </div>
 
   <div class="stock-card">
     <div class="stock-card-title">Provider Health</div>
     <div id="dhProviderTiles" class="stock-summary-grid"></div>
+  </div>
+
+  <!-- Routing System Status (Step 13) -->
+  <div class="stock-card" id="dhRoutingSystemCard">
+    <div class="stock-card-title">Routing System Status</div>
+    <div id="dhRoutingSystemPanel" class="dh-ds-panel">
+      <div id="dhRoutingSystemContent" class="stock-notes">
+        <div class="loading">Loading routing status…</div>
+      </div>
+      <!-- Operator controls (Step 15) -->
+      <div class="dh-routing-controls">
+        <button type="button" id="dhRefreshConfigBtn" class="dh-routing-ctrl-btn" title="Reload routing config from environment">
+          &#8635; Refresh Config
+        </button>
+        <button type="button" id="dhRefreshProvidersBtn" class="dh-routing-ctrl-btn" title="Live-probe all routing providers">
+          &#8635; Refresh Providers
+        </button>
+        <button type="button" id="dhRefreshRuntimeBtn" class="dh-routing-ctrl-btn dh-routing-ctrl-btn--primary" title="Full coherent refresh: config → gate → providers">
+          &#8635; Refresh Runtime
+        </button>
+      </div>
+      <div id="dhRoutingActionFeedback" class="dh-routing-feedback" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Routing Provider Health (Step 13) -->
+  <div class="stock-card" id="dhRoutingProvidersCard">
+    <div class="stock-card-title">Routing Provider Health</div>
+    <div id="dhRoutingProviderTiles" class="stock-summary-grid"></div>
+  </div>
+
+  <!-- Recent Routing Activity (Step 13) -->
+  <div class="stock-card" id="dhRoutingRecentCard">
+    <div class="stock-card-title">Recent Routing Activity</div>
+    <div class="risk-table-wrap">
+      <table class="risk-table">
+        <thead>
+          <tr>
+            <th>Task Type</th>
+            <th>Mode</th>
+            <th>Provider</th>
+            <th>Status</th>
+            <th>Fallback</th>
+            <th>Timing</th>
+          </tr>
+        </thead>
+        <tbody id="dhRoutingRecentBody"></tbody>
+      </table>
+    </div>
   </div>
 
   <div class="stock-layout">

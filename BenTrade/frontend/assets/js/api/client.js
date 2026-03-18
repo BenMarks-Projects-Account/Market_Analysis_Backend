@@ -320,6 +320,19 @@ window.BenTradeApi = (function(){
     return jsonFetch('/api/portfolio/risk/matrix');
   }
 
+  function getMarketPictureScoreboard(){
+    return jsonFetch('/api/market-picture/scoreboard');
+  }
+
+  function getMarketPictureModelScores(){
+    return jsonFetch('/api/market-picture/model-scores');
+  }
+
+  function getMarketPictureHistory(limit){
+    var qs = limit ? '?limit=' + encodeURIComponent(limit) : '';
+    return jsonFetch('/api/market-picture/history' + qs);
+  }
+
   function postLifecycleEvent(payload){
     return jsonFetch('/api/lifecycle/event', {
       method: 'POST',
@@ -538,6 +551,9 @@ window.BenTradeApi = (function(){
     getSignals,
     getSignalsUniverse,
     getPortfolioRiskMatrix,
+    getMarketPictureScoreboard,
+    getMarketPictureModelScores,
+    getMarketPictureHistory,
     postLifecycleEvent,
     getLifecycleTrades,
     getLifecycleTradeDetail,

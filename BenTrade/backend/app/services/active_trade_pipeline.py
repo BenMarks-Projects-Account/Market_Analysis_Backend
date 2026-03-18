@@ -671,7 +671,7 @@ def _default_model_executor(
         assistant_text = strip_think_tags(assistant_text)
 
     # Parse JSON from model response
-    parsed = extract_and_repair_json(assistant_text)
+    parsed, _parse_method = extract_and_repair_json(assistant_text)
     if not parsed or not isinstance(parsed, dict):
         return {
             "status": "error",
@@ -694,6 +694,90 @@ def _default_model_executor(
     }
 
 
+def _routed_model_executor(
+    payload: dict[str, Any],
+    rendered_text: str | None,
+) -> dict[str, Any]:
+    """Routed model executor — calls LLM via distributed routing (Step 8).
+
+    Uses ``execute_routed_model()`` with ``local_distributed`` mode for
+    automatic provider fallback.  Falls back to ``_default_model_executor()``
+    if routing infrastructure is unavailable.
+
+    Input/output shape matches ``_default_model_executor()`` for compatibility.
+    """
+    import json as _json
+    from common.json_repair import extract_and_repair_json
+
+    symbol = payload.get("symbol", "unknown")
+
+    messages = [
+        {"role": "system", "content": _ACTIVE_TRADE_SYSTEM_PROMPT},
+        {"role": "user", "content": rendered_text or _json.dumps(payload)},
+    ]
+
+    try:
+        from app.services.model_routing_integration import execute_routed_model
+
+        legacy_result, trace = execute_routed_model(
+            task_type="active_trade_reassessment",
+            messages=messages,
+            timeout=120.0,
+            max_tokens=1200,
+            temperature=0.0,
+            metadata={"symbol": symbol, "trade_key": payload.get("trade_key")},
+        )
+    except Exception as exc:
+        logger.warning(
+            "[active_trade_model] Routed execution unavailable for %s, "
+            "falling back to legacy: %s",
+            symbol, exc,
+        )
+        return _default_model_executor(payload, rendered_text)
+
+    if legacy_result["status"] != "success":
+        return {
+            "status": "error",
+            "raw_response": {},
+            "provider": legacy_result.get("provider") or "routed",
+            "model_name": legacy_result.get("model_name") or "unknown",
+            "latency_ms": legacy_result.get("timing_ms") or 0,
+            "error": legacy_result.get("error") or "routed_call_failed",
+            "metadata": {"request_id": legacy_result.get("request_id")},
+        }
+
+    # Parse JSON from the routed content.
+    content = legacy_result.get("content") or ""
+
+    # Strip <think> tags if present.
+    from common.model_sanitize import had_think_tags
+    if had_think_tags(content):
+        from common.model_sanitize import strip_think_tags
+        content = strip_think_tags(content)
+
+    parsed, _parse_method = extract_and_repair_json(content)
+    if not parsed or not isinstance(parsed, dict):
+        return {
+            "status": "error",
+            "raw_response": {"raw_text": content[:2000]},
+            "provider": legacy_result.get("provider") or "routed",
+            "model_name": legacy_result.get("model_name"),
+            "latency_ms": legacy_result.get("timing_ms"),
+            "error": "json_parse_failed",
+            "metadata": {"request_id": legacy_result.get("request_id")},
+        }
+
+    return {
+        "status": "success",
+        "raw_response": parsed,
+        "provider": legacy_result.get("provider") or "routed",
+        "model_name": legacy_result.get("model_name"),
+        "latency_ms": legacy_result.get("timing_ms"),
+        "error": None,
+        "metadata": {"request_id": legacy_result.get("request_id")},
+    }
+
+
 def run_model_analysis(
     packet: dict[str, Any],
     engine_output: dict[str, Any],
@@ -709,7 +793,7 @@ def run_model_analysis(
     Returns a normalized model output dict with recommendation fields,
     or a degraded/error result if the model is unavailable.
     """
-    executor = model_executor or _default_model_executor
+    executor = model_executor or _routed_model_executor
 
     rendered_text = _render_reassessment_prompt(packet, engine_output)
     prompt_payload = {

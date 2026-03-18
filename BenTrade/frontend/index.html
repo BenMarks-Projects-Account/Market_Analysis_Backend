@@ -477,14 +477,23 @@
       <!-- GLOBAL RIGHT INFO BAR — DO NOT RENDER THESE PANELS IN PAGE COMPONENTS -->
       <aside class="diagnostic-sidebar">
         <div class="diagnosticPanel">
-          <div class="diagnosticSection">
-            <div class="diagnosticTitle" id="sourceHealthTitle" data-base-text="SOURCE HEALTH">SOURCE HEALTH</div>
-            <div id="sourceHealthRows"></div>
-          </div>
 
-          <!-- BenTrade brand beacon panel -->
+          <!-- BenTrade brand beacon panel — full right panel -->
           <div class="diagnosticSection bt-brand-section">
             <div class="bt-brand-panel">
+
+              <!-- Brand header — above the rocket -->
+              <div class="bt-brand-header">
+                <div class="bt-brand-label">BenTrade</div>
+                <div class="bt-brand-tagline">Precision · Probability · Profit</div>
+              </div>
+
+              <!-- Data stream — live feed + dynamic source health + latency -->
+              <div class="bt-data-stream">
+                <div class="bt-status-row"><span class="bt-status-dot bt-status-dot--live"></span><span class="bt-status-text">LIVE FEED</span><span class="bt-status-val">ACTIVE</span></div>
+                <div id="btSourceHealthRows"></div>
+                <div class="bt-status-row"><span class="bt-status-dot bt-status-dot--ok"></span><span class="bt-status-text">LATENCY</span><span class="bt-status-val">&lt; 1ms</span></div>
+              </div>
 
               <!-- Launch vehicle / signal beacon -->
               <div class="bt-hero-zone">
@@ -652,20 +661,6 @@
                     <path d="M200 100 Q212 96 215 105" class="bt-arc-path bt-arc-path--17"/><!-- Casablanca-Sahara -->
                   </g>
                 </svg>
-              </div>
-
-              <!-- Brand footer — anchored at panel bottom -->
-              <div class="bt-brand-footer">
-                <div class="bt-brand-label">BenTrade</div>
-                <div class="bt-brand-tagline">Precision · Probability · Profit</div>
-              </div>
-
-              <!-- Data stream filler zone -->
-              <div class="bt-data-stream">
-                <div class="bt-status-row"><span class="bt-status-dot bt-status-dot--live"></span><span class="bt-status-text">LIVE FEED</span><span class="bt-status-val">ACTIVE</span></div>
-                <div class="bt-status-row"><span class="bt-status-dot bt-status-dot--ok"></span><span class="bt-status-text">LATENCY</span><span class="bt-status-val">&lt; 1ms</span></div>
-                <div class="bt-status-row"><span class="bt-status-dot bt-status-dot--ok"></span><span class="bt-status-text">NODES</span><span class="bt-status-val">20</span></div>
-                <div class="bt-status-row"><span class="bt-status-dot bt-status-dot--ok"></span><span class="bt-status-text">CHANNELS</span><span class="bt-status-val">17</span></div>
               </div>
 
               <div class="bt-brand-scanline"></div>

@@ -1,5 +1,14 @@
 """Model source definitions for LLM inference endpoints.
 
+Compatibility layer — retained for non-routed callers (model_router,
+model_health_service, active_trade_pipeline, routes_admin model-source
+endpoints).  These callers still need the endpoint URL + enabled flag
+for direct HTTP model calls.
+
+For routed execution (Step 8+), the authoritative mode selection lives
+in ``execution_mode_state`` and the provider registry lives in
+``model_routing_contract``.
+
 Each source maps to an OpenAI-compatible chat completions endpoint.
 Premium Online is a disabled placeholder for future Bedrock/OpenAI/Anthropic.
 """

@@ -78,10 +78,19 @@ async def get_data_health(request: Request) -> dict:
     events = events_service.read_recent(limit=200)
     rollups = build_rollups(events)
 
+    # Include routing system summary (Step 13)
+    routing_summary: dict = {}
+    try:
+        from app.services.routing_dashboard_service import build_dashboard_payload
+        routing_summary = build_dashboard_payload(recent_limit=5)
+    except Exception:
+        logger.debug("Routing dashboard payload unavailable", exc_info=True)
+
     return {
         "source_health": source_health,
         "validation_events": events,
         "rollups": rollups,
+        "routing": routing_summary,
     }
 
 
@@ -246,7 +255,14 @@ async def trigger_snapshot_cleanup(request: Request) -> dict:
 
 @router.get("/platform/model-source")
 async def get_model_source_endpoint(request: Request) -> dict:
-    """Return current model source and all available options."""
+    """Return current model source and all available options.
+
+    Compatibility endpoint — controls which LLM endpoint non-routed
+    callers target (model_health_service, model_router, etc.).
+
+    For routed execution (Step 8+), the authoritative mode is managed
+    via ``GET /routing/execution-mode`` and ``execution_mode_state``.
+    """
     from app.model_sources import MODEL_SOURCES
     from app.services.model_state import get_model_source
 
@@ -266,6 +282,10 @@ async def get_model_source_endpoint(request: Request) -> dict:
 @router.post("/platform/model-source")
 async def set_model_source_endpoint(request: Request) -> dict:
     """Switch the active model source.
+
+    Compatibility endpoint — controls which LLM endpoint non-routed
+    callers target.  For routed execution (Step 8+), use
+    ``POST /routing/execution-mode`` instead.
 
     Body: ``{"source": "local" | "model_machine" | "premium_online"}``
 

@@ -356,13 +356,14 @@ async def tmc_final_decision(
 
     # ── Run analysis ──
     try:
-        from common.model_analysis import LocalModelUnavailableError, analyze_tmc_final_decision
+        from common.model_analysis import LocalModelUnavailableError
+        from app.services.model_routing_integration import routed_tmc_final_decision
 
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None,
             functools.partial(
-                analyze_tmc_final_decision,
+                routed_tmc_final_decision,
                 candidate=candidate,
                 market_picture_context=market_picture_context,
                 strategy_id=strategy_id,

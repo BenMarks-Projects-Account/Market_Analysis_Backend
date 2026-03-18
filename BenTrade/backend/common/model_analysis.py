@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -12,6 +13,26 @@ from app.utils.validation import parse_expiration
 
 class LocalModelUnavailableError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class TransportResult:
+    """Lightweight return type from _model_transport().
+
+    Attributes:
+        content: Raw assistant text after think-tag stripping.
+        transport_path: "routed" if distributed routing was used, "legacy" if
+            direct HTTP POST was used.
+        finish_reason: The LLM finish_reason (e.g. "stop", "length") when
+            available from the legacy path.  None on the routed path because
+            the routing layer does not propagate this field.
+        provider: Provider identifier if routed (e.g. "local_llm"), None on
+            legacy path.
+    """
+    content: str
+    transport_path: str = "legacy"
+    finish_reason: str | None = None
+    provider: str | None = None
 
 
 def _extract_json_payload(raw_text: str) -> Any:
@@ -50,6 +71,190 @@ def _extract_json_payload(raw_text: str) -> Any:
         return json.loads(text[start_idx : end_idx + 1])
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Shared model transport layer (Steps 11-12)
+#
+# All analyze_* functions share identical HTTP transport + retry + response
+# extraction + think-tag stripping logic.  This function centralizes it:
+#   • When routing is enabled → execute_routed_model() (distributed)
+#   • When routing is disabled / routing fails → legacy requests.post()
+#
+# Returns a TransportResult dataclass with:
+#   content — raw assistant_text (post-sanitization)
+#   transport_path — "routed" or "legacy"
+#   finish_reason — LLM finish_reason from legacy path (None on routed)
+#   provider — provider name on routed path (None on legacy)
+#
+# Callers still own their own JSON repair, coercion, and trace attachment.
+#
+# Input: task_type — semantic identifier for routing policy
+#        payload — OpenAI-compatible payload dict with messages etc.
+#        log_prefix — domain tag for log messages (e.g. "MODEL_REGIME")
+#        model_url — legacy endpoint URL (resolved lazily if None)
+#        retries — retry count for legacy path (routing handles its own)
+#        timeout — request timeout in seconds
+# ---------------------------------------------------------------------------
+
+def _model_transport(
+    *,
+    task_type: str,
+    payload: dict[str, Any],
+    log_prefix: str,
+    model_url: str | None = None,
+    retries: int = 0,
+    timeout: int = 180,
+) -> TransportResult:
+    """Shared LLM transport: routed (if enabled) → legacy HTTP fallback.
+
+    Returns a TransportResult with the assistant text after think-tag
+    stripping, plus lightweight transport metadata (path, finish_reason,
+    provider).
+
+    Raises:
+        LocalModelUnavailableError: model endpoint unreachable (legacy path).
+        RuntimeError: model call failed for non-network reasons.
+    """
+    import logging
+    _log = logging.getLogger("bentrade.model_analysis")
+
+    # ── 1. Try distributed routing ──────────────────────────────
+    try:
+        from app.services.model_routing_integration import (
+            RoutingDisabledError,
+            execute_routed_model,
+        )
+
+        messages = payload.get("messages", [])
+        system_prompt: str | None = None
+        user_messages: list[dict[str, Any]] = []
+        for msg in messages:
+            if msg.get("role") == "system":
+                system_prompt = msg.get("content")
+            else:
+                user_messages.append(msg)
+
+        legacy_result, trace = execute_routed_model(
+            task_type=task_type,
+            messages=user_messages,
+            system_prompt=system_prompt,
+            timeout=float(timeout),
+            max_tokens=payload.get("max_tokens"),
+            temperature=payload.get("temperature"),
+            metadata={"source": log_prefix},
+        )
+
+        if legacy_result["status"] == "success":
+            content = legacy_result.get("content") or ""
+            _log.info(
+                "[%s] routed OK: provider=%s timing_ms=%s request_id=%s",
+                log_prefix,
+                trace.selected_provider,
+                trace.timing_ms,
+                trace.request_id,
+            )
+            # Sanitize think-tags (provider adapters may not strip these)
+            content = _strip_think_tags(content)
+            return TransportResult(
+                content=content,
+                transport_path="routed",
+                finish_reason=None,   # routing layer does not propagate finish_reason
+                provider=trace.selected_provider,
+            )
+
+        # Routing returned an error — fall through to legacy
+        _log.warning(
+            "[%s] routed call failed: %s — falling back to legacy",
+            log_prefix,
+            legacy_result.get("error"),
+        )
+    except RoutingDisabledError:
+        pass  # Expected — use legacy path
+    except Exception as exc:
+        _log.warning(
+            "[%s] routing unavailable: %s — falling back to legacy",
+            log_prefix,
+            exc,
+        )
+
+    # ── 2. Legacy HTTP path ─────────────────────────────────────
+    if model_url is None:
+        from app.services.model_router import get_model_endpoint
+        model_url = get_model_endpoint()
+
+    from requests.exceptions import RequestException as _ReqExc
+    import requests as _requests
+
+    last_error: Exception | None = None
+    attempt = 0
+    while attempt <= int(max(retries, 0)):
+        attempt += 1
+        try:
+            _log.info("[%s] POST %s (attempt %d, timeout=%ds)", log_prefix, model_url, attempt, timeout)
+            response = _requests.post(model_url, json=payload, timeout=timeout)
+            _log.info(
+                "[%s] response HTTP %d (%d bytes, %.1fs)",
+                log_prefix,
+                response.status_code,
+                len(response.content),
+                response.elapsed.total_seconds(),
+            )
+            response.raise_for_status()
+
+            response_json = None
+            try:
+                response_json = response.json()
+            except Exception:
+                response_json = None
+
+            assistant_text = None
+            finish_reason: str | None = None
+            if isinstance(response_json, dict):
+                choices = response_json.get("choices") or []
+                if choices and isinstance(choices, list) and isinstance(choices[0], dict):
+                    first = choices[0]
+                    finish_reason = first.get("finish_reason")
+                    message = first.get("message")
+                    if isinstance(message, dict) and "content" in message:
+                        assistant_text = message.get("content")
+                    elif "text" in first:
+                        assistant_text = first.get("text")
+            if assistant_text is None:
+                assistant_text = getattr(response, "text", "")
+
+            # Log finish_reason when present
+            if finish_reason:
+                _log.info("[%s] finish_reason=%s", log_prefix, finish_reason)
+            if finish_reason == "length":
+                _log.warning(
+                    "[%s] response TRUNCATED (finish_reason=length) — token budget may be insufficient",
+                    log_prefix,
+                )
+
+            # Sanitize: strip <think> tags
+            from common.model_sanitize import had_think_tags
+            if had_think_tags(assistant_text):
+                _log.info("[%s] <think> content detected and stripped (attempt %d)", log_prefix, attempt)
+            assistant_text = _strip_think_tags(assistant_text)
+
+            return TransportResult(
+                content=assistant_text,
+                transport_path="legacy",
+                finish_reason=finish_reason,
+                provider=None,
+            )
+        except _ReqExc as exc:
+            last_error = exc
+        except Exception as exc:
+            last_error = exc
+            break
+
+    if isinstance(last_error, _ReqExc):
+        raise LocalModelUnavailableError(
+            f"Local model endpoint unavailable at {model_url}: {last_error}"
+        ) from last_error
+    raise RuntimeError(f"{log_prefix} model transport failed: {last_error}")
 
 
 def _coerce_stock_model_output(candidate: Any) -> dict[str, Any] | None:
@@ -389,7 +594,6 @@ def analyze_regime(
     if model_url is None:
         from app.services.model_router import get_model_endpoint
         model_url = get_model_endpoint()
-    import requests as _requests
 
     _log = logging.getLogger("bentrade.model_analysis")
 
@@ -487,80 +691,43 @@ def analyze_regime(
         "stream": False,
     }
 
-    # ── 5. Call the model ───────────────────────────────────────────
-    last_error: Exception | None = None
-    attempt = 0
-    while attempt <= int(max(retries, 0)):
-        attempt += 1
-        try:
-            _log.info("[MODEL_REGIME] POST %s (attempt %d, timeout=%ds)", model_url, attempt, timeout)
-            response = _requests.post(model_url, json=payload, timeout=timeout)
-            _log.info(
-                "[MODEL_REGIME] response HTTP %d (%d bytes, %.1fs)",
-                response.status_code, len(response.content), response.elapsed.total_seconds(),
-            )
-            response.raise_for_status()
+    # ── 5. Call the model (via shared transport layer) ─────────────
+    _transport_result = _model_transport(
+        task_type="regime_analysis",
+        payload=payload,
+        log_prefix="MODEL_REGIME",
+        model_url=model_url,
+        retries=retries,
+        timeout=timeout,
+    )
+    assistant_text = _transport_result.content
 
-            response_json = None
-            try:
-                response_json = response.json()
-            except Exception:
-                response_json = None
+    # ── 6. Parse + coerce ───────────────────────────────────────
+    from common.json_repair import extract_and_repair_json
+    parsed, method = extract_and_repair_json(assistant_text)
 
-            assistant_text = None
-            if isinstance(response_json, dict):
-                choices = response_json.get("choices") or []
-                if choices and isinstance(choices, list) and isinstance(choices[0], dict):
-                    first = choices[0]
-                    message = first.get("message")
-                    if isinstance(message, dict) and "content" in message:
-                        assistant_text = message.get("content")
-                    elif "text" in first:
-                        assistant_text = first.get("text")
-            if assistant_text is None:
-                assistant_text = getattr(response, "text", "")
+    if method:
+        _log.info("[MODEL_REGIME] JSON extracted via method=%s", method)
 
-            # ── Sanitize: strip <think> tags and any hidden reasoning ──
-            from common.model_sanitize import had_think_tags
-            if had_think_tags(assistant_text):
-                _log.info("[MODEL_REGIME] <think> content detected and stripped (attempt %d)", attempt)
-            assistant_text = _strip_think_tags(assistant_text)
+    normalized = _coerce_regime_model_output(parsed)
+    if normalized is None:
+        raise ValueError("Model returned invalid regime analysis payload")
 
-            # Try robust JSON extraction via repair pipeline first
-            from common.json_repair import extract_and_repair_json
-            parsed, method = extract_and_repair_json(assistant_text)
+    # ── 7. Attach trace metadata ────────────────────────────────
+    normalized["_trace"] = {
+        "model_regime_input_mode": "raw_only",
+        "included_fields_count": included_count,
+        "excluded_fields_count": len(_REGIME_DERIVED_FIELDS),
+        "excluded_derived_field_names": _REGIME_DERIVED_FIELDS,
+        "missing_raw_fields": missing_fields,
+        "regime_raw_inputs_snapshot": {
+            k: v for k, v in regime_raw_inputs.items() if v is not None
+        },
+        "transport_path": _transport_result.transport_path,
+        "finish_reason": _transport_result.finish_reason,
+    }
 
-            if method:
-                _log.info("[MODEL_REGIME] JSON extracted via method=%s", method)
-
-            normalized = _coerce_regime_model_output(parsed)
-            if normalized is None:
-                raise ValueError("Model returned invalid regime analysis payload")
-
-            # ── 6. Attach trace metadata to response ────────────────
-            normalized["_trace"] = {
-                "model_regime_input_mode": "raw_only",
-                "included_fields_count": included_count,
-                "excluded_fields_count": len(_REGIME_DERIVED_FIELDS),
-                "excluded_derived_field_names": _REGIME_DERIVED_FIELDS,
-                "missing_raw_fields": missing_fields,
-                "regime_raw_inputs_snapshot": {
-                    k: v for k, v in regime_raw_inputs.items() if v is not None
-                },
-            }
-
-            return normalized
-        except RequestException as exc:
-            last_error = exc
-        except Exception as exc:
-            last_error = exc
-            break
-
-    if isinstance(last_error, RequestException):
-        raise LocalModelUnavailableError(
-            f"Local model endpoint unavailable at {model_url}: {last_error}"
-        ) from last_error
-    raise RuntimeError(f"Regime model analysis failed: {last_error}")
+    return normalized
 
 
 def analyze_trade(
@@ -597,7 +764,6 @@ def analyze_stock_idea(
     timeout: int = 180,
 ) -> dict[str, Any]:
     import logging
-    from common import utils as legacy_utils
 
     _log = logging.getLogger("bentrade.model_analysis")
 
@@ -637,63 +803,32 @@ def analyze_stock_idea(
         "stream": False,
     }
 
-    last_error: Exception | None = None
-    attempt = 0
-    while attempt <= int(max(retries, 0)):
-        attempt += 1
-        try:
-            response = legacy_utils.requests.post(model_url, json=payload, timeout=timeout)
-            _log.info(
-                "[MODEL_STOCK_IDEA] response HTTP %d (%d bytes, %.1fs)",
-                response.status_code, len(response.content), response.elapsed.total_seconds(),
-            )
-            response.raise_for_status()
+    # ── Transport via shared seam (Step 12 migration) ──
+    _transport_result = _model_transport(
+        task_type="stock_idea",
+        payload=payload,
+        log_prefix="MODEL_STOCK_IDEA",
+        model_url=model_url,
+        retries=retries,
+        timeout=timeout,
+    )
+    assistant_text = _transport_result.content
 
-            response_json = None
-            try:
-                response_json = response.json()
-            except Exception:
-                response_json = None
+    # Try robust JSON extraction via repair pipeline first
+    from common.json_repair import extract_and_repair_json
+    parsed, method = extract_and_repair_json(assistant_text)
 
-            assistant_text = None
-            if isinstance(response_json, dict):
-                choices = response_json.get("choices") or []
-                if choices and isinstance(choices, list) and isinstance(choices[0], dict):
-                    first = choices[0]
-                    message = first.get("message")
-                    if isinstance(message, dict) and "content" in message:
-                        assistant_text = message.get("content")
-                    elif "text" in first:
-                        assistant_text = first.get("text")
-            if assistant_text is None:
-                assistant_text = getattr(response, "text", "")
+    if method:
+        _log.info("[MODEL_STOCK_IDEA] JSON extracted via method=%s", method)
 
-            # ── Sanitize: strip <think> tags and any hidden reasoning ──
-            from common.model_sanitize import had_think_tags
-            if had_think_tags(assistant_text):
-                _log.info("[MODEL_STOCK_IDEA] <think> content detected and stripped (attempt %d)", attempt)
-            assistant_text = _strip_think_tags(assistant_text)
-
-            # Try robust JSON extraction via repair pipeline first
-            from common.json_repair import extract_and_repair_json
-            parsed, method = extract_and_repair_json(assistant_text)
-
-            if method:
-                _log.info("[MODEL_STOCK_IDEA] JSON extracted via method=%s", method)
-
-            normalized = _coerce_stock_model_output(parsed)
-            if normalized is None:
-                raise ValueError("Model returned invalid stock analysis payload")
-            return normalized
-        except RequestException as exc:
-            last_error = exc
-        except Exception as exc:
-            last_error = exc
-            break
-
-    if isinstance(last_error, RequestException):
-        raise LocalModelUnavailableError(f"Local model endpoint unavailable at {model_url}: {last_error}") from last_error
-    raise RuntimeError(f"Stock model analysis failed: {last_error}")
+    normalized = _coerce_stock_model_output(parsed)
+    if normalized is None:
+        raise ValueError("Model returned invalid stock analysis payload")
+    normalized["_trace"] = {
+        "transport_path": _transport_result.transport_path,
+        "finish_reason": _transport_result.finish_reason,
+    }
+    return normalized
 
 
 # ── Stock Strategy Model Analysis (scanner TradeCard) ────────────────────
@@ -901,7 +1036,6 @@ def analyze_stock_strategy(
       ValueError: if strategy_id is unknown
     """
     import logging
-    import requests as _requests
 
     if model_url is None:
         from app.services.model_router import get_model_endpoint
@@ -935,68 +1069,16 @@ def analyze_stock_strategy(
         "temperature": 0.0,
     }
 
-    def _call_llm(messages: list[dict], label: str) -> str | None:
-        """POST to LLM and extract assistant text. Returns None on network error."""
-        try:
-            _log.info("[MODEL_STOCK_STRATEGY] POST %s (%s, timeout=%ds)", model_url, label, timeout)
-            resp = _requests.post(
-                model_url,
-                json={"messages": messages, "max_tokens": 2048, "temperature": 0.0, "stream": False},
-                timeout=timeout,
-            )
-            _log.info(
-                "[MODEL_STOCK_STRATEGY] response HTTP %d (%d bytes, %.1fs) [%s]",
-                resp.status_code, len(resp.content), resp.elapsed.total_seconds(), label,
-            )
-            resp.raise_for_status()
-        except RequestException as exc:
-            _log.warning("[MODEL_STOCK_STRATEGY_TRACE] %s network error: %s", label, exc)
-            raise
-
-        response_json = None
-        try:
-            response_json = resp.json()
-        except Exception:
-            pass
-
-        assistant_text = None
-        if isinstance(response_json, dict):
-            choices = response_json.get("choices") or []
-            if choices and isinstance(choices, list) and isinstance(choices[0], dict):
-                first = choices[0]
-                message = first.get("message")
-                if isinstance(message, dict) and "content" in message:
-                    assistant_text = message.get("content")
-                elif "text" in first:
-                    assistant_text = first.get("text")
-        if assistant_text is None:
-            assistant_text = getattr(resp, "text", "")
-
-        return assistant_text
-
-    # ── Main attempt loop (network retries) ──────────────────────
-    last_error: Exception | None = None
-    assistant_text: str | None = None
-    attempt = 0
-    while attempt <= int(max(retries, 0)):
-        attempt += 1
-        try:
-            assistant_text = _call_llm(payload["messages"], f"attempt-{attempt}")
-            break  # network OK — proceed to parse
-        except RequestException as exc:
-            last_error = exc
-            _log.warning(
-                "[MODEL_STOCK_STRATEGY_TRACE] attempt %d/%d network fail: %s",
-                attempt, retries + 1, exc,
-            )
-
-    # All network retries exhausted
-    if assistant_text is None:
-        if isinstance(last_error, RequestException):
-            raise LocalModelUnavailableError(
-                f"Local model endpoint unavailable at {model_url}: {last_error}"
-            ) from last_error
-        raise RuntimeError(f"Stock strategy model analysis failed: {last_error}")
+    # ── Primary transport via shared seam (Step 12 migration) ────
+    _transport_result = _model_transport(
+        task_type="stock_strategy",
+        payload=payload,
+        log_prefix="MODEL_STOCK_STRATEGY",
+        model_url=model_url,
+        retries=retries,
+        timeout=timeout,
+    )
+    assistant_text = _transport_result.content
 
     _log.debug(
         "[MODEL_STOCK_STRATEGY_TRACE] raw_response_len=%d", len(assistant_text or ""),
@@ -1021,20 +1103,32 @@ def analyze_stock_strategy(
             strategy_id, symbol, (assistant_text or "")[:200],
         )
 
-        fix_messages = payload["messages"] + [
-            {"role": "assistant", "content": assistant_text},
-            {
-                "role": "user",
-                "content": (
-                    "Your previous response was not valid JSON. "
-                    "Return ONLY the corrected JSON object — no markdown fences, "
-                    "no explanation, no trailing commas. Start with { and end with }."
-                ),
-            },
-        ]
+        fix_payload = {
+            "messages": payload["messages"] + [
+                {"role": "assistant", "content": assistant_text},
+                {
+                    "role": "user",
+                    "content": (
+                        "Your previous response was not valid JSON. "
+                        "Return ONLY the corrected JSON object — no markdown fences, "
+                        "no explanation, no trailing commas. Start with { and end with }."
+                    ),
+                },
+            ],
+            "max_tokens": 2048,
+            "temperature": 0.0,
+        }
 
         try:
-            fix_text = _call_llm(fix_messages, "retry-fix")
+            _fix_result = _model_transport(
+                task_type="stock_strategy_fix",
+                payload=fix_payload,
+                log_prefix="MODEL_STOCK_STRATEGY",
+                model_url=model_url,
+                retries=0,
+                timeout=timeout,
+            )
+            fix_text = _fix_result.content
             if fix_text:
                 parsed2, parse_method2 = extract_and_repair_json(fix_text)
                 normalized = _coerce_stock_strategy_output(parsed2) if parsed2 is not None else None
@@ -1044,7 +1138,7 @@ def analyze_stock_strategy(
                         "[MODEL_STOCK_STRATEGY_TRACE] retry-with-fix SUCCEEDED strategy=%s symbol=%s method=%s",
                         strategy_id, symbol, parse_method,
                     )
-        except RequestException:
+        except (RequestException, LocalModelUnavailableError):
             _log.warning("[MODEL_STOCK_STRATEGY_TRACE] retry-fix network error, proceeding to fallback")
 
     # ── Fallback on total failure ────────────────────────────────
@@ -1076,6 +1170,10 @@ def analyze_stock_strategy(
         parse_method,
     )
 
+    normalized["_trace"] = {
+        "transport_path": _transport_result.transport_path,
+        "finish_reason": _transport_result.finish_reason,
+    }
     return normalized
 
 
@@ -1328,7 +1426,6 @@ def analyze_tmc_final_decision(
         LocalModelUnavailableError: if the LLM endpoint is unreachable.
     """
     import logging
-    import requests as _requests
 
     if model_url is None:
         from app.services.model_router import get_model_endpoint
@@ -1366,66 +1463,16 @@ def analyze_tmc_final_decision(
         "temperature": 0.0,
     }
 
-    def _call_llm(messages: list[dict], label: str) -> str | None:
-        try:
-            _log.info("[TMC_FINAL_DECISION] POST %s (%s, timeout=%ds)", model_url, label, timeout)
-            resp = _requests.post(
-                model_url,
-                json={"messages": messages, "max_tokens": 3000, "temperature": 0.0, "stream": False},
-                timeout=timeout,
-            )
-            _log.info(
-                "[TMC_FINAL_DECISION] response HTTP %d (%d bytes, %.1fs) [%s]",
-                resp.status_code, len(resp.content), resp.elapsed.total_seconds(), label,
-            )
-            resp.raise_for_status()
-        except RequestException as exc:
-            _log.warning("[TMC_FINAL_DECISION_TRACE] %s network error: %s", label, exc)
-            raise
-
-        response_json = None
-        try:
-            response_json = resp.json()
-        except Exception:
-            pass
-
-        assistant_text = None
-        if isinstance(response_json, dict):
-            choices = response_json.get("choices") or []
-            if choices and isinstance(choices, list) and isinstance(choices[0], dict):
-                first = choices[0]
-                message = first.get("message")
-                if isinstance(message, dict) and "content" in message:
-                    assistant_text = message.get("content")
-                elif "text" in first:
-                    assistant_text = first.get("text")
-        if assistant_text is None:
-            assistant_text = getattr(resp, "text", "")
-
-        return assistant_text
-
-    # ── Network retry loop ───────────────────────────────────────
-    last_error: Exception | None = None
-    assistant_text: str | None = None
-    attempt = 0
-    while attempt <= int(max(retries, 0)):
-        attempt += 1
-        try:
-            assistant_text = _call_llm(payload["messages"], f"attempt-{attempt}")
-            break
-        except RequestException as exc:
-            last_error = exc
-            _log.warning(
-                "[TMC_FINAL_DECISION_TRACE] attempt %d/%d network fail: %s",
-                attempt, retries + 1, exc,
-            )
-
-    if assistant_text is None:
-        if isinstance(last_error, RequestException):
-            raise LocalModelUnavailableError(
-                f"Local model endpoint unavailable at {model_url}: {last_error}"
-            ) from last_error
-        raise RuntimeError(f"TMC final decision model analysis failed: {last_error}")
+    # ── Primary transport via shared seam (Step 12 migration) ────
+    _transport_result = _model_transport(
+        task_type="tmc_final_decision",
+        payload=payload,
+        log_prefix="TMC_FINAL_DECISION",
+        model_url=model_url,
+        retries=retries,
+        timeout=timeout,
+    )
+    assistant_text = _transport_result.content
 
     _log.debug("[TMC_FINAL_DECISION_TRACE] raw_response_len=%d", len(assistant_text or ""))
 
@@ -1446,17 +1493,29 @@ def analyze_tmc_final_decision(
             "[TMC_FINAL_DECISION_TRACE] parse failed, attempting retry-with-fix symbol=%s",
             symbol,
         )
-        fix_messages = payload["messages"] + [
-            {"role": "assistant", "content": assistant_text},
-            {"role": "user", "content": (
-                "Your previous response was not valid JSON. "
-                "Please return ONLY the raw JSON object matching the schema "
-                "from the system prompt. No commentary, no fences. "
-                "Start with { and end with }."
-            )},
-        ]
+        fix_payload = {
+            "messages": payload["messages"] + [
+                {"role": "assistant", "content": assistant_text},
+                {"role": "user", "content": (
+                    "Your previous response was not valid JSON. "
+                    "Please return ONLY the raw JSON object matching the schema "
+                    "from the system prompt. No commentary, no fences. "
+                    "Start with { and end with }."
+                )},
+            ],
+            "max_tokens": 3000,
+            "temperature": 0.0,
+        }
         try:
-            fix_text = _call_llm(fix_messages, "retry-fix")
+            _fix_result = _model_transport(
+                task_type="tmc_final_decision_fix",
+                payload=fix_payload,
+                log_prefix="TMC_FINAL_DECISION",
+                model_url=model_url,
+                retries=0,
+                timeout=timeout,
+            )
+            fix_text = _fix_result.content
             if fix_text:
                 parsed2, parse_method2 = extract_and_repair_json(fix_text)
                 normalized = _coerce_tmc_final_decision_output(parsed2) if parsed2 is not None else None
@@ -1466,7 +1525,7 @@ def analyze_tmc_final_decision(
                         "[TMC_FINAL_DECISION_TRACE] retry-with-fix SUCCEEDED symbol=%s method=%s",
                         symbol, parse_method,
                     )
-        except RequestException:
+        except (RequestException, LocalModelUnavailableError):
             _log.warning("[TMC_FINAL_DECISION_TRACE] retry-fix network error, proceeding to fallback")
 
     # ── Fallback on total failure ────────────────────────────────
@@ -1495,6 +1554,10 @@ def analyze_tmc_final_decision(
         parse_method,
     )
 
+    normalized["_trace"] = {
+        "transport_path": _transport_result.transport_path,
+        "finish_reason": _transport_result.finish_reason,
+    }
     return normalized
 
 
@@ -1722,7 +1785,6 @@ def analyze_news_sentiment(
     if model_url is None:
         from app.services.model_router import get_model_endpoint
         model_url = get_model_endpoint()
-    import requests as _requests
 
     _log = logging.getLogger("bentrade.model_analysis")
 
@@ -1835,87 +1897,43 @@ def analyze_news_sentiment(
         "stream": False,
     }
 
-    # ── 5. Call the model ───────────────────────────────────────
-    last_error: Exception | None = None
-    attempt = 0
-    while attempt <= int(max(retries, 0)):
-        attempt += 1
-        try:
-            _log.info("[MODEL_NEWS] POST %s (attempt %d, timeout=%ds)", model_url, attempt, timeout)
-            response = _requests.post(model_url, json=payload, timeout=timeout)
-            _log.info(
-                "[MODEL_NEWS] response HTTP %d (%d bytes, %.1fs)",
-                response.status_code, len(response.content), response.elapsed.total_seconds(),
-            )
-            response.raise_for_status()
+    # ── 5. Call the model (via shared transport layer) ─────────────
+    _transport_result = _model_transport(
+        task_type="news_sentiment",
+        payload=payload,
+        log_prefix="MODEL_NEWS",
+        model_url=model_url,
+        retries=retries,
+        timeout=timeout,
+    )
+    assistant_text = _transport_result.content
 
-            response_json = None
-            try:
-                response_json = response.json()
-            except Exception:
-                response_json = None
+    # ── 6. Parse + coerce ───────────────────────────────────────
+    from common.json_repair import extract_and_repair_json
+    parsed, method = extract_and_repair_json(assistant_text)
 
-            assistant_text = None
-            finish_reason = None
-            if isinstance(response_json, dict):
-                choices = response_json.get("choices") or []
-                if choices and isinstance(choices, list) and isinstance(choices[0], dict):
-                    first = choices[0]
-                    finish_reason = first.get("finish_reason")
-                    message = first.get("message")
-                    if isinstance(message, dict) and "content" in message:
-                        assistant_text = message.get("content")
-                    elif "text" in first:
-                        assistant_text = first.get("text")
-            if finish_reason:
-                _log.info("[MODEL_NEWS] finish_reason=%s", finish_reason)
-            if finish_reason == "length":
-                _log.warning("[MODEL_NEWS] response TRUNCATED (finish_reason=length) — token budget may be insufficient")
-            if assistant_text is None:
-                assistant_text = getattr(response, "text", "")
+    if method:
+        _log.info("[MODEL_NEWS] JSON extracted via method=%s", method)
 
-            # ── Sanitize: strip <think> tags and any hidden reasoning ──
-            from common.model_sanitize import had_think_tags
-            if had_think_tags(assistant_text):
-                _log.info("[MODEL_NEWS] <think> content detected and stripped (attempt %d)", attempt)
-            assistant_text = _strip_think_tags(assistant_text)
+    normalized = _coerce_news_sentiment_model_output(parsed)
+    if normalized is None:
+        normalized = _build_plaintext_fallback(assistant_text, "news_sentiment")
+        method = "plaintext_fallback"
+        if normalized is None:
+            raise ValueError("Model returned invalid news sentiment payload")
 
-            # Try robust JSON extraction via repair pipeline first
-            from common.json_repair import extract_and_repair_json
-            parsed, method = extract_and_repair_json(assistant_text)
+    # ── 7. Attach trace metadata ────────────────────────────────
+    normalized["_trace"] = {
+        "input_mode": "raw_only",
+        "headlines_provided": included_headlines,
+        "excluded_derived_fields": _NEWS_SENTIMENT_EXCLUDED_FIELDS,
+        "missing_macro_fields": missing_macro,
+        "json_parse_method": method,
+        "transport_path": _transport_result.transport_path,
+        "finish_reason": _transport_result.finish_reason,
+    }
 
-            if method:
-                _log.info("[MODEL_NEWS] JSON extracted via method=%s", method)
-
-            normalized = _coerce_news_sentiment_model_output(parsed)
-            if normalized is None:
-                # Fallback: wrap raw text as plain-text analysis
-                normalized = _build_plaintext_fallback(assistant_text, "news_sentiment")
-                method = "plaintext_fallback"
-                if normalized is None:
-                    raise ValueError("Model returned invalid news sentiment payload")
-
-            # ── 6. Attach trace metadata ────────────────────────
-            normalized["_trace"] = {
-                "input_mode": "raw_only",
-                "headlines_provided": included_headlines,
-                "excluded_derived_fields": _NEWS_SENTIMENT_EXCLUDED_FIELDS,
-                "missing_macro_fields": missing_macro,
-                "json_parse_method": method,
-            }
-
-            return normalized
-        except RequestException as exc:
-            last_error = exc
-        except Exception as exc:
-            last_error = exc
-            break
-
-    if isinstance(last_error, RequestException):
-        raise LocalModelUnavailableError(
-            f"Local model endpoint unavailable at {model_url}: {last_error}"
-        ) from last_error
-    raise RuntimeError(f"News sentiment model analysis failed: {last_error}")
+    return normalized
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -2079,7 +2097,6 @@ def analyze_breadth_participation(
     if model_url is None:
         from app.services.model_router import get_model_endpoint
         model_url = get_model_endpoint()
-    import requests as _requests
 
     _log = logging.getLogger("bentrade.model_analysis")
 
@@ -2184,81 +2201,43 @@ def analyze_breadth_participation(
         "stream": False,
     }
 
-    # ── 5. Call the model ───────────────────────────────────────
-    last_error: Exception | None = None
-    attempt = 0
-    while attempt <= int(max(retries, 0)):
-        attempt += 1
-        try:
-            _log.info("[MODEL_BREADTH] POST %s (attempt %d, timeout=%ds)", model_url, attempt, timeout)
-            response = _requests.post(model_url, json=payload, timeout=timeout)
-            _log.info(
-                "[MODEL_BREADTH] response HTTP %d (%d bytes, %.1fs)",
-                response.status_code, len(response.content), response.elapsed.total_seconds(),
-            )
-            response.raise_for_status()
+    # ── 5. Call the model (via shared transport layer) ─────────────
+    _transport_result = _model_transport(
+        task_type="breadth_participation",
+        payload=payload,
+        log_prefix="MODEL_BREADTH",
+        model_url=model_url,
+        retries=retries,
+        timeout=timeout,
+    )
+    assistant_text = _transport_result.content
 
-            response_json = None
-            try:
-                response_json = response.json()
-            except Exception:
-                response_json = None
+    # ── 6. Parse + coerce ───────────────────────────────────────
+    from common.json_repair import extract_and_repair_json
+    parsed, method = extract_and_repair_json(assistant_text)
 
-            assistant_text = None
-            if isinstance(response_json, dict):
-                choices = response_json.get("choices") or []
-                if choices and isinstance(choices, list) and isinstance(choices[0], dict):
-                    first = choices[0]
-                    message = first.get("message")
-                    if isinstance(message, dict) and "content" in message:
-                        assistant_text = message.get("content")
-                    elif "text" in first:
-                        assistant_text = first.get("text")
-            if assistant_text is None:
-                assistant_text = getattr(response, "text", "")
+    if method:
+        _log.info("[MODEL_BREADTH] JSON extracted via method=%s", method)
 
-            # Sanitize: strip <think> tags
-            from common.model_sanitize import had_think_tags
-            if had_think_tags(assistant_text):
-                _log.info("[MODEL_BREADTH] <think> content detected and stripped (attempt %d)", attempt)
-            assistant_text = _strip_think_tags(assistant_text)
+    normalized = _coerce_breadth_model_output(parsed)
+    if normalized is None:
+        normalized = _build_plaintext_fallback(assistant_text, "breadth")
+        method = "plaintext_fallback"
+        if normalized is None:
+            raise ValueError("Model returned invalid breadth analysis payload")
 
-            # Try robust JSON extraction
-            from common.json_repair import extract_and_repair_json
-            parsed, method = extract_and_repair_json(assistant_text)
+    # ── 7. Attach trace metadata ────────────────────────────────
+    normalized["_trace"] = {
+        "input_mode": "raw_only",
+        "pillar_scores_provided": pillar_scores,
+        "excluded_derived_fields": _BREADTH_EXCLUDED_FIELDS,
+        "universe_coverage_pct": universe.get("coverage_pct", 0),
+        "json_parse_method": method,
+        "transport_path": _transport_result.transport_path,
+        "finish_reason": _transport_result.finish_reason,
+    }
 
-            if method:
-                _log.info("[MODEL_BREADTH] JSON extracted via method=%s", method)
-
-            normalized = _coerce_breadth_model_output(parsed)
-            if normalized is None:
-                # Fallback: wrap raw text as plain-text analysis
-                normalized = _build_plaintext_fallback(assistant_text, "breadth")
-                method = "plaintext_fallback"
-                if normalized is None:
-                    raise ValueError("Model returned invalid breadth analysis payload")
-
-            # ── 6. Attach trace metadata ────────────────────────
-            normalized["_trace"] = {
-                "input_mode": "raw_only",
-                "pillar_scores_provided": pillar_scores,
-                "excluded_derived_fields": _BREADTH_EXCLUDED_FIELDS,
-                "universe_coverage_pct": universe.get("coverage_pct", 0),
-                "json_parse_method": method,
-            }
-
-            return normalized
-        except RequestException as exc:
-            last_error = exc
-        except Exception as exc:
-            last_error = exc
-            break
-
-    if isinstance(last_error, RequestException):
-        raise LocalModelUnavailableError(
-            f"Local model endpoint unavailable at {model_url}: {last_error}"
-        ) from last_error
-    raise RuntimeError(f"Breadth model analysis failed: {last_error}")
+    return normalized
 
 
 def _strip_think_tags(text: str) -> str:
@@ -2419,7 +2398,6 @@ def analyze_volatility_options(
     if model_url is None:
         from app.services.model_router import get_model_endpoint
         model_url = get_model_endpoint()
-    import requests as _requests
 
     _log = logging.getLogger("bentrade.model_analysis")
 
@@ -2517,76 +2495,42 @@ def analyze_volatility_options(
         "stream": False,
     }
 
-    # ── 4. Call the model ───────────────────────────────────────
-    last_error: Exception | None = None
-    attempt = 0
-    while attempt <= int(max(retries, 0)):
-        attempt += 1
-        try:
-            _log.info("[MODEL_VOL] POST %s (attempt %d, timeout=%ds)", model_url, attempt, timeout)
-            response = _requests.post(model_url, json=payload, timeout=timeout)
-            _log.info(
-                "[MODEL_VOL] response HTTP %d (%d bytes, %.1fs)",
-                response.status_code, len(response.content), response.elapsed.total_seconds(),
-            )
-            response.raise_for_status()
+    # ── 4. Call the model (via shared transport layer) ─────────────
+    _transport_result = _model_transport(
+        task_type="volatility_options",
+        payload=payload,
+        log_prefix="MODEL_VOL",
+        model_url=model_url,
+        retries=retries,
+        timeout=timeout,
+    )
+    assistant_text = _transport_result.content
 
-            response_json = None
-            try:
-                response_json = response.json()
-            except Exception:
-                response_json = None
+    # ── 5. Parse + coerce ───────────────────────────────────────
+    from common.json_repair import extract_and_repair_json
+    parsed, method = extract_and_repair_json(assistant_text)
 
-            assistant_text = None
-            if isinstance(response_json, dict):
-                choices = response_json.get("choices") or []
-                if choices and isinstance(choices, list) and isinstance(choices[0], dict):
-                    first = choices[0]
-                    message = first.get("message")
-                    if isinstance(message, dict) and "content" in message:
-                        assistant_text = message.get("content")
-                    elif "text" in first:
-                        assistant_text = first.get("text")
-            if assistant_text is None:
-                assistant_text = getattr(response, "text", "")
+    if method:
+        _log.info("[MODEL_VOL] JSON extracted via method=%s", method)
 
-            from common.model_sanitize import had_think_tags
-            if had_think_tags(assistant_text):
-                _log.info("[MODEL_VOL] <think> content detected and stripped (attempt %d)", attempt)
-            assistant_text = _strip_think_tags(assistant_text)
+    normalized = _coerce_vol_model_output(parsed)
+    if normalized is None:
+        normalized = _build_plaintext_fallback(assistant_text, "volatility")
+        method = "plaintext_fallback"
+        if normalized is None:
+            raise ValueError("Model returned invalid volatility analysis payload")
 
-            from common.json_repair import extract_and_repair_json
-            parsed, method = extract_and_repair_json(assistant_text)
+    # ── 6. Attach trace metadata ────────────────────────────────
+    normalized["_trace"] = {
+        "input_mode": "raw_only",
+        "pillar_scores_provided": pillar_scores,
+        "excluded_derived_fields": _VOL_EXCLUDED_FIELDS,
+        "json_parse_method": method,
+        "transport_path": _transport_result.transport_path,
+        "finish_reason": _transport_result.finish_reason,
+    }
 
-            if method:
-                _log.info("[MODEL_VOL] JSON extracted via method=%s", method)
-
-            normalized = _coerce_vol_model_output(parsed)
-            if normalized is None:
-                normalized = _build_plaintext_fallback(assistant_text, "volatility")
-                method = "plaintext_fallback"
-                if normalized is None:
-                    raise ValueError("Model returned invalid volatility analysis payload")
-
-            normalized["_trace"] = {
-                "input_mode": "raw_only",
-                "pillar_scores_provided": pillar_scores,
-                "excluded_derived_fields": _VOL_EXCLUDED_FIELDS,
-                "json_parse_method": method,
-            }
-
-            return normalized
-        except RequestException as exc:
-            last_error = exc
-        except Exception as exc:
-            last_error = exc
-            break
-
-    if isinstance(last_error, RequestException):
-        raise LocalModelUnavailableError(
-            f"Local model endpoint unavailable at {model_url}: {last_error}"
-        ) from last_error
-    raise RuntimeError(f"Volatility model analysis failed: {last_error}")
+    return normalized
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2723,7 +2667,6 @@ def analyze_cross_asset_macro(
     if model_url is None:
         from app.services.model_router import get_model_endpoint
         model_url = get_model_endpoint()
-    import requests as _requests
 
     _log = logging.getLogger("bentrade.model_analysis")
 
@@ -2813,86 +2756,42 @@ def analyze_cross_asset_macro(
         "stream": False,
     }
 
-    last_error: Exception | None = None
-    attempt = 0
-    while attempt <= int(max(retries, 0)):
-        attempt += 1
-        try:
-            _log.info("[MODEL_CROSS_ASSET] POST %s (attempt %d, timeout=%ds)", model_url, attempt, timeout)
-            response = _requests.post(model_url, json=payload, timeout=timeout)
-            _log.info(
-                "[MODEL_CROSS_ASSET] response HTTP %d (%d bytes, %.1fs)",
-                response.status_code, len(response.content), response.elapsed.total_seconds(),
-            )
-            if response.status_code >= 400:
-                _log.error(
-                    "[MODEL_CROSS_ASSET] HTTP %d response body: %s",
-                    response.status_code, response.text[:2000],
-                )
-            response.raise_for_status()
+    # ── 5. Call the model (via shared transport layer) ─────────────
+    _transport_result = _model_transport(
+        task_type="cross_asset_macro",
+        payload=payload,
+        log_prefix="MODEL_CROSS_ASSET",
+        model_url=model_url,
+        retries=retries,
+        timeout=timeout,
+    )
+    assistant_text = _transport_result.content
 
-            response_json = None
-            try:
-                response_json = response.json()
-            except Exception:
-                response_json = None
+    # ── 6. Parse + coerce ───────────────────────────────────────
+    from common.json_repair import extract_and_repair_json
+    parsed, method = extract_and_repair_json(assistant_text)
 
-            assistant_text = None
-            if isinstance(response_json, dict):
-                choices = response_json.get("choices") or []
-                if choices and isinstance(choices, list) and isinstance(choices[0], dict):
-                    first = choices[0]
-                    message = first.get("message")
-                    if isinstance(message, dict) and "content" in message:
-                        assistant_text = message.get("content")
-                    elif "text" in first:
-                        assistant_text = first.get("text")
-            if assistant_text is None:
-                assistant_text = getattr(response, "text", "")
+    if method:
+        _log.info("[MODEL_CROSS_ASSET] JSON extracted via method=%s", method)
 
-            from common.model_sanitize import had_think_tags
-            if had_think_tags(assistant_text):
-                _log.info("[MODEL_CROSS_ASSET] <think> content detected and stripped (attempt %d)", attempt)
-            assistant_text = _strip_think_tags(assistant_text)
+    normalized = _coerce_cross_asset_model_output(parsed)
+    if normalized is None:
+        normalized = _build_plaintext_fallback(assistant_text, "cross_asset")
+        method = "plaintext_fallback"
+        if normalized is None:
+            raise ValueError("Model returned invalid cross-asset analysis payload")
 
-            from common.json_repair import extract_and_repair_json
-            parsed, method = extract_and_repair_json(assistant_text)
+    # ── 7. Attach trace metadata ────────────────────────────────
+    normalized["_trace"] = {
+        "input_mode": "raw_only",
+        "pillar_scores_provided": pillar_scores,
+        "excluded_derived_fields": _CROSS_ASSET_EXCLUDED_FIELDS,
+        "json_parse_method": method,
+        "transport_path": _transport_result.transport_path,
+        "finish_reason": _transport_result.finish_reason,
+    }
 
-            if method:
-                _log.info("[MODEL_CROSS_ASSET] JSON extracted via method=%s", method)
-
-            normalized = _coerce_cross_asset_model_output(parsed)
-            if normalized is None:
-                normalized = _build_plaintext_fallback(assistant_text, "cross_asset")
-                method = "plaintext_fallback"
-                if normalized is None:
-                    raise ValueError("Model returned invalid cross-asset analysis payload")
-
-            normalized["_trace"] = {
-                "input_mode": "raw_only",
-                "pillar_scores_provided": pillar_scores,
-                "excluded_derived_fields": _CROSS_ASSET_EXCLUDED_FIELDS,
-                "json_parse_method": method,
-            }
-
-            return normalized
-        except RequestException as exc:
-            # Capture response body for 4xx/5xx errors to aid debugging
-            resp_body = ""
-            if hasattr(exc, "response") and exc.response is not None:
-                resp_body = f" | response_body={exc.response.text[:500]}"
-            last_error = exc
-            last_error_detail = resp_body
-        except Exception as exc:
-            last_error = exc
-            last_error_detail = ""
-            break
-
-    if isinstance(last_error, RequestException):
-        raise LocalModelUnavailableError(
-            f"Local model endpoint unavailable at {model_url}: {last_error}{last_error_detail}"
-        ) from last_error
-    raise RuntimeError(f"Cross-asset model analysis failed: {last_error}")
+    return normalized
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3031,7 +2930,6 @@ def analyze_flows_positioning(
     if model_url is None:
         from app.services.model_router import get_model_endpoint
         model_url = get_model_endpoint()
-    import requests as _requests
 
     _log = logging.getLogger("bentrade.model_analysis")
 
@@ -3122,75 +3020,42 @@ def analyze_flows_positioning(
         "stream": False,
     }
 
-    last_error: Exception | None = None
-    attempt = 0
-    while attempt <= int(max(retries, 0)):
-        attempt += 1
-        try:
-            _log.info("[MODEL_FLOWS_POS] POST %s (attempt %d, timeout=%ds)", model_url, attempt, timeout)
-            response = _requests.post(model_url, json=payload, timeout=timeout)
-            _log.info(
-                "[MODEL_FLOWS_POS] response HTTP %d (%d bytes, %.1fs)",
-                response.status_code, len(response.content), response.elapsed.total_seconds(),
-            )
-            response.raise_for_status()
+    # ── 5. Call the model (via shared transport layer) ─────────────
+    _transport_result = _model_transport(
+        task_type="flows_positioning",
+        payload=payload,
+        log_prefix="MODEL_FLOWS_POS",
+        model_url=model_url,
+        retries=retries,
+        timeout=timeout,
+    )
+    assistant_text = _transport_result.content
 
-            response_json = None
-            try:
-                response_json = response.json()
-            except Exception:
-                response_json = None
+    # ── 6. Parse + coerce ───────────────────────────────────────
+    from common.json_repair import extract_and_repair_json
+    parsed, method = extract_and_repair_json(assistant_text)
 
-            assistant_text = None
-            if isinstance(response_json, dict):
-                choices = response_json.get("choices") or []
-                if choices and isinstance(choices, list) and isinstance(choices[0], dict):
-                    first = choices[0]
-                    message = first.get("message")
-                    if isinstance(message, dict) and "content" in message:
-                        assistant_text = message.get("content")
-                    elif "text" in first:
-                        assistant_text = first.get("text")
-            if assistant_text is None:
-                assistant_text = getattr(response, "text", "")
+    if method:
+        _log.info("[MODEL_FLOWS_POS] JSON extracted via method=%s", method)
 
-            from common.model_sanitize import had_think_tags
-            if had_think_tags(assistant_text):
-                _log.info("[MODEL_FLOWS_POS] <think> content detected and stripped (attempt %d)", attempt)
-            assistant_text = _strip_think_tags(assistant_text)
+    normalized = _coerce_flows_positioning_model_output(parsed)
+    if normalized is None:
+        normalized = _build_plaintext_fallback(assistant_text, "flows_positioning")
+        method = "plaintext_fallback"
+        if normalized is None:
+            raise ValueError("Model returned invalid flows & positioning analysis payload")
 
-            from common.json_repair import extract_and_repair_json
-            parsed, method = extract_and_repair_json(assistant_text)
+    # ── 7. Attach trace metadata ────────────────────────────────
+    normalized["_trace"] = {
+        "input_mode": "raw_only",
+        "pillar_scores_provided": pillar_scores,
+        "excluded_derived_fields": _FLOWS_POSITIONING_EXCLUDED_FIELDS,
+        "json_parse_method": method,
+        "transport_path": _transport_result.transport_path,
+        "finish_reason": _transport_result.finish_reason,
+    }
 
-            if method:
-                _log.info("[MODEL_FLOWS_POS] JSON extracted via method=%s", method)
-
-            normalized = _coerce_flows_positioning_model_output(parsed)
-            if normalized is None:
-                normalized = _build_plaintext_fallback(assistant_text, "flows_positioning")
-                method = "plaintext_fallback"
-                if normalized is None:
-                    raise ValueError("Model returned invalid flows & positioning analysis payload")
-
-            normalized["_trace"] = {
-                "input_mode": "raw_only",
-                "pillar_scores_provided": pillar_scores,
-                "excluded_derived_fields": _FLOWS_POSITIONING_EXCLUDED_FIELDS,
-                "json_parse_method": method,
-            }
-
-            return normalized
-        except RequestException as exc:
-            last_error = exc
-        except Exception as exc:
-            last_error = exc
-            break
-
-    if isinstance(last_error, RequestException):
-        raise LocalModelUnavailableError(
-            f"Local model endpoint unavailable at {model_url}: {last_error}"
-        ) from last_error
-    raise RuntimeError(f"Flows positioning model analysis failed: {last_error}")
+    return normalized
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -3345,7 +3210,6 @@ def analyze_liquidity_conditions(
     if model_url is None:
         from app.services.model_router import get_model_endpoint
         model_url = get_model_endpoint()
-    import requests as _requests
 
     _log = logging.getLogger("bentrade.model_analysis")
 
@@ -3440,88 +3304,39 @@ def analyze_liquidity_conditions(
         "stream": False,
     }
 
-    last_error: Exception | None = None
-    attempt = 0
-    while attempt <= int(max(retries, 0)):
-        attempt += 1
-        try:
-            _log.info("[MODEL_LIQ_COND] POST %s (attempt %d, timeout=%ds)", model_url, attempt, timeout)
-            response = _requests.post(model_url, json=payload, timeout=timeout)
-            _log.info(
-                "[MODEL_LIQ_COND] response HTTP %d (%d bytes, %.1fs)",
-                response.status_code, len(response.content), response.elapsed.total_seconds(),
-            )
-            if response.status_code >= 400:
-                _log.error(
-                    "[MODEL_LIQ_COND] HTTP %d response body: %s",
-                    response.status_code, response.text[:2000],
-                )
-            response.raise_for_status()
+    # ── 5. Call the model (via shared transport layer) ─────────────
+    _transport_result = _model_transport(
+        task_type="liquidity_conditions",
+        payload=payload,
+        log_prefix="MODEL_LIQ_COND",
+        model_url=model_url,
+        retries=retries,
+        timeout=timeout,
+    )
+    assistant_text = _transport_result.content
 
-            response_json = None
-            try:
-                response_json = response.json()
-            except Exception:
-                response_json = None
+    # ── 6. Parse + coerce ───────────────────────────────────────
+    from common.json_repair import extract_and_repair_json
+    parsed, method = extract_and_repair_json(assistant_text)
 
-            assistant_text = None
-            finish_reason = None
-            if isinstance(response_json, dict):
-                choices = response_json.get("choices") or []
-                if choices and isinstance(choices, list) and isinstance(choices[0], dict):
-                    first = choices[0]
-                    finish_reason = first.get("finish_reason")
-                    message = first.get("message")
-                    if isinstance(message, dict) and "content" in message:
-                        assistant_text = message.get("content")
-                    elif "text" in first:
-                        assistant_text = first.get("text")
-            if finish_reason:
-                _log.info("[MODEL_LIQ_COND] finish_reason=%s", finish_reason)
-            if finish_reason == "length":
-                _log.warning("[MODEL_LIQ_COND] response TRUNCATED (finish_reason=length) — token budget may be insufficient")
-            if assistant_text is None:
-                assistant_text = getattr(response, "text", "")
+    if method:
+        _log.info("[MODEL_LIQ_COND] JSON extracted via method=%s", method)
 
-            from common.model_sanitize import had_think_tags
-            if had_think_tags(assistant_text):
-                _log.info("[MODEL_LIQ_COND] <think> content detected and stripped (attempt %d)", attempt)
-            assistant_text = _strip_think_tags(assistant_text)
+    normalized = _coerce_liquidity_conditions_model_output(parsed)
+    if normalized is None:
+        normalized = _build_plaintext_fallback(assistant_text, "liquidity_conditions")
+        method = "plaintext_fallback"
+        if normalized is None:
+            raise ValueError("Model returned invalid liquidity conditions analysis payload")
 
-            from common.json_repair import extract_and_repair_json
-            parsed, method = extract_and_repair_json(assistant_text)
+    # ── 7. Attach trace metadata ────────────────────────────────
+    normalized["_trace"] = {
+        "input_mode": "raw_only",
+        "pillar_scores_provided": pillar_scores,
+        "excluded_derived_fields": _LIQUIDITY_CONDITIONS_EXCLUDED_FIELDS,
+        "json_parse_method": method,
+        "transport_path": _transport_result.transport_path,
+        "finish_reason": _transport_result.finish_reason,
+    }
 
-            if method:
-                _log.info("[MODEL_LIQ_COND] JSON extracted via method=%s", method)
-
-            normalized = _coerce_liquidity_conditions_model_output(parsed)
-            if normalized is None:
-                normalized = _build_plaintext_fallback(assistant_text, "liquidity_conditions")
-                method = "plaintext_fallback"
-                if normalized is None:
-                    raise ValueError("Model returned invalid liquidity conditions analysis payload")
-
-            normalized["_trace"] = {
-                "input_mode": "raw_only",
-                "pillar_scores_provided": pillar_scores,
-                "excluded_derived_fields": _LIQUIDITY_CONDITIONS_EXCLUDED_FIELDS,
-                "json_parse_method": method,
-            }
-
-            return normalized
-        except RequestException as exc:
-            resp_body = ""
-            if hasattr(exc, "response") and exc.response is not None:
-                resp_body = f" | response_body={exc.response.text[:500]}"
-            last_error = exc
-            last_error_detail = resp_body
-        except Exception as exc:
-            last_error = exc
-            last_error_detail = ""
-            break
-
-    if isinstance(last_error, RequestException):
-        raise LocalModelUnavailableError(
-            f"Local model endpoint unavailable at {model_url}: {last_error}{last_error_detail}"
-        ) from last_error
-    raise RuntimeError(f"Liquidity conditions model analysis failed: {last_error}")
+    return normalized

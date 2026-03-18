@@ -18,6 +18,19 @@ window.BenTradeSourceHealth = (function(){
     return 'status-yellow';
   }
 
+  /**
+   * Map source health status to a brand-panel dot CSS modifier.
+   *   ok/green  → --ok (green)
+   *   yellow/warn → --warn (yellow/amber)
+   *   down/red  → --down (red)
+   */
+  function brandDotClass(status){
+    const value = String(status || '').toLowerCase();
+    if(value === 'ok' || value === 'green') return 'bt-status-dot--ok';
+    if(value === 'down' || value === 'red') return 'bt-status-dot--down';
+    return 'bt-status-dot--warn';
+  }
+
   function formatAsOf(iso){
     if(!iso) return '';
     const date = new Date(String(iso));
@@ -94,6 +107,7 @@ window.BenTradeSourceHealth = (function(){
       return {
         label: name,
         statusClass: statusClass(item?.status),
+        rawStatus: String(item?.status || '').toLowerCase(),
         tooltip,
       };
     });
@@ -109,24 +123,50 @@ window.BenTradeSourceHealth = (function(){
     const rows = Object.entries(snapshot || {}).map(([source, value]) => ({
       label: keyToName[String(source || '').toLowerCase()] || String(source || '').toUpperCase(),
       statusClass: statusClass(value?.status),
+      rawStatus: String(value?.status || '').toLowerCase(),
       tooltip: value?.message || 'No message',
     }));
     return { as_of: null, rows };
   }
 
+  /**
+   * Render brand-panel source health rows (bt-status-row style).
+   * Each source gets a green/yellow/red dot + uppercase name + status label.
+   */
+  function renderBrandRows(rows){
+    return (rows || []).map((row) => {
+      const label = String(row?.label || 'Unknown').toUpperCase();
+      const dotClass = row?.brandDotClass || 'bt-status-dot--warn';
+      const statusVal = row?.statusVal || '—';
+      return `<div class="bt-status-row"><span class="bt-status-dot ${dotClass}"></span><span class="bt-status-text">${escapeHtml(label)}</span><span class="bt-status-val">${escapeHtml(statusVal)}</span></div>`;
+    }).join('');
+  }
+
   function renderFromCanonical(payload){
-    const target = document.getElementById('sourceHealthRows');
-    if(!target) return;
-    const normalized = normalizeCanonical(payload || {});
-    target.innerHTML = renderRows(normalized.rows);
-    setAsOf(normalized.as_of);
+    // Render into brand panel source rows
+    const brandTarget = document.getElementById('btSourceHealthRows');
+    if(brandTarget){
+      const normalized = normalizeCanonical(payload || {});
+      const brandRows = normalized.rows.map((row) => ({
+        label: row.label,
+        brandDotClass: brandDotClass(row.rawStatus),
+        statusVal: row.rawStatus === 'ok' || row.rawStatus === 'green' ? 'ACTIVE' : row.rawStatus === 'down' || row.rawStatus === 'red' ? 'DOWN' : 'WARN',
+      }));
+      brandTarget.innerHTML = renderBrandRows(brandRows);
+    }
   }
 
   function renderFromSnapshot(snapshot){
-    const target = document.getElementById('sourceHealthRows');
-    if(!target) return;
-    const normalized = normalizeSnapshot(snapshot || {});
-    target.innerHTML = renderRows(normalized.rows);
+    const brandTarget = document.getElementById('btSourceHealthRows');
+    if(brandTarget){
+      const normalized = normalizeSnapshot(snapshot || {});
+      const brandRows = normalized.rows.map((row) => ({
+        label: row.label,
+        brandDotClass: brandDotClass(row.rawStatus),
+        statusVal: row.rawStatus === 'ok' || row.rawStatus === 'green' ? 'ACTIVE' : row.rawStatus === 'down' || row.rawStatus === 'red' ? 'DOWN' : 'WARN',
+      }));
+      brandTarget.innerHTML = renderBrandRows(brandRows);
+    }
   }
 
   return {
@@ -166,9 +206,9 @@ window.BenTradeSourceHealthStore = (function(){
 
   /** Render all sources as unknown/red when no data is available. */
   function renderUnknown(){
-    var target = document.getElementById('sourceHealthRows');
+    var target = document.getElementById('btSourceHealthRows');
     if(!target) return;
-    target.innerHTML = '<div class="diagnosticRow"><span class="diagnosticLabel" style="opacity:.6">Health check pending…</span></div>';
+    target.innerHTML = '<div class="bt-status-row"><span class="bt-status-dot bt-status-dot--warn"></span><span class="bt-status-text" style="opacity:.6">HEALTH CHECK PENDING…</span><span class="bt-status-val">—</span></div>';
   }
 
   function resetCache(){

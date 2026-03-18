@@ -40,7 +40,9 @@ from app.api.routes_liquidity_conditions import router as liquidity_conditions_r
 from app.api.routes_news_sentiment import router as news_sentiment_router
 from app.api.routes_volatility_options import router as volatility_options_router
 # NOTE: routes_pipeline_monitor removed — deprecated as part of workflow pivot (Prompt 0)
+from app.api.routes_routing import router as routing_router
 from app.api.routes_scanner_review import router as scanner_review_router
+from app.api.routes_market_picture import router as market_picture_router
 from app.api.routes_tmc import router as tmc_router
 from app.clients.finnhub_client import FinnhubClient
 from app.clients.fred_client import FredClient
@@ -347,6 +349,11 @@ def create_app() -> FastAPI:
     )
 
     # -- Data Population service (MI scheduler) ----------------------------
+    # Use adaptive wrapper that checks routing_enabled per-request (Step 14).
+    # This removes the restart requirement when ROUTING_ENABLED changes.
+    from app.services.model_routing_integration import adaptive_routed_model_interpretation
+    mi_model_fn = adaptive_routed_model_interpretation
+
     mi_deps = MarketIntelligenceDeps(
         market_context_service=market_context_service,
         breadth_service=breadth_service,
@@ -356,7 +363,7 @@ def create_app() -> FastAPI:
         liquidity_conditions_service=liquidity_conditions_service,
         news_sentiment_service=news_sentiment_service,
         http_client=http_client,
-        model_request_fn=async_model_request,
+        model_request_fn=mi_model_fn,
     )
     data_population_service = DataPopulationService(
         data_dir=data_dir,
@@ -396,6 +403,8 @@ def create_app() -> FastAPI:
     # NOTE: pipeline_monitor_router removed — deprecated as part of workflow pivot (Prompt 0)
     app.include_router(scanner_review_router)
     app.include_router(tmc_router)
+    app.include_router(market_picture_router)
+    app.include_router(routing_router, prefix="/api/admin", tags=["routing"])
     app.include_router(data_population_router)
     app.include_router(dev_router)
     app.include_router(frontend_router)

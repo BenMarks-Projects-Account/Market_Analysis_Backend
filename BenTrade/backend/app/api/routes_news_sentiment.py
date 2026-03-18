@@ -80,6 +80,13 @@ async def run_model_analysis(request: Request, force: bool = True) -> dict:
     service = request.app.state.news_sentiment_service
     result = await service.run_model_analysis(force=force)
     has_model = result.get("model_analysis") is not None
+    if has_model:
+        try:
+            from app.services.model_score_store import save_model_score
+            data_dir = str(request.app.state.backend_dir / "data")
+            save_model_score(data_dir, "news_sentiment", result["model_analysis"], result.get("as_of"))
+        except Exception:
+            pass
     error_info = result.get("error")
     if error_info:
         logger.warning(

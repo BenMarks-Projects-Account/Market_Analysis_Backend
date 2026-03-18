@@ -65,6 +65,13 @@ async def run_model_analysis(
     service = request.app.state.flows_positioning_service
     result = await service.run_model_analysis(force=force)
     has_model = result.get("model_analysis") is not None
+    if has_model:
+        try:
+            from app.services.model_score_store import save_model_score
+            data_dir = str(request.app.state.backend_dir / "data")
+            save_model_score(data_dir, "flows_positioning", result["model_analysis"], result.get("as_of"))
+        except Exception:
+            pass
     logger.info(
         "[FLOWS_POSITIONING_MODEL] response status=200 has_model=%s",
         has_model,

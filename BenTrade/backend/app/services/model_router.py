@@ -4,13 +4,21 @@ Provides both synchronous (``requests``) and async (``httpx``) call paths
 so that existing sync callers (common/model_analysis.py, common/utils.py)
 and async callers (routes_active_trades.py) both route through here.
 
-Usage (sync):
+Usage (sync — legacy path, unchanged):
     from app.services.model_router import model_request
     result = model_request(payload, timeout=180)
 
-Usage (async):
+Usage (async — legacy path, unchanged):
     from app.services.model_router import async_model_request
     result = await async_model_request(http_client, payload, timeout=180.0)
+
+Usage (new provider-abstraction path):
+    from app.services.model_router import execute_with_provider
+    provider_result = execute_with_provider(execution_request, provider_id)
+
+Usage (distributed routing — Step 4):
+    from app.services.model_router import route_and_execute
+    result, trace = route_and_execute(execution_request)
 
 Endpoint resolution:
     from app.services.model_router import get_model_endpoint
@@ -114,3 +122,90 @@ async def async_model_request(
         resp.status_code, len(resp.content),
     )
     return resp
+
+
+# ---------------------------------------------------------------------------
+# Provider-abstraction execution seam (Step 2)
+# ---------------------------------------------------------------------------
+
+def execute_with_provider(
+    request: "ExecutionRequest",
+    provider_id: str,
+    *,
+    timeout: float | None = None,
+) -> "ProviderResult":
+    """Execute *request* through a single named provider adapter.
+
+    This is the new abstraction-layer entry point.  It does NOT implement
+    multi-provider fallback — that is the router policy's job (Step 4).
+
+    Returns a ``ProviderResult`` regardless of success/failure so the
+    caller always gets structured trace data.
+    """
+    from app.services.model_provider_base import ProviderResult
+    from app.services.model_provider_registry import get_registry
+    from app.services.model_routing_contract import (
+        ExecutionRequest,
+        ExecutionStatus,
+        ProviderState,
+    )
+
+    registry = get_registry()
+    adapter = registry.get_provider(provider_id)
+
+    if adapter is None:
+        logger.warning("[model_router] provider '%s' not registered", provider_id)
+        return ProviderResult(
+            provider=provider_id,
+            success=False,
+            execution_status=ExecutionStatus.FAILED.value,
+            error_code="unknown_provider",
+            error_message=f"No adapter registered for provider '{provider_id}'",
+            provider_state_observed=ProviderState.UNAVAILABLE.value,
+        )
+
+    if not adapter.is_configured:
+        logger.info("[model_router] provider '%s' is not configured — skipping", provider_id)
+        return ProviderResult(
+            provider=provider_id,
+            success=False,
+            execution_status=ExecutionStatus.SKIPPED.value,
+            error_code="not_configured",
+            error_message=f"Provider '{provider_id}' is not configured",
+            provider_state_observed=ProviderState.UNAVAILABLE.value,
+        )
+
+    return adapter.execute(request, timeout=timeout)
+
+
+# ---------------------------------------------------------------------------
+# Distributed routing entry point (Step 4)
+# ---------------------------------------------------------------------------
+
+def route_and_execute(
+    request: "ExecutionRequest",
+    *,
+    registry: Any = None,
+    gate: Any = None,
+    timeout: float | None = None,
+) -> tuple["ProviderResult | None", "ExecutionTrace"]:
+    """Route *request* through the policy engine and execute.
+
+    Delegates to ``model_router_policy.route_and_execute()`` which
+    handles provider selection, probing, gating, and fallback.
+
+    For direct modes (local, model_machine, premium_online):
+        Single-provider dispatch with honest results.
+
+    For distributed modes (local_distributed, online_distributed):
+        Multi-provider fallback with execution gating.
+
+    Returns (ProviderResult | None, ExecutionTrace).
+    """
+    from app.services.model_router_policy import (
+        route_and_execute as _policy_route_and_execute,
+    )
+
+    return _policy_route_and_execute(
+        request, registry=registry, gate=gate, timeout=timeout,
+    )

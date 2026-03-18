@@ -193,6 +193,8 @@ window.BenTradeHomeCacheStore = (function(){
 
       await runStage('portfolio risk', 'portfolioRisk', () => api.getPortfolioRiskMatrix());
 
+      await runStage('scoreboard', 'scoreboard', () => api.getMarketPictureScoreboard());
+
       await runStage('source health', 'sourceHealth', async () => {
         const response = await fetch('/api/health/sources', { method: 'GET' });
         const payload = await response.json().catch(() => ({}));

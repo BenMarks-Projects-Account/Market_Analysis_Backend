@@ -177,7 +177,19 @@ class DataPopulationService:
                     self._status.model_progress[label] = "running"
                     logger.info("event=model_analysis_start engine=%s", label)
                     try:
-                        await svc.run_model_analysis(force=True)
+                        model_result = await svc.run_model_analysis(force=True)
+                        # Persist model score for history snapshots
+                        if model_result.get("model_analysis"):
+                            try:
+                                from app.services.model_score_store import save_model_score
+                                save_model_score(
+                                    str(self._data_dir),
+                                    label,
+                                    model_result["model_analysis"],
+                                    model_result.get("as_of"),
+                                )
+                            except Exception:
+                                pass
                         self._status.model_progress[label] = "done"
                         logger.info("event=model_analysis_done engine=%s", label)
                     except Exception as exc:

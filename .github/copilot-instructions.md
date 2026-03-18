@@ -54,6 +54,39 @@ Non-negotiables (must follow):
    - Preserve existing working features.
    - Prefer additive instrumentation before changing strategy logic/thresholds.
 
+9)Testing Scope and Execution Rules
+
+These rules are mandatory for all implementation work unless the prompt explicitly overrides them.
+
+### Mandatory testing limits
+- Run only the narrowest targeted tests relevant to the files changed.
+- Do not run the full suite unless explicitly asked.
+- Do not retry or expand testing just because unrelated failures appear.
+- Do not chase unrelated regressions, flaky tests, collection errors, or legacy failures.
+
+### Out-of-scope failures
+The following are out of scope by default unless the task explicitly asks for them:
+- pre-existing failing tests
+- pre-existing collection/import errors
+- flaky or intermittent failures
+- failures in unrelated modules
+- broad regression cleanup
+
+If any of these appear, report them and stop. Do not broaden the task.
+
+### Preferred validation behavior
+- Use the smallest test command that proves the requested change.
+- Add or update the narrowest possible automated test if coverage is needed.
+- Stop once the requested behavior is validated.
+- Report targeted results cleanly without converting the task into a repo-wide stabilization effort.
+
+### Reporting format
+Include:
+- exact tests run
+- whether targeted tests passed
+- any unrelated failures encountered
+- a note that unrelated failures were not addressed because they were outside scope
+
 Anchor docs (work must conform to these standards):
 - docs/standards/scanner-contract.md — required scanner output fields and filter trace schema.
 - docs/standards/rejection-taxonomy.md — stable rejection reason codes; never rename, only add.

@@ -65,6 +65,12 @@ class Settings(BaseModel):
     POLYGON_API_KEY: str = _cfg("POLYGON_API_KEY", default="")
     POLYGON_BASE_URL: str = _cfg("POLYGON_BASE_URL", default="https://api.polygon.io")
 
+    # ── AWS Bedrock (premium model execution) ──────────────────
+    BEDROCK_ENABLED: bool = os.getenv("BEDROCK_ENABLED", "true").lower() == "true"
+    BEDROCK_REGION: str = _cfg("BEDROCK_REGION", "AWS_DEFAULT_REGION", default="us-east-1")
+    BEDROCK_MODEL_ID: str = _cfg("BEDROCK_MODEL_ID", default="us.amazon.nova-pro-v1:0")
+    BEDROCK_TIMEOUT_SECONDS: float = float(os.getenv("BEDROCK_TIMEOUT_SECONDS", "120"))
+
     FRED_VIX_SERIES_ID: str = "VIXCLS"
 
     QUOTE_CACHE_TTL_SECONDS: int = 10

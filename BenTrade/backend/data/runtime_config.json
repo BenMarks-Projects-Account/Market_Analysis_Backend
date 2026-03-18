@@ -3,5 +3,7 @@
   "updated_at": "2026-03-05T15:13:04.075537+00:00",
   "updated_by": "ui-toggle",
   "model_source": "local",
-  "model_source_updated_at": "2026-03-11T19:30:09.164605+00:00"
+  "model_source_updated_at": "2026-03-17T23:18:55.473487+00:00",
+  "execution_mode": "online_distributed",
+  "execution_mode_updated_at": "2026-03-18T15:45:59.590693+00:00"
 }
