@@ -296,6 +296,10 @@ window.BenTradeApi = (function(){
     return jsonFetch('/api/regime');
   }
 
+  function getRegimeProxies(){
+    return jsonFetch('/api/regime/proxies');
+  }
+
   function getTopRecommendations(){
     return jsonFetch('/api/recommendations/top');
   }
@@ -521,6 +525,19 @@ window.BenTradeApi = (function(){
     return jsonFetch('/api/data-population/trigger', { method: 'POST' });
   }
 
+  /* ── Contextual Chat ── */
+  function contextualChat(context, message, history){
+    return modelFetch('/api/chat/contextual', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        context: context || {},
+        message: message || '',
+        history: Array.isArray(history) ? history : [],
+      }),
+    });
+  }
+
   return {
     listReports,
     getReport,
@@ -546,6 +563,7 @@ window.BenTradeApi = (function(){
     addStockWatchlist,
     getMacroIndicators,
     getRegime,
+    getRegimeProxies,
     getTopRecommendations,
     getPlaybook,
     getSignals,
@@ -591,6 +609,7 @@ window.BenTradeApi = (function(){
     tmcFinalDecision,
     getDataPopulationStatus,
     triggerDataPopulation,
+    contextualChat,
     MODEL_TIMEOUT_MS: MODEL_TIMEOUT_MS,
     modelFetch: modelFetch,
   };

@@ -340,6 +340,23 @@ async def model_analyze_regime(payload: dict, request: Request):
             playbook_data=playbook_data if isinstance(playbook_data, dict) else None,
         )
 
+        # Diagnostic: surface finish_reason and field population to logs
+        _trace = model_output.get("_trace") or {}
+        _finish = _trace.get("finish_reason")
+        if _finish == "length":
+            logger.warning(
+                "[REGIME_ROUTE] model response TRUNCATED (finish_reason=length). "
+                "Output may be incomplete."
+            )
+        _populated = [k for k in (
+            "risk_regime_label", "trend_label", "vol_regime_label",
+            "executive_summary", "regime_breakdown", "confidence",
+        ) if model_output.get(k) is not None]
+        logger.info(
+            "[REGIME_ROUTE] model_output populated_keys(%d): %s finish_reason=%s",
+            len(_populated), _populated, _finish,
+        )
+
         # ── 3. Extract model summary labels for comparison ─────────
         model_summary = {
             "risk_regime_label": model_output.get("risk_regime_label"),
@@ -347,6 +364,13 @@ async def model_analyze_regime(payload: dict, request: Request):
             "vol_regime_label": model_output.get("vol_regime_label"),
             "confidence": model_output.get("confidence"),
             "key_drivers": model_output.get("key_drivers"),
+            # Three-block assessments from model
+            "structural_assessment": model_output.get("structural_assessment"),
+            "tape_assessment": model_output.get("tape_assessment"),
+            "tactical_assessment": model_output.get("tactical_assessment"),
+            # Model's what-works / what-to-avoid
+            "what_works": model_output.get("what_works"),
+            "what_to_avoid": model_output.get("what_to_avoid"),
         }
 
         # ── 4. Compute deltas ──────────────────────────────────────
@@ -366,15 +390,23 @@ async def model_analyze_regime(payload: dict, request: Request):
                 "trend": engine_summary.get("trend_label"),
                 "vol": engine_summary.get("vol_regime_label"),
                 "confidence": engine_summary.get("confidence"),
+                "structural": engine_summary.get("structural_label"),
+                "tape": engine_summary.get("tape_label"),
+                "tactical": engine_summary.get("tactical_label"),
             },
             "model_summary": {
                 "risk": model_summary.get("risk_regime_label"),
                 "trend": model_summary.get("trend_label"),
                 "vol": model_summary.get("vol_regime_label"),
                 "confidence": model_summary.get("confidence"),
+                "structural": model_summary.get("structural_assessment"),
+                "tape": model_summary.get("tape_assessment"),
+                "tactical": model_summary.get("tactical_assessment"),
             },
             "deltas": comparison["deltas"],
             "disagreement_count": comparison["disagreement_count"],
+            "finish_reason": _finish,
+            "truncated": _finish == "length",
             "timestamps": {
                 "engine_ts": regime_data.get("as_of"),
                 "model_ts": model_output.get("_trace", {}).get("regime_raw_inputs_snapshot", {}).get("timestamp"),

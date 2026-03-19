@@ -38,16 +38,36 @@ def _make_regime_data() -> dict[str, Any]:
             "trend": {
                 "score": 80.0,
                 "raw_points": 20.0,
-                "signals": ["Close 590.12 > EMA20 585.30", "SMA50 580.0 > SMA200 560.0"],
+                "signals": ["SPY 80/100 (> EMA20, > EMA50, SMA50 > SMA200)", "QQQ 100/100"],
                 "inputs": {
-                    "close": 590.12,
-                    "ema20": 585.30,
-                    "ema50": 578.10,
-                    "sma50": 580.0,
-                    "sma200": 560.0,
-                    "close_gt_ema20": True,
-                    "close_gt_ema50": True,
-                    "sma50_gt_sma200": True,
+                    "SPY": {
+                        "close": 590.12,
+                        "ema20": 585.30,
+                        "ema50": 578.10,
+                        "sma50": 580.0,
+                        "sma200": 560.0,
+                    },
+                    "QQQ": {
+                        "close": 510.0,
+                        "ema20": 505.0,
+                        "ema50": 498.0,
+                        "sma50": 500.0,
+                        "sma200": 480.0,
+                    },
+                    "IWM": {
+                        "close": 220.0,
+                        "ema20": 218.0,
+                        "ema50": 215.0,
+                        "sma50": 216.0,
+                        "sma200": 210.0,
+                    },
+                    "DIA": {
+                        "close": 430.0,
+                        "ema20": 428.0,
+                        "ema50": 425.0,
+                        "sma50": 426.0,
+                        "sma200": 415.0,
+                    },
                 },
             },
             "volatility": {
@@ -77,9 +97,13 @@ def _make_regime_data() -> dict[str, Any]:
             },
             "momentum": {
                 "score": 90.0,
-                "signals": ["RSI in ideal band 45-65 (+10)"],
+                "signals": ["Avg RSI 55.3 in ideal band 45-65"],
                 "inputs": {
-                    "rsi14": 55.3,
+                    "SPY": 56.1,
+                    "QQQ": 54.8,
+                    "IWM": 55.0,
+                    "DIA": 55.3,
+                    "avg_rsi14": 55.3,
                 },
             },
         },
@@ -143,7 +167,14 @@ class TestExtractRegimeRawInputs:
         assert raw["pct_sectors_above_ema20"] == pytest.approx(0.7272)
         assert raw["ten_year_yield"] == 4.25
         assert raw["ten_year_5d_change_bps"] == 3.0
-        assert raw["rsi14"] == 55.3
+        assert raw["avg_rsi14"] == 55.3
+        # Multi-index trend data
+        assert isinstance(raw["trend_indexes"], dict)
+        assert "SPY" in raw["trend_indexes"]
+        assert raw["trend_indexes"]["SPY"]["close"] == 590.12
+        # Per-index RSI
+        assert isinstance(raw["rsi14_per_index"], dict)
+        assert raw["rsi14_per_index"]["SPY"] == 56.1
 
     def test_excludes_derived_fields(self) -> None:
         """No derived labels, scores, booleans, or playbook data in raw output."""
@@ -163,16 +194,16 @@ class TestExtractRegimeRawInputs:
         raw = _extract_regime_raw_inputs({})
         assert raw["spy_price"] is None
         assert raw["vix_spot"] is None
-        assert raw["rsi14"] is None
-        # Should still have all expected keys
-        assert len(raw) == 13
+        assert raw["avg_rsi14"] is None
 
     def test_handles_partial_components(self) -> None:
         """Only trend component provided — others are None."""
         regime = {
             "components": {
                 "trend": {
-                    "inputs": {"close": 500.0, "ema20": 498.0},
+                    "inputs": {
+                        "SPY": {"close": 500.0, "ema20": 498.0},
+                    },
                 },
             },
         }
@@ -180,7 +211,7 @@ class TestExtractRegimeRawInputs:
         assert raw["spy_price"] == 500.0
         assert raw["spy_ema20"] == 498.0
         assert raw["vix_spot"] is None
-        assert raw["rsi14"] is None
+        assert raw["avg_rsi14"] is None
 
 
 # ─── Tests: _coerce_regime_model_output ──────────────────────────────
@@ -323,7 +354,7 @@ class TestDerivedFieldsConstant:
         assert "suggested_playbook" in _REGIME_DERIVED_FIELDS
 
     def test_not_empty(self) -> None:
-        assert len(_REGIME_DERIVED_FIELDS) >= 5
+        assert len(_REGIME_DERIVED_FIELDS) >= 3
 
 
 # ─── Tests: extract_engine_regime_summary ────────────────────────────
@@ -359,17 +390,23 @@ class TestExtractEngineRegimeSummary:
         assert summary["trend_label"] == "Uptrend"
 
     def test_trend_downtrend(self) -> None:
-        """close < sma200 → 'Downtrend'"""
+        """Majority of indexes have close < sma200 → 'Downtrend'"""
         regime = _make_regime_data()
-        regime["components"]["trend"]["inputs"]["close"] = 550.0  # below SMA200 560
+        # Set all indexes below their SMA200
+        for sym in ("SPY", "QQQ", "IWM", "DIA"):
+            sym_data = regime["components"]["trend"]["inputs"][sym]
+            sym_data["close"] = sym_data["sma200"] - 10.0
+            sym_data["ema20"] = sym_data["sma200"] - 5.0  # close < ema20 too
         summary = extract_engine_regime_summary(regime)
         assert summary["trend_label"] == "Downtrend"
 
     def test_trend_sideways(self) -> None:
-        """close < ema20 but > sma200 and sma50 < sma200 → 'Sideways'"""
+        """Half indexes above ema20, half below → 'Sideways'"""
         regime = _make_regime_data()
-        regime["components"]["trend"]["inputs"]["close"] = 583.0  # below ema20=585.30
-        regime["components"]["trend"]["inputs"]["sma50"] = 555.0  # below sma200=560
+        # Set SPY + QQQ below ema20, IWM + DIA above
+        for sym in ("SPY", "QQQ"):
+            sym_data = regime["components"]["trend"]["inputs"][sym]
+            sym_data["close"] = sym_data["ema20"] - 5.0
         summary = extract_engine_regime_summary(regime)
         assert summary["trend_label"] == "Sideways"
 

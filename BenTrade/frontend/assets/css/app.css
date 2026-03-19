@@ -4874,6 +4874,11 @@ main.main{
 .home-engine-score-stale{
     opacity:0.65;
 }
+/* Score pill color classes (replaces inline style="background:...") */
+.home-score-green{ background:#7ef7b8; }
+.home-score-amber{ background:#ffc758; }
+.home-score-red{ background:linear-gradient(135deg,#c85050,#a03838); }
+.home-score-na{ background:#888; opacity:0.5; }
 .home-model-freshness-badge{
     font-size:9px;
     font-weight:600;
@@ -4967,25 +4972,16 @@ main.main{
     margin-top:6px;
 }
 
-/* ── Strategy Playbooks (standalone panels) ── */
-.home-playbooks-row{
-    display:grid;
-    gap:18px;
-    grid-template-columns:repeat(2, minmax(0, 1fr));
+/* ── Strategy Playbooks (full-width panels) ── */
+.home-playbook-full{
+    width:100%;
 }
-@media (max-width:720px){
-    .home-playbooks-row{ grid-template-columns:1fr; }
-}
-.home-playbook-standalone{
-    display:flex;
-    flex-direction:column;
-}
-.home-playbook-standalone .bt-panel-title{
+.home-playbook-full .bt-panel-title{
     font-size:15px;
 }
 .home-strategy-playbook-body{
     flex:1;
-    min-height:120px;
+    min-height:80px;
 }
 .home-playbook-placeholder{
     padding:18px 12px;
@@ -4994,12 +4990,12 @@ main.main{
     font-size:12px;
 }
 
-/* ── Playbook Panel Content (Stock + Options) ── */
+/* ── Playbook Panel Content — Favor/Avoid color-coded lanes ── */
 .home-pb-header{
     display:flex;
     align-items:center;
     gap:10px;
-    margin-bottom:12px;
+    margin-bottom:14px;
     padding-bottom:10px;
     border-bottom:1px solid rgba(0,234,255,0.10);
 }
@@ -5022,9 +5018,9 @@ main.main{
     background:rgba(126,247,184,0.08);
 }
 .home-pb-posture.riskoff{
-    color:#ff6b6b;
-    border-color:rgba(255,107,107,0.35);
-    background:rgba(255,107,107,0.08);
+    color:#c85050;
+    border-color:rgba(180,60,60,0.35);
+    background:rgba(160,50,50,0.08);
 }
 .home-pb-posture.neutral{
     color:var(--cyan);
@@ -5037,81 +5033,70 @@ main.main{
     color:rgba(215,251,255,0.72);
     line-height:1.4;
 }
-.home-pb-strats{
+
+/* ── Favor / Avoid lanes ── */
+.home-pb-lane{
+    margin-bottom:12px;
+}
+.home-pb-lane-label{
+    font-size:10px;
+    font-weight:700;
+    letter-spacing:0.12em;
+    text-transform:uppercase;
+    margin-bottom:8px;
+    padding-left:2px;
+}
+.home-pb-lane--favor .home-pb-lane-label{
+    color:rgba(0,234,255,0.80);
+}
+.home-pb-lane--avoid .home-pb-lane-label{
+    color:rgba(200,80,80,0.80);
+}
+.home-pb-lane-items{
     display:grid;
     gap:6px;
 }
-.home-pb-strat{
-    padding:8px 10px;
+
+/* ── Strategy pills ── */
+.home-pb-pill{
+    padding:8px 12px;
     border-radius:8px;
-    border:1px solid rgba(0,234,255,0.12);
-    background:linear-gradient(180deg, rgba(7,12,20,0.60), rgba(4,8,14,0.72));
-    transition: border-color 0.15s ease;
+    transition:border-color 0.15s ease;
 }
-.home-pb-strat:hover{
-    border-color:rgba(0,234,255,0.28);
+.home-pb-pill:hover{
+    filter:brightness(1.1);
 }
-.home-pb-strat-head{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:8px;
+.home-pb-pill--favor{
+    border:1px solid rgba(0,234,255,0.22);
+    background:linear-gradient(180deg, rgba(0,234,255,0.06), rgba(0,180,220,0.03));
 }
-.home-pb-strat-name{
+.home-pb-pill--favor.home-pb-pill--strong{
+    border-color:rgba(0,234,255,0.35);
+    background:linear-gradient(180deg, rgba(0,234,255,0.10), rgba(0,180,220,0.05));
+}
+.home-pb-pill--avoid{
+    border:1px solid rgba(200,80,80,0.25);
+    background:linear-gradient(180deg, rgba(200,80,80,0.06), rgba(160,50,50,0.03));
+}
+.home-pb-pill-name{
     font-size:12.5px;
     font-weight:600;
-    color:var(--text);
+    display:block;
+    margin-bottom:2px;
 }
-.home-pb-conviction{
-    font-size:9px;
-    font-weight:700;
-    letter-spacing:0.10em;
-    text-transform:uppercase;
-    flex-shrink:0;
-    padding:2px 6px;
-    border-radius:4px;
+.home-pb-pill--favor .home-pb-pill-name{
+    color:rgba(0,234,255,0.90);
 }
-.home-pb-conviction-high{
-    color:#7ef7b8;
-    background:rgba(126,247,184,0.10);
-    border:1px solid rgba(126,247,184,0.20);
+.home-pb-pill--favor.home-pb-pill--strong .home-pb-pill-name{
+    color:rgba(0,234,255,1);
 }
-.home-pb-conviction-moderate{
-    color:var(--cyan);
-    background:rgba(0,234,255,0.08);
-    border:1px solid rgba(0,234,255,0.18);
+.home-pb-pill--avoid .home-pb-pill-name{
+    color:rgba(200,80,80,0.90);
 }
-.home-pb-conviction-low{
-    color:var(--muted);
-    background:rgba(255,255,255,0.04);
-    border:1px solid rgba(255,255,255,0.10);
-}
-.home-pb-strat-reason{
+.home-pb-pill-reason{
     font-size:11px;
-    color:rgba(215,251,255,0.45);
-    margin-top:4px;
     line-height:1.35;
-}
-.home-pb-caution{
-    display:flex;
-    align-items:flex-start;
-    gap:8px;
-    margin-top:10px;
-    padding:8px 10px;
-    border-radius:8px;
-    border:1px solid rgba(255,107,107,0.25);
-    background:linear-gradient(180deg, rgba(24,8,8,0.55), rgba(14,5,5,0.65));
-}
-.home-pb-caution-icon{
-    color:#ff6b6b;
-    font-size:13px;
-    flex-shrink:0;
-    margin-top:1px;
-}
-.home-pb-caution-text{
-    font-size:11px;
-    color:rgba(255,180,180,0.78);
-    line-height:1.4;
+    color:rgba(215,251,255,0.45);
 }
 .home-pb-fallback{
     padding:18px 12px;
@@ -5121,28 +5106,7 @@ main.main{
     font-style:italic;
 }
 
-/* ── Regime panel body (factors + guidance) ── */
-.home-regime-body{
-    margin-top:6px;
-    display:grid;
-    gap:16px;
-    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
-}
-@media (max-width:720px){
-    .home-regime-body{ grid-template-columns:1fr; }
-}
-.home-regime-factors-col,
-.home-regime-guidance-col{
-    min-width:0;
-}
-.home-regime-factors-header{
-    font-size:10px;
-    font-weight:700;
-    text-transform:uppercase;
-    letter-spacing:0.10em;
-    color:rgba(0,234,255,0.55);
-    margin-bottom:8px;
-}
+/* ── Regime panel body — legacy factors+guidance layout removed ── */
 
 .home-banner-toolbar{
     display:flex;
@@ -5434,7 +5398,7 @@ main.main{
 /* ── Market Regime: Hero Strip ── */
 .home-regime-strip{
     display:block;
-    margin-bottom:6px;
+    margin-bottom:10px;
 }
 .home-regime-hero{
     display:flex;
@@ -5453,17 +5417,7 @@ main.main{
     min-width:0;
     padding:12px 16px;
 }
-.home-regime-hero-right{
-    display:flex;
-    flex-direction:column;
-    align-items:flex-end;
-    justify-content:center;
-    gap:6px;
-    padding:10px 14px;
-    border-left:1px solid rgba(0,234,255,0.10);
-    background:rgba(0,234,255,0.02);
-    flex:0 0 auto;
-}
+
 .home-regime-pill{
     display:flex;
     flex-direction:column;
@@ -5497,8 +5451,8 @@ main.main{
 }
 .home-regime-pill.bullish{ border-color:rgba(126,247,184,0.40); }
 .home-regime-pill.bullish .home-regime-pill-label{ color:#7ef7b8; }
-.home-regime-pill.riskoff{ border-color:rgba(255,107,107,0.40); }
-.home-regime-pill.riskoff .home-regime-pill-label{ color:#ff6b6b; }
+.home-regime-pill.riskoff{ border-color:rgba(180,60,60,0.50); }
+.home-regime-pill.riskoff .home-regime-pill-label{ color:#c85050; }
 .home-regime-pill.neutral{ border-color:rgba(0,234,255,0.30); }
 .home-regime-pill.neutral .home-regime-pill-label{ color:var(--cyan); }
 
@@ -5521,51 +5475,8 @@ main.main{
     color:rgba(215,251,255,0.65);
 }
 
-/* ── Index change chips ── */
-.home-regime-idx-strip{
-    display:flex;
-    gap:5px;
-    flex-wrap:wrap;
-    justify-content:flex-end;
-}
-.home-regime-idx-chip{
-    font-size:10px;
-    font-weight:700;
-    padding:2px 6px;
-    border-radius:4px;
-    background:rgba(0,234,255,0.04);
-    border:1px solid rgba(0,234,255,0.12);
-    color:var(--muted);
-    white-space:nowrap;
-    font-family:'Consolas','Menlo',monospace;
-}
-.home-regime-idx-chip.bullish{ color:#7ef7b8; border-color:rgba(126,247,184,0.25); }
-.home-regime-idx-chip.riskoff{ color:#ff6b6b; border-color:rgba(255,107,107,0.25); }
-
-/* ── Tone chips (vol / breadth / rates / curve / momentum) ── */
-.home-regime-tone-chips{
-    display:flex;
-    gap:4px;
-    flex-wrap:wrap;
-    justify-content:flex-end;
-}
-.home-regime-tone-chip{
-    font-size:9.5px;
-    font-weight:600;
-    padding:1px 5px;
-    border-radius:4px;
-    background:rgba(0,234,255,0.03);
-    border:1px solid rgba(0,234,255,0.10);
-    color:var(--muted);
-    white-space:nowrap;
-    text-transform:capitalize;
-}
-.home-regime-tone-chip.bullish{ color:#7ef7b8; border-color:rgba(126,247,184,0.20); }
-.home-regime-tone-chip.riskoff{ color:#ff6b6b; border-color:rgba(255,107,107,0.20); }
-
 @media (max-width:720px){
     .home-regime-hero{ flex-direction:column; }
-    .home-regime-hero-right{ align-items:flex-start; }
 }
 
 /* Session strip (sidebar) */
@@ -5584,58 +5495,306 @@ main.main{
     grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-/* ── Market regime factor bars ── */
-.home-regime-components{
-    margin-top:2px;
-    display:grid;
-    gap:6px;
-}
+/* ── Market regime factor bars — REMOVED (legacy) ── */
 
-.home-regime-row{
+/* ── Three-block status cards ── */
+.home-regime-blocks{
     display:grid;
-    grid-template-columns: 80px minmax(0, 1fr) 28px;
+    grid-template-columns:repeat(3, minmax(0, 1fr));
     gap:8px;
-    align-items:center;
+    margin-bottom:8px;
 }
-
-.home-regime-name{
+@media (max-width:720px){
+    .home-regime-blocks{ grid-template-columns:1fr; }
+}
+.home-regime-block-card{
+    background:rgba(4,8,19,0.70);
+    border:1px solid rgba(0,234,255,0.12);
+    border-radius:8px;
+    padding:10px 12px 8px;
+    transition:border-color 0.2s;
+}
+.home-regime-block-card:hover{
+    border-color:rgba(0,234,255,0.25);
+}
+.home-regime-block-card.bullish{ border-color:rgba(126,247,184,0.30); }
+.home-regime-block-card.riskoff{ border-color:rgba(180,60,60,0.35); }
+.home-regime-block-header{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    margin-bottom:6px;
+}
+.home-regime-block-icon{ display:inline-flex; align-items:center; width:14px; height:14px; flex-shrink:0; }
+.home-regime-block-title{
     font-size:11px;
     font-weight:700;
-    color:rgba(0,234,255,0.75);
+    color:var(--cyan);
     text-transform:uppercase;
     letter-spacing:0.04em;
 }
-.home-regime-score{
+.home-regime-block-label{
+    margin-left:auto;
+    font-size:10px;
+    font-weight:600;
+    color:var(--text);
+    opacity:0.8;
+}
+.home-regime-block-score-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+.home-regime-block-bar{
+    flex:1 1 auto;
+    height:6px;
+    border-radius:999px;
+    border:1px solid rgba(0,234,255,0.12);
+    background:rgba(0,234,255,0.03);
+    overflow:hidden;
+}
+.home-regime-block-fill{
+    height:100%;
+    border-radius:999px;
+    background:linear-gradient(90deg, rgba(0,234,255,0.85), rgba(0,220,255,0.65));
+    box-shadow:0 0 10px rgba(0,234,255,0.18);
+    transition:width 0.3s ease;
+}
+.home-regime-block-card.bullish .home-regime-block-fill{
+    background:linear-gradient(90deg, rgba(126,247,184,0.85), rgba(126,247,184,0.55));
+    box-shadow:0 0 10px rgba(126,247,184,0.18);
+}
+.home-regime-block-card.riskoff .home-regime-block-fill{
+    background:linear-gradient(90deg, rgba(255,107,107,0.85), rgba(255,107,107,0.55));
+    box-shadow:0 0 10px rgba(255,107,107,0.18);
+}
+.home-regime-block-score{
     font-size:12px;
     font-weight:700;
     color:var(--text);
-    text-align:right;
     font-family:'Consolas','Menlo',monospace;
+    min-width:22px;
+    text-align:right;
 }
-.home-regime-signal{
-    grid-column: 1 / -1;
-    font-size:10.5px;
-    color:rgba(215,251,255,0.45);
+.home-regime-block-conf{
+    font-size:10px;
+    color:var(--muted);
+    opacity:0.7;
+}
+.home-regime-block-signals{
+    display:flex;
+    flex-wrap:wrap;
+    gap:3px;
+    margin-top:5px;
+}
+.home-regime-block-signal{
+    font-size:9.5px;
+    color:rgba(215,251,255,0.50);
+    background:rgba(0,234,255,0.03);
+    border:1px solid rgba(0,234,255,0.08);
+    border-radius:3px;
+    padding:1px 4px;
+    white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
-    white-space:nowrap;
-    padding-left:88px;
+    max-width:180px;
 }
 
-.home-regime-track{
-    height:7px;
-    border-radius:999px;
-    border:1px solid rgba(0,234,255,0.14);
-    background: rgba(0,234,255,0.03);
+/* ── Decision insights grid (2×2) ── */
+.home-regime-insights{
+    margin-bottom:8px;
+}
+.home-regime-insights-grid{
+    display:grid;
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+    gap:6px;
+}
+@media (max-width:520px){
+    .home-regime-insights-grid{ grid-template-columns:1fr; }
+}
+
+/* ── Insights + Model Analysis side-by-side row ── */
+.home-regime-insights-model-row{
+    display:grid;
+    grid-template-columns:minmax(0, 1.2fr) minmax(0, 1fr);
+    gap:14px;
+    margin-bottom:10px;
+}
+@media (max-width:760px){
+    .home-regime-insights-model-row{ grid-template-columns:1fr; }
+}
+.home-regime-insights-col,
+.home-regime-model-col{
+    min-width:0;
+}
+.home-regime-insight-col{
+    background:rgba(4,8,19,0.50);
+    border:1px solid rgba(0,234,255,0.08);
+    border-radius:6px;
+    padding:8px 10px;
+}
+.home-regime-insight-title{
+    font-size:10.5px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.04em;
+    color:var(--cyan);
+    margin-bottom:4px;
+}
+.home-regime-insight-title.bullish{ color:#7ef7b8; }
+.home-regime-insight-title.riskoff{ color:#c85050; }
+.home-regime-insight-list{
+    margin:0;
+    padding-left:14px;
+    font-size:11px;
+    line-height:1.55;
+    color:rgba(215,251,255,0.65);
+}
+
+/* ── Confidence + agreement badges ── */
+.home-regime-meta-row{
+    display:flex;
+    gap:8px;
+    margin-top:4px;
+    align-items:center;
+}
+.home-regime-confidence{
+    font-size:10px;
+    font-weight:600;
+    color:var(--cyan);
+    background:rgba(0,234,255,0.06);
+    border:1px solid rgba(0,234,255,0.15);
+    border-radius:4px;
+    padding:1px 6px;
+}
+.home-regime-agreement{
+    font-size:10px;
+    font-weight:600;
+    border-radius:4px;
+    padding:1px 6px;
+}
+.home-regime-agreement.aligned{
+    color:#7ef7b8;
+    background:rgba(126,247,184,0.08);
+    border:1px solid rgba(126,247,184,0.20);
+}
+.home-regime-agreement.divergent{
+    color:#ffc758;
+    background:rgba(255,199,88,0.08);
+    border:1px solid rgba(255,199,88,0.20);
+}
+
+/* ── Legacy factor breakdown toggle — REMOVED ── */
+
+/* ── 5-tier regime pill colors ── */
+.home-regime-pill.cautious{
+    border-color:rgba(126,247,184,0.25);
+}
+.home-regime-pill.cautious .home-regime-pill-label{
+    color:rgba(126,247,184,0.70);
+}
+
+/* ── Macro proxy charts (full-width section) ── */
+.home-regime-proxies-section{
+    margin-top:0;
+    padding-top:0;
+}
+.home-regime-proxies-grid{
+    display:grid;
+    grid-template-columns:repeat(3, minmax(0, 1fr));
+    gap:8px;
+}
+@media (max-width:900px){
+    .home-regime-proxies-grid{ grid-template-columns:1fr 1fr; }
+}
+@media (max-width:520px){
+    .home-regime-proxies-grid{ grid-template-columns:1fr; }
+}
+.home-regime-proxy-card{
+    background:linear-gradient(180deg, rgba(6,10,22,0.75), rgba(3,6,14,0.80));
+    border:1px solid rgba(0,234,255,0.08);
+    border-radius:8px;
+    padding:4px 6px 2px 6px;
     overflow:hidden;
+    position:relative;
+    transition:border-color 0.2s, box-shadow 0.2s;
+}
+.home-proxy-bar-tag{
+    position:absolute;
+    top:3px;
+    right:5px;
+    font-size:7.5px;
+    font-weight:600;
+    letter-spacing:0.3px;
+    color:rgba(147,167,182,0.45);
+    pointer-events:none;
+    z-index:1;
+}
+.home-regime-proxy-card:hover{
+    border-color:rgba(0,234,255,0.18);
+    box-shadow:0 0 12px rgba(0,234,255,0.06);
+}
+.home-regime-proxy-svg{
+    width:100%;
+    height:auto;
+    display:block;
+}
+.home-regime-proxy-placeholder{
+    grid-column:1 / -1;
+    text-align:center;
+    padding:16px 0;
+    color:rgba(147,167,182,0.5);
+    font-size:11px;
 }
 
-.home-regime-fill{
-    height:100%;
-    border-radius:999px;
-    background: linear-gradient(90deg, rgba(0,234,255,0.85), rgba(0,220,255,0.65));
-    box-shadow: 0 0 12px rgba(0,234,255,0.22);
-    transition: width 0.3s ease;
+/* ── Section panel wrappers for Market Regime sub-sections ── */
+.home-regime-section-panel{
+    background:rgba(4,8,19,0.45);
+    border:1px solid rgba(0,234,255,0.08);
+    border-radius:10px;
+    padding:14px 14px 12px;
+    margin-bottom:10px;
+}
+.home-regime-section-header{
+    font-family:'Orbitron',sans-serif;
+    font-size:11px;
+    font-weight:700;
+    color:rgba(0,234,255,0.60);
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    margin-bottom:8px;
+    padding-bottom:6px;
+    border-bottom:1px solid rgba(0,234,255,0.06);
+}
+
+/* ── Sector context metadata chips ── */
+.home-sector-context-chips{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    margin-bottom:8px;
+}
+.home-sector-ctx-chip{
+    font-size:10px;
+    font-weight:600;
+    border-radius:4px;
+    padding:2px 8px;
+    white-space:nowrap;
+}
+.home-sector-ctx-chip.bullish{
+    color:#7ef7b8;
+    background:rgba(126,247,184,0.08);
+    border:1px solid rgba(126,247,184,0.20);
+}
+.home-sector-ctx-chip.neutral{
+    color:var(--cyan);
+    background:rgba(0,234,255,0.06);
+    border:1px solid rgba(0,234,255,0.15);
+}
+.home-sector-ctx-chip.riskoff{
+    color:#ff6b6b;
+    background:rgba(255,107,107,0.08);
+    border:1px solid rgba(255,107,107,0.20);
 }
 
 /* ── Freshness tags (live / eod) ── */
@@ -5677,6 +5836,42 @@ main.main{
     justify-items:start;
 }
 
+.home-guidance-section{
+    display:grid;
+    gap:8px;
+}
+.home-guidance-row{
+    display:flex;
+    align-items:baseline;
+    gap:8px;
+    flex-wrap:wrap;
+}
+.home-guidance-label{
+    font-size:10px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.08em;
+    min-width:40px;
+    flex-shrink:0;
+}
+.home-guidance-label--favor{ color:rgba(126,247,184,0.75); }
+.home-guidance-label--avoid{ color:rgba(200,80,80,0.80); }
+.home-guidance-pills{
+    display:flex;
+    gap:5px;
+    flex-wrap:wrap;
+}
+.home-guidance-notes{
+    margin-top:6px;
+    display:grid;
+    gap:3px;
+}
+.home-guidance-notes .stock-note{
+    font-size:11px;
+    line-height:1.4;
+    color:rgba(255,255,255,0.55);
+}
+
 .home-chip-group{
     display:flex;
     gap:5px;
@@ -5710,12 +5905,9 @@ main.main{
 }
 
 /* ── Regime Model Analysis ─────────────────────────────── */
-.home-regime-model-btn{
-    margin-top:10px;
-    font-size:13px;
-}
+/* .home-regime-model-btn removed — model analysis now auto-runs */
 .home-regime-model-output{
-    margin-top:10px;
+    margin-top:0;
 }
 .regime-model-loading{
     display:flex;
@@ -5745,7 +5937,7 @@ main.main{
 }
 .regime-model-body{
     padding:6px 14px 14px;
-    max-height:420px;
+    max-height:600px;
     overflow-y:auto;
     display:grid;
     gap:10px;
@@ -6022,30 +6214,7 @@ main.main{
     gap:8px;
 }
 
-.home-signal-hub{
-    display:grid;
-    gap:8px;
-}
-
-.home-signal-row{
-    border:1px solid rgba(0,234,255,0.18);
-    border-radius:10px;
-    padding:8px;
-    background: linear-gradient(180deg, rgba(7,12,20,0.72), rgba(4,8,14,0.82));
-}
-
-.home-signal-head{
-    display:flex;
-    align-items:center;
-    gap:8px;
-    margin-bottom:6px;
-}
-
-.home-signal-chips{
-    display:flex;
-    flex-wrap:wrap;
-    gap:6px;
-}
+/* ── Signal Hub — REMOVED (replaced by expanded Sector Performance) ── */
 
 .home-sector-row{
     display:grid;
@@ -6334,12 +6503,6 @@ main.main{
 }
 
 @media (max-width: 1100px){
-    .home-regime-body{
-        grid-template-columns: 1fr;
-    }
-    .home-playbooks-row{
-        grid-template-columns: 1fr;
-    }
     .home-data-row{
         grid-template-columns: 1fr;
     }
@@ -6764,6 +6927,13 @@ main.main{
 #overlay-root > .ben-tip{
     pointer-events:none !important;
 }
+/* Chat backdrop: only intercept clicks when visibly open */
+#overlay-root > .bt-chat-backdrop{
+    pointer-events:none;
+}
+#overlay-root > .bt-chat-backdrop.bt-chat-backdrop--visible{
+    pointer-events:auto;
+}
 
 /* ── Modal-open state ─────────────────────────────────────────
    Applied to .shell when a modal (trade ticket, DWB, etc.) opens.
@@ -6845,8 +7015,146 @@ main.main{
     align-items:center;
     padding:0;
     min-height:540px;
-    overflow:visible;
+    overflow:hidden;
     flex:1 1 auto;
+}
+/* ── Deep starfield — Layer 1: bright stars + medium stars + dust ── */
+.bt-brand-panel::before{
+    content:'';
+    position:absolute;
+    inset:-12%;
+    width:124%;
+    height:124%;
+    pointer-events:none;
+    z-index:0;
+    background-image:
+        /* ── Bright stars (1.2–2px) — anchor points ── */
+        radial-gradient(2px 2px at 8% 4%, rgba(215,251,255,0.65) 50%, transparent 50%),
+        radial-gradient(1.6px 1.6px at 22% 12%, rgba(0,234,255,0.55) 50%, transparent 50%),
+        radial-gradient(1.8px 1.8px at 41% 3%, rgba(215,251,255,0.60) 50%, transparent 50%),
+        radial-gradient(2px 2px at 58% 16%, rgba(0,234,255,0.50) 50%, transparent 50%),
+        radial-gradient(1.5px 1.5px at 76% 8%, rgba(215,251,255,0.58) 50%, transparent 50%),
+        radial-gradient(1.7px 1.7px at 90% 20%, rgba(0,234,255,0.52) 50%, transparent 50%),
+        radial-gradient(1.6px 1.6px at 14% 36%, rgba(215,251,255,0.54) 50%, transparent 50%),
+        radial-gradient(1.4px 1.4px at 33% 28%, rgba(0,234,255,0.48) 50%, transparent 50%),
+        radial-gradient(2px 2px at 50% 43%, rgba(215,251,255,0.60) 50%, transparent 50%),
+        radial-gradient(1.5px 1.5px at 68% 33%, rgba(0,234,255,0.52) 50%, transparent 50%),
+        radial-gradient(1.6px 1.6px at 85% 46%, rgba(215,251,255,0.56) 50%, transparent 50%),
+        radial-gradient(1.8px 1.8px at 5% 53%, rgba(0,234,255,0.50) 50%, transparent 50%),
+        radial-gradient(1.5px 1.5px at 18% 66%, rgba(215,251,255,0.52) 50%, transparent 50%),
+        radial-gradient(1.7px 1.7px at 38% 60%, rgba(0,234,255,0.48) 50%, transparent 50%),
+        radial-gradient(1.6px 1.6px at 55% 70%, rgba(215,251,255,0.55) 50%, transparent 50%),
+        radial-gradient(1.4px 1.4px at 72% 58%, rgba(0,234,255,0.45) 50%, transparent 50%),
+        radial-gradient(1.8px 1.8px at 88% 73%, rgba(215,251,255,0.50) 50%, transparent 50%),
+        radial-gradient(1.5px 1.5px at 10% 80%, rgba(0,234,255,0.46) 50%, transparent 50%),
+        radial-gradient(1.6px 1.6px at 30% 86%, rgba(215,251,255,0.48) 50%, transparent 50%),
+        radial-gradient(2px 2px at 48% 93%, rgba(0,234,255,0.52) 50%, transparent 50%),
+        radial-gradient(1.5px 1.5px at 65% 83%, rgba(215,251,255,0.50) 50%, transparent 50%),
+        radial-gradient(1.7px 1.7px at 82% 90%, rgba(0,234,255,0.45) 50%, transparent 50%),
+        radial-gradient(1.4px 1.4px at 95% 56%, rgba(215,251,255,0.48) 50%, transparent 50%),
+        radial-gradient(1.6px 1.6px at 3% 26%, rgba(0,234,255,0.42) 50%, transparent 50%),
+        radial-gradient(1.8px 1.8px at 47% 25%, rgba(215,251,255,0.52) 50%, transparent 50%),
+        radial-gradient(1.5px 1.5px at 62% 48%, rgba(0,234,255,0.44) 50%, transparent 50%),
+        /* ── Medium stars (0.8–1.1px) — fill density ── */
+        radial-gradient(1px 1px at 16% 10%, rgba(215,251,255,0.35) 50%, transparent 50%),
+        radial-gradient(0.9px 0.9px at 35% 20%, rgba(0,234,255,0.30) 50%, transparent 50%),
+        radial-gradient(1px 1px at 52% 6%, rgba(215,251,255,0.33) 50%, transparent 50%),
+        radial-gradient(0.8px 0.8px at 70% 26%, rgba(0,234,255,0.28) 50%, transparent 50%),
+        radial-gradient(1px 1px at 88% 13%, rgba(215,251,255,0.32) 50%, transparent 50%),
+        radial-gradient(0.9px 0.9px at 25% 50%, rgba(0,234,255,0.28) 50%, transparent 50%),
+        radial-gradient(1.1px 1.1px at 45% 40%, rgba(215,251,255,0.33) 50%, transparent 50%),
+        radial-gradient(0.8px 0.8px at 62% 53%, rgba(0,234,255,0.26) 50%, transparent 50%),
+        radial-gradient(1px 1px at 80% 43%, rgba(215,251,255,0.30) 50%, transparent 50%),
+        radial-gradient(0.9px 0.9px at 8% 70%, rgba(0,234,255,0.26) 50%, transparent 50%),
+        radial-gradient(1px 1px at 42% 76%, rgba(215,251,255,0.28) 50%, transparent 50%),
+        radial-gradient(0.8px 0.8px at 58% 80%, rgba(0,234,255,0.24) 50%, transparent 50%),
+        radial-gradient(1px 1px at 75% 86%, rgba(215,251,255,0.26) 50%, transparent 50%),
+        radial-gradient(0.9px 0.9px at 92% 63%, rgba(0,234,255,0.24) 50%, transparent 50%),
+        radial-gradient(1px 1px at 28% 42%, rgba(215,251,255,0.28) 50%, transparent 50%),
+        radial-gradient(0.8px 0.8px at 73% 18%, rgba(0,234,255,0.24) 50%, transparent 50%),
+        radial-gradient(1.1px 1.1px at 12% 92%, rgba(215,251,255,0.28) 50%, transparent 50%),
+        radial-gradient(0.9px 0.9px at 83% 38%, rgba(0,234,255,0.25) 50%, transparent 50%),
+        radial-gradient(1px 1px at 60% 32%, rgba(215,251,255,0.26) 50%, transparent 50%),
+        radial-gradient(0.8px 0.8px at 40% 95%, rgba(0,234,255,0.22) 50%, transparent 50%),
+        /* ── Faint dust (0.3–0.5px) — atmospheric depth ── */
+        radial-gradient(0.5px 0.5px at 20% 18%, rgba(215,251,255,0.18) 50%, transparent 50%),
+        radial-gradient(0.4px 0.4px at 40% 33%, rgba(0,234,255,0.14) 50%, transparent 50%),
+        radial-gradient(0.5px 0.5px at 60% 13%, rgba(215,251,255,0.16) 50%, transparent 50%),
+        radial-gradient(0.3px 0.3px at 80% 38%, rgba(0,234,255,0.12) 50%, transparent 50%),
+        radial-gradient(0.5px 0.5px at 15% 58%, rgba(215,251,255,0.15) 50%, transparent 50%),
+        radial-gradient(0.4px 0.4px at 35% 68%, rgba(0,234,255,0.12) 50%, transparent 50%),
+        radial-gradient(0.5px 0.5px at 55% 48%, rgba(215,251,255,0.14) 50%, transparent 50%),
+        radial-gradient(0.3px 0.3px at 75% 63%, rgba(0,234,255,0.11) 50%, transparent 50%),
+        radial-gradient(0.4px 0.4px at 90% 78%, rgba(215,251,255,0.13) 50%, transparent 50%),
+        radial-gradient(0.5px 0.5px at 10% 88%, rgba(0,234,255,0.12) 50%, transparent 50%),
+        radial-gradient(0.4px 0.4px at 50% 90%, rgba(215,251,255,0.14) 50%, transparent 50%),
+        radial-gradient(0.3px 0.3px at 85% 3%, rgba(0,234,255,0.11) 50%, transparent 50%),
+        radial-gradient(0.5px 0.5px at 3% 48%, rgba(215,251,255,0.13) 50%, transparent 50%),
+        radial-gradient(0.4px 0.4px at 97% 42%, rgba(0,234,255,0.11) 50%, transparent 50%),
+        radial-gradient(0.3px 0.3px at 67% 72%, rgba(215,251,255,0.12) 50%, transparent 50%),
+        radial-gradient(0.5px 0.5px at 23% 8%, rgba(0,234,255,0.13) 50%, transparent 50%);
+    animation:btStarDrift 45s linear infinite;
+}
+/* ── Starfield Layer 2: secondary field — counter-drift for parallax ── */
+.bt-brand-panel::after{
+    content:'';
+    position:absolute;
+    inset:-8%;
+    width:116%;
+    height:116%;
+    pointer-events:none;
+    z-index:0;
+    background-image:
+        /* Bright anchors */
+        radial-gradient(1.6px 1.6px at 6% 23%, rgba(215,251,255,0.42) 50%, transparent 50%),
+        radial-gradient(1.4px 1.4px at 19% 46%, rgba(0,234,255,0.38) 50%, transparent 50%),
+        radial-gradient(1.5px 1.5px at 36% 13%, rgba(215,251,255,0.40) 50%, transparent 50%),
+        radial-gradient(1.7px 1.7px at 54% 36%, rgba(0,234,255,0.36) 50%, transparent 50%),
+        radial-gradient(1.4px 1.4px at 71% 50%, rgba(215,251,255,0.38) 50%, transparent 50%),
+        radial-gradient(1.6px 1.6px at 86% 30%, rgba(0,234,255,0.34) 50%, transparent 50%),
+        radial-gradient(1.5px 1.5px at 12% 76%, rgba(215,251,255,0.36) 50%, transparent 50%),
+        radial-gradient(1.4px 1.4px at 28% 90%, rgba(0,234,255,0.32) 50%, transparent 50%),
+        radial-gradient(1.6px 1.6px at 46% 66%, rgba(215,251,255,0.38) 50%, transparent 50%),
+        radial-gradient(1.5px 1.5px at 64% 80%, rgba(0,234,255,0.34) 50%, transparent 50%),
+        radial-gradient(1.4px 1.4px at 79% 70%, rgba(215,251,255,0.36) 50%, transparent 50%),
+        radial-gradient(1.7px 1.7px at 93% 86%, rgba(0,234,255,0.32) 50%, transparent 50%),
+        radial-gradient(1.5px 1.5px at 48% 8%, rgba(215,251,255,0.35) 50%, transparent 50%),
+        radial-gradient(1.4px 1.4px at 78% 18%, rgba(0,234,255,0.30) 50%, transparent 50%),
+        /* Medium fill */
+        radial-gradient(0.8px 0.8px at 25% 6%, rgba(215,251,255,0.22) 50%, transparent 50%),
+        radial-gradient(0.7px 0.7px at 48% 20%, rgba(0,234,255,0.18) 50%, transparent 50%),
+        radial-gradient(0.8px 0.8px at 68% 40%, rgba(215,251,255,0.20) 50%, transparent 50%),
+        radial-gradient(0.7px 0.7px at 82% 56%, rgba(0,234,255,0.17) 50%, transparent 50%),
+        radial-gradient(0.8px 0.8px at 15% 43%, rgba(215,251,255,0.19) 50%, transparent 50%),
+        radial-gradient(0.7px 0.7px at 55% 53%, rgba(0,234,255,0.16) 50%, transparent 50%),
+        radial-gradient(0.8px 0.8px at 38% 83%, rgba(215,251,255,0.18) 50%, transparent 50%),
+        radial-gradient(0.7px 0.7px at 72% 93%, rgba(0,234,255,0.15) 50%, transparent 50%),
+        radial-gradient(0.9px 0.9px at 8% 58%, rgba(215,251,255,0.20) 50%, transparent 50%),
+        radial-gradient(0.7px 0.7px at 42% 48%, rgba(0,234,255,0.16) 50%, transparent 50%),
+        radial-gradient(0.8px 0.8px at 90% 45%, rgba(215,251,255,0.18) 50%, transparent 50%),
+        radial-gradient(0.7px 0.7px at 60% 62%, rgba(0,234,255,0.15) 50%, transparent 50%),
+        /* Faint dust */
+        radial-gradient(0.4px 0.4px at 32% 35%, rgba(215,251,255,0.10) 50%, transparent 50%),
+        radial-gradient(0.3px 0.3px at 52% 75%, rgba(0,234,255,0.08) 50%, transparent 50%),
+        radial-gradient(0.4px 0.4px at 18% 55%, rgba(215,251,255,0.09) 50%, transparent 50%),
+        radial-gradient(0.3px 0.3px at 75% 28%, rgba(0,234,255,0.08) 50%, transparent 50%),
+        radial-gradient(0.4px 0.4px at 88% 68%, rgba(215,251,255,0.09) 50%, transparent 50%),
+        radial-gradient(0.3px 0.3px at 5% 95%, rgba(0,234,255,0.08) 50%, transparent 50%);
+    animation:btStarDrift2 60s linear infinite;
+}
+@keyframes btStarDrift{
+    0%{ transform:translate(0, 0) rotate(0deg); }
+    25%{ transform:translate(-2%, -1.5%); }
+    50%{ transform:translate(-3.5%, -2.5%) rotate(0.3deg); }
+    75%{ transform:translate(-1%, -0.5%); }
+    100%{ transform:translate(0, 0) rotate(0deg); }
+}
+@keyframes btStarDrift2{
+    0%{ transform:translate(0, 0) rotate(0deg); }
+    25%{ transform:translate(1.5%, -1%); }
+    50%{ transform:translate(2.5%, -2%) rotate(-0.2deg); }
+    75%{ transform:translate(1%, -0.5%); }
+    100%{ transform:translate(0, 0) rotate(0deg); }
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -7165,6 +7473,9 @@ main.main{
     margin-bottom:12px;
     border-bottom:1px solid rgba(0,234,255,0.06);
     width:80%;
+    position:relative;
+    z-index:1;
+    animation:btBrandFloat 8s ease-in-out infinite;
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -7211,6 +7522,22 @@ main.main{
     padding:10px 0 8px;
     border-top:1px solid rgba(0,234,255,0.04);
     border-bottom:1px solid rgba(0,234,255,0.04);
+    position:relative;
+    z-index:1;
+    animation:btStreamFloat 10s ease-in-out infinite;
+}
+
+@keyframes btBrandFloat{
+    0%,100%{ transform:translateY(0) rotate(0deg); }
+    25%{ transform:translateY(-3px) rotate(-0.15deg); }
+    50%{ transform:translateY(-5px) rotate(0deg); }
+    75%{ transform:translateY(-2px) rotate(0.15deg); }
+}
+@keyframes btStreamFloat{
+    0%,100%{ transform:translateY(0) rotate(0deg); }
+    30%{ transform:translateY(-2px) rotate(0.1deg); }
+    60%{ transform:translateY(-4px) rotate(-0.1deg); }
+    85%{ transform:translateY(-1px); }
 }
 
 #btSourceHealthRows{
@@ -7246,10 +7573,10 @@ main.main{
     align-items:center;
     gap:8px;
     padding:2px 4px;
-    font-size:9px;
-    letter-spacing:0.12em;
+    font-size:11px;
+    letter-spacing:0.10em;
     color:var(--muted);
-    opacity:0.6;
+    opacity:0.75;
 }
 
 .bt-status-dot{
@@ -7315,4 +7642,533 @@ main.main{
     10%{ opacity:1; }
     90%{ opacity:1; }
     100%{ top:100%; opacity:0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Contextual Chat Drawer
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Trigger button (inside panels) ── */
+.home-regime-chat-btn-row{
+    display:flex;
+    justify-content:flex-end;
+    padding:6px 10px 4px;
+}
+.bt-chat-trigger-btn{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    padding:5px 14px;
+    font-size:0.78rem;
+    font-weight:600;
+    color:var(--cyan);
+    background:rgba(0,234,255,0.06);
+    border:1px solid rgba(0,234,255,0.22);
+    border-radius:6px;
+    cursor:pointer;
+    transition:background 0.18s, border-color 0.18s;
+}
+.bt-chat-trigger-btn:hover{
+    background:rgba(0,234,255,0.13);
+    border-color:rgba(0,234,255,0.40);
+}
+.bt-chat-trigger-btn:disabled{
+    opacity:0.35;
+    cursor:not-allowed;
+    filter:grayscale(0.5);
+}
+.bt-chat-trigger-btn:disabled:hover{
+    background:rgba(0,234,255,0.06);
+    border-color:rgba(0,234,255,0.22);
+}
+@keyframes btBtnShake{
+    0%, 100%{ transform:translateX(0); }
+    20%{ transform:translateX(-4px); }
+    40%{ transform:translateX(4px); }
+    60%{ transform:translateX(-3px); }
+    80%{ transform:translateX(2px); }
+}
+.bt-btn-shake{
+    animation:btBtnShake 0.4s ease;
+}
+
+/* ── Backdrop ── */
+.bt-chat-backdrop{
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.45);
+    z-index:8999;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity 0.22s ease;
+}
+.bt-chat-backdrop.bt-chat-backdrop--visible{
+    opacity:1;
+    pointer-events:auto;
+}
+
+/* ── Drawer panel ── */
+.bt-chat-drawer{
+    position:fixed;
+    top:0;
+    right:0;
+    width:420px;
+    max-width:92vw;
+    height:100vh;
+    z-index:9000;
+    display:flex;
+    flex-direction:column;
+    background:linear-gradient(180deg, rgba(4,8,16,0.97), rgba(2,4,10,0.99));
+    border-left:1px solid var(--panel-border);
+    box-shadow:-6px 0 32px rgba(0,0,0,0.55);
+    transform:translateX(100%);
+    transition:transform 0.28s cubic-bezier(0.22,0.61,0.36,1);
+}
+.bt-chat-drawer.bt-chat-drawer--open{
+    transform:translateX(0);
+}
+
+/* ── Header ── */
+.bt-chat-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:14px 16px 12px;
+    border-bottom:1px solid var(--panel-border);
+    flex-shrink:0;
+}
+.bt-chat-header-left{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-width:0;
+}
+.bt-chat-header-icon{
+    flex-shrink:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    width:30px;
+    height:30px;
+    border-radius:7px;
+    background:rgba(0,234,255,0.10);
+    color:var(--cyan);
+}
+.bt-chat-header-text{
+    min-width:0;
+}
+.bt-chat-header-title{
+    font-size:0.85rem;
+    font-weight:700;
+    color:var(--cyan);
+    letter-spacing:0.3px;
+    line-height:1.2;
+}
+.bt-chat-header-subtitle{
+    font-size:0.72rem;
+    color:var(--muted);
+    letter-spacing:0.2px;
+    margin-top:2px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+/* ── Context banner ── */
+.bt-chat-context-banner{
+    padding:8px 14px;
+    background:rgba(0,234,255,0.04);
+    border-bottom:1px solid rgba(0,234,255,0.10);
+    flex-shrink:0;
+}
+.bt-chat-banner-row{
+    display:flex;
+    align-items:center;
+    gap:7px;
+    font-size:0.74rem;
+    color:var(--text);
+}
+.bt-chat-banner-dot{
+    width:6px;
+    height:6px;
+    border-radius:50%;
+    background:var(--cyan);
+    flex-shrink:0;
+    box-shadow:0 0 6px rgba(0,234,255,0.45);
+}
+.bt-chat-banner-label{
+    opacity:0.85;
+}
+.bt-chat-banner-label strong{
+    color:var(--cyan);
+    font-weight:600;
+}
+.bt-chat-banner-detail{
+    font-size:0.70rem;
+    color:var(--muted);
+    margin-top:3px;
+    padding-left:13px;
+}
+
+/* ── Message area ── */
+.bt-chat-messages{
+    flex:1 1 auto;
+    overflow-y:auto;
+    padding:12px 14px 8px;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+}
+.bt-chat-messages::-webkit-scrollbar{ width:4px; }
+.bt-chat-messages::-webkit-scrollbar-track{ background:transparent; }
+.bt-chat-messages::-webkit-scrollbar-thumb{ background:rgba(0,234,255,0.15); border-radius:4px; }
+.bt-chat-messages::-webkit-scrollbar-thumb:hover{ background:rgba(0,234,255,0.30); }
+
+/* ── Individual messages ── */
+.bt-chat-msg{
+    max-width:88%;
+    padding:9px 12px;
+    border-radius:10px;
+    font-size:0.82rem;
+    line-height:1.52;
+    color:var(--text);
+    word-wrap:break-word;
+}
+.bt-chat-msg-ts{
+    font-size:0.62rem;
+    color:var(--muted);
+    opacity:0;
+    margin-top:4px;
+    text-align:right;
+    transition:opacity 0.2s ease;
+}
+.bt-chat-msg:hover .bt-chat-msg-ts{
+    opacity:0.6;
+}
+.bt-chat-msg--user{
+    align-self:flex-end;
+    background:rgba(0,234,255,0.10);
+    border:1px solid rgba(0,234,255,0.18);
+    border-radius:10px 10px 3px 10px;
+}
+.bt-chat-msg--assistant{
+    align-self:flex-start;
+    background:rgba(255,255,255,0.04);
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:10px 10px 10px 3px;
+}
+.bt-chat-msg--assistant p{ margin:0 0 6px; }
+.bt-chat-msg--assistant p:last-child{ margin-bottom:0; }
+.bt-chat-msg--assistant strong{ color:var(--cyan); font-weight:600; }
+.bt-chat-msg--assistant ul,
+.bt-chat-msg--assistant ol{
+    margin:4px 0 6px 18px;
+    padding:0;
+}
+.bt-chat-msg--assistant li{ margin-bottom:3px; }
+.bt-chat-msg--assistant code{
+    background:rgba(0,234,255,0.08);
+    padding:1px 5px;
+    border-radius:3px;
+    font-size:0.78rem;
+    color:var(--cyan);
+}
+
+/* ── Thinking / typing indicator ── */
+.bt-chat-thinking{
+    align-self:flex-start;
+    padding:10px 16px;
+    background:rgba(255,255,255,0.03);
+    border:1px solid rgba(255,255,255,0.06);
+    border-radius:10px 10px 10px 3px;
+}
+.bt-chat-dots{
+    display:flex;
+    gap:5px;
+}
+.bt-chat-dots span{
+    width:7px;
+    height:7px;
+    border-radius:50%;
+    background:var(--cyan-dim);
+    animation:btChatPulse 1.2s ease-in-out infinite;
+}
+.bt-chat-dots span:nth-child(2){ animation-delay:0.15s; }
+.bt-chat-dots span:nth-child(3){ animation-delay:0.3s; }
+
+@keyframes btChatPulse{
+    0%, 80%, 100%{ opacity:0.3; transform:scale(0.85); }
+    40%{ opacity:1; transform:scale(1.1); }
+}
+
+/* ── Input area ── */
+.bt-chat-input-bar{
+    display:flex;
+    align-items:flex-end;
+    gap:8px;
+    padding:10px 14px 14px;
+    border-top:1px solid var(--panel-border);
+    flex-shrink:0;
+}
+.bt-chat-input{
+    flex:1 1 auto;
+    resize:none;
+    min-height:36px;
+    max-height:120px;
+    padding:8px 10px;
+    font-size:0.82rem;
+    font-family:inherit;
+    line-height:1.4;
+    color:var(--text);
+    background:rgba(255,255,255,0.04);
+    border:1px solid rgba(0,234,255,0.16);
+    border-radius:8px;
+    outline:none;
+    transition:border-color 0.15s;
+}
+.bt-chat-input:focus{
+    border-color:rgba(0,234,255,0.40);
+}
+.bt-chat-input::placeholder{
+    color:var(--muted);
+    opacity:0.6;
+}
+.bt-chat-send-btn{
+    flex-shrink:0;
+    width:36px;
+    height:36px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:var(--cyan);
+    border:none;
+    border-radius:8px;
+    cursor:pointer;
+    transition:opacity 0.15s;
+}
+.bt-chat-send-btn:disabled{
+    opacity:0.35;
+    cursor:not-allowed;
+}
+.bt-chat-send-btn svg{
+    width:16px;
+    height:16px;
+    fill:var(--bg);
+}
+
+/* ── Error messages in chat ── */
+.bt-chat-msg--error{
+    align-self:center;
+    color:var(--danger);
+    background:rgba(255,79,102,0.06);
+    border:1px solid rgba(255,79,102,0.18);
+    font-size:0.78rem;
+    text-align:center;
+    max-width:92%;
+}
+
+/* ── System / seed messages ── */
+.bt-chat-msg--system{
+    align-self:center;
+    color:var(--muted);
+    background:transparent;
+    border:none;
+    font-size:0.75rem;
+    opacity:0.7;
+    max-width:95%;
+    text-align:center;
+}
+
+/* ── Body-lock when drawer is open ── */
+.bt-chat-body-lock{
+    overflow:hidden;
+}
+
+/* ── Chat error bar ── */
+.bt-chat-error{
+    display:none;
+    align-items:center;
+    justify-content:center;
+    gap:10px;
+    padding:8px 14px;
+    color:var(--danger);
+    font-size:0.78rem;
+    text-align:center;
+    background:rgba(255,79,102,0.06);
+    border-top:1px solid rgba(255,79,102,0.18);
+    flex-wrap:wrap;
+}
+.bt-chat-retry-btn{
+    display:inline-flex;
+    align-items:center;
+    padding:3px 12px;
+    font-size:0.74rem;
+    font-weight:600;
+    color:var(--cyan);
+    background:rgba(0,234,255,0.08);
+    border:1px solid rgba(0,234,255,0.25);
+    border-radius:5px;
+    cursor:pointer;
+    transition:background 0.15s;
+}
+.bt-chat-retry-btn:hover{
+    background:rgba(0,234,255,0.16);
+}
+
+/* ── Send button sending state ── */
+.bt-chat-send-btn--sending{
+    opacity:0.5;
+    cursor:wait;
+}
+
+/* ── Header action buttons (reset, minimize, end) ── */
+.bt-chat-header-actions{
+    display:flex;
+    align-items:center;
+    gap:4px;
+    flex-shrink:0;
+}
+.bt-chat-reset-btn,
+.bt-chat-close-btn,
+.bt-chat-end-btn{
+    background:none;
+    border:none;
+    color:var(--muted);
+    cursor:pointer;
+    padding:3px 6px;
+    border-radius:4px;
+    transition:color 0.15s, background 0.15s;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+.bt-chat-reset-btn:hover{
+    color:var(--cyan);
+    background:rgba(0,234,255,0.08);
+}
+.bt-chat-close-btn:hover{
+    color:var(--text);
+    background:rgba(255,255,255,0.06);
+}
+.bt-chat-end-btn{
+    font-size:1.1rem;
+    line-height:1;
+}
+.bt-chat-end-btn:hover{
+    color:var(--danger);
+    background:rgba(255,79,102,0.10);
+}
+
+/* ── Quick starters ── */
+.bt-chat-starters{
+    padding:10px 14px 6px;
+    flex-shrink:0;
+}
+.bt-chat-starters-label{
+    font-size:0.68rem;
+    color:var(--muted);
+    text-transform:uppercase;
+    letter-spacing:0.6px;
+    margin-bottom:8px;
+}
+.bt-chat-starters-grid{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+}
+.bt-chat-starter-btn{
+    padding:5px 12px;
+    font-size:0.74rem;
+    font-family:inherit;
+    color:var(--cyan);
+    background:rgba(0,234,255,0.06);
+    border:1px solid rgba(0,234,255,0.18);
+    border-radius:14px;
+    cursor:pointer;
+    transition:background 0.15s, border-color 0.15s;
+    white-space:nowrap;
+}
+.bt-chat-starter-btn:hover{
+    background:rgba(0,234,255,0.14);
+    border-color:rgba(0,234,255,0.35);
+}
+
+/* ── Suggested follow-ups ── */
+.bt-chat-followups{
+    display:flex;
+    flex-wrap:wrap;
+    gap:5px;
+    padding:4px 0 2px;
+    align-self:flex-start;
+    max-width:88%;
+}
+.bt-chat-followup-btn{
+    padding:4px 10px;
+    font-size:0.72rem;
+    font-family:inherit;
+    color:var(--cyan);
+    background:rgba(0,234,255,0.04);
+    border:1px solid rgba(0,234,255,0.14);
+    border-radius:12px;
+    cursor:pointer;
+    transition:background 0.15s, border-color 0.15s;
+}
+.bt-chat-followup-btn:hover{
+    background:rgba(0,234,255,0.12);
+    border-color:rgba(0,234,255,0.30);
+}
+
+/* ── Minimized chat bubble ── */
+.bt-chat-bubble{
+    position:fixed;
+    bottom:24px;
+    right:24px;
+    z-index:9001;
+    width:52px;
+    height:52px;
+    border-radius:50%;
+    background:var(--cyan);
+    border:none;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    box-shadow:0 4px 20px rgba(0,234,255,0.35), 0 0 0 0 rgba(0,234,255,0);
+    opacity:0;
+    pointer-events:none;
+    transform:scale(0.7);
+    transition:opacity 0.22s ease, transform 0.22s ease, box-shadow 0.2s;
+}
+.bt-chat-bubble--visible{
+    opacity:1;
+    pointer-events:auto;
+    transform:scale(1);
+}
+.bt-chat-bubble:hover{
+    box-shadow:0 4px 24px rgba(0,234,255,0.5), 0 0 0 4px rgba(0,234,255,0.12);
+}
+.bt-chat-bubble-icon{
+    stroke:var(--bg);
+    pointer-events:none;
+}
+.bt-chat-bubble-end{
+    position:absolute;
+    top:-4px;
+    right:-4px;
+    width:20px;
+    height:20px;
+    border-radius:50%;
+    background:var(--danger);
+    border:2px solid var(--bg);
+    color:#fff;
+    font-size:0.68rem;
+    line-height:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    opacity:0;
+    transition:opacity 0.15s;
+}
+.bt-chat-bubble:hover .bt-chat-bubble-end{
+    opacity:1;
 }

@@ -9,6 +9,7 @@ Data source hierarchy (priority order):
   SPY/QQQ/IWM/DIA → Tradier quote (intraday, via get_flat_macro enrichment)
   10Y Yield → FRED DGS10 (EOD)
   2Y Yield  → FRED DGS2 (EOD)
+  30Y Yield → FRED DGS30 (EOD)
   Fed Funds → FRED DFF (EOD)
   Oil WTI   → FRED DCOILWTICO (EOD)
   USD Index → FRED DTWEXBGS (EOD / weekly)
@@ -208,9 +209,10 @@ class MarketContextService:
                 vix_metric = await self._vix_from_fred()
 
             # Remaining metrics: all FRED (fire in parallel)
-            ten_year, two_year, fed_funds, oil, usd = await asyncio.gather(
+            ten_year, two_year, thirty_year, fed_funds, oil, usd = await asyncio.gather(
                 self._fred_metric("DGS10"),
                 self._fred_metric("DGS2"),
+                self._fred_metric("DGS30"),
                 self._fred_metric("DFF"),
                 self._fred_metric("DCOILWTICO"),
                 self._fred_metric("DTWEXBGS"),
@@ -245,6 +247,7 @@ class MarketContextService:
                 "vix": vix_metric,
                 "ten_year_yield": ten_year,
                 "two_year_yield": two_year,
+                "thirty_year_yield": thirty_year,
                 "fed_funds_rate": fed_funds,
                 "oil_wti": oil,
                 "usd_index": usd,
@@ -320,7 +323,7 @@ class MarketContextService:
             return m["value"]
 
         freshness = {}
-        for key in ("vix", "ten_year_yield", "two_year_yield", "fed_funds_rate", "oil_wti", "usd_index", "yield_curve_spread", "cpi_yoy"):
+        for key in ("vix", "ten_year_yield", "two_year_yield", "thirty_year_yield", "fed_funds_rate", "oil_wti", "usd_index", "yield_curve_spread", "cpi_yoy"):
             m = ctx.get(key)
             if m:
                 freshness[key] = {
@@ -337,6 +340,7 @@ class MarketContextService:
             "vix": _val("vix"),
             "ten_year_yield": _val("ten_year_yield"),
             "two_year_yield": _val("two_year_yield"),
+            "thirty_year_yield": _val("thirty_year_yield"),
             "fed_funds_rate": _val("fed_funds_rate"),
             "oil_wti": _val("oil_wti"),
             "usd_index": _val("usd_index"),

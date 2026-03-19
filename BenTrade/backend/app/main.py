@@ -21,6 +21,7 @@ from app.api.routes_playbook import router as playbook_router
 from app.api.routes_portfolio_risk import router as portfolio_risk_router
 from app.api.routes_recommendations import router as recommendations_router
 from app.api.routes_regime import router as regime_router
+from app.api.routes_contextual_chat import router as contextual_chat_router
 from app.api.routes_reports import router as reports_router
 from app.api.routes_risk_capital import router as risk_capital_router
 from app.api.routes_signals import router as signals_router
@@ -244,6 +245,7 @@ def create_app() -> FastAPI:
     )
 
     app.state.http_client = http_client
+    app.state.cache = cache
     app.state.tradier_client = tradier_client
     app.state.finnhub_client = finnhub_client
     app.state.polygon_client = polygon_client
@@ -332,6 +334,16 @@ def create_app() -> FastAPI:
     )
     app.state.liquidity_conditions_service = liquidity_conditions_service
 
+    # Late-bind MI engine services to RegimeService (constructed earlier)
+    regime_service.bind_engines(
+        breadth_service=breadth_service,
+        volatility_options_service=vol_service,
+        cross_asset_macro_service=cross_asset_macro_service,
+        flows_positioning_service=flows_positioning_service,
+        liquidity_conditions_service=liquidity_conditions_service,
+        news_sentiment_service=news_sentiment_service,
+    )
+
     app.state.settings = settings
     app.state.backend_dir = backend_dir
     app.state.frontend_dir = frontend_dir
@@ -406,6 +418,7 @@ def create_app() -> FastAPI:
     app.include_router(market_picture_router)
     app.include_router(routing_router, prefix="/api/admin", tags=["routing"])
     app.include_router(data_population_router)
+    app.include_router(contextual_chat_router)
     app.include_router(dev_router)
     app.include_router(frontend_router)
 

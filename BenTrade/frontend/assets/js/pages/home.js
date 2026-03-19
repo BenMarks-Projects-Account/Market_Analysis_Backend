@@ -10,8 +10,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
    * Those are GLOBAL-ONLY panels rendered in the global right info bar (index.html / sessionStats.js).
    */
   const regimeStripEl = scope.querySelector('#homeRegimeStrip');
-  const regimeComponentsEl = scope.querySelector('#homeRegimeComponents');
-  const playbookChipsEl = scope.querySelector('#homePlaybookChips');
+  const regimeBlocksEl = scope.querySelector('#homeRegimeBlocks');
+  const regimeInsightsEl = scope.querySelector('#homeRegimeInsights');
+  // playbookChipsEl removed — regime right-side now shows model analysis directly
   const scanPresetEl = scope.querySelector('#homeScanPreset');           // null — OE removed from home
   const runQueueBtnEl = scope.querySelector('#homeRunQueueBtn');         // null — OE removed from home
   const stopQueueBtnEl = scope.querySelector('#homeStopQueueBtn');      // null — removed
@@ -22,7 +23,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
   const queueLogEl = scope.querySelector('#homeQueueLog');              // null — OE removed from home
   const scanStatusEl = scope.querySelector('#homeScanStatus');          // null — OE removed from home
   const scanErrorEl = scope.querySelector('#homeScanError');            // null — OE removed from home
-  const signalHubEl = scope.querySelector('#homeSignalHub');
+  const sectorContextEl = scope.querySelector('#homeSectorContext');
   const indexTilesEl = scope.querySelector('#homeIndexTiles');
   const scoreboardCardsEl = scope.querySelector('#homeScoreboardCards');
   const spyChartEl = scope.querySelector('#homeSpyChart');
@@ -38,7 +39,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
   const lastUpdatedEl = scope.querySelector('#homeLastUpdated');
   const vixChartEl = scope.querySelector('#homeVixChart');
   const errorEl = scope.querySelector('#homeError');
-  const regimeModelBtnEl = scope.querySelector('#homeRegimeModelBtn');
+  // regimeModelBtnEl removed — model analysis auto-runs on every refresh
   const regimeComparisonEl = scope.querySelector('#homeRegimeComparisonTable');
   const regimeModelOutputEl = scope.querySelector('#homeRegimeModelOutput');
   const activeTradesCountEl = scope.querySelector('#homeActiveTradesCount');
@@ -65,8 +66,20 @@ window.BenTradePages.initHome = function initHome(rootEl){
   const mpHistorySvgEl = scope.querySelector('#homeMPHistorySvg');
   const mpHistoryLegendEl = scope.querySelector('#homeMPHistoryLegend');
 
+  /* ── Regime proxy charts ref ── */
+  const regimeProxiesEl = scope.querySelector('#homeRegimeProxies');
+
+  /* ── Contextual Chat button ── */
+  const regimeChatBtnEl = scope.querySelector('#homeRegimeChatBtn');
+  if (regimeChatBtnEl) {
+    regimeChatBtnEl.addEventListener('click', _onRegimeChatClick);
+    // Start disabled — enabled once regime data arrives
+    regimeChatBtnEl.disabled = true;
+    regimeChatBtnEl.title = 'Waiting for regime data…';
+  }
+
   /* Guard: only require elements that are actually in the new layout */
-  if(!regimeStripEl || !regimeComponentsEl || !playbookChipsEl || !signalHubEl || !indexTilesEl || !spyChartEl || !sectorBarsEl || !riskTilesEl || !macroTilesEl || !fullRefreshBtnEl || !refreshBtnEl || !refreshingBadgeEl || !lastUpdatedEl || !vixChartEl || !errorEl){
+  if(!regimeStripEl || !indexTilesEl || !spyChartEl || !sectorBarsEl || !riskTilesEl || !macroTilesEl || !fullRefreshBtnEl || !refreshBtnEl || !refreshingBadgeEl || !lastUpdatedEl || !vixChartEl || !errorEl){
     return;
   }
 
@@ -354,6 +367,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
   /* ── Market Regime Model Analysis state ── */
   let _latestRegimePayload = null;
   let _latestPlaybookPayload = null;
+  let _latestRegimeModelResult = null;  // cached model analysis API result for persistence
   let _regimeModelInflight = null;   // Promise | null — guards duplicate clicks
 
   function setScanError(text){
@@ -401,6 +415,14 @@ window.BenTradePages.initHome = function initHome(rootEl){
     const badgeCls = dc === 0 ? 'regime-comparison-badge--agree' : 'regime-comparison-badge--disagree';
     const badgeText = dc === 0 ? 'Full Agreement' : `${dc} Disagreement${dc > 1 ? 's' : ''}`;
 
+    // Truncation warning
+    const isTruncated = trace?.truncated === true;
+    const allModelNull = !model.risk_regime_label && !model.trend_label && !model.vol_regime_label && model.confidence == null;
+    const truncationHtml = (isTruncated || allModelNull)
+      ? `<div style="padding:6px 10px;background:rgba(200,80,80,0.15);border:1px solid rgba(200,80,80,0.3);border-radius:6px;margin-bottom:8px;font-size:12px;color:#e0a0a0;">
+           ⚠ Model response ${isTruncated ? 'was truncated (token limit)' : 'returned empty fields'}. Results may be incomplete.${isTruncated ? ' Consider increasing max_tokens.' : ''}
+         </div>`
+      : '';
     // Helper – return Δ cell content
     function deltaCell(key){
       const d = deltas[key];
@@ -413,13 +435,23 @@ window.BenTradePages.initHome = function initHome(rootEl){
     // Confidence display helper
     function fmtConf(v){ return v != null ? `${(v * 100).toFixed(0)}%` : '—'; }
 
-    // Rows: Risk, Trend, Volatility, Confidence
+    // Rows: Risk, Trend, Volatility, Confidence + block assessments
     const rows = [
       { label: 'Risk Regime', eVal: engine.risk_regime_label, mVal: model.risk_regime_label, key: 'risk' },
       { label: 'Trend',       eVal: engine.trend_label,        mVal: model.trend_label,        key: 'trend' },
       { label: 'Volatility',  eVal: engine.vol_regime_label,   mVal: model.vol_regime_label,   key: 'vol' },
       { label: 'Confidence',  eVal: fmtConf(engine.confidence), mVal: fmtConf(model.confidence), key: 'confidence' },
     ];
+    // Block assessment rows when present
+    if(engine.structural_label || model.structural_assessment){
+      rows.push({ label: 'Structural', eVal: engine.structural_label, mVal: model.structural_assessment, key: 'structural' });
+    }
+    if(engine.tape_label || model.tape_assessment){
+      rows.push({ label: 'Tape', eVal: engine.tape_label, mVal: model.tape_assessment, key: 'tape' });
+    }
+    if(engine.tactical_label || model.tactical_assessment){
+      rows.push({ label: 'Tactical', eVal: engine.tactical_label, mVal: model.tactical_assessment, key: 'tactical' });
+    }
     const rowsHtml = rows.map(r =>
       `<tr><td>${_esc(r.label)}</td><td>${_esc(r.eVal || '—')}</td><td>${_esc(r.mVal || '—')}</td>${deltaCell(r.key)}</tr>`
     ).join('');
@@ -441,6 +473,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
         `Input mode: ${_esc(trace.input_mode || '?')}`,
         `Raw input keys: ${(trace.raw_input_keys || []).length}`,
         `Disagreements: ${trace.disagreement_count ?? '?'}`,
+        `Finish reason: ${_esc(trace.finish_reason || 'ok')}`,
       ];
       if(trace.timestamps){
         if(trace.timestamps.engine_ts) tLines.push(`Engine ts: ${_esc(trace.timestamps.engine_ts)}`);
@@ -457,6 +490,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
             <span class="regime-comparison-badge ${badgeCls}">${badgeText}</span>
           </summary>
           <div class="regime-comparison-body">
+            ${truncationHtml}
             <table class="regime-comparison-table">
               <thead><tr><th>Metric</th><th>Engine</th><th>Model</th><th>Δ</th></tr></thead>
               <tbody>${rowsHtml}</tbody>
@@ -467,7 +501,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
         </details>
       </div>`;
     regimeComparisonEl.style.display = 'block';
-    console.debug('[REGIME_COMPARISON] rendered', { disagreement_count: dc, deltas });
+    console.debug('[REGIME_COMPARISON] rendered', {
+      disagreement_count: dc, deltas, isTruncated, allModelNull,
+      model_summary: model,
+      engine_summary: engine,
+    });
   }
 
   function _renderRegimeModelOutput(analysis){
@@ -478,6 +516,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
       return;
     }
 
+    console.debug('[REGIME_MODEL_OUTPUT] analysis keys:', Object.keys(analysis),
+      'has_exec_summary:', !!analysis.executive_summary,
+      'has_breakdown:', !!analysis.regime_breakdown,
+      'has_trace:', !!analysis._trace);
+
     const sections = [];
 
     // Executive summary
@@ -485,15 +528,31 @@ window.BenTradePages.initHome = function initHome(rootEl){
       sections.push(`<div class="regime-model-section"><div class="regime-model-section-title">Executive Summary</div><div class="regime-model-section-body">${_esc(analysis.executive_summary)}</div></div>`);
     }
 
-    // Regime breakdown by component
+    // Regime breakdown by component (extended with block assessments)
     if(analysis.regime_breakdown && typeof analysis.regime_breakdown === 'object'){
-      const lines = ['trend', 'volatility', 'breadth', 'rates', 'momentum']
+      const breakdownKeys = ['structural', 'tape', 'tactical', 'trend', 'volatility', 'breadth', 'rates', 'momentum'];
+      const lines = breakdownKeys
         .filter((k) => analysis.regime_breakdown[k])
         .map((k) => `<li><strong>${k.charAt(0).toUpperCase() + k.slice(1)}:</strong> ${_esc(String(analysis.regime_breakdown[k]))}</li>`)
         .join('');
       if(lines){
         sections.push(`<div class="regime-model-section"><div class="regime-model-section-title">Regime Breakdown</div><ul class="regime-model-list">${lines}</ul></div>`);
       }
+    }
+
+    // Model what-works / what-to-avoid
+    const mWhatWorks = Array.isArray(analysis.what_works) ? analysis.what_works : [];
+    const mWhatAvoid = Array.isArray(analysis.what_to_avoid) ? analysis.what_to_avoid : [];
+    if(mWhatWorks.length || mWhatAvoid.length){
+      let wwHtml = '<div class="regime-model-section"><div class="regime-model-section-title">Model Strategy Guidance</div>';
+      if(mWhatWorks.length){
+        wwHtml += `<div style="margin-bottom:6px;"><strong style="color:var(--green,#7ef7b8);">What Works:</strong> ${mWhatWorks.map((w) => _esc(String(w))).join(' · ')}</div>`;
+      }
+      if(mWhatAvoid.length){
+        wwHtml += `<div><strong style="color:var(--red,#c85050);">Avoid:</strong> ${mWhatAvoid.map((w) => _esc(String(w))).join(' · ')}</div>`;
+      }
+      wwHtml += '</div>';
+      sections.push(wwHtml);
     }
 
     // Primary fit
@@ -571,13 +630,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
     }
 
     // Show loading state
-    if(regimeModelBtnEl){
-      regimeModelBtnEl.disabled = true;
-      regimeModelBtnEl.textContent = 'Analyzing…';
-    }
     if(regimeModelOutputEl){
       regimeModelOutputEl.style.display = 'block';
-      regimeModelOutputEl.innerHTML = '<div class="regime-model-loading"><span class="home-scan-spinner" aria-hidden="true"></span> Running model analysis…</div>';
+      regimeModelOutputEl.innerHTML = '<div class="regime-model-loading"><span class="home-scan-spinner" aria-hidden="true"></span> Running model analysis\u2026</div>';
     }
 
     const promise = api.modelAnalyzeRegime(_latestRegimePayload, _latestPlaybookPayload);
@@ -586,6 +641,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
     try{
       const result = await promise;
       if(_regimeModelInflight !== promise) return; // stale
+      _latestRegimeModelResult = result;
+      // Persist result into home cache for SPA re-mount restoration
+      _persistRegimeModelResult(result);
       _renderRegimeComparisonTable(result);
       _renderRegimeModelOutput(result?.analysis || result);
     }catch(err){
@@ -594,10 +652,6 @@ window.BenTradePages.initHome = function initHome(rootEl){
     }finally{
       if(_regimeModelInflight === promise){
         _regimeModelInflight = null;
-      }
-      if(regimeModelBtnEl){
-        regimeModelBtnEl.disabled = false;
-        regimeModelBtnEl.textContent = 'Model Analysis';
       }
     }
   }
@@ -608,7 +662,131 @@ window.BenTradePages.initHome = function initHome(rootEl){
     regimeModelOutputEl.innerHTML = `<div class="regime-model-error">${_esc(message)}</div>`;
   }
 
+  /** Persist regime model analysis result into home cache snapshot. */
+  function _persistRegimeModelResult(result){
+    const cacheStore = window.BenTradeHomeCacheStore;
+    if(!cacheStore) return;
+    const snap = cacheStore.getSnapshot();
+    if(!snap || !snap.data) return;
+    snap.data.regimeModelResult = result;
+    // Re-set to persist (triggers localStorage write)
+    cacheStore.setSnapshot(snap);
+  }
+
+  /** Restore cached regime model analysis from snapshot data. */
+  function _restoreRegimeModelResult(data){
+    const result = data?.regimeModelResult;
+    if(!result) return;
+    _latestRegimeModelResult = result;
+    _renderRegimeComparisonTable(result);
+    _renderRegimeModelOutput(result?.analysis || result);
+  }
+
   /* ── End Regime Model Analysis ─────────────────────────────────── */
+
+  /* ── Contextual Chat: Market Regime context builder ───────────── */
+
+  /**
+   * Build a curated context contract for the Market Regime panel.
+   * Returns the reusable context contract shape consumed by BenTradeChat.open().
+   *
+   * CROSS-REF: Server-side mirror lives in
+   *   contextual_chat_service.build_market_regime_context()
+   * Both must produce the same context_payload field set.
+   * Frontend is authoritative (has full dashboard state);
+   * server-side is a fallback / validation reference.
+   */
+  function _buildRegimeChatContext() {
+    var regime = _latestRegimePayload || {};
+    var modelResult = _latestRegimeModelResult || {};
+    var modelSummary = modelResult.model_summary || {};
+    var comparison = modelResult.comparison || {};
+    var components = regime.components || {};
+    var blocks = regime.blocks || {};
+
+    var structural = blocks.structural || {};
+    var tape = blocks.tape || {};
+    var tactical = blocks.tactical || {};
+    var playbook = regime.suggested_playbook || _latestPlaybookPayload || {};
+
+    var payload = {
+      regime_label: regime.regime_label || null,
+      regime_score: regime.regime_score != null ? regime.regime_score : null,
+      confidence: regime.confidence != null ? regime.confidence : null,
+      interpretation: regime.interpretation || null,
+      structural_block: {
+        label: structural.label || null,
+        summary: structural.summary || null,
+      },
+      tape_block: {
+        label: tape.label || null,
+        summary: tape.summary || null,
+      },
+      tactical_block: {
+        label: tactical.label || null,
+        summary: tactical.summary || null,
+      },
+      key_drivers: regime.key_drivers || null,
+      what_works: playbook.primary || playbook.what_works || null,
+      what_to_avoid: playbook.avoid || playbook.what_to_avoid || null,
+      change_triggers: regime.change_triggers || null,
+      as_of: regime.as_of || null,
+    };
+
+    // Include model analysis agreement/disagreement if available
+    if (comparison.disagreement_count != null) {
+      payload.model_agreement = {
+        disagreement_count: comparison.disagreement_count,
+        model_risk: modelSummary.risk_regime_label || null,
+        model_trend: modelSummary.trend_label || null,
+        model_vol: modelSummary.vol_regime_label || null,
+        model_confidence: modelSummary.confidence != null ? modelSummary.confidence : null,
+      };
+    }
+
+    var label = payload.regime_label || 'Unknown';
+    var score = payload.regime_score != null ? payload.regime_score : '?';
+    var conf = payload.confidence != null ? (payload.confidence * 100).toFixed(0) + '%' : '?';
+
+    return {
+      context_type: 'market_regime',
+      context_title: 'Market Regime',
+      context_summary: 'Regime: ' + label + ' (score ' + score + ', confidence ' + conf + ')',
+      context_payload: payload,
+      source_panel: 'home.regime',
+      generated_at: new Date().toISOString(),
+    };
+  }
+
+  /** Enable/disable the chat button based on regime data readiness. */
+  function _updateChatBtnState() {
+    if (!regimeChatBtnEl) return;
+    var ready = !!_latestRegimePayload && !!_latestRegimePayload.regime_label;
+    regimeChatBtnEl.disabled = !ready;
+    regimeChatBtnEl.title = ready
+      ? 'Discuss this regime with AI'
+      : 'Waiting for regime data…';
+  }
+
+  function _onRegimeChatClick() {
+    if (!_latestRegimePayload || !_latestRegimePayload.regime_label) {
+      console.warn('[REGIME_CHAT] No regime data available yet.');
+      // Brief visual feedback instead of silent failure
+      if (regimeChatBtnEl) {
+        regimeChatBtnEl.classList.add('bt-btn-shake');
+        setTimeout(function () { regimeChatBtnEl.classList.remove('bt-btn-shake'); }, 500);
+      }
+      return;
+    }
+    var ctx = _buildRegimeChatContext();
+    if (window.BenTradeChat) {
+      window.BenTradeChat.open(ctx);
+    } else {
+      console.error('[REGIME_CHAT] BenTradeChat module not loaded.');
+    }
+  }
+
+  /* ── End Contextual Chat ──────────────────────────────────────── */
 
   const INDEX_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA'];
   const SECTOR_SYMBOLS = ['XLF', 'XLK', 'XLE', 'XLY', 'XLP', 'XLV', 'XLI', 'XLB', 'XLRE', 'XLU', 'XLC'];
@@ -1346,6 +1524,223 @@ window.BenTradePages.initHome = function initHome(rootEl){
     `;
   }
 
+  /* ── Compact proxy mini-chart renderer ──────────────────────── */
+
+  /**
+   * Render a single compact mini-chart SVG for a broad-market proxy.
+   *
+   * @param {SVGElement} svgEl — target SVG element
+   * @param {Array<{date:string, close:number}>} history — daily close data
+   * @param {Object} opts — { symbol, changePct, stroke }
+   */
+  function renderMiniChart(svgEl, history, opts){
+    const rows = Array.isArray(history) ? history : [];
+    const points = rows.map(r => toNumber(r?.close)).filter(v => v !== null);
+    if(!points.length){
+      svgEl.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="rgba(147,167,182,0.6)" font-size="11">No data</text>';
+      return;
+    }
+
+    const width = 320;
+    const height = 120;
+    const margin = { top: 24, right: 10, bottom: 20, left: 38 };
+    const plotW = width - margin.left - margin.right;
+    const plotH = height - margin.top - margin.bottom;
+    const min = Math.min(...points);
+    const max = Math.max(...points);
+    const span = Math.max(max - min, 0.0001);
+
+    const yFor = v => margin.top + (1 - ((v - min) / span)) * plotH;
+
+    /* Parse dates for day-boundary detection */
+    const dates = rows.map(r => {
+      if(!r?.date) return null;
+      const raw = String(r.date);
+      const d = raw.includes('T') ? new Date(raw) : new Date(raw + 'T00:00:00');
+      return isNaN(d.getTime()) ? null : d;
+    });
+    const hasDates = dates.length === points.length && dates[0] !== null;
+
+    /* X scale — INDEX-based (trading-session progression).
+       Eliminates weekend/non-trading gaps by spacing points evenly. */
+    const xFor = i => margin.left + (i / Math.max(points.length - 1, 1)) * plotW;
+
+    /* Build Catmull-Rom smooth curve through data points.
+       Tension divisor /10 keeps curves close to actual data while
+       eliminating jagged noise (previous /6 was too wavy). */
+    const pts = points.map((v, i) => ({ x: xFor(i), y: yFor(v) }));
+    let linePath;
+    if(pts.length <= 2){
+      linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+    } else {
+      linePath = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+      for(let i = 0; i < pts.length - 1; i++){
+        const p0 = pts[Math.max(i - 1, 0)];
+        const p1 = pts[i];
+        const p2 = pts[i + 1];
+        const p3 = pts[Math.min(i + 2, pts.length - 1)];
+        const cp1x = p1.x + (p2.x - p0.x) / 10;
+        const cp1y = p1.y + (p2.y - p0.y) / 10;
+        const cp2x = p2.x - (p3.x - p1.x) / 10;
+        const cp2y = p2.y - (p3.y - p1.y) / 10;
+        linePath += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+      }
+    }
+    const fillPath = linePath + ` L ${pts[pts.length - 1].x.toFixed(1)} ${(height - margin.bottom).toFixed(1)} L ${pts[0].x.toFixed(1)} ${(height - margin.bottom).toFixed(1)} Z`;
+
+    /* Gradient fill under the line — color driven by positive/negative move.
+       Positive (+) → green (matching yield curve bullish tone).
+       Negative (−) → burnt-red gradient.
+       Neutral/unknown → default cyan.
+       ID must be alphanumeric only — spaces/dashes break url(#id) refs. */
+    const safeId = (opts?.symbol || '').replace(/[^A-Za-z0-9]/g, '') || Math.random().toString(36).slice(2, 8);
+    const gradientId = 'proxyGrad_' + safeId;
+    const glowId = 'proxyGlow_' + safeId;
+    const changePctVal = opts?.changePct;
+    const isPositive = changePctVal != null && changePctVal >= 0;
+    const isNegative = changePctVal != null && changePctVal < 0;
+    /* Green gradient stops (positive) */
+    const gradTop    = isPositive ? 'rgb(126,247,184)' : isNegative ? 'rgb(200,80,80)' : 'rgb(0,220,245)';
+    const gradMid    = isPositive ? 'rgb(100,220,155)' : isNegative ? 'rgb(180,60,60)' : 'rgb(0,200,235)';
+    const gradBottom = isPositive ? 'rgb(80,195,130)'  : isNegative ? 'rgb(160,46,46)' : 'rgb(0,180,220)';
+    const gradientDef = `
+      <defs>
+        <linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${gradTop}" stop-opacity="0.30"/>
+          <stop offset="50%" stop-color="${gradMid}" stop-opacity="0.12"/>
+          <stop offset="100%" stop-color="${gradBottom}" stop-opacity="0.02"/>
+        </linearGradient>
+        <filter id="${glowId}" x="-8%" y="-8%" width="116%" height="116%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="1.2" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>`;
+
+    /* Y grid — 3 horizontal lines, subtler */
+    const yTicks = [0, 0.5, 1].map(r => {
+      const v = max - span * r;
+      return { v, y: yFor(v) };
+    });
+    const yGrid = yTicks.map(t => `<line x1="${margin.left}" y1="${t.y.toFixed(1)}" x2="${(width - margin.right)}" y2="${t.y.toFixed(1)}" stroke="rgba(0,234,255,0.06)" stroke-width="0.5"/>`).join('');
+    const yLabels = yTicks.map(t => `<text x="${margin.left - 4}" y="${(t.y + 3).toFixed(1)}" text-anchor="end" fill="rgba(215,251,255,0.50)" font-size="7.5">${t.v.toFixed(1)}</text>`).join('');
+
+    /* X labels + subtle day separators using INDEX-based positioning */
+    let xLabels = '';
+    let dayGridLines = '';
+    if(hasDates){
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const first = dates[0];
+      const last = dates[dates.length - 1];
+      const daySpan = (last.getTime() - first.getTime()) / 86400000;
+      const yBase = height - margin.bottom + 12;
+      const fmtDate = (d) => {
+        return daySpan <= 30
+          ? `${months[d.getMonth()]} ${d.getDate()}`
+          : `${months[d.getMonth()]} ${d.getFullYear().toString().slice(2)}`;
+      };
+      xLabels = `
+        <text x="${margin.left}" y="${yBase}" fill="rgba(215,251,255,0.45)" font-size="7.5">${fmtDate(first)}</text>
+        <text x="${(width - margin.right)}" y="${yBase}" text-anchor="end" fill="rgba(215,251,255,0.45)" font-size="7.5">${fmtDate(last)}</text>`;
+
+      /* Day separators — very subtle, only at actual day transitions */
+      if(daySpan > 1){
+        const seenDays = new Set();
+        seenDays.add(dates[0].toDateString());
+        for(let di = 1; di < dates.length; di++){
+          const ds = dates[di].toDateString();
+          if(!seenDays.has(ds)){
+            seenDays.add(ds);
+            const x = xFor(di).toFixed(1);
+            dayGridLines += `<line x1="${x}" y1="${margin.top}" x2="${x}" y2="${(height - margin.bottom)}" stroke="rgba(0,234,255,0.05)" stroke-width="0.5"/>`;
+          }
+        }
+      }
+    }
+
+    /* Symbol label + return annotation */
+    const symbol = _esc(opts?.symbol || '');
+    const changePct = opts?.changePct;
+    const returnStr = changePct != null ? (changePct >= 0 ? '+' : '') + (changePct * 100).toFixed(1) + '%' : '';
+    const isNeg = changePct != null && changePct < 0;
+    /* Burnt-red gradient text for negative returns, green for positive */
+    const returnColor = changePct != null
+      ? (changePct >= 0 ? 'rgba(126,247,184,0.9)' : 'rgba(200,80,80,0.95)')
+      : 'rgba(147,167,182,0.6)';
+    /* Stroke also follows positive/negative direction */
+    const stroke = opts?.stroke || (isPositive ? 'rgba(126,247,184,0.80)' : isNegative ? 'rgba(200,80,80,0.80)' : 'rgba(0,234,255,0.80)');
+
+    /* Replace entire SVG element so <defs> gradient IDs register properly.
+       Setting innerHTML on an existing SVG doesn't register defs in all
+       browsers, causing fill="url(#…)" to fall back to black. */
+    const svgMarkup = `<svg class="home-regime-proxy-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+      ${gradientDef}
+      ${yGrid}
+      ${dayGridLines}
+      <text x="${margin.left}" y="14" fill="rgba(215,251,255,0.9)" font-size="11" font-weight="600">${symbol}</text>
+      <text x="${width - margin.right}" y="14" text-anchor="end" fill="${returnColor}" font-size="10" font-weight="500">${returnStr}</text>
+      <path d="${fillPath}" fill="url(#${gradientId})" />
+      <path d="${linePath}" fill="none" stroke="${stroke}" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" filter="url(#${glowId})"/>
+      ${yLabels}
+      ${xLabels}
+    </svg>`;
+    svgEl.outerHTML = svgMarkup;
+  }
+
+  /**
+   * Fetch and render macro proxy charts + yield curve in the regime panel.
+   * Fire-and-forget — called during snapshot render.
+   */
+  function loadAndRenderRegimeProxies(macro){
+    if(!regimeProxiesEl) return;
+    api.getRegimeProxies().then(function(resp){
+      const proxies = resp?.proxies || {};
+      const symbols = ['VTI', 'VXUS', 'EFA', 'BND', 'TLT', 'UUP', 'HYG', 'LQD'];
+      const labels = {
+        VTI: 'Total US Market',
+        VXUS: 'International Equity',
+        EFA: 'Developed Intl',
+        BND: 'US Bond Aggregate',
+        TLT: '20+ Yr Treasury',
+        UUP: 'US Dollar Index',
+        HYG: 'High-Yield Credit',
+        LQD: 'IG Corporate Bonds',
+      };
+      if(!Object.keys(proxies).length){
+        regimeProxiesEl.innerHTML = '<div class="stock-note" style="padding:8px;">Proxy chart data unavailable.</div>';
+        return;
+      }
+      let html = '';
+      symbols.forEach(function(sym){
+        const entry = proxies[sym];
+        if(!entry) return;
+        const barTag = (entry.bar_size === '1h' || entry.bar_size === '15min') ? '1h' : 'D';
+        html += `<div class="home-regime-proxy-card">
+          <span class="home-proxy-bar-tag">${barTag}</span>
+          <svg class="home-regime-proxy-svg" viewBox="0 0 320 120" preserveAspectRatio="none"></svg>
+        </div>`;
+      });
+      // Append yield curve chart as the last tile in the grid
+      html += _buildYieldCurveChartCard(macro || {});
+      regimeProxiesEl.innerHTML = html;
+      const svgs = regimeProxiesEl.querySelectorAll('.home-regime-proxy-svg');
+      let idx = 0;
+      symbols.forEach(function(sym){
+        const entry = proxies[sym];
+        if(!entry || !svgs[idx]) return;
+        renderMiniChart(svgs[idx], entry.history || [], {
+          symbol: sym + ' — ' + (labels[sym] || ''),
+          changePct: entry.change_pct,
+        });
+        idx++;
+      });
+    }).catch(function(err){
+      console.warn('[RegimeProxies] fetch failed:', err?.message || err);
+      if(regimeProxiesEl){
+        regimeProxiesEl.innerHTML = '<div class="stock-note" style="padding:8px;">Proxy charts unavailable.</div>';
+      }
+    });
+  }
+
   /* ── Dynamic Regime Summary Tooltip Builder ─────────────────── */
 
   const FACTOR_NAMES = {
@@ -1465,6 +1860,31 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   /**
+   * Derive tone chips from the three-block engine output.
+   * Each block produces one chip with its label and a tone class.
+   */
+  function _buildBlockToneChips(blocks) {
+    const BLOCK_META = [
+      ['structural', 'Structure'],
+      ['tape',       'Tape'],
+      ['tactical',   'Tactical'],
+    ];
+    const chips = [];
+    for (const [key, title] of BLOCK_META) {
+      const b = blocks[key];
+      if (!b) continue;
+      const score = toNumber(b.score);
+      const label = b.label || '—';
+      let tone = 'neutral';
+      if (score !== null) {
+        tone = score >= 60 ? 'bullish' : (score < 40 ? 'riskoff' : 'neutral');
+      }
+      chips.push({ label: `${title}: ${label}`, tone });
+    }
+    return chips;
+  }
+
+  /**
    * Build a dynamic regime tooltip from live data.
    *
    * Inputs:
@@ -1528,43 +1948,74 @@ window.BenTradePages.initHome = function initHome(rootEl){
     });
   }
 
+  /* ── Regime label mapping (5-tier) ── */
+  const REGIME_LABEL_MAP = {
+    RISK_ON:          'Risk-On',
+    RISK_ON_CAUTIOUS: 'Risk-On Cautious',
+    NEUTRAL:          'Neutral',
+    RISK_OFF_CAUTION: 'Risk-Off Caution',
+    RISK_OFF:         'Risk-Off',
+  };
+
+  function _regimeTone(label){
+    if(label === 'RISK_ON' || label === 'RISK_ON_CAUTIOUS') return 'bullish';
+    if(label === 'RISK_OFF' || label === 'RISK_OFF_CAUTION') return 'riskoff';
+    return 'neutral';
+  }
+
+  function _blockTone(score){
+    if(score == null) return 'neutral';
+    if(score >= 60) return 'bullish';
+    if(score < 40) return 'riskoff';
+    return 'neutral';
+  }
+
   function renderRegime(regimePayload, spySummary, macro, indexSummaries){
     const vix = toNumber(macro?.vix ?? spySummary?.options_context?.vix);
     const tenYear = toNumber(macro?.ten_year_yield);
     const regimeScore = toNumber(regimePayload?.regime_score) ?? 50;
+    const confidence = toNumber(regimePayload?.confidence);
+    const interpretation = regimePayload?.interpretation || '';
     const regimeLabelRaw = String(regimePayload?.regime_label || 'NEUTRAL').toUpperCase();
-    const regimeLabelText = regimeLabelRaw === 'RISK_ON' ? 'Risk-On' : (regimeLabelRaw === 'RISK_OFF' ? 'Risk-Off' : 'Neutral');
-    const tone = regimeLabelRaw === 'RISK_ON' ? 'bullish' : (regimeLabelRaw === 'RISK_OFF' ? 'riskoff' : 'neutral');
+    const regimeLabelText = REGIME_LABEL_MAP[regimeLabelRaw] || 'Neutral';
+    const tone = _regimeTone(regimeLabelRaw);
 
-    /* ── Market-picture synthesis from existing regime + macro data ── */
-    const mp = _synthesizeMarketPicture(regimeLabelRaw, regimeScore, regimePayload?.components || {}, vix, tenYear, macro || {});
+    // Three blocks from new engine (may be absent for legacy payloads)
+    const blocks = regimePayload?.blocks || {};
+    const hasBlocks = !!(blocks.structural || blocks.tape || blocks.tactical);
+    const agreement = regimePayload?.agreement || {};
 
-    /* ── Multi-index one-liner: SPY QQQ IWM DIA changes ── */
-    const idxSums = indexSummaries || {};
-    const idxChips = INDEX_SYMBOLS.map((sym) => {
-      const pct = toNumber(idxSums[sym]?.price?.change_pct);
-      const sign = pct !== null && pct >= 0 ? '+' : '';
-      const pctStr = pct !== null ? sign + pct.toFixed(2) + '%' : '—';
-      const chipTone = pct !== null ? (pct >= 0 ? 'bullish' : 'riskoff') : 'neutral';
-      return `<span class="home-regime-idx-chip ${chipTone}">${sym} ${pctStr}</span>`;
-    }).join('');
+    /* ── Fallback: synthesize environment summary from legacy components when blocks unavailable ── */
+    const mp = hasBlocks
+      ? { envLabel: interpretation, envSummary: '' }
+      : _synthesizeMarketPicture(regimeLabelRaw, regimeScore, regimePayload?.components || {}, vix, tenYear, macro || {});
 
-    /* ── Hero strip: regime pill + environment summary + index chips ── */
+    /* ── Confidence badge ── */
+    const confStr = confidence != null ? `${(confidence * 100).toFixed(0)}%` : '';
+    const confBadge = confStr ? `<span class="home-regime-confidence">Conf: ${confStr}</span>` : '';
+
+    /* ── Agreement indicator ── */
+    const agreementBadge = hasBlocks
+      ? (agreement.blocks_aligned
+        ? '<span class="home-regime-agreement aligned">Blocks Aligned</span>'
+        : `<span class="home-regime-agreement divergent">Divergent (spread ${agreement.max_spread || '?'})</span>`)
+      : '';
+
+    /* ── Hero strip: regime pill + env summary + confidence (full-width, no right-side clutter) ── */
+    const envLabel = hasBlocks ? interpretation : mp.envLabel;
+    const envSummary = hasBlocks ? '' : mp.envSummary;
     regimeStripEl.innerHTML = `
       <div class="home-regime-hero">
         <div class="home-regime-hero-left">
           <div class="home-regime-pill ${tone}" data-ben-tip="regime_summary">
-            <span class="home-regime-pill-label">${regimeLabelText}</span>
+            <span class="home-regime-pill-label">${_esc(regimeLabelText)}</span>
             <span class="home-regime-pill-score">${fmt(regimeScore, 0)}</span>
           </div>
           <div class="home-regime-env">
-            <div class="home-regime-env-label">${mp.envLabel}</div>
-            <div class="home-regime-env-summary stock-note">${mp.envSummary}</div>
+            <div class="home-regime-env-label">${_esc(envLabel)}</div>
+            ${envSummary ? `<div class="home-regime-env-summary stock-note">${_esc(envSummary)}</div>` : ''}
+            <div class="home-regime-meta-row">${confBadge}${agreementBadge}</div>
           </div>
-        </div>
-        <div class="home-regime-hero-right">
-          <div class="home-regime-idx-strip">${idxChips}</div>
-          <div class="home-regime-tone-chips">${mp.toneChips.map((c) => `<span class="home-regime-tone-chip ${c.tone}">${c.label}</span>`).join('')}</div>
         </div>
       </div>
     `;
@@ -1572,56 +2023,203 @@ window.BenTradePages.initHome = function initHome(rootEl){
     /* ── Register dynamic regime-summary tooltip ── */
     _registerRegimeSummaryTooltip(regimeLabelRaw, regimeScore, regimePayload?.components || {}, vix, tenYear);
 
-    /* ── Factor bars (market regime factors) ── */
-    const FACTOR_SHORT = {
-      trend: 'Trend',
-      volatility: 'Vol',
-      breadth: 'Breadth',
-      rates: 'Rates',
-      momentum: 'Momentum',
-    };
-    const componentOrder = ['trend', 'volatility', 'breadth', 'rates', 'momentum'];
-    const components = regimePayload?.components || {};
-    const _debugRegime = window.BENTRADE_DEBUG_REGIME;
-    regimeComponentsEl.innerHTML = componentOrder.map((key) => {
-      const item = components[key] || {};
-      const rawScore = toNumber(item?.score);
-      const score = rawScore !== null ? Math.max(0, Math.min(100, rawScore)) : 0;
-      const fillWidth = Math.max(2, Math.round(score));
-      const signals = Array.isArray(item?.signals) ? item.signals : [];
-
-      if(_debugRegime){
-        console.info(`[REGIME_BAR] ${key}: raw=${rawScore}, clamped=${score}, fill=${fillWidth}%`);
+    /* ── Three-block status cards ── */
+    if(regimeBlocksEl){
+      if(hasBlocks){
+        const BLOCK_TITLES = { structural: 'Structural', tape: 'Tape', tactical: 'Tactical' };
+        const BLOCK_ICONS = {
+          structural: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="8" width="3" height="5" rx="0.5" fill="rgba(0,220,245,0.7)"/><rect x="5.5" y="4" width="3" height="9" rx="0.5" fill="rgba(0,220,245,0.85)"/><rect x="10" y="1" width="3" height="12" rx="0.5" fill="rgba(0,220,245,1)"/></svg>',
+          tape: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><polyline points="1,10 4,6 7,8 10,3 13,5" stroke="rgba(0,220,245,0.9)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="10" cy="3" r="1.2" fill="rgba(0,220,245,0.9)"/></svg>',
+          tactical: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5" stroke="rgba(0,220,245,0.7)" stroke-width="1.2" fill="none"/><circle cx="7" cy="7" r="2" stroke="rgba(0,220,245,0.9)" stroke-width="1" fill="none"/><circle cx="7" cy="7" r="0.8" fill="rgba(0,220,245,1)"/></svg>',
+        };
+        regimeBlocksEl.innerHTML = ['structural', 'tape', 'tactical'].map((bk) => {
+          const b = blocks[bk] || {};
+          const bScore = toNumber(b.score) ?? 0;
+          const bLabel = b.label || '—';
+          const bConf = b.confidence != null ? `${(b.confidence * 100).toFixed(0)}%` : '';
+          const bTone = _blockTone(bScore);
+          const bSignals = Array.isArray(b.key_signals) ? b.key_signals.slice(0, 3) : [];
+          return `
+            <div class="home-regime-block-card ${bTone}">
+              <div class="home-regime-block-header">
+                <span class="home-regime-block-icon">${BLOCK_ICONS[bk]}</span>
+                <span class="home-regime-block-title">${BLOCK_TITLES[bk]}</span>
+                <span class="home-regime-block-label">${_esc(bLabel)}</span>
+              </div>
+              <div class="home-regime-block-score-row">
+                <div class="home-regime-block-bar"><div class="home-regime-block-fill" style="width:${Math.max(2, Math.round(bScore))}%;"></div></div>
+                <span class="home-regime-block-score">${Math.round(bScore)}</span>
+                ${bConf ? `<span class="home-regime-block-conf">${bConf}</span>` : ''}
+              </div>
+              ${bSignals.length ? `<div class="home-regime-block-signals">${bSignals.map((s) => `<span class="home-regime-block-signal">${_esc(String(s))}</span>`).join('')}</div>` : ''}
+            </div>`;
+        }).join('');
+        regimeBlocksEl.style.display = '';
+      } else {
+        regimeBlocksEl.innerHTML = '';
+        regimeBlocksEl.style.display = 'none';
       }
+    }
 
-      const signalText = signals[0] ? String(signals[0]) : '';
+    /* ── Decision insights: what works / avoid / triggers / drivers ── */
+    if(regimeInsightsEl){
+      const whatWorks = Array.isArray(regimePayload?.what_works) ? regimePayload.what_works : [];
+      const whatAvoid = Array.isArray(regimePayload?.what_to_avoid) ? regimePayload.what_to_avoid : [];
+      const triggers = Array.isArray(regimePayload?.change_triggers) ? regimePayload.change_triggers : [];
+      const drivers = Array.isArray(regimePayload?.key_drivers) ? regimePayload.key_drivers : [];
+      const hasInsights = whatWorks.length || whatAvoid.length || triggers.length || drivers.length;
 
-      return `
-        <div class="home-regime-row">
-          <div class="home-regime-name" data-ben-tip="regime_${key}">${FACTOR_SHORT[key]}</div>
-          <div class="home-regime-track"><div class="home-regime-fill" style="width:${fillWidth}%;"></div></div>
-          <div class="home-regime-score">${Math.round(score)}</div>
-        </div>
-        ${signalText ? `<div class="home-regime-signal stock-note">${signalText}</div>` : ''}
-      `;
-    }).join('');
+      if(hasInsights){
+        let insightHtml = '<div class="home-regime-insights-grid">';
+        if(whatWorks.length){
+          insightHtml += `<div class="home-regime-insight-col"><div class="home-regime-insight-title bullish">What Works</div><ul class="home-regime-insight-list">${whatWorks.map((w) => `<li>${_esc(String(w))}</li>`).join('')}</ul></div>`;
+        }
+        if(whatAvoid.length){
+          insightHtml += `<div class="home-regime-insight-col"><div class="home-regime-insight-title riskoff">What to Avoid</div><ul class="home-regime-insight-list">${whatAvoid.map((w) => `<li>${_esc(String(w))}</li>`).join('')}</ul></div>`;
+        }
+        if(drivers.length){
+          insightHtml += `<div class="home-regime-insight-col"><div class="home-regime-insight-title">Key Drivers</div><ul class="home-regime-insight-list">${drivers.map((d) => `<li>${_esc(String(d))}</li>`).join('')}</ul></div>`;
+        }
+        if(triggers.length){
+          insightHtml += `<div class="home-regime-insight-col"><div class="home-regime-insight-title">Change Triggers</div><ul class="home-regime-insight-list">${triggers.map((t) => `<li>${_esc(String(t))}</li>`).join('')}</ul></div>`;
+        }
+        insightHtml += '</div>';
+        regimeInsightsEl.innerHTML = insightHtml;
+        regimeInsightsEl.style.display = '';
+      } else {
+        regimeInsightsEl.innerHTML = '';
+        regimeInsightsEl.style.display = 'none';
+      }
+    }
 
-    /* ── Regime guidance chips (Primary / Avoid / Notes) ── */
-    const playbook = regimePayload?.suggested_playbook || {};
-    const primary = Array.isArray(playbook?.primary) ? playbook.primary : [];
-    const avoid = Array.isArray(playbook?.avoid) ? playbook.avoid : [];
-    const notes = Array.isArray(playbook?.notes) ? playbook.notes.slice(0, 2) : [];
-    playbookChipsEl.innerHTML = `
-      <div class="home-chip-group">
-        <span class="stock-note">Primary:</span>
-        ${(primary.length ? primary : ['none']).map((item) => { const tipKey = window.BenTradeBenTooltip?.resolveKey?.(item) || ''; return `<span class="qtPill"${tipKey ? ' data-ben-tip="' + tipKey + '"' : ''}>${String(item)}</span>`; }).join('')}
-      </div>
-      <div class="home-chip-group">
-        <span class="stock-note">Avoid:</span>
-        ${(avoid.length ? avoid : ['none']).map((item) => { const tipKey = window.BenTradeBenTooltip?.resolveKey?.(item) || ''; return `<span class="qtPill qtPill-warn"${tipKey ? ' data-ben-tip="' + tipKey + '"' : ''}>${String(item)}</span>`; }).join('')}
-      </div>
-      <div class="home-playbook-notes">${notes.length ? notes.map((note) => `<div class="stock-note">• ${String(note)}</div>`).join('') : '<div class="stock-note">• No playbook notes.</div>'}</div>
-    `;
+  }
+
+  /**
+   * Render a real yield-curve SVG chart inside a proxy-card-style tile.
+   * Plots available tenor points (FF, 2Y, 10Y, 30Y) on maturity × yield axes.
+   * Returns the HTML string for insertion into the proxy grid.
+   */
+  function _buildYieldCurveChartCard(macro){
+    const ff = toNumber(macro?.fed_funds_rate);
+    const twoY = toNumber(macro?.two_year_yield);
+    const tenY = toNumber(macro?.ten_year_yield);
+    const thirtyY = toNumber(macro?.thirty_year_yield);
+
+    const tenors = [];
+    if(ff !== null) tenors.push({ label: 'FF', maturity: 0.08, yield: ff });
+    if(twoY !== null) tenors.push({ label: '2Y', maturity: 2, yield: twoY });
+    if(tenY !== null) tenors.push({ label: '10Y', maturity: 10, yield: tenY });
+    if(thirtyY !== null) tenors.push({ label: '30Y', maturity: 30, yield: thirtyY });
+
+    if(tenors.length < 2){
+      return `<div class="home-regime-proxy-card"><div class="stock-note" style="padding:16px 8px;text-align:center;">Yield curve data unavailable</div></div>`;
+    }
+
+    // Determine shape classification using standard 10Y-2Y spread
+    // Fallback priority: 10Y-2Y (standard) → 10Y-FF → 30Y-2Y
+    let spread = null;
+    let spreadLabel = '';
+    if(tenY !== null && twoY !== null){
+      spread = tenY - twoY;
+      spreadLabel = '10Y-2Y';
+    } else if(tenY !== null && ff !== null){
+      spread = tenY - ff;
+      spreadLabel = '10Y-FF';
+    } else if(thirtyY !== null && twoY !== null){
+      spread = thirtyY - twoY;
+      spreadLabel = '30Y-2Y';
+    }
+    let shape = 'Unknown', shapeTone = 'neutral';
+    if(spread !== null){
+      if(spread < -0.25){ shape = 'Inverted'; shapeTone = 'riskoff'; }
+      else if(spread < 0){ shape = 'Shallow Inversion'; shapeTone = 'caution'; }
+      else if(spread < 0.25){ shape = 'Flat'; shapeTone = 'neutral'; }
+      else if(spread < 1.0){ shape = 'Normal'; shapeTone = 'bullish'; }
+      else { shape = 'Steep'; shapeTone = 'bullish'; }
+    }
+
+    // SVG chart dimensions
+    const W = 320, H = 120;
+    const m = { top: 26, right: 12, bottom: 22, left: 36 };
+    const pW = W - m.left - m.right;
+    const pH = H - m.top - m.bottom;
+
+    const yields = tenors.map(t => t.yield);
+    const yMin = Math.min(...yields) - 0.3;
+    const yMax = Math.max(...yields) + 0.3;
+    const ySpan = Math.max(yMax - yMin, 0.01);
+    // x-axis: use log-ish scale so short tenors are more spread out
+    const maxMat = tenors[tenors.length - 1].maturity;
+    const xMax = Math.max(maxMat * 1.05, 11);
+    const logX = mat => Math.log(Math.max(mat, 0.04) + 1);
+    const logMax = logX(xMax);
+    const xFor = mat => m.left + (logX(mat) / logMax) * pW;
+    const yFor = y => m.top + (1 - ((y - yMin) / ySpan)) * pH;
+
+    // Gradient + stroke colors by tone
+    const toneColor = { bullish: 'rgba(126,247,184,', riskoff: 'rgba(200,80,80,', caution: 'rgba(255,199,88,', neutral: 'rgba(0,234,255,' };
+    const base = toneColor[shapeTone] || toneColor.neutral;
+    const strokeColor = base + '0.9)';
+
+    // Build smooth curve via Catmull-Rom interpolation
+    const pts = tenors.map(t => ({ x: xFor(t.maturity), y: yFor(t.yield) }));
+    let linePath;
+    if(pts.length <= 2){
+      linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+    } else {
+      // Catmull-Rom to cubic Bezier for smooth curve
+      linePath = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+      for(let i = 0; i < pts.length - 1; i++){
+        const p0 = pts[Math.max(i - 1, 0)];
+        const p1 = pts[i];
+        const p2 = pts[i + 1];
+        const p3 = pts[Math.min(i + 2, pts.length - 1)];
+        const cp1x = p1.x + (p2.x - p0.x) / 6;
+        const cp1y = p1.y + (p2.y - p0.y) / 6;
+        const cp2x = p2.x - (p3.x - p1.x) / 6;
+        const cp2y = p2.y - (p3.y - p1.y) / 6;
+        linePath += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+      }
+    }
+    const fillPath = linePath + ` L ${pts[pts.length - 1].x.toFixed(1)} ${(H - m.bottom).toFixed(1)} L ${pts[0].x.toFixed(1)} ${(H - m.bottom).toFixed(1)} Z`;
+
+    // Y grid lines
+    const gridCount = 3;
+    let yGrid = '', yLabels = '';
+    for(let i = 0; i <= gridCount; i++){
+      const v = yMin + (ySpan * i / gridCount);
+      const y = yFor(v);
+      yGrid += `<line x1="${m.left}" y1="${y.toFixed(1)}" x2="${(W - m.right)}" y2="${y.toFixed(1)}" stroke="rgba(0,234,255,0.08)" stroke-width="0.5"/>`;
+      yLabels += `<text x="${m.left - 4}" y="${(y + 3).toFixed(1)}" text-anchor="end" fill="rgba(215,251,255,0.55)" font-size="8">${v.toFixed(1)}%</text>`;
+    }
+
+    // Data point dots + labels
+    const dots = pts.map((p, i) =>
+      `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="${strokeColor}" stroke="rgba(0,0,0,0.4)" stroke-width="0.5"/>` +
+      `<text x="${p.x.toFixed(1)}" y="${(H - m.bottom + 13).toFixed(1)}" text-anchor="middle" fill="rgba(215,251,255,0.65)" font-size="8">${tenors[i].label}</text>` +
+      `<text x="${p.x.toFixed(1)}" y="${(p.y - 6).toFixed(1)}" text-anchor="middle" fill="rgba(215,251,255,0.80)" font-size="7.5" font-weight="600">${tenors[i].yield.toFixed(2)}%</text>`
+    ).join('');
+
+    const gradId = 'ycGrad_' + Math.random().toString(36).slice(2, 6);
+
+    const svg = `
+      <svg class="home-regime-proxy-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="${base}0.18)"/>
+            <stop offset="100%" stop-color="${base}0.01)"/>
+          </linearGradient>
+        </defs>
+        ${yGrid}
+        <text x="${m.left}" y="14" fill="rgba(215,251,255,0.9)" font-size="11" font-weight="600">Yield Curve</text>
+        <text x="${W - m.right}" y="14" text-anchor="end" fill="${strokeColor}" font-size="9.5" font-weight="500">${shape}${spread !== null ? ' (' + (spread >= 0 ? '+' : '') + (spread * 100).toFixed(0) + 'bp ' + spreadLabel + ')' : ''}</text>
+        <path d="${fillPath}" fill="url(#${gradId})" />
+        <path d="${linePath}" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+        ${dots}
+        ${yLabels}
+      </svg>`;
+
+    return `<div class="home-regime-proxy-card">${svg}</div>`;
   }
 
   /* ── Scoreboard: engine vs model score cards ── */
@@ -1630,7 +2228,90 @@ window.BenTradePages.initHome = function initHome(rootEl){
     if(score == null) return '#888';
     if(score >= 70) return '#7ef7b8';
     if(score >= 50) return '#ffc758';
-    return '#ff6b6b';
+    return '#c85050';
+  }
+
+  /** CSS class for score pill background (replaces inline style colors). */
+  function _scoreClass(score){
+    if(score == null) return 'home-score-na';
+    if(score >= 70) return 'home-score-green';
+    if(score >= 50) return 'home-score-amber';
+    return 'home-score-red';
+  }
+
+  /**
+   * Clean a summary string for safe, readable display.
+   *
+   * Recovery layers (defense-in-depth):
+   *   1. Backend _build_plaintext_fallback() (model_analysis.py) extracts
+   *      score/summary from raw JSON when LLM returns unparsed JSON text.
+   *   2. This function (frontend) catches any remaining JSON-dump summaries
+   *      persisted before the backend fix (2026-03-18) and extracts the
+   *      .summary field.  Safe to remove the JSON branch below once all
+   *      model_scores_latest.json entries have been re-generated.
+   *
+   * - Escapes HTML entities
+   * - Strips markdown artifacts (**, ##, `, etc.)
+   * - Collapses whitespace
+   * - If the string is a JSON object, extracts the "summary" field from within
+   * - Strips raw JSON-like object dumps that remain after extraction
+   * Returns null if empty after cleaning.
+   */
+  function _cleanSummary(raw){
+    if(!raw || typeof raw !== 'string') return null;
+    let text = String(raw).trim();
+    // If the whole summary is a JSON object, try to extract the "summary" field
+    if(text.charAt(0) === '{'){
+      try{
+        var parsed = JSON.parse(text);
+        if(parsed && typeof parsed === 'object'){
+          // Priority: summary → executive_summary → description → tone+label fallback
+          var extracted = parsed.summary || parsed.executive_summary || parsed.description;
+          if(typeof extracted === 'string' && extracted.trim()){
+            text = extracted.trim();
+          } else {
+            // Build a readable fallback from available structured fields
+            var parts = [];
+            if(parsed.tone) parts.push(String(parsed.tone));
+            if(parsed.label) parts.push('(' + String(parsed.label) + ')');
+            if(parsed.headline_drivers && Array.isArray(parsed.headline_drivers)){
+              parts.push('— ' + parsed.headline_drivers.slice(0, 3).join(', '));
+            }
+            text = parts.length ? parts.join(' ') : '';
+          }
+        }
+      }catch(_e){}
+    }
+    // Strip markdown heading markers
+    text = text.replace(/^#{1,6}\s+/gm, '');
+    // Strip markdown bold/italic/code
+    text = text.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1');
+    text = text.replace(/`([^`]+)`/g, '$1');
+    // Strip any remaining raw JSON-like blocks (multiline { } or [ ])
+    text = text.replace(/\{[^}]{10,}\}/g, '');
+    text = text.replace(/\[[^\]]{10,}\]/g, '');
+    // Collapse whitespace
+    text = text.replace(/\s+/g, ' ').trim();
+    if(!text) return null;
+    return _esc(text);
+  }
+
+  /**
+   * Try to extract a numeric score from a raw JSON model summary string.
+   * Returns a number (0-100) or null.
+   */
+  function _extractScoreFromSummary(raw){
+    if(!raw || typeof raw !== 'string') return null;
+    var trimmed = raw.trim();
+    if(trimmed.charAt(0) !== '{') return null;
+    try{
+      var parsed = JSON.parse(trimmed);
+      if(parsed && typeof parsed === 'object' && parsed.score != null){
+        var val = Number(parsed.score);
+        if(!isNaN(val) && val >= 0 && val <= 100) return val;
+      }
+    }catch(_e){}
+    return null;
   }
 
   function _fmtScore(val){
@@ -1686,42 +2367,58 @@ window.BenTradePages.initHome = function initHome(rootEl){
     // Build engine cards with paired engine vs model layout
     let html = '<div class="home-engine-cards-grid">';
     engines.forEach(function(eng){
+      // Recover model_score from raw JSON summary if the backend didn't extract it
+      if(eng.model_score == null && eng.model_summary){
+        var recovered = _extractScoreFromSummary(eng.model_summary);
+        if(recovered !== null) eng.model_score = recovered;
+      }
       const eScore = _fmtScore(eng.engine_score);
       const mScore = _fmtScore(eng.model_score);
-      const eColor = _scoreColor(eng.engine_score);
-      const mColor = _scoreColor(eng.model_score);
+      const eScoreCls = _scoreClass(eng.engine_score);
+      const mScoreCls = _scoreClass(eng.model_score);
       const eLabel = eng.engine_label || '';
-      const eSummary = eng.engine_summary || 'No engine summary available.';
-      const mSummary = eng.model_summary || null;
-      const statusBadge = eng.status === 'ok' || eng.status === 'missing' ? '' : `<span class="qtPill qtPill-warn" style="font-size:10px;margin-left:6px;">${eng.status}</span>`;
+      const eSummary = _cleanSummary(eng.engine_summary) || 'No engine summary available.';
+      const mSummary = _cleanSummary(eng.model_summary);
+      // Degraded badge: only shown when engine_status is not ok/missing.
+      // Includes the specific reason when available so the warning is traceable.
+      let statusBadge = '';
+      if(eng.status !== 'ok' && eng.status !== 'missing'){
+        const reasons = Array.isArray(eng.degraded_reasons) && eng.degraded_reasons.length
+          ? eng.degraded_reasons.map(function(r){ return _esc(r.replace(/_/g, ' ')); }).join(', ')
+          : _esc(eng.status);
+        statusBadge = `<span class="qtPill qtPill-warn" style="font-size:10px;margin-left:6px;" title="${reasons}">${_esc(eng.status)}</span>`;
+      }
       const freshBadge = _modelFreshnessBadge(eng);
       const modelBadgeHtml = freshBadge.text ? `<span class="home-model-freshness-badge ${freshBadge.cssClass}">${freshBadge.text}</span>` : '';
+
+      // Model status indicator — honest display of model health
+      const mStatusCls = eng.model_score == null ? 'home-engine-score-na' : (eng.model_fresh === false ? 'home-engine-score-stale' : '');
 
       html += `
         <div class="stock-card home-engine-card">
           <div class="home-engine-card-header">
-            <span class="home-engine-card-name">${eng.name || eng.key}${statusBadge}</span>
+            <span class="home-engine-card-name">${_esc(eng.name || eng.key)}${statusBadge}</span>
           </div>
-          ${eLabel ? `<div class="home-engine-card-label">${eLabel}</div>` : ''}
+          ${eLabel ? `<div class="home-engine-card-label">${_esc(eLabel)}</div>` : ''}
           <div class="home-engine-scores-row">
             <div class="home-engine-score-box">
               <span class="home-engine-score-tag">Engine</span>
-              <span class="home-engine-score-pill" style="background:${eColor};">${eScore}</span>
+              <span class="home-engine-score-pill ${eScoreCls}">${eScore}</span>
             </div>
             <div class="home-engine-score-box">
               <span class="home-engine-score-tag">Model</span>
-              <span class="home-engine-score-pill ${eng.model_score == null ? 'home-engine-score-na' : (eng.model_fresh === false ? 'home-engine-score-stale' : '')}" style="background:${mColor};">${mScore}</span>
+              <span class="home-engine-score-pill ${mScoreCls} ${mStatusCls}">${mScore}</span>
               ${modelBadgeHtml}
             </div>
           </div>
           <div class="home-engine-summaries">
             <div class="home-engine-summary-section">
               <span class="home-engine-summary-tag">Engine</span>
-              <div class="home-engine-summary-text stock-note">${eSummary}</div>
+              <div class="home-engine-summary-text stock-note home-engine-summary-clamp">${eSummary}</div>
             </div>
             <div class="home-engine-summary-section">
               <span class="home-engine-summary-tag">Model</span>
-              <div class="home-engine-summary-text stock-note ${mSummary ? 'home-engine-summary-clamp' : 'home-engine-summary-na'}">${mSummary || (eng.model_score != null ? 'Model score available, but no stored summary.' : 'No model analysis yet')}</div>
+              <div class="home-engine-summary-text stock-note ${mSummary ? 'home-engine-summary-clamp' : 'home-engine-summary-na'}">${mSummary || (eng.model_score != null ? 'Score recorded — summary pending next model run.' : 'Not yet analyzed')}</div>
             </div>
           </div>
         </div>
@@ -1730,11 +2427,24 @@ window.BenTradePages.initHome = function initHome(rootEl){
     html += '</div>';
 
     // Composite overview row
-    const cState = composite.market_state || '—';
-    const cSupport = composite.support_state || '—';
-    const cStability = composite.stability_state || '—';
+    const cState = _esc(composite.market_state || '—');
+    const cSupport = _esc(composite.support_state || '—');
+    const cStability = _esc(composite.stability_state || '—');
     const cConf = composite.confidence != null ? (composite.confidence * 100).toFixed(0) + '%' : '—';
-    const cSummary = composite.summary || '';
+    const cSummary = _cleanSummary(composite.summary);
+
+    // Model interpretation pill: the workflow-level LLM interpretation is
+    // separate from per-engine model scores.  Only show a warning when the
+    // interpretation genuinely failed AND no per-engine model scores exist.
+    const hasAnyModelScore = engines.some(function(e){ return e.model_score != null; });
+    let modelPillHtml = '';
+    if(modelStatus === 'failed' && !hasAnyModelScore){
+      modelPillHtml = '<span class="qtPill home-composite-pill qtPill-warn">Interpretation: unavailable</span>';
+    } else if(modelStatus === 'skipped'){
+      modelPillHtml = '<span class="qtPill home-composite-pill">Interpretation: skipped</span>';
+    }
+    // When per-engine model scores exist, the interpretation failure is
+    // inconsequential — per-engine models provide the real analysis.
 
     html += `
       <div class="home-scoreboard-composite">
@@ -1743,7 +2453,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
           <span class="qtPill home-composite-pill">Support: ${cSupport}</span>
           <span class="qtPill home-composite-pill">Stability: ${cStability}</span>
           <span class="qtPill home-composite-pill">Confidence: ${cConf}</span>
-          ${modelStatus ? `<span class="qtPill home-composite-pill ${modelStatus === 'succeeded' ? '' : 'qtPill-warn'}">Model: ${modelStatus}</span>` : ''}
+          ${modelPillHtml}
         </div>
         ${cSummary ? `<div class="home-composite-summary stock-note">${cSummary}</div>` : ''}
         ${generatedAt ? `<div class="home-composite-timestamp stock-note">Generated: ${new Date(generatedAt).toLocaleString()}</div>` : ''}
@@ -1776,7 +2486,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     }).join('');
   }
 
-  function renderSectors(sectorSummaries){
+  function renderSectors(sectorSummaries, regimePayload){
     const rows = SECTOR_SYMBOLS.map((symbol) => {
       const pct = toNumber(sectorSummaries[symbol]?.price?.change_pct) ?? 0;
       const meta = SECTOR_META[symbol] || { name: symbol, description: symbol };
@@ -1799,6 +2509,70 @@ window.BenTradePages.initHome = function initHome(rootEl){
         </div>
       `;
     }).join('');
+
+    /* ── Sector context metadata chips ── */
+    if(sectorContextEl){
+      const chips = _buildSectorContextChips(rows, regimePayload);
+      sectorContextEl.innerHTML = chips.length
+        ? `<div class="home-sector-context-chips">${chips.map(c => `<span class="home-sector-ctx-chip ${c.tone}">${_esc(c.label)}</span>`).join('')}</div>`
+        : '';
+    }
+  }
+
+  /**
+   * Derive concise sector influence/metadata chips for the expanded sector panel.
+   */
+  function _buildSectorContextChips(rows, regimePayload){
+    const chips = [];
+    const sorted = rows.slice().sort((a, b) => b.pct - a.pct);
+    const positiveCount = rows.filter(r => r.pct > 0).length;
+
+    // Breadth influence
+    const breadthPct = Math.round((positiveCount / Math.max(rows.length, 1)) * 100);
+    chips.push({
+      label: `Breadth: ${breadthPct}% advancing`,
+      tone: breadthPct >= 64 ? 'bullish' : (breadthPct <= 36 ? 'riskoff' : 'neutral'),
+    });
+
+    // Leadership concentration: top 2 sectors' share of total positive motion
+    const totalAbsMove = rows.reduce((s, r) => s + Math.abs(r.pct), 0);
+    if(totalAbsMove > 0 && sorted.length >= 2){
+      const top2Share = (Math.abs(sorted[0].pct) + Math.abs(sorted[1].pct)) / totalAbsMove;
+      if(top2Share > 0.45){
+        chips.push({ label: `Concentrated: ${sorted[0].symbol} + ${sorted[1].symbol}`, tone: 'neutral' });
+      } else {
+        chips.push({ label: 'Leadership: Distributed', tone: 'bullish' });
+      }
+    }
+
+    // Defensive vs Cyclical tilt
+    const DEFENSIVE = ['XLP', 'XLU', 'XLV', 'XLRE'];
+    const CYCLICAL = ['XLK', 'XLY', 'XLF', 'XLI', 'XLE', 'XLB', 'XLC'];
+    const defAvg = DEFENSIVE.reduce((s, sym) => {
+      const r = rows.find(x => x.symbol === sym);
+      return s + (r ? r.pct : 0);
+    }, 0) / DEFENSIVE.length;
+    const cycAvg = CYCLICAL.reduce((s, sym) => {
+      const r = rows.find(x => x.symbol === sym);
+      return s + (r ? r.pct : 0);
+    }, 0) / CYCLICAL.length;
+    if(Math.abs(cycAvg - defAvg) > 0.15){
+      const tilt = cycAvg > defAvg ? 'Cyclical' : 'Defensive';
+      const tiltTone = cycAvg > defAvg ? 'bullish' : 'riskoff';
+      chips.push({ label: `Tilt: ${tilt}`, tone: tiltTone });
+    } else {
+      chips.push({ label: 'Tilt: Balanced', tone: 'neutral' });
+    }
+
+    // Rates influence — from regime components if available
+    const ratesScore = toNumber(regimePayload?.components?.rates?.score);
+    if(ratesScore !== null){
+      const ratesLabel = ratesScore >= 60 ? 'Supportive' : (ratesScore < 40 ? 'Pressuring' : 'Neutral');
+      const ratesTone = ratesScore >= 60 ? 'bullish' : (ratesScore < 40 ? 'riskoff' : 'neutral');
+      chips.push({ label: `Rates: ${ratesLabel}`, tone: ratesTone });
+    }
+
+    return chips;
   }
 
   function renderScannerOpportunities(ideas){
@@ -2085,37 +2859,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
   /* renderStrategyBoard — REMOVED: Strategy Leaderboard is global-only (index.html / sessionStats.js) */
 
-  function renderSignalHub(universePayload){
-    const items = Array.isArray(universePayload?.items) ? universePayload.items : [];
-    if(!items.length){
-      signalHubEl.innerHTML = '<div class="stock-note">Signal Hub unavailable.</div>';
-      return;
-    }
-
-    const bySymbol = new Map(items.map((row) => [String(row?.symbol || '').toUpperCase(), row]));
-    const sectorSymbols = ['XLK', 'XLF', 'XLE', 'XLV', 'XLY', 'XLP', 'XLI', 'XLB', 'XLRE', 'XLU', 'XLC'];
-    const sectorRows = sectorSymbols
-      .map((symbol) => bySymbol.get(symbol))
-      .filter(Boolean)
-      .sort((a, b) => Number((b?.composite || {}).score || 0) - Number((a?.composite || {}).score || 0))
-      .slice(0, 4);
-
-    const targetRows = [bySymbol.get('SPY'), ...sectorRows].filter(Boolean);
-    signalHubEl.innerHTML = targetRows.map((row) => {
-      const symbol = String(row?.symbol || 'N/A').toUpperCase();
-      const score = _fmtLib.normalizeScore((row?.composite || {}).score) ?? 0;
-      const label = String((row?.composite || {}).label || 'Neutral');
-      const positives = (Array.isArray(row?.signals) ? row.signals : []).filter((item) => item?.value).slice(0, 4);
-      return `
-        <div class="home-signal-row">
-          <div class="home-signal-head"><span class="qtPill">${symbol}</span> <span class="stock-note">${label} ${score.toFixed(1)}%</span></div>
-          <div class="home-signal-chips">
-            ${positives.length ? positives.map((item) => `<span class="qtPill" data-metric="${String(item.id || '')}">${String(item.id || '').replaceAll('_', ' ')}</span>`).join('') : '<span class="stock-note">No active signals</span>'}
-          </div>
-        </div>
-      `;
-    }).join('');
-  }
+  /* renderSignalHub — REMOVED: Signal Hub replaced by expanded Sector Performance panel */
 
   function renderRisk(snapshot, activeTradesPayload){
     const portfolio = snapshot?.portfolio || {};
@@ -2343,7 +3087,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     return { posture, summary, strategies: strategies.slice(0, 5), caution };
   }
 
-  /* ── Render a playbook panel (shared renderer for both stock & options) ── */
+  /* ── Render a playbook panel — cyan/red color-coded format ── */
   function _renderPlaybookPanel(el, shaped){
     if(!el) return;
     if(!shaped){
@@ -2353,15 +3097,32 @@ window.BenTradePages.initHome = function initHome(rootEl){
     const postureTone = shaped.posture === 'aggressive' || shaped.posture === 'constructive'
       ? 'bullish' : (shaped.posture === 'defensive' ? 'riskoff' : 'neutral');
 
-    let html = `<div class="home-pb-header"><span class="home-pb-posture ${postureTone}">${shaped.posture}</span><span class="home-pb-summary stock-note">${shaped.summary}</span></div><div class="home-pb-strats">`;
-    shaped.strategies.forEach(function(s){
-      const convClass = s.conviction === 'high' ? 'home-pb-conviction-high' : (s.conviction === 'moderate' ? 'home-pb-conviction-moderate' : 'home-pb-conviction-low');
-      html += `<div class="home-pb-strat"><div class="home-pb-strat-head"><span class="home-pb-strat-name">${s.name}</span><span class="home-pb-conviction ${convClass}">${s.conviction.toUpperCase()}</span></div><div class="home-pb-strat-reason stock-note">${s.reason}</div></div>`;
-    });
-    html += '</div>';
-    if(shaped.caution){
-      html += `<div class="home-pb-caution"><span class="home-pb-caution-icon">⚠</span><span class="home-pb-caution-text stock-note">${shaped.caution}</span></div>`;
+    let html = `<div class="home-pb-header"><span class="home-pb-posture ${postureTone}">${shaped.posture}</span><span class="home-pb-summary stock-note">${shaped.summary}</span></div>`;
+
+    // Split strategies: favor (high/moderate) vs avoid (low + caution)
+    const favor = shaped.strategies.filter(function(s){ return s.conviction === 'high' || s.conviction === 'moderate'; });
+    const avoid = shaped.strategies.filter(function(s){ return s.conviction === 'low'; });
+
+    if(favor.length){
+      html += `<div class="home-pb-lane home-pb-lane--favor"><div class="home-pb-lane-label">FAVOR</div><div class="home-pb-lane-items">`;
+      favor.forEach(function(s){
+        const isHigh = s.conviction === 'high';
+        html += `<div class="home-pb-pill home-pb-pill--favor${isHigh ? ' home-pb-pill--strong' : ''}"><span class="home-pb-pill-name">${s.name}</span><span class="home-pb-pill-reason">${s.reason}</span></div>`;
+      });
+      html += '</div></div>';
     }
+
+    if(avoid.length || shaped.caution){
+      html += `<div class="home-pb-lane home-pb-lane--avoid"><div class="home-pb-lane-label">AVOID / REDUCE</div><div class="home-pb-lane-items">`;
+      avoid.forEach(function(s){
+        html += `<div class="home-pb-pill home-pb-pill--avoid"><span class="home-pb-pill-name">${s.name}</span><span class="home-pb-pill-reason">${s.reason}</span></div>`;
+      });
+      if(shaped.caution){
+        html += `<div class="home-pb-pill home-pb-pill--avoid"><span class="home-pb-pill-name">⚠ Caution</span><span class="home-pb-pill-reason">${shaped.caution}</span></div>`;
+      }
+      html += '</div></div>';
+    }
+
     el.innerHTML = html;
   }
 
@@ -2388,14 +3149,14 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
   /**
    * ENGINE_HISTORY_SERIES — stable engine keys, display labels and line colors.
-   * Must match ENGINE_DISPLAY in routes_market_picture.py.
+   * Keys MUST match ENGINE_DISPLAY in market_picture_contract.py (canonical source).
    */
   const ENGINE_HISTORY_SERIES = [
     { key: 'breadth_participation',   label: 'Breadth & Participation',      color: 'rgba(0,234,255,0.9)'   },
     { key: 'volatility_options',      label: 'Volatility & Options',         color: 'rgba(255,199,88,0.9)'  },
     { key: 'cross_asset_macro',       label: 'Cross-Asset Macro',            color: 'rgba(126,247,184,0.9)' },
     { key: 'flows_positioning',       label: 'Flows & Positioning',          color: 'rgba(255,79,102,0.9)'  },
-    { key: 'liquidity_conditions',    label: 'Liquidity & Financial Conds',  color: 'rgba(181,126,255,0.9)' },
+    { key: 'liquidity_financial_conditions', label: 'Liquidity & Financial Conds', color: 'rgba(181,126,255,0.9)' },
     { key: 'news_sentiment',          label: 'News & Sentiment',             color: 'rgba(255,156,68,0.9)'  },
   ];
 
@@ -2717,13 +3478,16 @@ window.BenTradePages.initHome = function initHome(rootEl){
     // Stash regime + playbook for on-demand model analysis (auto-refresh safe)
     _latestRegimePayload = regimePayload;
     _latestPlaybookPayload = playbookPayload;
+    // Enable chat button now that regime context is available
+    _updateChatBtnState();
 
     renderRegime(regimePayload, spySummary, macro, indexSummaries);
+    // Restore cached regime model analysis immediately (before auto-run updates it)
+    _restoreRegimeModelResult(data);
     renderScoreboard(scoreboardPayload);
     renderIndexes(indexSummaries);
-    renderSectors(sectorSummaries);
+    renderSectors(sectorSummaries, regimePayload);
     renderScannerOpportunities(ideas);
-    renderSignalHub(signalUniversePayload);
 
     // Shape and render Stock + Options playbooks from market-picture context
     const _regimeLabelRaw = String(regimePayload?.regime_label || 'NEUTRAL').toUpperCase();
@@ -2743,6 +3507,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
     // Market Picture History — fire-and-forget async fetch + render
     loadAndRenderMarketPictureHistory();
+
+    // Macro proxy charts — fire-and-forget async fetch + render
+    loadAndRenderRegimeProxies(macro);
 
     // VIX canary: compare chart last price (VIXY ETF) with macro card VIX value
     var mc = window.BenTradeMarketContext;
@@ -3431,10 +4198,10 @@ window.BenTradePages.initHome = function initHome(rootEl){
         const phase = status?.phase || 'idle';
         if(bootUI){
           if(phase === 'market_data'){
-            bootUI.setPhaseActive('market_data');
+            bootUI.activatePhase('market_data');
           } else if(phase === 'model_analysis'){
             bootUI.setPhaseDone('market_data');
-            bootUI.setPhaseActive('model_analysis');
+            bootUI.activatePhase('model_analysis');
             if(status.model_progress) bootUI.setModelProgress(status.model_progress);
           } else if(phase === 'completed'){
             bootUI.setPhaseDone('market_data');
@@ -3457,39 +4224,61 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   if(bootModal && !bootModal.alreadyChosen()){
-    /* First visit this session — show welcome + kick off data pipeline */
+    /* First visit this session — parallel startup orchestration.
+     *
+     * Branch A: backend data-population (market_data → model_analysis phases)
+     *   Triggered immediately; progress tracked via polling.
+     *
+     * Branch B: home dashboard data load + auto regime model analysis
+     *   Loads whatever data the backend already has, then auto-triggers the
+     *   Market Regime model analysis to populate the right-side guidance area.
+     *
+     * The loading modal stays up until BOTH branches complete.
+     */
     const bootUI = bootModal.create(scope);
     bootUI.show();
 
-    // Hold the refreshing badge visible for the entire data population cycle
+    // Hold the refreshing badge visible for the entire startup cycle
     _holdRefreshBadge = true;
     setRefreshingBadge(true);
     refreshingBadgeEl.innerHTML = '<span class="badge-spinner" aria-hidden="true"></span>Populating Data\u2026';
 
-    // 1. Trigger backend data population (market data → model analysis)
+    // ── Trigger backend data-population pipeline ──
     api.triggerDataPopulation().catch(() => {});
-    bootUI.setPhaseActive('market_data');
 
-    // 2. Poll data population — wait for backend MI + model analysis to finish
-    pollDataPopulation(bootUI).then(async (finalStatus) => {
-      console.log('[DATA_POP] Population complete:', finalStatus);
+    // ── Branch A: poll backend population status ──
+    // Manages market_data + model_analysis boot-modal phases.
+    bootUI.activatePhase('market_data');
+    const populationDone = pollDataPopulation(bootUI).then((finalStatus) => {
+      console.log('[STARTUP] Backend population complete:', finalStatus?.phase);
+      return finalStatus;
+    });
 
-      // 3. NOW load the dashboard with fresh market state data
-      bootUI.setPhaseActive('dashboard');
+    // ── Branch B: load dashboard data + auto-run regime model analysis ──
+    // Runs in parallel with data population.
+    bootUI.activatePhase('dashboard');
+    const dashboardDone = (async () => {
       try {
-        await runLoadSequence({ force: true, showOverlay: false, homeOnly: true, reason: 'post_population' });
-        bootUI.setPhaseDone('dashboard');
+        await runLoadSequence({ force: true, showOverlay: false, homeOnly: true, reason: 'startup_parallel' });
       } catch(_e) {
         bindRetry();
       }
+      // Auto-trigger Market Regime model analysis now that regime data is loaded.
+      // Result populates the right-side Regime Guidance area (comparison table + model output).
+      try {
+        await runRegimeModelAnalysis();
+      } catch(_e) {
+        // Non-fatal — guidance area retains engine-derived chips as baseline
+      }
+      bootUI.setPhaseDone('dashboard');
+    })();
 
-      // 4. Close welcome modal after a brief delay so user sees completion
+    // ── Wait for both branches, then dismiss modal ──
+    Promise.allSettled([populationDone, dashboardDone]).then(() => {
       setTimeout(() => {
         bootUI.close();
         setTimeout(() => bootUI.destroy(), 500);
       }, 1500);
-
-      // 5. Release badge hold and hide it
       _holdRefreshBadge = false;
       setRefreshingBadge(false);
     });
@@ -3505,16 +4294,13 @@ window.BenTradePages.initHome = function initHome(rootEl){
     // Background refresh if stale (non-blocking, preserves current UI)
     if(cacheStore.isStale(null, cacheStore.FRESH_TTL_MS)){
       console.log('[HOME_REFRESH] SPA re-mount — cache stale, starting silent background refresh');
-      runLoadSequence({ force: false, showOverlay: false, homeOnly: true, reason: 'remount_stale' }).catch(function(err){
+      runLoadSequence({ force: false, showOverlay: false, homeOnly: true, reason: 'remount_stale' }).then(function(){
+        // Auto-trigger model analysis after fresh data loads
+        return runRegimeModelAnalysis();
+      }).catch(function(err){
         console.warn('[HOME_REFRESH] SPA re-mount silent refresh failed:', err?.message || err);
       });
     }
-  }
-
-  if(regimeModelBtnEl){
-    regimeModelBtnEl.addEventListener('click', () => {
-      runRegimeModelAnalysis();
-    });
   }
 
   refreshBtnEl.addEventListener('click', async () => {
@@ -3524,6 +4310,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
     try{
       await runLoadSequence({ force: true, showOverlay: false, reason: 'manual' });
       setError('');
+      // Auto-trigger model analysis after manual refresh
+      runRegimeModelAnalysis().catch(function(){});
     }catch(err){
       setError(String(err?.message || err || 'Refresh failed'));
     }finally{

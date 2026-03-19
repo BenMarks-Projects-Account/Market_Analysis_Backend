@@ -59,6 +59,8 @@ window.BenTradeOverlayRoot = (function () {
       '#tradeTicketOverlay',
       '.dwb-modal-overlay',
       '#strategyDefaultsToast',
+      '.bt-chat-backdrop',
+      '.bt-chat-drawer',
     ];
 
     selectors.forEach(function (sel) {

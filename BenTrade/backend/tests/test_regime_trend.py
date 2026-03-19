@@ -23,18 +23,23 @@ class _DummyBaseDataService:
         self.fred_client = _DummyFredClient()
 
     async def get_snapshot(self, symbol: str):
-        if symbol.upper() != "SPY":
-            return {"underlying_price": None, "prices_history": []}
+        if symbol.upper() == "SPY":
+            return {
+                "underlying_price": self._spy_history[-1] if self._spy_history else None,
+                "prices_history": self._spy_history[-160:],
+                "vix": None,
+            }
+        # Other trend indexes get synthetic rising prices
+        prices = [100.0 + (i * 0.5) for i in range(len(self._spy_history))]
         return {
-            "underlying_price": self._spy_history[-1] if self._spy_history else None,
-            "prices_history": self._spy_history[-160:],
-            "vix": None,
+            "underlying_price": prices[-1] if prices else None,
+            "prices_history": prices[-160:],
         }
 
     async def get_prices_history(self, symbol: str, lookback_days: int = 365):
         if symbol.upper() == "SPY":
             return self._spy_history
-        return [100.0 + (i * 0.05) for i in range(60)]
+        return [100.0 + (i * 0.5) for i in range(len(self._spy_history))]
 
     def _mark_success(self, *_args, **_kwargs):
         return None
@@ -64,8 +69,10 @@ class RegimeTrendTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(trend.get("signals") or []), 0)
 
         inputs = trend.get("inputs") or {}
-        for key in ("close", "ema20", "ema50", "sma50", "sma200", "close_gt_ema20", "close_gt_ema50", "sma50_gt_sma200"):
-            self.assertIn(key, inputs)
+        # Multi-index: inputs keyed by symbol, each with per-MA fields
+        self.assertIn("SPY", inputs)
+        for key in ("close", "ema20", "ema50", "sma50", "sma200"):
+            self.assertIn(key, inputs["SPY"])
 
     async def test_trend_partial_scoring_with_insufficient_history(self):
         prices = [500.0 + (i * 1.0) for i in range(80)]
@@ -77,11 +84,12 @@ class RegimeTrendTests(unittest.IsolatedAsyncioTestCase):
         payload = await svc._compute()
         trend = payload.get("components", {}).get("trend", {})
         inputs = trend.get("inputs") or {}
-        notes = payload.get("suggested_playbook", {}).get("notes") or []
 
-        self.assertIsNone(inputs.get("sma200"))
+        # With only 80 prices, SMA200 won't be calculable for any index
+        spy_inputs = inputs.get("SPY", {})
+        self.assertIsNone(spy_inputs.get("sma200"))
+        # Trend score should still be positive (EMA20/EMA50 are available)
         self.assertGreater(float(trend.get("score") or 0.0), 0.0)
-        self.assertTrue(any("Insufficient history for SMA200" in str(note) for note in notes))
 
 
 if __name__ == "__main__":

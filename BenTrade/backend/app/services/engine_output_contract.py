@@ -575,8 +575,15 @@ def _derive_engine_status(
     Status rules:
       - no_data:   score is None and no signal_quality
       - error:     score is None (engine likely failed)
-      - degraded:  score present but data quality is compromised
+      - degraded:  score present but data quality is materially compromised
       - ok:        score present, quality acceptable
+
+    Degraded thresholds scale with signal_quality:
+      high:   missing > 3  or warnings > 6
+      medium: missing > 2  or warnings > 4
+      low:    always degraded (low signal quality itself is a reason)
+
+    Staleness always degrades regardless of signal_quality.
     """
     reasons: list[str] = []
 
@@ -590,15 +597,29 @@ def _derive_engine_status(
             reasons.append(f"warnings:{warning_count}")
         return "error", reasons
 
-    # Score present — check for degraded conditions
+    # Score present — check for degraded conditions.
+    # Thresholds are signal-quality-aware: a high-quality engine with a
+    # few proxy warnings is operating normally, not degraded.
     if signal_quality == "low":
         reasons.append("low_signal_quality")
-    if missing_count > 0:
-        reasons.append(f"missing_inputs:{missing_count}")
-    if warning_count > 2:
-        reasons.append(f"elevated_warnings:{warning_count}")
+        # Also enumerate specifics for traceability
+        if missing_count > 0:
+            reasons.append(f"missing_inputs:{missing_count}")
+        if warning_count > 0:
+            reasons.append(f"elevated_warnings:{warning_count}")
+    elif signal_quality == "medium":
+        if missing_count > 2:
+            reasons.append(f"missing_inputs:{missing_count}")
+        if warning_count > 4:
+            reasons.append(f"elevated_warnings:{warning_count}")
+    else:
+        # high (or unknown treated as high)
+        if missing_count > 3:
+            reasons.append(f"missing_inputs:{missing_count}")
+        if warning_count > 6:
+            reasons.append(f"elevated_warnings:{warning_count}")
 
-    # Staleness check
+    # Staleness check — always applies
     if as_of:
         staleness = _check_staleness(as_of)
         if staleness:

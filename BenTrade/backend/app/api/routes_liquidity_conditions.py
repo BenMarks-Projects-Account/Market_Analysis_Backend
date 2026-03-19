@@ -69,7 +69,7 @@ async def run_model_analysis(
         try:
             from app.services.model_score_store import save_model_score
             data_dir = str(request.app.state.backend_dir / "data")
-            save_model_score(data_dir, "liquidity_conditions", result["model_analysis"], result.get("as_of"))
+            save_model_score(data_dir, "liquidity_financial_conditions", result["model_analysis"], result.get("as_of"))
         except Exception:
             pass
     logger.info(

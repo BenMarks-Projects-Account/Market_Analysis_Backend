@@ -298,3 +298,64 @@ class PolygonClient:
 
         bars = await self.get_aggregates_ohlc(ticker, start_date=start, end_date=today)
         return [{"date": b["date"], "close": b["close"]} for b in bars]
+
+    async def get_intraday_bars(
+        self,
+        ticker: str,
+        lookback_days: int = 14,
+        multiplier: int = 15,
+        timespan: str = "minute",
+    ) -> list[dict[str, Any]]:
+        """Return intraday bars with ISO-datetime timestamps.
+
+        Returns ``[{"date": "2026-03-18T10:30:00+00:00", "close": float}, ...]``.
+        Uses Polygon aggregates with sub-daily granularity (default 15-min bars).
+        """
+        ticker = str(ticker).upper().strip()
+        if not ticker:
+            return []
+
+        today = date.today()
+        start = date.fromordinal(max(today.toordinal() - lookback_days, 1))
+        from_str = start.isoformat()
+        to_str = today.isoformat()
+
+        cache_key = f"polygon:intraday:{ticker}:{from_str}:{to_str}:{timespan}:{multiplier}"
+
+        async def _load() -> list[dict[str, Any]]:
+            url = (
+                f"{self.settings.POLYGON_BASE_URL}/v2/aggs/ticker/{ticker}"
+                f"/range/{multiplier}/{timespan}/{from_str}/{to_str}"
+            )
+            params: dict[str, Any] = {
+                "adjusted": "true",
+                "sort": "asc",
+                "limit": 5000,
+                "apiKey": self.settings.POLYGON_API_KEY,
+            }
+            payload = await self._dedup_request(cache_key, "GET", url, params=params)
+            return self._parse_intraday(payload)
+
+        return await self.cache.get_or_set(cache_key, self.settings.CANDLES_CACHE_TTL_SECONDS, _load)
+
+    @staticmethod
+    def _parse_intraday(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Parse Polygon aggregates into bars with full ISO datetime strings."""
+        results = payload.get("results") or []
+        if not results:
+            return []
+        bars: list[dict[str, Any]] = []
+        for r in results:
+            ts_ms = r.get("t")
+            if ts_ms is None:
+                continue
+            try:
+                dt = datetime.fromtimestamp(int(ts_ms) / 1000, tz=timezone.utc)
+                iso_dt = dt.isoformat()
+            except (OSError, ValueError, OverflowError):
+                continue
+            try:
+                bars.append({"date": iso_dt, "close": float(r["c"])})
+            except (KeyError, TypeError, ValueError):
+                continue
+        return bars

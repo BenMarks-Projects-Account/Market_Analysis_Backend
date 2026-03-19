@@ -27,13 +27,14 @@ logger = logging.getLogger(__name__)
 
 INTERVAL_SECONDS = 300  # 5 minutes
 
-# Each entry: (attr on MarketIntelligenceDeps, human-readable label)
+# Each entry: (attr on MarketIntelligenceDeps, label used for model-score persistence)
+# Labels MUST match the canonical engine keys in market_state_contract.ENGINE_KEYS.
 _ENGINE_MODEL_CALLS: list[tuple[str, str]] = [
     ("breadth_service", "breadth_participation"),
     ("volatility_options_service", "volatility_options"),
     ("cross_asset_macro_service", "cross_asset_macro"),
     ("flows_positioning_service", "flows_positioning"),
-    ("liquidity_conditions_service", "liquidity_conditions"),
+    ("liquidity_conditions_service", "liquidity_financial_conditions"),
     ("news_sentiment_service", "news_sentiment"),
 ]
 

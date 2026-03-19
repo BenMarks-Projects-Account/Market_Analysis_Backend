@@ -16,7 +16,7 @@ var ENGINE_HISTORY_SERIES = [
   { key: 'volatility_options',      label: 'Volatility & Options',         color: 'rgba(255,199,88,0.9)'  },
   { key: 'cross_asset_macro',       label: 'Cross-Asset Macro',            color: 'rgba(126,247,184,0.9)' },
   { key: 'flows_positioning',       label: 'Flows & Positioning',          color: 'rgba(255,79,102,0.9)'  },
-  { key: 'liquidity_conditions',    label: 'Liquidity & Financial Conds',  color: 'rgba(181,126,255,0.9)' },
+  { key: 'liquidity_financial_conditions', label: 'Liquidity & Financial Conds', color: 'rgba(181,126,255,0.9)' },
   { key: 'news_sentiment',          label: 'News & Sentiment',             color: 'rgba(255,156,68,0.9)'  },
 ];
 
@@ -243,7 +243,7 @@ console.log('Test: six series always returned');
   assertEqual(result.series[1].key, 'volatility_options', 'second key');
   assertEqual(result.series[2].key, 'cross_asset_macro', 'third key');
   assertEqual(result.series[3].key, 'flows_positioning', 'fourth key');
-  assertEqual(result.series[4].key, 'liquidity_conditions', 'fifth key');
+  assertEqual(result.series[4].key, 'liquidity_financial_conditions', 'fifth key');
   assertEqual(result.series[5].key, 'news_sentiment', 'sixth key');
 })();
 

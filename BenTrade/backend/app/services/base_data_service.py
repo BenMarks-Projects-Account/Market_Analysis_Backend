@@ -616,6 +616,57 @@ class BaseDataService:
             )
             return []
 
+    async def get_intraday_bars(self, symbol: str, lookback_days: int = 14) -> list[dict[str, Any]]:
+        """Return hourly bars with ISO-datetime timestamps for intraday charts.
+
+        Returns ``[{"date": "ISO-datetime", "close": float}, ...]``.
+        Primary: Polygon 1-hour aggregates.  Fallback: Tradier 15min history.
+        Returns empty list (not an error) if intraday data is unavailable.
+        """
+        normalized_symbol = self._normalize_symbol(symbol)
+        if not normalized_symbol:
+            return []
+
+        # Primary: Polygon hourly bars (~65 bars over 14 days)
+        if self.polygon_client is not None and self._source_configured("polygon"):
+            try:
+                bars = await self.polygon_client.get_intraday_bars(
+                    normalized_symbol, lookback_days=lookback_days,
+                    multiplier=1, timespan="hour",
+                )
+                if bars:
+                    self._mark_success("polygon", http_status=200, message="intraday bars ok")
+                    return bars
+                logger.debug("event=intraday_empty symbol=%s source=polygon", normalized_symbol)
+            except Exception as exc:
+                self._mark_failure("polygon", exc)
+                logger.warning(
+                    "event=intraday_unavailable symbol=%s source=polygon error=%s",
+                    normalized_symbol, str(exc),
+                )
+
+        # Fallback: Tradier 15min history
+        end_date = datetime.now(timezone.utc).date()
+        start_date = end_date - timedelta(days=lookback_days)
+        try:
+            fallback = await self.tradier_client.get_intraday_bars(
+                normalized_symbol,
+                start_date=start_date.isoformat(),
+                end_date=end_date.isoformat(),
+                interval="15min",
+            )
+            if fallback:
+                self._mark_success("tradier", http_status=200, message="intraday bars fallback ok")
+                return fallback
+            logger.debug("event=intraday_empty symbol=%s source=tradier", normalized_symbol)
+        except Exception as exc:
+            self._mark_failure("tradier", exc)
+            logger.warning(
+                "event=intraday_unavailable symbol=%s source=tradier error=%s",
+                normalized_symbol, str(exc),
+            )
+        return []
+
     async def _get_chain_with_health(self, symbol: str, expiration: str, greeks: bool = True) -> list[dict[str, Any]]:
         _is_snapshot = isinstance(self.chain_source, (SnapshotChainSource, ManifestSnapshotSource))
         try:

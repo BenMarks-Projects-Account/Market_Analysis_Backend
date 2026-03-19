@@ -172,7 +172,7 @@ window.BenTradeBootChoiceModal = (function(){
         volatility_options: 'Volatility',
         cross_asset_macro: 'Cross-Asset',
         flows_positioning: 'Flows',
-        liquidity_conditions: 'Liquidity',
+        liquidity_financial_conditions: 'Liquidity',
         news_sentiment: 'News',
       };
       let html = '';
@@ -197,12 +197,23 @@ window.BenTradeBootChoiceModal = (function(){
       root.remove();
     }
 
+    /** Activate a single phase without deactivating others (parallel-safe). */
+    function activatePhase(phase){
+      const el = phaseEls[phase];
+      if(!el) return;
+      el.classList.add('active');
+      el.classList.remove('done');
+      const icon = el.querySelector('.boot-phase-icon');
+      if(icon) icon.textContent = '\u25F7';
+    }
+
     return {
       show,
       close,
       destroy,
       setPhaseActive,
       setPhaseDone,
+      activatePhase,
       setModelProgress,
       isOpen: () => root.classList.contains('is-open'),
     };

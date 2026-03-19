@@ -67,6 +67,70 @@
       .shell-layout > .diagnostic-sidebar{ display:none; }
     }
 
+    /* ── Expand / Collapse — fullscreen zoom for center panel ── */
+    .bt-view-expanded{
+      overflow:visible;
+    }
+    .bt-view-expanded > .titlebar{
+      opacity:0;
+      pointer-events:none;
+      max-height:0;
+      overflow:hidden;
+      margin:0;
+      padding:0;
+      transition:opacity 0.28s ease, max-height 0.32s ease;
+    }
+    .bt-view-expanded > .subtitlebar{
+      opacity:0;
+      pointer-events:none;
+      max-height:0;
+      overflow:hidden;
+      margin:0;
+      padding:0;
+      transition:opacity 0.28s ease, max-height 0.32s ease;
+    }
+    .bt-view-expanded > .shell-layout{
+      grid-template-columns:1fr;
+      gap:0;
+      margin-top:0;
+      transition:grid-template-columns 0.32s cubic-bezier(0.22,0.61,0.36,1);
+    }
+    .bt-view-expanded > .shell-layout > .sidebar{
+      display:none;
+    }
+    .bt-view-expanded > .shell-layout > .diagnostic-sidebar{
+      display:none;
+    }
+    .bt-view-expanded > .shell-layout > .main{
+      position:fixed;
+      inset:0;
+      z-index:8000;
+      width:100vw;
+      height:100vh;
+      max-width:none;
+      overflow:auto;
+      padding:16px 24px;
+      background:var(--bg, #02040a);
+      animation:btExpandZoom 0.34s cubic-bezier(0.22,0.61,0.36,1) forwards;
+    }
+    @keyframes btExpandZoom{
+      0%{
+        transform:scale(0.88);
+        opacity:0.6;
+      }
+      100%{
+        transform:scale(1);
+        opacity:1;
+      }
+    }
+    /* Reverse animation not needed — collapse is instant removal of class,
+       but we add a subtle transition on .main for the return */
+    .shell-layout > .main{
+      transition:transform 0.28s ease, opacity 0.24s ease;
+    }
+
+
+
     .dash-frame{
       width:100%;
       height: calc(100vh - 210px);
@@ -695,6 +759,8 @@
   <script src="assets/js/ui/boot_choice_modal.js?v=20260218a"></script>
   <script src="assets/js/ui/data_workbench_modal.js?v=20260225a"></script>
   <script src="assets/js/ui/home_loading_overlay.js?v=20260216b"></script>
+  <script src="assets/js/ui/chat_drawer.js?v=20260614a"></script>
+  <script src="assets/js/ui/panel_expand.js?v=20260318a"></script>
   <script src="assets/js/utils/rateLimiter.js?v=20260216a"></script>
   <script src="assets/js/ui/notes.js?v=20260216a"></script>
   <script src="assets/js/stores/sessionStats.js?v=20260216b"></script>

@@ -21,7 +21,7 @@ ENGINE_DISPLAY: list[tuple[str, str]] = [
     ("volatility_options", "Volatility & Options"),
     ("cross_asset_macro", "Cross-Asset Macro"),
     ("flows_positioning", "Flows & Positioning"),
-    ("liquidity_conditions", "Liquidity & Financial Conditions"),
+    ("liquidity_financial_conditions", "Liquidity & Financial Conditions"),
     ("news_sentiment", "News & Sentiment"),
 ]
 
@@ -88,6 +88,10 @@ def normalize_engine_card(
     raw_engine_status = engine_data.get("engine_status") if has_engine else None
     engine_status = "missing" if not has_engine else _resolve_engine_status(raw_engine_status)
 
+    # Degraded reasons from engine normalization (for traceable UI badges)
+    status_detail = engine_data.get("status_detail") if has_engine else None
+    degraded_reasons = (status_detail.get("degraded_reasons") or []) if isinstance(status_detail, dict) else []
+
     # ── Model fields ──
     model_score = model_entry.get("model_score") if model_entry else None
     model_label = model_entry.get("model_label") if model_entry else None
@@ -114,6 +118,7 @@ def normalize_engine_card(
         "confidence": confidence,
         "engine_status": engine_status,
         "model_status": model_status,
+        "degraded_reasons": degraded_reasons,
         # Legacy: the original routes exposed a bare "status" field
         # holding the engine status.  Kept for backward compat.
         "status": engine_status,
@@ -137,12 +142,35 @@ def build_engine_cards(
     -------
     list[dict] — one card per ENGINE_DISPLAY entry, in stable order.
     """
+    # ── Temporary backward-compat alias (added 2026-03-18) ──────────────
+    # Before the key alignment fix, model scores were persisted under
+    # "liquidity_conditions" instead of the canonical
+    # "liquidity_financial_conditions".  Existing model_scores_latest.json
+    # files may still contain the old key.  This alias resolves it.
+    #
+    # REMOVAL PLAN: safe to delete once all deployed instances have run
+    # at least one full model-analysis cycle (writes canonical key).
+    # After removal, delete the related test_model_score_alias_lookup
+    # test in test_market_picture_contract.py.
+    # ──────────────────────────────────────────────────────────────────────
+    _MODEL_KEY_ALIASES: dict[str, str] = {
+        "liquidity_financial_conditions": "liquidity_conditions",
+    }
+
+    def _get_model_entry(key: str) -> dict[str, Any] | None:
+        entry = all_model_scores.get(key)
+        if entry is None:
+            alias = _MODEL_KEY_ALIASES.get(key)
+            if alias:
+                entry = all_model_scores.get(alias)
+        return entry
+
     return [
         normalize_engine_card(
             key=key,
             display_name=display_name,
             engine_data=raw_engines.get(key),
-            model_entry=all_model_scores.get(key),
+            model_entry=_get_model_entry(key),
         )
         for key, display_name in ENGINE_DISPLAY
     ]

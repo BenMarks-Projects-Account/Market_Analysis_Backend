@@ -73,13 +73,13 @@ window.BenTradeSourceHealth = (function(){
     });
 
     const ordered = SOURCE_ORDER.map((name) => map.get(name)).filter(Boolean);
-    // AI Model entry is always listed last
+    // AI Model entry is listed first (right after LIVE FEED in the brand panel)
     const modelEntry = sources.find((item) => String(item?.name || '').trim() === AI_MODEL_LABEL);
     const extras = sources.filter((item) => {
       const name = String(item?.name || '').trim();
       return !SOURCE_ORDER.includes(name) && name !== AI_MODEL_LABEL;
     });
-    const all = [...ordered, ...extras, ...(modelEntry ? [modelEntry] : [])];
+    const all = [...(modelEntry ? [modelEntry] : []), ...ordered, ...extras];
 
     const rows = all.map((item) => {
       const notes = Array.isArray(item?.notes) ? item.notes.filter(Boolean).map(String) : [];

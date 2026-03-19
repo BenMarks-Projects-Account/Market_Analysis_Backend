@@ -329,6 +329,63 @@ class TradierClient:
 
         return await self.cache.get_or_set(key, self.settings.CANDLES_CACHE_TTL_SECONDS, _load)
 
+    async def get_intraday_bars(
+        self, symbol: str, start_date: str, end_date: str, interval: str = "15min"
+    ) -> list[dict[str, Any]]:
+        """Return intraday bars with ISO-datetime timestamps.
+
+        Tradier ``/markets/history`` with ``interval=15min`` returns bars keyed
+        under ``history.day`` with ``date`` + ``time`` fields (or just ``date``
+        as an ISO-like datetime).  Normalised to::
+
+            [{"date": "2026-03-18T10:30:00", "close": float}, ...]
+        """
+        normalized_symbol = self._normalize_symbol(symbol)
+        if not normalized_symbol:
+            return []
+
+        key = f"tradier:intraday:{normalized_symbol}:{start_date}:{end_date}:{interval}"
+        url = f"{self.settings.TRADIER_BASE_URL}/markets/history"
+
+        async def _load() -> list[dict[str, Any]]:
+            payload = await request_json(
+                self.http_client,
+                "GET",
+                url,
+                params={
+                    "symbol": normalized_symbol,
+                    "interval": interval,
+                    "start": start_date,
+                    "end": end_date,
+                },
+                headers=self._headers,
+            )
+
+            days = ((payload.get("history") or {}).get("day")) or []
+            if isinstance(days, dict):
+                days = [days]
+
+            result: list[dict[str, Any]] = []
+            for bar in days:
+                if not isinstance(bar, dict):
+                    continue
+                close = bar.get("close")
+                bar_date = bar.get("date")
+                if close is None or bar_date is None:
+                    continue
+                # Tradier may return datetime or date+time fields
+                bar_time = bar.get("time")
+                iso_dt = str(bar_date)
+                if bar_time and "T" not in iso_dt:
+                    iso_dt = f"{iso_dt}T{bar_time}"
+                try:
+                    result.append({"date": iso_dt, "close": float(close)})
+                except (TypeError, ValueError):
+                    continue
+            return result
+
+        return await self.cache.get_or_set(key, self.settings.CANDLES_CACHE_TTL_SECONDS, _load)
+
     async def health(self) -> bool:
         try:
             await self.get_quote("SPY")

@@ -307,12 +307,29 @@ def _coerce_stock_model_output(candidate: Any) -> dict[str, Any] | None:
 
 
 def _coerce_regime_model_output(candidate: Any) -> dict[str, Any] | None:
-    """Normalise the LLM response for regime analysis into a consistent dict."""
+    """Normalise the LLM response for regime analysis into a consistent dict.
+
+    Resilient to common LLM response variations:
+    - Alternate key names (e.g., risk_regime vs risk_regime_label)
+    - Truncated JSON with partial fields
+    - Nested sub-objects
+    """
+    import logging as _logging
+    _log = _logging.getLogger("bentrade.model_analysis")
+
     if isinstance(candidate, list) and candidate:
         first = candidate[0]
         if isinstance(first, dict):
             candidate = first
     if not isinstance(candidate, dict):
+        return None
+
+    # ── Helper: find value from multiple possible key names ─────────
+    def _get_first(d: dict, *keys: str) -> Any:
+        for k in keys:
+            v = d.get(k)
+            if v is not None:
+                return v
         return None
 
     sections = [
@@ -336,7 +353,7 @@ def _coerce_regime_model_output(candidate: Any) -> dict[str, Any] | None:
         else:
             out[key] = None
 
-    confidence_raw = candidate.get("confidence")
+    confidence_raw = _get_first(candidate, "confidence", "overall_confidence")
     try:
         out["confidence"] = max(0.0, min(float(confidence_raw), 1.0))
     except (TypeError, ValueError):
@@ -345,17 +362,57 @@ def _coerce_regime_model_output(candidate: Any) -> dict[str, Any] | None:
     # ── Model-inferred regime summary labels ────────────────────────
     # These are the structured labels the model infers independently from raw
     # inputs — used for the Engine-vs-Model comparison table.
-    for label_key in ("risk_regime_label", "trend_label", "vol_regime_label"):
-        val = candidate.get(label_key)
+    # Try multiple alternate key names LLMs commonly produce.
+    _LABEL_ALTERNATES: dict[str, tuple[str, ...]] = {
+        "risk_regime_label": ("risk_regime_label", "risk_regime", "risk_label", "risk"),
+        "trend_label": ("trend_label", "trend", "market_trend"),
+        "vol_regime_label": ("vol_regime_label", "vol_label", "volatility_label",
+                             "volatility", "vol_regime", "volatility_regime"),
+    }
+    for label_key, alternates in _LABEL_ALTERNATES.items():
+        val = _get_first(candidate, *alternates)
         out[label_key] = str(val).strip() if isinstance(val, str) and val.strip() else None
 
-    key_drivers = candidate.get("key_drivers")
+    # ── Three-block assessment labels ───────────────────────────────
+    _ASSESS_ALTERNATES: dict[str, tuple[str, ...]] = {
+        "structural_assessment": ("structural_assessment", "structural", "structural_label"),
+        "tape_assessment": ("tape_assessment", "tape", "tape_label"),
+        "tactical_assessment": ("tactical_assessment", "tactical", "tactical_label"),
+    }
+    for assess_key, alternates in _ASSESS_ALTERNATES.items():
+        val = _get_first(candidate, *alternates)
+        out[assess_key] = str(val).strip() if isinstance(val, str) and val.strip() else None
+
+    # ── What-works / what-to-avoid ──────────────────────────────────
+    for list_key in ("what_works", "what_to_avoid"):
+        out[list_key] = _coerce_string_list(candidate.get(list_key), max_items=6)
+
+    key_drivers = _get_first(candidate, "key_drivers", "drivers", "top_drivers")
     if isinstance(key_drivers, list):
         out["key_drivers"] = [str(item).strip() for item in key_drivers if str(item or "").strip()][:5]
     elif isinstance(key_drivers, str) and key_drivers.strip():
         out["key_drivers"] = [key_drivers.strip()]
     else:
         out["key_drivers"] = None
+
+    # ── Diagnostic: count how many fields are populated vs None ─────
+    populated = sum(1 for k, v in out.items() if v is not None)
+    total = len(out)
+    if populated == 0:
+        _log.warning(
+            "[MODEL_REGIME_COERCE] ALL fields None after coercion. "
+            "candidate_keys=%s candidate_sample=%s",
+            list(candidate.keys())[:20],
+            str(candidate)[:500],
+        )
+    elif populated < total // 2:
+        _log.warning(
+            "[MODEL_REGIME_COERCE] low_fill=%d/%d. "
+            "missing_keys=%s candidate_keys=%s",
+            populated, total,
+            [k for k, v in out.items() if v is None],
+            list(candidate.keys())[:20],
+        )
 
     return out
 
@@ -364,16 +421,19 @@ def _extract_regime_raw_inputs(regime_data: dict[str, Any]) -> dict[str, Any]:
     """Extract ONLY raw market inputs from regime data, excluding all derived scores/labels.
 
     Raw inputs = values directly from providers or computed from raw price series
-    (e.g., moving averages, RSI from closes).
+    (e.g., moving averages, RSI from closes) PLUS MI engine pillar-level detail
+    from the three-block architecture.
 
     Explicitly excluded:
-    - regime_label (RISK_ON/NEUTRAL/RISK_OFF)
+    - regime_label (RISK_ON/NEUTRAL/RISK_OFF/etc.)
     - regime_score (0-100 composite)
+    - confidence (0-1 composite)
+    - interpretation (human-readable string)
     - component score values (normalized 0-100)
     - component raw_points
     - component signals (human-readable scoring descriptions)
     - suggested_playbook (primary/avoid/notes)
-    - boolean comparisons (close_gt_ema20, close_gt_ema50, sma50_gt_sma200)
+    - what_works, what_to_avoid, change_triggers, key_drivers
     """
     components = regime_data.get("components") or {}
 
@@ -383,16 +443,23 @@ def _extract_regime_raw_inputs(regime_data: dict[str, Any]) -> dict[str, Any]:
     rates_inputs = (components.get("rates") or {}).get("inputs") or {}
     momentum_inputs = (components.get("momentum") or {}).get("inputs") or {}
 
-    # Derived boolean fields to exclude from trend inputs
-    _TREND_EXCLUDED = {"close_gt_ema20", "close_gt_ema50", "sma50_gt_sma200"}
+    _TREND_SYMBOLS = ["SPY", "QQQ", "IWM", "DIA"]
+    per_index_trend: dict[str, dict[str, Any]] = {}
+    for sym in _TREND_SYMBOLS:
+        sym_data = trend_inputs.get(sym)
+        if isinstance(sym_data, dict):
+            per_index_trend[sym] = sym_data
+
+    spy_trend = per_index_trend.get("SPY", {})
 
     raw: dict[str, Any] = {
-        # Trend: SPY price and moving averages (computed from raw price series)
-        "spy_price": trend_inputs.get("close"),
-        "spy_ema20": trend_inputs.get("ema20"),
-        "spy_ema50": trend_inputs.get("ema50"),
-        "spy_sma50": trend_inputs.get("sma50"),
-        "spy_sma200": trend_inputs.get("sma200"),
+        # Trend: multi-index moving averages (per-symbol breakdown)
+        "trend_indexes": per_index_trend if per_index_trend else None,
+        "spy_price": spy_trend.get("close"),
+        "spy_ema20": spy_trend.get("ema20"),
+        "spy_ema50": spy_trend.get("ema50"),
+        "spy_sma50": spy_trend.get("sma50"),
+        "spy_sma200": spy_trend.get("sma200"),
         # Volatility: VIX spot level and recent change
         "vix_spot": vol_inputs.get("vix"),
         "vix_5d_change_pct": vol_inputs.get("vix_5d_change"),
@@ -403,11 +470,55 @@ def _extract_regime_raw_inputs(regime_data: dict[str, Any]) -> dict[str, Any]:
         # Rates: 10Y Treasury yield
         "ten_year_yield": rates_inputs.get("ten_year_yield"),
         "ten_year_5d_change_bps": rates_inputs.get("ten_year_5d_change_bps"),
-        # Momentum: RSI
-        "rsi14": momentum_inputs.get("rsi14"),
+        # Momentum: multi-index average RSI
+        "avg_rsi14": momentum_inputs.get("avg_rsi14"),
+        "rsi14_per_index": {
+            sym: momentum_inputs.get(sym)
+            for sym in _TREND_SYMBOLS
+            if momentum_inputs.get(sym) is not None
+        } or None,
     }
 
+    # ── Three-block pillar detail (MI engine normalized data) ─────
+    # Include pillar-level detail from each block.  To avoid payload bloat,
+    # each pillar is trimmed to a compact summary (label + score + key scalars)
+    # and signals are capped at 6 items, each truncated to 120 chars.
+    blocks = regime_data.get("blocks") or {}
+    for block_key in ("structural", "tape", "tactical"):
+        block = blocks.get(block_key)
+        if not block or not isinstance(block, dict):
+            continue
+        pillar_detail = block.get("pillar_detail")
+        if pillar_detail and isinstance(pillar_detail, dict):
+            raw[f"block_{block_key}_pillars"] = _compact_pillar_detail(pillar_detail)
+        key_signals = block.get("key_signals")
+        if key_signals and isinstance(key_signals, list):
+            raw[f"block_{block_key}_signals"] = [
+                str(s)[:120] for s in key_signals[:6]
+            ]
+
     return raw
+
+
+def _compact_pillar_detail(pillar_detail: dict[str, Any]) -> dict[str, Any]:
+    """Reduce a block's pillar_detail to model-relevant scalars only.
+
+    Keeps: label, score, value, weight, tone, spread, level, direction
+    Drops: deeply nested sub-objects, history arrays, raw component dicts.
+    """
+    _KEEP_KEYS = {"label", "score", "value", "weight", "tone", "spread",
+                  "level", "direction", "status", "signal", "pct", "delta"}
+    compact: dict[str, Any] = {}
+    for name, detail in pillar_detail.items():
+        if not isinstance(detail, dict):
+            compact[name] = detail
+            continue
+        slim: dict[str, Any] = {}
+        for k, v in detail.items():
+            if k in _KEEP_KEYS and not isinstance(v, (dict, list)):
+                slim[k] = v
+        compact[name] = slim if slim else {"_empty": True}
+    return compact
 
 
 # Fields that are explicitly derived by BenTrade's regime engine and must NOT
@@ -415,13 +526,20 @@ def _extract_regime_raw_inputs(regime_data: dict[str, Any]) -> dict[str, Any]:
 _REGIME_DERIVED_FIELDS = [
     "regime_label",
     "regime_score",
+    "confidence",
+    "interpretation",
     "suggested_playbook",
+    "what_works",
+    "what_to_avoid",
+    "change_triggers",
+    "key_drivers",
+    "agreement",
+    "blocks.*.score",
+    "blocks.*.label",
+    "blocks.*.confidence",
     "components.*.score",
     "components.*.raw_points",
     "components.*.signals",
-    "components.trend.inputs.close_gt_ema20",
-    "components.trend.inputs.close_gt_ema50",
-    "components.trend.inputs.sma50_gt_sma200",
 ]
 
 
@@ -433,39 +551,52 @@ def extract_engine_regime_summary(regime_data: dict[str, Any]) -> dict[str, Any]
 
     Input fields and derivation:
       - risk_regime_label: from regime_data["regime_label"] (RISK_ON → Risk-On, etc.)
-      - trend_label: inferred from trend component inputs (close vs EMA20/EMA50/SMA200)
+      - trend_label: inferred from multi-index trend composite (majority vote)
       - vol_regime_label: inferred from VIX level buckets
-      - confidence: regime_score / 100 (normalized to 0-1)
-      - key_drivers: top signals from components with highest scores
+      - confidence: from regime_data["confidence"] (direct, 0-1) or score/100 fallback
+      - key_drivers: from regime_data["key_drivers"] or top component signals
+      - structural/tape/tactical labels: from regime_data["blocks"]
     """
     # ── Risk regime label ───────────────────────────────────────────
     raw_label = str(regime_data.get("regime_label") or "NEUTRAL").upper()
-    _LABEL_MAP = {"RISK_ON": "Risk-On", "RISK_OFF": "Risk-Off", "NEUTRAL": "Neutral"}
+    _LABEL_MAP = {
+        "RISK_ON": "Risk-On",
+        "RISK_ON_CAUTIOUS": "Risk-On (Cautious)",
+        "RISK_OFF": "Risk-Off",
+        "RISK_OFF_CAUTION": "Risk-Off (Caution)",
+        "NEUTRAL": "Neutral",
+    }
     risk_regime_label = _LABEL_MAP.get(raw_label, "Neutral")
 
     # ── Trend label ─────────────────────────────────────────────────
-    # Derived from: close vs EMA20, EMA50, SMA50 vs SMA200
     components = regime_data.get("components") or {}
     trend_inputs = (components.get("trend") or {}).get("inputs") or {}
-    close = trend_inputs.get("close")
-    ema20 = trend_inputs.get("ema20")
-    sma50 = trend_inputs.get("sma50")
-    sma200 = trend_inputs.get("sma200")
-
-    if close is not None and ema20 is not None and sma200 is not None:
-        if close > ema20 and (sma50 is None or sma50 > sma200):
-            trend_label = "Uptrend"
-        elif close < sma200:
-            trend_label = "Downtrend"
-        else:
-            trend_label = "Sideways"
-    elif close is not None and ema20 is not None:
-        trend_label = "Uptrend" if close > ema20 else "Downtrend"
-    else:
+    _TREND_SYMS = ["SPY", "QQQ", "IWM", "DIA"]
+    bull_count, bear_count, valid_count = 0, 0, 0
+    for sym in _TREND_SYMS:
+        sym_data = trend_inputs.get(sym) if isinstance(trend_inputs.get(sym), dict) else None
+        if not sym_data:
+            continue
+        close = sym_data.get("close")
+        ema20 = sym_data.get("ema20")
+        sma200 = sym_data.get("sma200")
+        if close is None or ema20 is None:
+            continue
+        valid_count += 1
+        if close > ema20:
+            bull_count += 1
+        if sma200 is not None and close < sma200:
+            bear_count += 1
+    if valid_count == 0:
         trend_label = "Unknown"
+    elif bull_count > valid_count / 2:
+        trend_label = "Uptrend"
+    elif bear_count > valid_count / 2:
+        trend_label = "Downtrend"
+    else:
+        trend_label = "Sideways"
 
     # ── Volatility regime label ─────────────────────────────────────
-    # Derived from: VIX level buckets
     vol_inputs = (components.get("volatility") or {}).get("inputs") or {}
     vix = vol_inputs.get("vix")
     if vix is not None:
@@ -479,35 +610,70 @@ def extract_engine_regime_summary(regime_data: dict[str, Any]) -> dict[str, Any]
         vol_regime_label = "Unknown"
 
     # ── Confidence ──────────────────────────────────────────────────
-    # regime_score is 0-100; normalize to 0-1 for comparison
-    regime_score = regime_data.get("regime_score")
-    try:
-        confidence = round(max(0.0, min(float(regime_score) / 100.0, 1.0)), 2)
-    except (TypeError, ValueError):
-        confidence = None
+    # Prefer the direct confidence field from new regime; fallback to score/100
+    confidence = regime_data.get("confidence")
+    if confidence is None:
+        regime_score = regime_data.get("regime_score")
+        try:
+            confidence = round(max(0.0, min(float(regime_score) / 100.0, 1.0)), 2)
+        except (TypeError, ValueError):
+            confidence = None
+    else:
+        try:
+            confidence = round(max(0.0, min(float(confidence), 1.0)), 2)
+        except (TypeError, ValueError):
+            confidence = None
 
     # ── Key drivers ─────────────────────────────────────────────────
-    # Pick top signals from the components with highest scores
+    # Prefer top-level key_drivers from new regime; fallback to component signals
     key_drivers: list[str] = []
-    scored_components = []
-    for cname in ("trend", "volatility", "breadth", "rates", "momentum"):
-        comp = components.get(cname) or {}
-        score = comp.get("score")
-        signals = comp.get("signals") or []
-        if score is not None and signals:
-            scored_components.append((score, cname, signals))
-    scored_components.sort(key=lambda x: x[0], reverse=True)
-    for _, cname, signals in scored_components[:3]:
-        if signals:
-            key_drivers.append(f"{cname.capitalize()}: {signals[0]}")
+    top_drivers = regime_data.get("key_drivers")
+    if isinstance(top_drivers, list) and top_drivers:
+        key_drivers = [str(d) for d in top_drivers[:5]]
+    else:
+        scored_components = []
+        for cname in ("trend", "volatility", "breadth", "rates", "momentum"):
+            comp = components.get(cname) or {}
+            score = comp.get("score")
+            signals = comp.get("signals") or []
+            if score is not None and signals:
+                scored_components.append((score, cname, signals))
+        scored_components.sort(key=lambda x: x[0], reverse=True)
+        for _, cname, signals in scored_components[:3]:
+            if signals:
+                key_drivers.append(f"{cname.capitalize()}: {signals[0]}")
 
-    return {
+    # ── Block-level labels (new three-block architecture) ───────────
+    blocks = regime_data.get("blocks") or {}
+    structural_label = None
+    tape_label = None
+    tactical_label = None
+    for bkey, attr in [("structural", "structural_label"), ("tape", "tape_label"), ("tactical", "tactical_label")]:
+        block = blocks.get(bkey)
+        if block and isinstance(block, dict):
+            if bkey == "structural":
+                structural_label = block.get("label")
+            elif bkey == "tape":
+                tape_label = block.get("label")
+            elif bkey == "tactical":
+                tactical_label = block.get("label")
+
+    result = {
         "risk_regime_label": risk_regime_label,
         "trend_label": trend_label,
         "vol_regime_label": vol_regime_label,
         "confidence": confidence,
         "key_drivers": key_drivers,
     }
+    # Include block labels if available (new architecture)
+    if structural_label is not None:
+        result["structural_label"] = structural_label
+    if tape_label is not None:
+        result["tape_label"] = tape_label
+    if tactical_label is not None:
+        result["tactical_label"] = tactical_label
+
+    return result
 
 
 def compute_regime_deltas(
@@ -567,6 +733,18 @@ def compute_regime_deltas(
         "confidence": conf_delta,
     }
 
+    # Block-level deltas (structural / tape / tactical)
+    # Engine uses *_label, model uses *_assessment — compare cross-key
+    for bkey, e_key, m_key in [
+        ("structural", "structural_label", "structural_assessment"),
+        ("tape", "tape_label", "tape_assessment"),
+        ("tactical", "tactical_label", "tactical_assessment"),
+    ]:
+        e_val = engine_summary.get(e_key)
+        m_val = model_summary.get(m_key)
+        if e_val is not None or m_val is not None:
+            deltas[bkey] = _label_delta(e_val, m_val)
+
     disagreement_count = sum(1 for v in deltas.values() if not v["match"])
 
     return {
@@ -621,40 +799,49 @@ def analyze_regime(
 
     # ── 3. Build prompt ─────────────────────────────────────────────
     prompt = (
-        "You are an independent market analyst producing an options-trading regime assessment.\n"
+        "You are an independent market regime analyst for an options trading platform.\n"
         "You will receive a JSON object with:\n"
-        "  - regime_raw_inputs: raw market data values (prices, moving averages, VIX, yields, breadth, RSI)\n"
+        "  - regime_raw_inputs: raw market data values organized across three domains:\n"
+        "    * Legacy factor data (index prices, moving averages, VIX, yields, breadth, RSI)\n"
+        "    * Structural block pillars (liquidity conditions, cross-asset macro signals)\n"
+        "    * Tape block pillars (breadth/participation engine detail, index trend/momentum)\n"
+        "    * Tactical block pillars (volatility/options structure, flows/positioning, news/sentiment)\n"
         "  - metadata: timestamp and data-source health information\n\n"
         "IMPORTANT RULES:\n"
         "  1. Do NOT use any precomputed regime labels, scores, or playbook recommendations.\n"
         "     If a label is needed, infer it yourself from the raw inputs.\n"
         "  2. All assessments must be derived solely from the raw inputs provided.\n"
-        "  3. If a raw input is null/missing, note it explicitly and reduce confidence accordingly.\n\n"
+        "  3. If a raw input is null/missing, note it explicitly and reduce confidence.\n"
+        "  4. Your analysis should cover THREE regime dimensions:\n"
+        "     - Structural: Is the background environment supportive, restrictive, or unstable?\n"
+        "     - Tape: Is the broad US market trending, broad, rotational, narrow, or weakening?\n"
+        "     - Tactical: Is the short-term outlook expansionary, stable, compressing, or event-risk?\n\n"
         "Return valid JSON only (no markdown, no code fences) with exactly these keys:\n"
-        "  risk_regime_label   – string, one of: 'Risk-On', 'Neutral', 'Risk-Off'\n"
-        "     (your independent assessment of the overall risk regime)\n"
-        "  trend_label         – string, one of: 'Uptrend', 'Sideways', 'Downtrend'\n"
-        "     (your independent assessment of the market trend)\n"
-        "  vol_regime_label    – string, one of: 'Low', 'Moderate', 'High'\n"
-        "     (your independent assessment of the volatility regime)\n"
-        "  key_drivers         – string array of 3 short bullet points describing the top\n"
-        "     factors driving your regime assessment, derived from the raw inputs\n"
-        "  executive_summary   – string, 2-4 sentence overview of the current market regime\n"
-        "     as you infer it from the raw data. Include your inferred regime stance\n"
-        "     (risk-on / neutral / risk-off) and overall trend direction.\n"
-        "  regime_breakdown    – object with keys trend, volatility, breadth, rates, momentum;\n"
-        "     each value is a 2-3 sentence analysis of that component based on raw inputs.\n"
-        "     Explicitly state which raw values you are interpreting.\n"
-        "  primary_fit         – string explaining which options strategies fit the regime\n"
-        "     you inferred, and why, based on the raw data\n"
-        "  avoid_rationale     – string explaining which strategies are riskier given\n"
-        "     the raw data, and why\n"
-        "  change_triggers     – string array of 3-5 specific conditions that would shift\n"
-        "     the regime (e.g., 'VIX rises above 25', 'SPY breaks below SMA200')\n"
-        "  confidence_caveats  – string with confidence level and any data-quality caveats;\n"
-        "     call out any missing inputs that reduce confidence\n"
-        "  confidence          – float 0-1 representing your overall confidence\n"
-        "  raw_inputs_used     – object listing each raw input name and the value you received,\n"
+        "  risk_regime_label    – string, one of: 'Risk-On', 'Neutral', 'Risk-Off'\n"
+        "  trend_label          – string, one of: 'Uptrend', 'Sideways', 'Downtrend'\n"
+        "  vol_regime_label     – string, one of: 'Low', 'Moderate', 'High'\n"
+        "  structural_assessment – string, one of: 'Supportive', 'Mixed', 'Restrictive', 'Unstable'\n"
+        "     Your independent read of the macro/liquidity/rates environment.\n"
+        "  tape_assessment       – string, one of: 'Trending', 'Broad', 'Rotational', 'Narrow', 'Weakening'\n"
+        "     Your independent read of US market breadth and participation.\n"
+        "  tactical_assessment   – string, one of: 'Expansionary', 'Stable', 'Compression', 'Event-Risk'\n"
+        "     Your independent read of near-term forward pressure and tradability.\n"
+        "  key_drivers          – string array of 3-5 short bullet points describing the top\n"
+        "     factors driving your regime assessment\n"
+        "  executive_summary    – string, 2-4 sentence overview of the current market regime.\n"
+        "     Reference all three blocks (structural, tape, tactical) in your summary.\n"
+        "  regime_breakdown     – object with keys: structural, tape, tactical, trend, volatility,\n"
+        "     breadth, rates, momentum. Each value is a 2-3 sentence analysis.\n"
+        "  what_works           – string array of 2-4 strategies/approaches that tend to work\n"
+        "     in this regime environment\n"
+        "  what_to_avoid        – string array of 2-4 strategies/approaches to avoid\n"
+        "  primary_fit          – string explaining which options strategies fit this regime\n"
+        "  avoid_rationale      – string explaining which strategies are riskier and why\n"
+        "  change_triggers      – string array of 3-5 specific conditions that would shift\n"
+        "     the regime\n"
+        "  confidence_caveats   – string with confidence level and data-quality caveats\n"
+        "  confidence           – float 0-1 representing your overall confidence\n"
+        "  raw_inputs_used      – object listing each raw input name and value received,\n"
         "     plus a 'missing' array of input names that were null\n"
         "Do not include any keys beyond this schema."
     )
@@ -667,11 +854,33 @@ def analyze_regime(
 
     # Verify exclusion: assert no derived fields leak into user_data
     _user_data_str = json.dumps(user_data, ensure_ascii=False, indent=None)
-    for forbidden in ("regime_label", "regime_score", "suggested_playbook"):
+    for forbidden in ("regime_label", "regime_score", "suggested_playbook", "interpretation", "what_works", "what_to_avoid"):
         if f'"{forbidden}"' in _user_data_str:
             _log.error(
                 "[MODEL_REGIME_TRACE] LEAK DETECTED: derived field '%s' found in user_data", forbidden
             )
+
+    # ── Size budget: cap user_data at ~4000 chars to stay within safe token limits
+    _MAX_USER_DATA_CHARS = 4000
+    if len(_user_data_str) > _MAX_USER_DATA_CHARS:
+        _log.warning(
+            "[MODEL_REGIME_TRACE] user_data exceeds budget: %d chars (max %d). "
+            "Trimming per-index trend data to SPY-only.",
+            len(_user_data_str), _MAX_USER_DATA_CHARS,
+        )
+        # Progressive trim: drop non-SPY trend data first
+        ti = regime_raw_inputs.get("trend_indexes")
+        if isinstance(ti, dict) and len(ti) > 1:
+            spy_only = {k: v for k, v in ti.items() if k == "SPY"}
+            regime_raw_inputs["trend_indexes"] = spy_only if spy_only else None
+        # Drop RSI per-index detail
+        regime_raw_inputs.pop("rsi14_per_index", None)
+        # Rebuild
+        user_data["regime_raw_inputs"] = regime_raw_inputs
+        _user_data_str = json.dumps(user_data, ensure_ascii=False, indent=None)
+        _log.info(
+            "[MODEL_REGIME_TRACE] after trim: %d chars", len(_user_data_str),
+        )
 
     _log.debug(
         "[MODEL_REGIME_TRACE] user_data_snapshot=%s",
@@ -686,7 +895,7 @@ def analyze_regime(
                 "content": _user_data_str,
             },
         ],
-        "max_tokens": 2400,
+        "max_tokens": 4096,
         "temperature": 0.0,
         "stream": False,
     }
@@ -708,10 +917,52 @@ def analyze_regime(
 
     if method:
         _log.info("[MODEL_REGIME] JSON extracted via method=%s", method)
+    else:
+        _log.warning(
+            "[MODEL_REGIME] JSON extraction FAILED. assistant_text_len=%d "
+            "first_200=%r last_200=%r",
+            len(assistant_text or ""),
+            (assistant_text or "")[:200],
+            (assistant_text or "")[-200:],
+        )
+
+    # Diagnostic: log parsed keys before coercion
+    if isinstance(parsed, dict):
+        _log.info(
+            "[MODEL_REGIME] parsed_keys=%s parsed_sample_values={%s}",
+            list(parsed.keys()),
+            ", ".join(
+                f"{k}: {str(v)[:60]}"
+                for k, v in list(parsed.items())[:5]
+            ),
+        )
+    else:
+        _log.warning("[MODEL_REGIME] parsed is not dict: type=%s val=%s",
+                     type(parsed).__name__, str(parsed)[:300])
 
     normalized = _coerce_regime_model_output(parsed)
     if normalized is None:
-        raise ValueError("Model returned invalid regime analysis payload")
+        # Fallback: try to salvage useful prose from the raw response
+        normalized = _build_plaintext_fallback(assistant_text, "regime")
+        if normalized is None:
+            raise ValueError("Model returned invalid regime analysis payload")
+        _log.warning(
+            "[MODEL_REGIME] JSON coerce failed; used plaintext_fallback"
+        )
+
+    # Diagnostic: log key fields after coercion
+    _log.info(
+        "[MODEL_REGIME] coerced: risk=%s trend=%s vol=%s conf=%s "
+        "structural=%s tape=%s tactical=%s exec_summary=%s",
+        normalized.get("risk_regime_label"),
+        normalized.get("trend_label"),
+        normalized.get("vol_regime_label"),
+        normalized.get("confidence"),
+        normalized.get("structural_assessment"),
+        normalized.get("tape_assessment"),
+        normalized.get("tactical_assessment"),
+        "present" if normalized.get("executive_summary") else "MISSING",
+    )
 
     # ── 7. Attach trace metadata ────────────────────────────────
     normalized["_trace"] = {
@@ -1605,7 +1856,7 @@ def _coerce_news_sentiment_model_output(candidate: Any) -> dict[str, Any] | None
 
     # ── Summary (required) ──────────────────────────────────────
     summary = candidate.get("summary") or candidate.get("executive_summary")
-    out["summary"] = str(summary).strip() if isinstance(summary, str) and summary.strip() else None
+    out["summary"] = _safe_summary_text(summary)
 
     # ── Headline drivers (list of dicts) ────────────────────────
     hd_raw = candidate.get("headline_drivers")
@@ -1678,6 +1929,26 @@ def _coerce_news_sentiment_model_output(candidate: Any) -> dict[str, Any] | None
     return out
 
 
+def _safe_summary_text(val: Any, fallback: str | None = None) -> str | None:
+    """Extract a clean text summary from a model output value.
+
+    Handles str (pass-through), dict (extract nested .text/.summary/.content),
+    list (join items). Returns *fallback* for None or unrecognised types.
+    """
+    if isinstance(val, str) and val.strip():
+        return val.strip()
+    if isinstance(val, dict):
+        for key in ("text", "summary", "content", "executive_summary", "description"):
+            nested = val.get(key)
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+        return fallback
+    if isinstance(val, list):
+        joined = " ".join(str(item).strip() for item in val if str(item or "").strip())
+        return joined if joined else fallback
+    return fallback
+
+
 def _coerce_string_list(val: Any, *, max_items: int = 8) -> list[str] | None:
     """Coerce a value to a list of non-empty strings, or None."""
     if isinstance(val, list):
@@ -1688,16 +1959,109 @@ def _coerce_string_list(val: Any, *, max_items: int = 8) -> list[str] | None:
     return None
 
 
+def _coerce_by_module(candidate: dict, module: str) -> dict[str, Any] | None:
+    """Dispatch *candidate* to the correct module-specific coercer."""
+    _dispatch = {
+        "regime": _coerce_regime_model_output,
+        "news_sentiment": _coerce_news_sentiment_model_output,
+        "cross_asset": _coerce_cross_asset_model_output,
+        "breadth": _coerce_breadth_model_output,
+        "volatility": _coerce_vol_model_output,
+        "flows_positioning": _coerce_flows_positioning_model_output,
+        "liquidity_conditions": _coerce_liquidity_conditions_model_output,
+    }
+    coercer = _dispatch.get(module)
+    if coercer is None:
+        return None
+    return coercer(candidate)
+
+
 def _build_plaintext_fallback(raw_text: str, module: str) -> dict[str, Any] | None:
     """Build a minimal model result from raw text when JSON parsing fails.
 
     If the model returned useful prose but not valid JSON, we wrap it in the
     standard schema so the UI can still display something useful instead of
     showing a "malformed response" error.
+
+    If the raw text looks like JSON, attempt to extract score/label/summary
+    from within it before falling back to storing the text as-is.
     """
     text = (raw_text or "").strip()
     if not text or len(text) < 20:
         return None
+
+    # Strip <think>/<scratchpad> blocks so embedded JSON is reachable
+    import re as _re
+    text = _re.sub(r"<think>.*?</think>", "", text, flags=_re.DOTALL).strip()
+    text = _re.sub(r"<scratchpad>.*?</scratchpad>", "", text, flags=_re.DOTALL).strip()
+    if not text or len(text) < 20:
+        return None
+
+    # Attempt to recover structured fields from JSON-like raw text
+    extracted_score = None
+    extracted_label = None
+    extracted_summary = None
+    # Try direct parse first, then extract embedded JSON block
+    json_text = text
+    if not text.lstrip().startswith("{"):
+        # Try to find an embedded JSON object in the text
+        brace_match = _re.search(r"\{[\s\S]+\}", text)
+        if brace_match:
+            json_text = brace_match.group(0)
+        else:
+            json_text = None
+    if json_text:
+        try:
+            candidate = json.loads(json_text)
+            if isinstance(candidate, dict):
+                # Try full module-specific coercion first — recovers ALL structured
+                # fields (regime labels, assessments, headline_drivers, etc.)
+                module_coerced = _coerce_by_module(candidate, module)
+                if module_coerced is not None:
+                    module_coerced["_plaintext_fallback"] = True
+                    module_coerced["_module"] = module
+                    module_coerced.setdefault("uncertainty_flags", [])
+                    if isinstance(module_coerced["uncertainty_flags"], list):
+                        module_coerced["uncertainty_flags"].append(
+                            "Recovered from raw JSON fallback"
+                        )
+                    return module_coerced
+
+                # Minimal extraction if module coercer didn't apply
+                s = candidate.get("score")
+                if s is not None:
+                    try:
+                        extracted_score = max(0.0, min(float(s), 100.0))
+                    except (TypeError, ValueError):
+                        pass
+                l = candidate.get("label")
+                if isinstance(l, str) and l.strip():
+                    extracted_label = l.strip().upper()
+                sm = _safe_summary_text(candidate.get("summary"))
+                if sm:
+                    extracted_summary = sm
+                c = candidate.get("confidence")
+                extracted_conf = None
+                if c is not None:
+                    try:
+                        extracted_conf = round(max(0.0, min(float(c), 1.0)), 2)
+                    except (TypeError, ValueError):
+                        pass
+                if extracted_score is not None or extracted_summary:
+                    return {
+                        "label": extracted_label or "ANALYSIS",
+                        "score": extracted_score,
+                        "confidence": extracted_conf,
+                        "summary": extracted_summary,
+                        "pillar_analysis": {},
+                        "trader_takeaway": candidate.get("trader_takeaway") or "",
+                        "uncertainty_flags": ["Recovered from raw JSON fallback"],
+                        "_plaintext_fallback": True,
+                        "_module": module,
+                    }
+        except (json.JSONDecodeError, TypeError):
+            pass
+
     # Truncate overly long text
     summary = text[:1500].strip()
     if len(text) > 1500:
@@ -2314,7 +2678,9 @@ def _coerce_vol_model_output(candidate: Any) -> dict[str, Any] | None:
     label = candidate.get("label") or "ANALYSIS"
     score = candidate.get("score")
     confidence = candidate.get("confidence")
-    summary = candidate.get("summary") or "Model did not provide a summary."
+    summary = _safe_summary_text(
+        candidate.get("summary"), fallback="Model did not provide a summary."
+    )
 
     try:
         score = max(0.0, min(100.0, float(score)))
@@ -2586,7 +2952,9 @@ def _coerce_cross_asset_model_output(candidate: Any) -> dict[str, Any] | None:
     label = candidate.get("label") or "ANALYSIS"
     score = candidate.get("score")
     confidence = candidate.get("confidence")
-    summary = candidate.get("summary") or "Model did not provide a summary."
+    summary = _safe_summary_text(
+        candidate.get("summary"), fallback="Model did not provide a summary."
+    )
 
     try:
         score = max(0.0, min(100.0, float(score)))
@@ -2848,7 +3216,9 @@ def _coerce_flows_positioning_model_output(candidate: Any) -> dict[str, Any] | N
     label = candidate.get("label") or "ANALYSIS"
     score = candidate.get("score")
     confidence = candidate.get("confidence")
-    summary = candidate.get("summary") or "Model did not provide a summary."
+    summary = _safe_summary_text(
+        candidate.get("summary"), fallback="Model did not provide a summary."
+    )
 
     try:
         score = max(0.0, min(100.0, float(score)))
@@ -3111,7 +3481,9 @@ def _coerce_liquidity_conditions_model_output(candidate: Any) -> dict[str, Any] 
     label = candidate.get("label") or "ANALYSIS"
     score = candidate.get("score")
     confidence = candidate.get("confidence")
-    summary = candidate.get("summary") or "Model did not provide a summary."
+    summary = _safe_summary_text(
+        candidate.get("summary"), fallback="Model did not provide a summary."
+    )
 
     try:
         score = max(0.0, min(100.0, float(score)))

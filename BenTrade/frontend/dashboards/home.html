@@ -26,25 +26,49 @@
       <div class="stock-card-title bt-panel-title">Market Regime</div>
       <!-- Hero: regime status + environment read -->
       <div id="homeRegimeStrip" class="home-regime-strip"></div>
-      <!-- Factor bars + regime guidance -->
-      <div class="home-regime-body">
-        <div class="home-regime-factors-col">
-          <div class="home-regime-factors-header">Factor Breakdown</div>
-          <div id="homeRegimeComponents" class="home-regime-components"></div>
+
+      <!-- Broad market proxy charts — full width context layer -->
+      <div class="home-regime-section-panel">
+        <div class="home-regime-section-header">Macro Market Proxies</div>
+        <div id="homeRegimeProxies" class="home-regime-proxies-grid">
+          <div class="home-regime-proxy-placeholder stock-note">Loading proxy charts…</div>
         </div>
-        <div class="home-regime-guidance-col">
-          <div class="home-regime-factors-header">Regime Guidance</div>
-          <div id="homePlaybookChips" class="home-playbook-chips"></div>
-          <button id="homeRegimeModelBtn" class="btn qtButton home-regime-model-btn" type="button">Model Analysis</button>
-          <div id="homeRegimeComparisonTable" class="home-regime-comparison-table" style="display:none;"></div>
-          <div id="homeRegimeModelOutput" class="home-regime-model-output" style="display:none;"></div>
+      </div>
+
+      <!-- Three-block status row -->
+      <div class="home-regime-section-panel">
+        <div class="home-regime-section-header">Structural · Tape · Tactical</div>
+        <div id="homeRegimeBlocks" class="home-regime-blocks"></div>
+      </div>
+
+      <!-- Insights 2x2 + Model Analysis side-by-side -->
+      <div class="home-regime-section-panel">
+        <div class="home-regime-insights-model-row">
+          <div class="home-regime-insights-col">
+            <div class="home-regime-section-header">Decision Insights</div>
+            <div id="homeRegimeInsights" class="home-regime-insights"></div>
+          </div>
+          <div class="home-regime-model-col">
+            <div class="home-regime-section-header">Model Analysis</div>
+            <div id="homeRegimeComparisonTable" class="home-regime-comparison-table" style="display:none;"></div>
+            <div id="homeRegimeModelOutput" class="home-regime-model-output">
+              <div class="regime-model-loading"><span class="home-scan-spinner" aria-hidden="true"></span> Loading model analysis…</div>
+            </div>
+          </div>
         </div>
+      </div><!-- .home-regime-section-panel (insights+model) -->
+
+      <!-- Chat with AI trigger -->
+      <div class="home-regime-chat-btn-row">
+        <button id="homeRegimeChatBtn" class="btn bt-chat-trigger-btn" type="button" title="Discuss this regime with AI">
+          💬 Chat with AI
+        </button>
       </div>
     </section>
 
-    <!-- ═══ 2. Market Picture Overview ═══ -->
+    <!-- ═══ 2. Market Overview ═══ -->
     <section class="stock-card home-scoreboard-panel">
-      <div class="stock-card-title bt-panel-title">Market Picture Overview</div>
+      <div class="stock-card-title bt-panel-title">Market Overview</div>
       <div id="homeScoreboard" class="home-scoreboard-body">
         <!-- Engine score cards rendered by home.js -->
         <div id="homeScoreboardCards" class="home-scoreboard-cards"></div>
@@ -70,14 +94,11 @@
               <svg id="homeVixChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
             </div>
           </div>
-          <div class="home-scoreboard-grid">
+          <div class="home-scoreboard-fullwidth">
             <div class="stock-card home-nested-card">
               <div class="stock-card-title">Sector Performance</div>
+              <div id="homeSectorContext" class="home-sector-context"></div>
               <div id="homeSectorBars" class="home-sector-bars"></div>
-            </div>
-            <div class="stock-card home-nested-card">
-              <div class="stock-card-title">Signal Hub</div>
-              <div id="homeSignalHub" class="home-signal-hub"></div>
             </div>
           </div>
         </div>
@@ -85,20 +106,18 @@
     </section>
 
     <!-- ═══ 3. Strategy Playbooks ═══ -->
-    <div class="home-playbooks-row">
-      <section class="stock-card home-playbook-standalone">
-        <div class="stock-card-title bt-panel-title">Stock Strategy Playbook</div>
-        <div id="homeStockStrategyPlaybook" class="home-strategy-playbook-body">
-          <div class="stock-note home-playbook-placeholder">Stock strategy recommendations will appear here based on market regime.</div>
-        </div>
-      </section>
-      <section class="stock-card home-playbook-standalone">
-        <div class="stock-card-title bt-panel-title">Options Strategy Playbook</div>
-        <div id="homeOptionsStrategyPlaybook" class="home-strategy-playbook-body">
-          <div class="stock-note home-playbook-placeholder">Options strategy recommendations will appear here based on market regime.</div>
-        </div>
-      </section>
-    </div>
+    <section class="stock-card home-playbook-full">
+      <div class="stock-card-title bt-panel-title">Stock Strategy Playbook</div>
+      <div id="homeStockStrategyPlaybook" class="home-strategy-playbook-body">
+        <div class="stock-note home-playbook-placeholder">Stock strategy recommendations will appear here based on market regime.</div>
+      </div>
+    </section>
+    <section class="stock-card home-playbook-full">
+      <div class="stock-card-title bt-panel-title">Options Strategy Playbook</div>
+      <div id="homeOptionsStrategyPlaybook" class="home-strategy-playbook-body">
+        <div class="stock-note home-playbook-placeholder">Options strategy recommendations will appear here based on market regime.</div>
+      </div>
+    </section>
 
     <!-- ═══ 4. Portfolio Snapshot ═══ -->
     <section class="stock-card home-portfolio-snapshot-panel">

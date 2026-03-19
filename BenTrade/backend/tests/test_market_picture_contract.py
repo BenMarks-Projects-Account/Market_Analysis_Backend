@@ -219,6 +219,43 @@ class TestBuildEngineCards:
         assert vo["engine_status"] == "missing"
         assert vo["model_score"] == 72.0
 
+    def test_liquidity_engine_key_matches_artifact(self):
+        """ENGINE_DISPLAY must use liquidity_financial_conditions to match artifacts."""
+        engine_keys = [k for k, _ in ENGINE_DISPLAY]
+        assert "liquidity_financial_conditions" in engine_keys
+        assert "liquidity_conditions" not in engine_keys
+
+    def test_liquidity_engine_data_found(self):
+        """build_engine_cards must find engine data under liquidity_financial_conditions."""
+        raw_engines = {"liquidity_financial_conditions": _engine_data(score=53.2, label="Tightening")}
+        cards = build_engine_cards(raw_engines, {})
+        liq = next(c for c in cards if c["key"] == "liquidity_financial_conditions")
+        assert liq["engine_score"] == 53.2
+        assert liq["engine_label"] == "Tightening"
+        assert liq["engine_status"] == "ok"
+
+    def test_model_score_alias_lookup(self):
+        """Model scores saved under legacy key 'liquidity_conditions' must still resolve."""
+        raw_engines = {"liquidity_financial_conditions": _engine_data()}
+        # Model score saved under the old (wrong) key
+        model_scores = {"liquidity_conditions": _model_entry(model_score=53.1)}
+        cards = build_engine_cards(raw_engines, model_scores)
+        liq = next(c for c in cards if c["key"] == "liquidity_financial_conditions")
+        assert liq["engine_score"] == 68.5  # from engine data
+        assert liq["model_score"] == 53.1   # found via alias
+        assert liq["model_status"] == "fresh"
+
+    def test_canonical_model_key_preferred_over_alias(self):
+        """Canonical key must be preferred when both exist."""
+        raw_engines = {"liquidity_financial_conditions": _engine_data()}
+        model_scores = {
+            "liquidity_financial_conditions": _model_entry(model_score=99.0),
+            "liquidity_conditions": _model_entry(model_score=53.1),
+        }
+        cards = build_engine_cards(raw_engines, model_scores)
+        liq = next(c for c in cards if c["key"] == "liquidity_financial_conditions")
+        assert liq["model_score"] == 99.0  # canonical key wins
+
 
 # ── Backward compatibility: ENGINE_DISPLAY re-export ──
 
