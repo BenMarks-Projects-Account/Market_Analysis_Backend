@@ -58,6 +58,32 @@ window.BenTradeChat = (function () {
       'What would flip this regime?',
       'Why is the tape narrow?',
     ],
+    general_market: [
+      'What is the market doing today?',
+      'Explain implied volatility',
+      'What are credit spreads?',
+      'How do I read an options chain?',
+      'What is theta decay?',
+      'Bull vs bear spread — when to use each?',
+    ],
+  };
+
+  // ── Generic context for direct bubble clicks (no dashboard context) ──
+  var _GENERIC_CONTEXT = {
+    context_type:    'general_market',
+    context_title:   'Market & Trading Q\u0026A',
+    context_summary: 'General market analysis and options trading discussion.',
+    context_payload: {
+      role: 'market_technician',
+      description: 'You are a senior market technician and options analyst. '
+        + 'You specialize in probability-based, risk-defined options strategies '
+        + 'focused on index ETFs (SPY, QQQ, IWM, DIA). '
+        + 'Answer questions about market conditions, technical analysis, '
+        + 'options mechanics, volatility, and trade structure. '
+        + 'Be concise, actionable, and grounded in data.',
+    },
+    source_panel:    'chat_bubble',
+    generated_at:    new Date().toISOString(),
   };
 
   // ══════════════════════════════════════════════════════════════════
@@ -138,11 +164,11 @@ window.BenTradeChat = (function () {
       _inputEl.style.height = Math.min(_inputEl.scrollHeight, 120) + 'px';
     });
 
-    // Minimized bubble (persistent, hidden until needed)
+    // Chat bubble (always visible in .main panel)
     _bubbleEl = document.createElement('button');
     _bubbleEl.className = 'bt-chat-bubble';
-    _bubbleEl.setAttribute('aria-label', 'Reopen chat');
-    _bubbleEl.setAttribute('title', 'Reopen chat');
+    _bubbleEl.setAttribute('aria-label', 'Open chat');
+    _bubbleEl.setAttribute('title', 'Chat with AI');
     _bubbleEl.innerHTML = [
       '<svg class="bt-chat-bubble-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
       '<button class="bt-chat-bubble-end" type="button" aria-label="End chat" title="End chat">&times;</button>',
@@ -153,12 +179,16 @@ window.BenTradeChat = (function () {
         endChat();
         return;
       }
-      _reopenFromBubble();
+      _onBubbleClick();
     });
 
     document.body.appendChild(_backdropEl);
     document.body.appendChild(_drawerEl);
     document.body.appendChild(_bubbleEl);
+
+    // Position bubble inside the .main panel visually
+    _positionBubble();
+    window.addEventListener('resize', _positionBubble);
 
     // Re-parent into overlay-root on fullscreen changes
     document.addEventListener('fullscreenchange', _rehomeDrawer);
@@ -172,6 +202,19 @@ window.BenTradeChat = (function () {
     if (_backdropEl && _backdropEl.parentElement !== root) root.appendChild(_backdropEl);
     if (_drawerEl  && _drawerEl.parentElement  !== root) root.appendChild(_drawerEl);
     if (_bubbleEl  && _bubbleEl.parentElement  !== root) root.appendChild(_bubbleEl);
+    _positionBubble();
+  }
+
+  /** Position the fixed bubble so it appears inside the diagnostic-sidebar's lower-right. */
+  function _positionBubble() {
+    if (!_bubbleEl) return;
+    var panel = document.querySelector('.shell-layout > .diagnostic-sidebar');
+    if (!panel) return;
+    var rect = panel.getBoundingClientRect();
+    // 16px inset from the right edge of diagnostic panel
+    var rightOffset = window.innerWidth - rect.right + 16;
+    _bubbleEl.style.right = rightOffset + 'px';
+    _bubbleEl.style.left = 'auto';
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -240,7 +283,7 @@ window.BenTradeChat = (function () {
       _backdropEl.classList.remove('bt-chat-backdrop--visible');
     }
     document.body.classList.remove('bt-chat-body-lock');
-    _hideBubble();
+    if (_bubbleEl) _bubbleEl.removeAttribute('data-has-session');
   }
 
   function isOpen() {
@@ -261,6 +304,7 @@ window.BenTradeChat = (function () {
       messages: [],
     };
     _lastFailedText = null;
+    if (_bubbleEl) _bubbleEl.setAttribute('data-has-session', '');
 
     // Update header
     var title = contextContract.context_title || contextContract.context_type || 'AI Chat';
@@ -292,12 +336,23 @@ window.BenTradeChat = (function () {
     _startNewSession(_session.context);
   }
 
+  /** Handle bubble click: reopen existing session or start generic chat. */
+  function _onBubbleClick() {
+    if (_session) {
+      // Reopen existing minimized session
+      _showDrawer();
+      _scrollToBottom();
+      _inputEl.focus();
+    } else {
+      // No active session — open generic market Q&A
+      open(Object.assign({}, _GENERIC_CONTEXT, {
+        generated_at: new Date().toISOString(),
+      }));
+    }
+  }
+
   function _reopenFromBubble() {
-    if (!_session) return;
-    _hideBubble();
-    _showDrawer();
-    _scrollToBottom();
-    _inputEl.focus();
+    _onBubbleClick();
   }
 
   function _showDrawer() {
@@ -306,15 +361,9 @@ window.BenTradeChat = (function () {
     document.body.classList.add('bt-chat-body-lock');
   }
 
-  function _showBubble() {
-    if (!_bubbleEl) return;
-    _bubbleEl.classList.add('bt-chat-bubble--visible');
-  }
-
-  function _hideBubble() {
-    if (!_bubbleEl) return;
-    _bubbleEl.classList.remove('bt-chat-bubble--visible');
-  }
+  /** Bubble is always visible; these are no-ops kept for API compat. */
+  function _showBubble() { /* always visible */ }
+  function _hideBubble() { /* always visible */ }
 
   // ══════════════════════════════════════════════════════════════════
   // Internal: Quick starters
@@ -366,6 +415,16 @@ window.BenTradeChat = (function () {
   }
 
   function _buildSeedMessage(ctx) {
+    // Generic market chat — introduce the AI role without auto-analyzing
+    if (ctx.context_type === 'general_market') {
+      return (
+        'You are a senior market technician and options analyst specializing in '
+        + 'probability-based, risk-defined options strategies on index ETFs '
+        + '(SPY, QQQ, IWM, DIA). Introduce yourself briefly and let the user '
+        + 'know you can help with market analysis, options mechanics, volatility, '
+        + 'trade structure, and strategy selection. Be concise and professional.'
+      );
+    }
     var summary = ctx.context_summary || '';
     var label = (ctx.context_payload || {}).regime_label || '';
     return (
@@ -636,6 +695,21 @@ window.BenTradeChat = (function () {
   function _updateContextBanner(ctx) {
     var banner = _drawerEl.querySelector('.bt-chat-context-banner');
     if (!banner) return;
+
+    // Generic market chat — simpler banner
+    if (ctx.context_type === 'general_market') {
+      banner.innerHTML = [
+        '<div class="bt-chat-banner-row">',
+        '  <span class="bt-chat-banner-dot"></span>',
+        '  <span class="bt-chat-banner-label">Mode: <strong>' + _esc(ctx.context_title || 'Market & Trading Q&A') + '</strong></span>',
+        '</div>',
+        '<div class="bt-chat-banner-detail">',
+        '  Ask anything about markets, options, volatility, or trade strategy.',
+        '</div>',
+      ].join('');
+      return;
+    }
+
     var payload = ctx.context_payload || {};
     var label = payload.regime_label || 'Unknown';
     var score = payload.regime_score != null ? payload.regime_score : '\u2014';
@@ -666,6 +740,21 @@ window.BenTradeChat = (function () {
   }
 
   // ── Public surface ───────────────────────────────────────────────
+
+  /** Ensure the bubble is placed into .main immediately on load.
+   *  Called automatically; also safe to call again after DOM changes. */
+  function _initBubble() {
+    _ensureDOM();
+  }
+
+  // Auto-init when DOM is ready so the bubble is always visible
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _initBubble);
+  } else {
+    // DOM already parsed — defer one tick so .main exists
+    setTimeout(_initBubble, 0);
+  }
+
   return {
     open: open,
     minimize: minimize,

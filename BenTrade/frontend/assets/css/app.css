@@ -8153,38 +8153,96 @@ main.main{
     border-color:rgba(0,234,255,0.30);
 }
 
-/* ── Minimized chat bubble ── */
+/* ── Chat bubble — lunar-surface style, anchored in .main panel ── */
 .bt-chat-bubble{
     position:fixed;
-    bottom:24px;
-    right:24px;
+    bottom:20px;
+    right:auto;
     z-index:9001;
     width:52px;
     height:52px;
     border-radius:50%;
-    background:var(--cyan);
+    background:
+        /* ── 3D sphere highlight — light from upper-left ── */
+        radial-gradient(circle at 30% 25%,
+            rgba(255,255,255,0.40) 0%, transparent 40%),
+        /* ── Terminator shadow — lower-right darkening ── */
+        radial-gradient(circle at 75% 78%,
+            rgba(0,10,18,0.60) 0%, transparent 55%),
+        /* ── Mare / dark basin patches ── */
+        radial-gradient(ellipse 48% 38% at 55% 42%,
+            rgba(0,30,42,0.36) 0%, transparent 100%),
+        radial-gradient(ellipse 32% 28% at 28% 62%,
+            rgba(0,25,35,0.30) 0%, transparent 100%),
+        /* ── Large craters ── */
+        radial-gradient(circle 6px at 62% 30%,
+            rgba(0,12,18,0.52) 0%, rgba(0,40,50,0.18) 60%, transparent 100%),
+        radial-gradient(circle 5px at 35% 52%,
+            rgba(0,12,18,0.46) 0%, rgba(0,40,50,0.14) 55%, transparent 100%),
+        radial-gradient(circle 7px at 48% 68%,
+            rgba(0,12,18,0.54) 0%, rgba(0,40,50,0.18) 50%, transparent 100%),
+        /* ── Medium craters ── */
+        radial-gradient(circle 3.5px at 72% 52%,
+            rgba(0,10,16,0.42) 0%, rgba(0,50,60,0.12) 60%, transparent 100%),
+        radial-gradient(circle 3px at 28% 35%,
+            rgba(0,10,16,0.38) 0%, rgba(0,50,60,0.10) 55%, transparent 100%),
+        radial-gradient(circle 4px at 55% 22%,
+            rgba(0,10,16,0.42) 0%, rgba(0,50,60,0.12) 50%, transparent 100%),
+        radial-gradient(circle 3px at 40% 80%,
+            rgba(0,10,16,0.34) 0%, transparent 100%),
+        /* ── Small craters / pitting ── */
+        radial-gradient(circle 2px at 22% 42%,
+            rgba(0,8,14,0.32) 0%, transparent 100%),
+        radial-gradient(circle 1.5px at 78% 40%,
+            rgba(0,8,14,0.28) 0%, transparent 100%),
+        radial-gradient(circle 2px at 50% 48%,
+            rgba(0,8,14,0.28) 0%, transparent 100%),
+        radial-gradient(circle 1.5px at 65% 62%,
+            rgba(0,8,14,0.24) 0%, transparent 100%),
+        radial-gradient(circle 1.5px at 38% 25%,
+            rgba(0,8,14,0.24) 0%, transparent 100%),
+        /* ── Crater rim highlights (bright edges catch the light) ── */
+        radial-gradient(circle 7px at 60% 28%,
+            transparent 48%, rgba(180,245,255,0.18) 56%, transparent 64%),
+        radial-gradient(circle 6px at 34% 50%,
+            transparent 46%, rgba(180,245,255,0.14) 54%, transparent 62%),
+        radial-gradient(circle 8px at 46% 66%,
+            transparent 44%, rgba(180,245,255,0.16) 52%, transparent 60%),
+        /* ── Highland bright patches ── */
+        radial-gradient(circle at 38% 28%,
+            rgba(200,250,255,0.20) 0%, transparent 28%),
+        radial-gradient(circle at 22% 72%,
+            rgba(200,250,255,0.12) 0%, transparent 20%),
+        /* ── Base cyan ── */
+        var(--cyan);
     border:none;
     cursor:pointer;
     display:flex;
     align-items:center;
     justify-content:center;
-    box-shadow:0 4px 20px rgba(0,234,255,0.35), 0 0 0 0 rgba(0,234,255,0);
-    opacity:0;
-    pointer-events:none;
-    transform:scale(0.7);
-    transition:opacity 0.22s ease, transform 0.22s ease, box-shadow 0.2s;
-}
-.bt-chat-bubble--visible{
+    box-shadow:
+        0 4px 22px rgba(0,234,255,0.40),
+        0 0 0 0 rgba(0,234,255,0),
+        inset 0 -5px 10px rgba(0,10,18,0.35),
+        inset 0 3px 8px rgba(200,250,255,0.18);
     opacity:1;
     pointer-events:auto;
     transform:scale(1);
+    transition:box-shadow 0.2s, transform 0.18s;
+    animation:btHeroFloat 5s ease-in-out infinite;
 }
 .bt-chat-bubble:hover{
-    box-shadow:0 4px 24px rgba(0,234,255,0.5), 0 0 0 4px rgba(0,234,255,0.12);
+    transform:scale(1.06);
+    box-shadow:
+        0 4px 30px rgba(0,234,255,0.60),
+        0 0 0 5px rgba(0,234,255,0.14),
+        inset 0 -5px 10px rgba(0,10,18,0.35),
+        inset 0 3px 8px rgba(200,250,255,0.18);
 }
 .bt-chat-bubble-icon{
     stroke:var(--bg);
     pointer-events:none;
+    opacity:0.5;
 }
 .bt-chat-bubble-end{
     position:absolute;
@@ -8207,6 +8265,10 @@ main.main{
 }
 .bt-chat-bubble:hover .bt-chat-bubble-end{
     opacity:1;
+}
+/* Hide the end (✖) button when no chat session is active */
+.bt-chat-bubble:not([data-has-session]) .bt-chat-bubble-end{
+    display:none;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
