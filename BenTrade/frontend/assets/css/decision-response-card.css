@@ -48,10 +48,10 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.10em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 4px 12px;
   border-radius: 4px;
@@ -64,10 +64,10 @@
 
 /* Conviction chip */
 .dr-conviction {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   padding: 3px 8px;
   border-radius: 3px;
@@ -105,11 +105,11 @@
   letter-spacing: 0.04em;
 }
 .dr-indicator-value {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
 }
 /* Indicator value color states */
 .dr-val-positive { color: #00e676; }
@@ -132,10 +132,10 @@
 
 /* ── Section Titles ───────────────────────────────────────────────────────── */
 .dr-section-title {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-display);
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   color: var(--cyan, #00eaff);
   text-transform: uppercase;
   margin-bottom: 6px;
@@ -211,10 +211,10 @@
   color: var(--muted, #93a7b6);
 }
 .dr-size-value {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   padding: 3px 10px;
   border-radius: 4px;
@@ -255,10 +255,10 @@
   border-radius: 6px;
 }
 .dr-warnings-title {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-display);
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.10em;
+  letter-spacing: 0.06em;
   color: var(--warn, #f4c85f);
   text-transform: uppercase;
   margin-bottom: 4px;
@@ -317,10 +317,10 @@
   opacity: 0.6;
 }
 .dr-footer-tag {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.10em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 2px 6px;
   border-radius: 3px;

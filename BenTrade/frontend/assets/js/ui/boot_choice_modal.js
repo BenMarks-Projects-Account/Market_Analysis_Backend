@@ -109,20 +109,39 @@ window.BenTradeBootChoiceModal = (function(){
             <span class="boot-welcome-text">BenTrade Data Population Has Begun</span>
           </div>
           <div class="boot-welcome-phases">
-            <div class="boot-phase" data-phase="market_data">
-              <span class="boot-phase-icon">&#9711;</span>
-              <span class="boot-phase-label">Market Data</span>
-            </div>
-            <div class="boot-phase" data-phase="model_analysis">
-              <div class="boot-phase-label">
+            <!-- Left workflow column: Market Data → Model Analysis (engines) -->
+            <div class="boot-workflow-col">
+              <div class="boot-phase" data-phase="market_data">
                 <span class="boot-phase-icon">&#9711;</span>
-                Model Analysis
+                <span class="boot-phase-label">Market Data</span>
               </div>
-              <div class="boot-model-engines" id="bootModelEngines"></div>
+              <div class="boot-workflow-connector" aria-hidden="true"></div>
+              <div class="boot-phase boot-phase-nested" data-phase="model_analysis">
+                <div class="boot-phase-label">
+                  <span class="boot-phase-icon">&#9711;</span>
+                  Model Analysis
+                </div>
+                <div class="boot-model-engines" id="bootModelEngines"></div>
+              </div>
             </div>
-            <div class="boot-phase" data-phase="dashboard">
-              <span class="boot-phase-icon">&#9711;</span>
-              <span class="boot-phase-label">Dashboard</span>
+            <!-- Right workflow column: Dashboard → Model Analysis (Market Regime) -->
+            <div class="boot-workflow-col">
+              <div class="boot-phase" data-phase="dashboard">
+                <span class="boot-phase-icon">&#9711;</span>
+                <span class="boot-phase-label">Dashboards</span>
+              </div>
+              <div class="boot-workflow-connector" aria-hidden="true"></div>
+              <div class="boot-phase boot-phase-nested" data-phase="dashboard_model">
+                <div class="boot-phase-label">
+                  <span class="boot-phase-icon">&#9711;</span>
+                  Model Analysis
+                </div>
+                <div class="boot-model-regime" id="bootModelRegime">
+                  <span class="boot-engine-item" data-engine="market_regime">
+                    <span class="boot-engine-icon">&middot;</span>Market Regime
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -138,8 +157,33 @@ window.BenTradeBootChoiceModal = (function(){
       market_data: root.querySelector('[data-phase="market_data"]'),
       model_analysis: root.querySelector('[data-phase="model_analysis"]'),
       dashboard: root.querySelector('[data-phase="dashboard"]'),
+      dashboard_model: root.querySelector('[data-phase="dashboard_model"]'),
     };
     const modelEnginesEl = root.querySelector('#bootModelEngines');
+    const regimeEl = root.querySelector('#bootModelRegime');
+
+    const ENGINE_LABELS = {
+      breadth_participation: 'Breadth',
+      volatility_options: 'Volatility',
+      cross_asset_macro: 'Cross-Asset',
+      flows_positioning: 'Flows',
+      liquidity_financial_conditions: 'Liquidity',
+      news_sentiment: 'News',
+    };
+
+    function _engineIcon(st){
+      return st === 'done' ? '\u2713' : st === 'running' ? '\u25F7' : st === 'failed' ? '\u2717' : '\u00B7';
+    }
+
+    // Render engines in initial "pending" state so labels are visible immediately
+    (function _initEngineLabels(){
+      if(!modelEnginesEl) return;
+      let html = '';
+      for(const [, label] of Object.entries(ENGINE_LABELS)){
+        html += `<span class="boot-engine-item"><span class="boot-engine-icon">\u00B7</span>${label}</span>`;
+      }
+      modelEnginesEl.innerHTML = html;
+    })();
 
     function setPhaseActive(phase){
       Object.entries(phaseEls).forEach(([key, el]) => {
@@ -162,26 +206,35 @@ window.BenTradeBootChoiceModal = (function(){
       if(icon) icon.textContent = '\u2713'; // checkmark
     }
 
-    /** Update the per-engine model analysis sub-progress list.
+    /** Update the per-engine model analysis sub-progress list (left side).
      *  @param {Object<string,string>} progress — e.g. {breadth_participation: "running", ...}
      */
     function setModelProgress(progress){
       if(!modelEnginesEl || !progress) return;
-      const ENGINE_LABELS = {
-        breadth_participation: 'Breadth',
-        volatility_options: 'Volatility',
-        cross_asset_macro: 'Cross-Asset',
-        flows_positioning: 'Flows',
-        liquidity_financial_conditions: 'Liquidity',
-        news_sentiment: 'News',
-      };
       let html = '';
       for(const [key, label] of Object.entries(ENGINE_LABELS)){
         const st = progress[key] || 'pending';
-        const icon = st === 'done' ? '\u2713' : st === 'running' ? '\u25F7' : st === 'failed' ? '\u2717' : '\u00B7';
+        const icon = _engineIcon(st);
         html += `<span class="boot-engine-item boot-engine-${st}"><span class="boot-engine-icon">${icon}</span>${label}</span>`;
       }
       modelEnginesEl.innerHTML = html;
+    }
+
+    /** Update the Market Regime item status on the right side.
+     *  @param {'pending'|'running'|'done'|'failed'} status
+     */
+    function setRegimeStatus(status){
+      if(!regimeEl) return;
+      const item = regimeEl.querySelector('[data-engine="market_regime"]');
+      if(!item) return;
+      item.className = 'boot-engine-item';
+      if(status === 'running' || status === 'done' || status === 'failed'){
+        item.classList.add('boot-engine-' + status);
+      }
+      const icon = item.querySelector('.boot-engine-icon');
+      if(icon){
+        icon.textContent = status === 'done' ? '\u2713' : status === 'running' ? '\u25F7' : status === 'failed' ? '\u2717' : '\u00B7';
+      }
     }
 
     function show(){
@@ -215,6 +268,7 @@ window.BenTradeBootChoiceModal = (function(){
       setPhaseDone,
       activatePhase,
       setModelProgress,
+      setRegimeStatus,
       isOpen: () => root.classList.contains('is-open'),
     };
   }

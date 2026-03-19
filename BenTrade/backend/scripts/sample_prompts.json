@@ -1,0 +1,1133 @@
+[
+  {
+    "prompt_id": "stock_pullback_swing",
+    "prompt_name": "Stock Strategy — Pullback Swing",
+    "source_file": "common/stock_strategy_prompts.py",
+    "model_params": {
+      "temperature": 0.2,
+      "max_tokens": 1500
+    },
+    "system_prompt": "You are a short-term stock risk advisor and trading assistant.\n\nCONTEXT:\n- Horizon: 1–30 trading days.\n- Strategies: long-only equity positions.\n- Recommendations: BUY or PASS (never SELL / SHORT / HOLD / WAIT).\n- Focus: probability-weighted edge, risk, and timing.\n\nRULES:\n1. Never give financial guarantees or definitive predictions.\n2. Use ONLY the provided metrics and engine data — do NOT hallucinate\n   external news, fundamentals, earnings, or sector data.\n3. Your \"score\" is YOUR independent 0–100 assessment, separate from the engine score.\n4. You MUST compare your score to the engine score and explain any disagreement.\n\nCRITICAL FORMATTING RULES:\n- Return ONLY raw JSON. No markdown code fences, no backticks, no commentary.\n- Start your response with { and end with }. Nothing before or after.\n- Every key must be a double-quoted string. Every string value must be double-quoted.\n- Do NOT use trailing commas after the last item in arrays or objects.\n- All numbers must be numeric literals (not strings). Use null for unknown values.\n- If any field is unknown, output null (for scalars) or empty arrays [], but KEEP the key.\n\nOUTPUT JSON SCHEMA (return this exact structure):\n{\n  \"recommendation\": \"BUY\" or \"PASS\",\n  \"score\": <int 0-100>,\n  \"confidence\": <int 0-100>,\n  \"summary\": \"<1-2 sentence thesis>\",\n  \"key_drivers\": [\n    {\"factor\": \"<name>\", \"impact\": \"positive\" or \"negative\" or \"neutral\", \"evidence\": \"<short detail>\"}\n  ],\n  \"risk_review\": {\n    \"primary_risks\": [\"<risk 1>\", \"<risk 2>\"],\n    \"volatility_risk\": \"low\" or \"medium\" or \"high\",\n    \"timing_risk\": \"low\" or \"medium\" or \"high\",\n    \"data_quality_flag\": null\n  },\n  \"engine_vs_model\": {\n    \"engine_score\": <number from input>,\n    \"model_score\": <your score>,\n    \"agreement\": \"agree\" or \"disagree\" or \"mixed\",\n    \"notes\": [\"<reasoning about agreement/disagreement>\"]\n  },\n  \"data_quality\": {\n    \"provider\": \"<data source from input>\",\n    \"warnings\": []\n  }\n}\n\nREMEMBER: Raw JSON only. No prose. No fences. Start with { end with }.\n",
+    "user_prompt": {
+      "strategy": "stock_pullback_swing",
+      "strategy_description": "Pullback Swing: buys healthy pullbacks in confirmed uptrends, expecting price to resume its upward trajectory. Short-term hold (3-15 days). Ideal setup: strong trend, modest pullback (-1% to -6% from 20D high), RSI reset to 40-60, near SMA-20 support.",
+      "symbol": "AAPL",
+      "price": 178.42,
+      "as_of": "2026-03-18T15:30:00+00:00",
+      "engine": {
+        "composite_score": 82,
+        "score_breakdown": {
+          "trend_score": 22,
+          "momentum_score": 20,
+          "volatility_score": 18,
+          "pullback_score": 15,
+          "catalyst_score": 7
+        },
+        "thesis": [
+          "Price pulled back 3.2% from 20-day high into SMA-20 support",
+          "RSI reset from 68 to 48 — healthy momentum reset",
+          "Volume declining on pullback — selling exhaustion pattern",
+          "Price holding above rising SMA-50 trend line"
+        ]
+      },
+      "trend_metrics": {
+        "trend_state": "uptrend",
+        "sma20": 179.85,
+        "sma50": 174.6,
+        "sma200": 168.22,
+        "slope_20": 0.42,
+        "slope_50": 0.28
+      },
+      "pullback_metrics": {
+        "pullback_from_20d_high": -3.19,
+        "pullback_from_50d_high": -4.33,
+        "distance_to_sma20": -0.8,
+        "distance_to_sma50": 2.19
+      },
+      "momentum_reset": {
+        "rsi14": 48.3,
+        "rsi_change_5d": -19.7
+      },
+      "returns": {
+        "return_1d": -0.45,
+        "return_5d": -2.85,
+        "return_20d": 3.2
+      },
+      "liquidity": {
+        "avg_vol_20": 62500000,
+        "avg_dollar_vol_20": 11150000000,
+        "today_vol_vs_avg": 0.77
+      },
+      "analysis_questions": [
+        "Is this a healthy pullback in a genuine uptrend, or an early breakdown?",
+        "Is entry timing good now, or should the trader wait for further pullback or confirmation?",
+        "What is the biggest failure mode for this setup?"
+      ],
+      "market_picture": {
+        "description": "Current market environment from BenTrade's 6 intelligence modules. Use this to contextualize your BUY/PASS decision against broader market conditions.",
+        "engines": {
+          "breadth_participation": {
+            "score": 22.09,
+            "label": "Deteriorating",
+            "confidence": 95.0,
+            "summary": "Breadth is deteriorating (composite 22/100). Weaknesses: participation breadth.",
+            "trader_takeaway": "Internal structure is deteriorating. Broad participation is absent. Defensive posture recommended — consider hedging, reducing exposure, or focusing on highest-conviction setups only.",
+            "bull_factors": [],
+            "bear_factors": [
+              "Participation Breadth is weak (27/100)",
+              "Trend Breadth is weak (17/100)"
+            ],
+            "risks": [
+              "[trend_breadth] trend_momentum_long: unavailable",
+              "[volume_breadth] accumulation_distribution_bias: not yet implemented"
+            ],
+            "regime_tags": [
+              "deteriorating"
+            ]
+          },
+          "volatility_options": {
+            "score": 60.18,
+            "label": "Mixed but Tradable",
+            "confidence": 95.0,
+            "summary": "Volatility regime is mixed but tradable (composite 60/100). Strengths: volatility structure. Concerns: volatility regime fragility.",
+            "trader_takeaway": "Mixed but tradable conditions. Premium selling is viable but use smaller position sizes and tighter risk management. Watch for vol expansion.",
+            "bull_factors": [
+              "Volatility Structure is constructive (64/100)",
+              "Tail Risk Skew is favorable (72/100)"
+            ],
+            "bear_factors": [
+              "Volatility Regime is fragile (47/100)"
+            ],
+            "risks": [
+              "[tail_risk_skew] cboe_skew: CBOE SKEW index unavailable",
+              "missing_data: 1 inputs missing (-5.0)"
+            ],
+            "regime_tags": [
+              "mixed_but_tradable"
+            ]
+          },
+          "cross_asset_macro": {
+            "score": 61.24,
+            "label": "Partial Confirmation",
+            "confidence": 92.0,
+            "summary": "Cross-asset confirmation is partial confirmation (composite 61/100). Confirming: credit risk appetite.",
+            "trader_takeaway": "Cross-asset signals partially confirm equities. Some markets support the bull case but others are neutral or cautionary. Favor quality setups.",
+            "bull_factors": [
+              "Credit Risk Appetite confirms equities (75/100)"
+            ],
+            "bear_factors": [],
+            "risks": [
+              "Copper (PCOPPUSDM) is 77 days stale"
+            ],
+            "regime_tags": [
+              "partial_confirmation"
+            ]
+          },
+          "flows_positioning": {
+            "score": 63.51,
+            "label": "Mixed but Tradable",
+            "confidence": 70.0,
+            "summary": "Flows & positioning composite is mixed but tradable (64/100). Supportive: crowding / stretch. Risk area: flow direction.",
+            "trader_takeaway": "Flows are mixed but tradable. Some positioning metrics are supportive while others show early signs of crowding or stress. Stay selective.",
+            "bull_factors": [
+              "Crowding / Stretch is supportive (72/100)",
+              "Squeeze / Unwind Risk is supportive (71/100)"
+            ],
+            "bear_factors": [
+              "Flow Direction & Persistence signals risk (42/100)"
+            ],
+            "risks": [
+              "Heavy proxy reliance (11 proxy sources) (-8)",
+              "No direct institutional flow data — proxy only (-5)"
+            ],
+            "regime_tags": [
+              "mixed_but_tradable"
+            ]
+          },
+          "liquidity_financial_conditions": {
+            "score": 51.95,
+            "label": "Neutral / Tightening",
+            "confidence": 84.3,
+            "summary": "Liquidity & conditions composite is neutral / tightening (52/100). Supportive: credit & funding stress. Pressure from: dollar / global liquidity.",
+            "trader_takeaway": "Conditions are tightening. Rate pressure, credit widening, or dollar strength may be creating headwinds. Reduce position sizing and be more selective.",
+            "bull_factors": [
+              "Credit & Funding Stress is supportive (75/100)"
+            ],
+            "bear_factors": [
+              "Dollar / Global Liquidity signals stress (17/100)"
+            ],
+            "risks": [
+              "Funding stress is a PROXY (VIX + rate heuristic), not direct measurement",
+              "High cross-pillar disagreement (58pp range) — liquidity picture is fractured"
+            ],
+            "regime_tags": [
+              "neutral_tightening"
+            ]
+          },
+          "news_sentiment": {
+            "score": 62.61,
+            "label": "Neutral",
+            "confidence": 0,
+            "summary": "The engine sees a broadly neutral market backdrop (score: 62.6, regime: Neutral). The strongest positive contributor is negative pressure / risk load, and the largest drag is Macro Stress.",
+            "trader_takeaway": "The engine leans mildly constructive. Standard premium-selling is reasonable but keep position sizes moderate. The signal quality is limited.",
+            "bull_factors": [
+              "negative_pressure: negative_pressure",
+              "narrative_severity: narrative_severity"
+            ],
+            "bear_factors": [
+              "macro_stress: macro_stress"
+            ],
+            "risks": [],
+            "regime_tags": [
+              "neutral"
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "prompt_id": "stock_momentum_breakout",
+    "prompt_name": "Stock Strategy — Momentum Breakout",
+    "source_file": "common/stock_strategy_prompts.py",
+    "model_params": {
+      "temperature": 0.2,
+      "max_tokens": 1500
+    },
+    "system_prompt": "You are a short-term stock risk advisor and trading assistant.\n\nCONTEXT:\n- Horizon: 1–30 trading days.\n- Strategies: long-only equity positions.\n- Recommendations: BUY or PASS (never SELL / SHORT / HOLD / WAIT).\n- Focus: probability-weighted edge, risk, and timing.\n\nRULES:\n1. Never give financial guarantees or definitive predictions.\n2. Use ONLY the provided metrics and engine data — do NOT hallucinate\n   external news, fundamentals, earnings, or sector data.\n3. Your \"score\" is YOUR independent 0–100 assessment, separate from the engine score.\n4. You MUST compare your score to the engine score and explain any disagreement.\n\nCRITICAL FORMATTING RULES:\n- Return ONLY raw JSON. No markdown code fences, no backticks, no commentary.\n- Start your response with { and end with }. Nothing before or after.\n- Every key must be a double-quoted string. Every string value must be double-quoted.\n- Do NOT use trailing commas after the last item in arrays or objects.\n- All numbers must be numeric literals (not strings). Use null for unknown values.\n- If any field is unknown, output null (for scalars) or empty arrays [], but KEEP the key.\n\nOUTPUT JSON SCHEMA (return this exact structure):\n{\n  \"recommendation\": \"BUY\" or \"PASS\",\n  \"score\": <int 0-100>,\n  \"confidence\": <int 0-100>,\n  \"summary\": \"<1-2 sentence thesis>\",\n  \"key_drivers\": [\n    {\"factor\": \"<name>\", \"impact\": \"positive\" or \"negative\" or \"neutral\", \"evidence\": \"<short detail>\"}\n  ],\n  \"risk_review\": {\n    \"primary_risks\": [\"<risk 1>\", \"<risk 2>\"],\n    \"volatility_risk\": \"low\" or \"medium\" or \"high\",\n    \"timing_risk\": \"low\" or \"medium\" or \"high\",\n    \"data_quality_flag\": null\n  },\n  \"engine_vs_model\": {\n    \"engine_score\": <number from input>,\n    \"model_score\": <your score>,\n    \"agreement\": \"agree\" or \"disagree\" or \"mixed\",\n    \"notes\": [\"<reasoning about agreement/disagreement>\"]\n  },\n  \"data_quality\": {\n    \"provider\": \"<data source from input>\",\n    \"warnings\": []\n  }\n}\n\nREMEMBER: Raw JSON only. No prose. No fences. Start with { end with }.\n",
+    "user_prompt": {
+      "strategy": "stock_momentum_breakout",
+      "strategy_description": "Momentum Breakout: enters near or just above a breakout through multi-week resistance (20- or 55-day high), with volume confirmation. Short-term hold (5-20 days). Ideal setup: tight base / compression, volume spike on breakout day, RSI 50-70, not too extended from MAs.",
+      "symbol": "NVDA",
+      "price": 142.88,
+      "as_of": "2026-03-18T15:30:00+00:00",
+      "engine": {
+        "composite_score": 74,
+        "score_breakdown": {
+          "trend_score": 20,
+          "momentum_score": 22,
+          "volatility_score": 12,
+          "breakout_score": 20
+        },
+        "thesis": [
+          "Breaking through 20-day high on 2.1x volume surge",
+          "RSI at 62 — strong but not overbought",
+          "Price gapped above SMA-20 with bullish follow-through",
+          "Tight 20-day range compression resolved upward"
+        ]
+      },
+      "breakout_metrics": {
+        "breakout_state": "breaking_out",
+        "high_20": 141.9,
+        "high_55": 143.5,
+        "high_252": 152.89,
+        "breakout_proximity_55": -0.43,
+        "breakout_proximity_20": 0.69,
+        "pct_from_52w_high": -6.55
+      },
+      "volume_metrics": {
+        "vol_spike_ratio": 2.1,
+        "avg_dollar_vol_20": 6520000000,
+        "today_vol": 95800000
+      },
+      "compression_metrics": {
+        "range_20_pct": 5.2,
+        "range_55_pct": 14.8,
+        "compression_score": 72,
+        "atr_pct": 2.35
+      },
+      "momentum_metrics": {
+        "rsi14": 62.4,
+        "roc_10": 5.2,
+        "roc_20": 8.8,
+        "gap_pct": 1.4
+      },
+      "trend_metrics": {
+        "trend_state": "uptrend",
+        "sma20": 136.5,
+        "sma50": 131.2,
+        "dist_sma20": 4.67,
+        "dist_sma50": 8.9,
+        "slope_20": 0.65,
+        "slope_50": 0.48
+      },
+      "analysis_questions": [
+        "Is this breakout real and sustainable, or likely a fakeout?",
+        "Is the stock too extended from its base or moving averages?",
+        "Does the volume profile support the breakout conviction?"
+      ],
+      "market_picture": {
+        "description": "Current market environment from BenTrade's 6 intelligence modules. Use this to contextualize your BUY/PASS decision against broader market conditions.",
+        "engines": {
+          "breadth_participation": {
+            "score": 22.09,
+            "label": "Deteriorating",
+            "confidence": 95.0,
+            "summary": "Breadth is deteriorating (composite 22/100). Weaknesses: participation breadth.",
+            "trader_takeaway": "Internal structure is deteriorating. Broad participation is absent. Defensive posture recommended — consider hedging, reducing exposure, or focusing on highest-conviction setups only.",
+            "bull_factors": [],
+            "bear_factors": [
+              "Participation Breadth is weak (27/100)",
+              "Trend Breadth is weak (17/100)"
+            ],
+            "risks": [
+              "[trend_breadth] trend_momentum_long: unavailable",
+              "[volume_breadth] accumulation_distribution_bias: not yet implemented"
+            ],
+            "regime_tags": [
+              "deteriorating"
+            ]
+          },
+          "volatility_options": {
+            "score": 60.18,
+            "label": "Mixed but Tradable",
+            "confidence": 95.0,
+            "summary": "Volatility regime is mixed but tradable (composite 60/100). Strengths: volatility structure. Concerns: volatility regime fragility.",
+            "trader_takeaway": "Mixed but tradable conditions. Premium selling is viable but use smaller position sizes and tighter risk management. Watch for vol expansion.",
+            "bull_factors": [
+              "Volatility Structure is constructive (64/100)",
+              "Tail Risk Skew is favorable (72/100)"
+            ],
+            "bear_factors": [
+              "Volatility Regime is fragile (47/100)"
+            ],
+            "risks": [
+              "[tail_risk_skew] cboe_skew: CBOE SKEW index unavailable",
+              "missing_data: 1 inputs missing (-5.0)"
+            ],
+            "regime_tags": [
+              "mixed_but_tradable"
+            ]
+          },
+          "cross_asset_macro": {
+            "score": 61.24,
+            "label": "Partial Confirmation",
+            "confidence": 92.0,
+            "summary": "Cross-asset confirmation is partial confirmation (composite 61/100). Confirming: credit risk appetite.",
+            "trader_takeaway": "Cross-asset signals partially confirm equities. Some markets support the bull case but others are neutral or cautionary. Favor quality setups.",
+            "bull_factors": [
+              "Credit Risk Appetite confirms equities (75/100)"
+            ],
+            "bear_factors": [],
+            "risks": [
+              "Copper (PCOPPUSDM) is 77 days stale"
+            ],
+            "regime_tags": [
+              "partial_confirmation"
+            ]
+          },
+          "flows_positioning": {
+            "score": 63.51,
+            "label": "Mixed but Tradable",
+            "confidence": 70.0,
+            "summary": "Flows & positioning composite is mixed but tradable (64/100). Supportive: crowding / stretch. Risk area: flow direction.",
+            "trader_takeaway": "Flows are mixed but tradable. Some positioning metrics are supportive while others show early signs of crowding or stress. Stay selective.",
+            "bull_factors": [
+              "Crowding / Stretch is supportive (72/100)",
+              "Squeeze / Unwind Risk is supportive (71/100)"
+            ],
+            "bear_factors": [
+              "Flow Direction & Persistence signals risk (42/100)"
+            ],
+            "risks": [
+              "Heavy proxy reliance (11 proxy sources) (-8)",
+              "No direct institutional flow data — proxy only (-5)"
+            ],
+            "regime_tags": [
+              "mixed_but_tradable"
+            ]
+          },
+          "liquidity_financial_conditions": {
+            "score": 51.95,
+            "label": "Neutral / Tightening",
+            "confidence": 84.3,
+            "summary": "Liquidity & conditions composite is neutral / tightening (52/100). Supportive: credit & funding stress. Pressure from: dollar / global liquidity.",
+            "trader_takeaway": "Conditions are tightening. Rate pressure, credit widening, or dollar strength may be creating headwinds. Reduce position sizing and be more selective.",
+            "bull_factors": [
+              "Credit & Funding Stress is supportive (75/100)"
+            ],
+            "bear_factors": [
+              "Dollar / Global Liquidity signals stress (17/100)"
+            ],
+            "risks": [
+              "Funding stress is a PROXY (VIX + rate heuristic), not direct measurement",
+              "High cross-pillar disagreement (58pp range) — liquidity picture is fractured"
+            ],
+            "regime_tags": [
+              "neutral_tightening"
+            ]
+          },
+          "news_sentiment": {
+            "score": 62.61,
+            "label": "Neutral",
+            "confidence": 0,
+            "summary": "The engine sees a broadly neutral market backdrop (score: 62.6, regime: Neutral). The strongest positive contributor is negative pressure / risk load, and the largest drag is Macro Stress.",
+            "trader_takeaway": "The engine leans mildly constructive. Standard premium-selling is reasonable but keep position sizes moderate. The signal quality is limited.",
+            "bull_factors": [
+              "negative_pressure: negative_pressure",
+              "narrative_severity: narrative_severity"
+            ],
+            "bear_factors": [
+              "macro_stress: macro_stress"
+            ],
+            "risks": [],
+            "regime_tags": [
+              "neutral"
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "prompt_id": "stock_mean_reversion",
+    "prompt_name": "Stock Strategy — Mean Reversion",
+    "source_file": "common/stock_strategy_prompts.py",
+    "model_params": {
+      "temperature": 0.2,
+      "max_tokens": 1500
+    },
+    "system_prompt": "You are a short-term stock risk advisor and trading assistant.\n\nCONTEXT:\n- Horizon: 1–30 trading days.\n- Strategies: long-only equity positions.\n- Recommendations: BUY or PASS (never SELL / SHORT / HOLD / WAIT).\n- Focus: probability-weighted edge, risk, and timing.\n\nRULES:\n1. Never give financial guarantees or definitive predictions.\n2. Use ONLY the provided metrics and engine data — do NOT hallucinate\n   external news, fundamentals, earnings, or sector data.\n3. Your \"score\" is YOUR independent 0–100 assessment, separate from the engine score.\n4. You MUST compare your score to the engine score and explain any disagreement.\n\nCRITICAL FORMATTING RULES:\n- Return ONLY raw JSON. No markdown code fences, no backticks, no commentary.\n- Start your response with { and end with }. Nothing before or after.\n- Every key must be a double-quoted string. Every string value must be double-quoted.\n- Do NOT use trailing commas after the last item in arrays or objects.\n- All numbers must be numeric literals (not strings). Use null for unknown values.\n- If any field is unknown, output null (for scalars) or empty arrays [], but KEEP the key.\n\nOUTPUT JSON SCHEMA (return this exact structure):\n{\n  \"recommendation\": \"BUY\" or \"PASS\",\n  \"score\": <int 0-100>,\n  \"confidence\": <int 0-100>,\n  \"summary\": \"<1-2 sentence thesis>\",\n  \"key_drivers\": [\n    {\"factor\": \"<name>\", \"impact\": \"positive\" or \"negative\" or \"neutral\", \"evidence\": \"<short detail>\"}\n  ],\n  \"risk_review\": {\n    \"primary_risks\": [\"<risk 1>\", \"<risk 2>\"],\n    \"volatility_risk\": \"low\" or \"medium\" or \"high\",\n    \"timing_risk\": \"low\" or \"medium\" or \"high\",\n    \"data_quality_flag\": null\n  },\n  \"engine_vs_model\": {\n    \"engine_score\": <number from input>,\n    \"model_score\": <your score>,\n    \"agreement\": \"agree\" or \"disagree\" or \"mixed\",\n    \"notes\": [\"<reasoning about agreement/disagreement>\"]\n  },\n  \"data_quality\": {\n    \"provider\": \"<data source from input>\",\n    \"warnings\": []\n  }\n}\n\nREMEMBER: Raw JSON only. No prose. No fences. Start with { end with }.\n",
+    "user_prompt": {
+      "strategy": "stock_mean_reversion",
+      "strategy_description": "Mean Reversion: buys oversold stocks showing stabilization signals, expecting a snapback toward the mean (SMA-20 or SMA-50). Very short hold (1-7 days). Ideal setup: RSI < 30 or Z-score < -2, bounce hint (2 consecutive up-days after selloff), atr_pct < 5%.",
+      "symbol": "META",
+      "price": 485.2,
+      "as_of": "2026-03-18T15:30:00+00:00",
+      "engine": {
+        "composite_score": 71,
+        "score_breakdown": {
+          "trend_score": 8,
+          "momentum_score": 22,
+          "volatility_score": 18,
+          "reversion_score": 23
+        },
+        "thesis": [
+          "RSI-14 at 24 — deeply oversold after 5-day selloff",
+          "Z-score at -2.3 standard deviations below 20-day mean",
+          "Bounce hint detected: 2 consecutive up-closes after selloff",
+          "Price 5.8% below SMA-20 — strong snapback room"
+        ]
+      },
+      "oversold_metrics": {
+        "reversion_state": "oversold_stabilizing",
+        "rsi14": 24.1,
+        "rsi2": 8.5,
+        "zscore_20": -2.31
+      },
+      "distance_metrics": {
+        "dist_sma20": -5.82,
+        "dist_sma50": -8.4,
+        "drawdown_20": -9.1,
+        "drawdown_55": -12.6
+      },
+      "stabilization_metrics": {
+        "bounce_hint": true,
+        "return_1d": 0.85,
+        "return_2d": 1.2,
+        "return_5d": -7.8,
+        "slope_sma20": -0.18,
+        "downtrend_pressure": 0.6
+      },
+      "volatility_metrics": {
+        "atr_pct": 2.85,
+        "realized_vol_20": 0.38,
+        "range_10_pct": 11.2
+      },
+      "liquidity": {
+        "avg_vol_20": 18500000,
+        "avg_dollar_vol_20": 8975000000,
+        "vol_spike_ratio": 1.8
+      },
+      "analysis_questions": [
+        "Is this a bounce setup with genuine stabilization, or a falling knife?",
+        "Is there enough snapback room to the mean (SMA-20/50)?",
+        "Is the volatility manageable for a short-term mean-reversion hold?"
+      ],
+      "market_picture": {
+        "description": "Current market environment from BenTrade's 6 intelligence modules. Use this to contextualize your BUY/PASS decision against broader market conditions.",
+        "engines": {
+          "breadth_participation": {
+            "score": 22.09,
+            "label": "Deteriorating",
+            "confidence": 95.0,
+            "summary": "Breadth is deteriorating (composite 22/100). Weaknesses: participation breadth.",
+            "trader_takeaway": "Internal structure is deteriorating. Broad participation is absent. Defensive posture recommended — consider hedging, reducing exposure, or focusing on highest-conviction setups only.",
+            "bull_factors": [],
+            "bear_factors": [
+              "Participation Breadth is weak (27/100)",
+              "Trend Breadth is weak (17/100)"
+            ],
+            "risks": [
+              "[trend_breadth] trend_momentum_long: unavailable",
+              "[volume_breadth] accumulation_distribution_bias: not yet implemented"
+            ],
+            "regime_tags": [
+              "deteriorating"
+            ]
+          },
+          "volatility_options": {
+            "score": 60.18,
+            "label": "Mixed but Tradable",
+            "confidence": 95.0,
+            "summary": "Volatility regime is mixed but tradable (composite 60/100). Strengths: volatility structure. Concerns: volatility regime fragility.",
+            "trader_takeaway": "Mixed but tradable conditions. Premium selling is viable but use smaller position sizes and tighter risk management. Watch for vol expansion.",
+            "bull_factors": [
+              "Volatility Structure is constructive (64/100)",
+              "Tail Risk Skew is favorable (72/100)"
+            ],
+            "bear_factors": [
+              "Volatility Regime is fragile (47/100)"
+            ],
+            "risks": [
+              "[tail_risk_skew] cboe_skew: CBOE SKEW index unavailable",
+              "missing_data: 1 inputs missing (-5.0)"
+            ],
+            "regime_tags": [
+              "mixed_but_tradable"
+            ]
+          },
+          "cross_asset_macro": {
+            "score": 61.24,
+            "label": "Partial Confirmation",
+            "confidence": 92.0,
+            "summary": "Cross-asset confirmation is partial confirmation (composite 61/100). Confirming: credit risk appetite.",
+            "trader_takeaway": "Cross-asset signals partially confirm equities. Some markets support the bull case but others are neutral or cautionary. Favor quality setups.",
+            "bull_factors": [
+              "Credit Risk Appetite confirms equities (75/100)"
+            ],
+            "bear_factors": [],
+            "risks": [
+              "Copper (PCOPPUSDM) is 77 days stale"
+            ],
+            "regime_tags": [
+              "partial_confirmation"
+            ]
+          },
+          "flows_positioning": {
+            "score": 63.51,
+            "label": "Mixed but Tradable",
+            "confidence": 70.0,
+            "summary": "Flows & positioning composite is mixed but tradable (64/100). Supportive: crowding / stretch. Risk area: flow direction.",
+            "trader_takeaway": "Flows are mixed but tradable. Some positioning metrics are supportive while others show early signs of crowding or stress. Stay selective.",
+            "bull_factors": [
+              "Crowding / Stretch is supportive (72/100)",
+              "Squeeze / Unwind Risk is supportive (71/100)"
+            ],
+            "bear_factors": [
+              "Flow Direction & Persistence signals risk (42/100)"
+            ],
+            "risks": [
+              "Heavy proxy reliance (11 proxy sources) (-8)",
+              "No direct institutional flow data — proxy only (-5)"
+            ],
+            "regime_tags": [
+              "mixed_but_tradable"
+            ]
+          },
+          "liquidity_financial_conditions": {
+            "score": 51.95,
+            "label": "Neutral / Tightening",
+            "confidence": 84.3,
+            "summary": "Liquidity & conditions composite is neutral / tightening (52/100). Supportive: credit & funding stress. Pressure from: dollar / global liquidity.",
+            "trader_takeaway": "Conditions are tightening. Rate pressure, credit widening, or dollar strength may be creating headwinds. Reduce position sizing and be more selective.",
+            "bull_factors": [
+              "Credit & Funding Stress is supportive (75/100)"
+            ],
+            "bear_factors": [
+              "Dollar / Global Liquidity signals stress (17/100)"
+            ],
+            "risks": [
+              "Funding stress is a PROXY (VIX + rate heuristic), not direct measurement",
+              "High cross-pillar disagreement (58pp range) — liquidity picture is fractured"
+            ],
+            "regime_tags": [
+              "neutral_tightening"
+            ]
+          },
+          "news_sentiment": {
+            "score": 62.61,
+            "label": "Neutral",
+            "confidence": 0,
+            "summary": "The engine sees a broadly neutral market backdrop (score: 62.6, regime: Neutral). The strongest positive contributor is negative pressure / risk load, and the largest drag is Macro Stress.",
+            "trader_takeaway": "The engine leans mildly constructive. Standard premium-selling is reasonable but keep position sizes moderate. The signal quality is limited.",
+            "bull_factors": [
+              "negative_pressure: negative_pressure",
+              "narrative_severity: narrative_severity"
+            ],
+            "bear_factors": [
+              "macro_stress: macro_stress"
+            ],
+            "risks": [],
+            "regime_tags": [
+              "neutral"
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "prompt_id": "stock_volatility_expansion",
+    "prompt_name": "Stock Strategy — Volatility Expansion",
+    "source_file": "common/stock_strategy_prompts.py",
+    "model_params": {
+      "temperature": 0.2,
+      "max_tokens": 1500
+    },
+    "system_prompt": "You are a short-term stock risk advisor and trading assistant.\n\nCONTEXT:\n- Horizon: 1–30 trading days.\n- Strategies: long-only equity positions.\n- Recommendations: BUY or PASS (never SELL / SHORT / HOLD / WAIT).\n- Focus: probability-weighted edge, risk, and timing.\n\nRULES:\n1. Never give financial guarantees or definitive predictions.\n2. Use ONLY the provided metrics and engine data — do NOT hallucinate\n   external news, fundamentals, earnings, or sector data.\n3. Your \"score\" is YOUR independent 0–100 assessment, separate from the engine score.\n4. You MUST compare your score to the engine score and explain any disagreement.\n\nCRITICAL FORMATTING RULES:\n- Return ONLY raw JSON. No markdown code fences, no backticks, no commentary.\n- Start your response with { and end with }. Nothing before or after.\n- Every key must be a double-quoted string. Every string value must be double-quoted.\n- Do NOT use trailing commas after the last item in arrays or objects.\n- All numbers must be numeric literals (not strings). Use null for unknown values.\n- If any field is unknown, output null (for scalars) or empty arrays [], but KEEP the key.\n\nOUTPUT JSON SCHEMA (return this exact structure):\n{\n  \"recommendation\": \"BUY\" or \"PASS\",\n  \"score\": <int 0-100>,\n  \"confidence\": <int 0-100>,\n  \"summary\": \"<1-2 sentence thesis>\",\n  \"key_drivers\": [\n    {\"factor\": \"<name>\", \"impact\": \"positive\" or \"negative\" or \"neutral\", \"evidence\": \"<short detail>\"}\n  ],\n  \"risk_review\": {\n    \"primary_risks\": [\"<risk 1>\", \"<risk 2>\"],\n    \"volatility_risk\": \"low\" or \"medium\" or \"high\",\n    \"timing_risk\": \"low\" or \"medium\" or \"high\",\n    \"data_quality_flag\": null\n  },\n  \"engine_vs_model\": {\n    \"engine_score\": <number from input>,\n    \"model_score\": <your score>,\n    \"agreement\": \"agree\" or \"disagree\" or \"mixed\",\n    \"notes\": [\"<reasoning about agreement/disagreement>\"]\n  },\n  \"data_quality\": {\n    \"provider\": \"<data source from input>\",\n    \"warnings\": []\n  }\n}\n\nREMEMBER: Raw JSON only. No prose. No fences. Start with { end with }.\n",
+    "user_prompt": {
+      "strategy": "stock_volatility_expansion",
+      "strategy_description": "Volatility Expansion: identifies stocks transitioning from volatility compression to expansion, with a bullish directional bias. Short-to-medium hold (5-20 days). Ideal setup: ATR ratio > 1.3, Bollinger width expanding, volume spike, close above SMA-20.",
+      "symbol": "AMZN",
+      "price": 198.45,
+      "as_of": "2026-03-18T15:30:00+00:00",
+      "engine": {
+        "composite_score": 68,
+        "score_breakdown": {
+          "trend_score": 16,
+          "momentum_score": 14,
+          "volatility_score": 22,
+          "expansion_score": 16
+        },
+        "thesis": [
+          "ATR ratio 1.55 — vol expanding from prior compression",
+          "Bollinger width expanding from 180-day low",
+          "1.6x volume surge on expansion day — institutional participation",
+          "Price above SMA-20 with bullish directional bias confirmed"
+        ]
+      },
+      "expansion_metrics": {
+        "expansion_state": "expanding",
+        "atr_ratio_10": 1.55,
+        "rv_ratio": 1.38,
+        "range_ratio": 1.42,
+        "atr_pct": 2.1,
+        "prior_atr_pct": 1.35
+      },
+      "compression_history": {
+        "bb_width_20": 0.072,
+        "bb_width_prev": 0.038,
+        "bb_width_rising": true,
+        "bb_width_percentile_180": 15,
+        "range_20_pct": 9.8,
+        "prior_range_20_pct": 5.2
+      },
+      "directional_bias": {
+        "bullish_bias": true,
+        "close_vs_sma20": "above",
+        "close_vs_sma50": "above",
+        "return_1d": 1.9,
+        "return_2d": 2.4,
+        "return_5d": 0.6,
+        "rsi14": 56.8
+      },
+      "volume_confirmation": {
+        "vol_spike_ratio": 1.6,
+        "avg_dollar_vol_20": 9280000000,
+        "today_vol": 72400000
+      },
+      "risk_metrics": {
+        "gap_pct": 0.8,
+        "sma20": 195.3,
+        "sma50": 190.8,
+        "sma200": 182.5
+      },
+      "analysis_questions": [
+        "Is the volatility expansion likely to continue, or will it mean-revert quickly?",
+        "Is the direction favorable for a long-only position?",
+        "What is the risk if the expansion fizzles or reverses?"
+      ],
+      "market_picture": {
+        "description": "Current market environment from BenTrade's 6 intelligence modules. Use this to contextualize your BUY/PASS decision against broader market conditions.",
+        "engines": {
+          "breadth_participation": {
+            "score": 22.09,
+            "label": "Deteriorating",
+            "confidence": 95.0,
+            "summary": "Breadth is deteriorating (composite 22/100). Weaknesses: participation breadth.",
+            "trader_takeaway": "Internal structure is deteriorating. Broad participation is absent. Defensive posture recommended — consider hedging, reducing exposure, or focusing on highest-conviction setups only.",
+            "bull_factors": [],
+            "bear_factors": [
+              "Participation Breadth is weak (27/100)",
+              "Trend Breadth is weak (17/100)"
+            ],
+            "risks": [
+              "[trend_breadth] trend_momentum_long: unavailable",
+              "[volume_breadth] accumulation_distribution_bias: not yet implemented"
+            ],
+            "regime_tags": [
+              "deteriorating"
+            ]
+          },
+          "volatility_options": {
+            "score": 60.18,
+            "label": "Mixed but Tradable",
+            "confidence": 95.0,
+            "summary": "Volatility regime is mixed but tradable (composite 60/100). Strengths: volatility structure. Concerns: volatility regime fragility.",
+            "trader_takeaway": "Mixed but tradable conditions. Premium selling is viable but use smaller position sizes and tighter risk management. Watch for vol expansion.",
+            "bull_factors": [
+              "Volatility Structure is constructive (64/100)",
+              "Tail Risk Skew is favorable (72/100)"
+            ],
+            "bear_factors": [
+              "Volatility Regime is fragile (47/100)"
+            ],
+            "risks": [
+              "[tail_risk_skew] cboe_skew: CBOE SKEW index unavailable",
+              "missing_data: 1 inputs missing (-5.0)"
+            ],
+            "regime_tags": [
+              "mixed_but_tradable"
+            ]
+          },
+          "cross_asset_macro": {
+            "score": 61.24,
+            "label": "Partial Confirmation",
+            "confidence": 92.0,
+            "summary": "Cross-asset confirmation is partial confirmation (composite 61/100). Confirming: credit risk appetite.",
+            "trader_takeaway": "Cross-asset signals partially confirm equities. Some markets support the bull case but others are neutral or cautionary. Favor quality setups.",
+            "bull_factors": [
+              "Credit Risk Appetite confirms equities (75/100)"
+            ],
+            "bear_factors": [],
+            "risks": [
+              "Copper (PCOPPUSDM) is 77 days stale"
+            ],
+            "regime_tags": [
+              "partial_confirmation"
+            ]
+          },
+          "flows_positioning": {
+            "score": 63.51,
+            "label": "Mixed but Tradable",
+            "confidence": 70.0,
+            "summary": "Flows & positioning composite is mixed but tradable (64/100). Supportive: crowding / stretch. Risk area: flow direction.",
+            "trader_takeaway": "Flows are mixed but tradable. Some positioning metrics are supportive while others show early signs of crowding or stress. Stay selective.",
+            "bull_factors": [
+              "Crowding / Stretch is supportive (72/100)",
+              "Squeeze / Unwind Risk is supportive (71/100)"
+            ],
+            "bear_factors": [
+              "Flow Direction & Persistence signals risk (42/100)"
+            ],
+            "risks": [
+              "Heavy proxy reliance (11 proxy sources) (-8)",
+              "No direct institutional flow data — proxy only (-5)"
+            ],
+            "regime_tags": [
+              "mixed_but_tradable"
+            ]
+          },
+          "liquidity_financial_conditions": {
+            "score": 51.95,
+            "label": "Neutral / Tightening",
+            "confidence": 84.3,
+            "summary": "Liquidity & conditions composite is neutral / tightening (52/100). Supportive: credit & funding stress. Pressure from: dollar / global liquidity.",
+            "trader_takeaway": "Conditions are tightening. Rate pressure, credit widening, or dollar strength may be creating headwinds. Reduce position sizing and be more selective.",
+            "bull_factors": [
+              "Credit & Funding Stress is supportive (75/100)"
+            ],
+            "bear_factors": [
+              "Dollar / Global Liquidity signals stress (17/100)"
+            ],
+            "risks": [
+              "Funding stress is a PROXY (VIX + rate heuristic), not direct measurement",
+              "High cross-pillar disagreement (58pp range) — liquidity picture is fractured"
+            ],
+            "regime_tags": [
+              "neutral_tightening"
+            ]
+          },
+          "news_sentiment": {
+            "score": 62.61,
+            "label": "Neutral",
+            "confidence": 0,
+            "summary": "The engine sees a broadly neutral market backdrop (score: 62.6, regime: Neutral). The strongest positive contributor is negative pressure / risk load, and the largest drag is Macro Stress.",
+            "trader_takeaway": "The engine leans mildly constructive. Standard premium-selling is reasonable but keep position sizes moderate. The signal quality is limited.",
+            "bull_factors": [
+              "negative_pressure: negative_pressure",
+              "narrative_severity: narrative_severity"
+            ],
+            "bear_factors": [
+              "macro_stress: macro_stress"
+            ],
+            "risks": [],
+            "regime_tags": [
+              "neutral"
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "prompt_id": "tmc_final_decision",
+    "prompt_name": "TMC Final Trade Decision",
+    "source_file": "common/tmc_final_decision_prompts.py",
+    "model_params": {
+      "temperature": 0.0,
+      "max_tokens": 3000
+    },
+    "system_prompt": "You are a disciplined short-term portfolio manager making real allocation decisions with real capital.  This is not an academic exercise — you are deciding whether to commit money to a specific trade right now.\n\nYOUR MANDATE:\n- You manage a short-term equity portfolio (1-30 day holding periods).\n- You prioritize staying net positive over any single trade's upside.\n- You are risk-aware: a skipped good trade costs nothing, but a bad trade costs capital and opportunity.\n- You have access to the trade setup data AND the current market environment from 6 independent intelligence modules.\n\nDECISION FRAMEWORK:\n1. TRADE SETUP: Does the technical setup have genuine edge, or is it noise?  Evaluate the engine's thesis and metrics critically.\n2. MARKET ALIGNMENT: Does the broader market environment support this type of trade right now?  A great pullback buy in a deteriorating market is not a great trade.\n3. RISK/REWARD: Is the potential gain worth the risk of loss?  Consider the downside scenario, not just the base case.\n4. TIMING: Is this the right moment, or could patience improve the entry?\n5. DATA QUALITY: Is the data you're seeing trustworthy and complete?\n\nDECISION RULES:\n- \"EXECUTE\" means you would size the position for your own portfolio right now at current prices.\n- \"PASS\" means either the edge is insufficient, the risk is too high, the market environment is wrong, or the timing is poor.\n- If you are on the fence, PASS.  Conviction below 60 should be a PASS.\n- Be brutally honest.  Do not recommend trades you wouldn't take yourself.\n\nFACTOR ANALYSIS:\nFor each factor you considered, report:\n- category: \"trade_setup\" | \"market_environment\" | \"risk_reward\" | \"timing\" | \"data_quality\"\n- assessment: \"favorable\" | \"unfavorable\" | \"neutral\" | \"concerning\"\n- weight: \"high\" | \"medium\" | \"low\" (how much it influenced your decision)\n- detail: one sentence explaining WHY, citing specific numbers/metrics from the input data (e.g. \"RSI at 48 has reset from overbought\", \"volume 1.8x average signals institutional interest\")\n\nTECHNICAL ANALYSIS:\nProvide a structured technical breakdown of the setup.  This is NOT a summary paragraph — it is a granular assessment of each technical dimension, citing the actual metric values from the input data.\n- setup_quality_assessment: 2-3 sentences evaluating the overall technical setup quality, referencing specific metric values.\n- key_metrics_cited: a flat dict of the most relevant metrics you relied on (e.g. {\"rsi14\": 48, \"atr_pct\": 1.2, \"dist_sma20\": -0.3}).\n- trend_context: one sentence on the trend reading, citing SMA positions or slope values.\n- momentum_read: one sentence on momentum, citing RSI, ROC, or return values.\n- volatility_read: one sentence on volatility, citing ATR, BB width, or vol ratio.\n- volume_read: one sentence on volume, citing volume ratio or today's vs average.\n\nCRITICAL FORMATTING RULES:\n- Return ONLY raw JSON. No markdown fences, no backticks, no commentary.\n- Start with { and end with }. Nothing before or after.\n- Every key must be a double-quoted string. Every string value must be double-quoted.\n- Do NOT use trailing commas after the last item in arrays or objects.\n- All numbers must be numeric literals (not strings). Use null for unknowns.\n- Keep the key even if the value is null or an empty array.\n\nOUTPUT JSON SCHEMA (return this exact structure):\n{\n  \"decision\": \"EXECUTE\" or \"PASS\",\n  \"conviction\": <int 0-100>,\n  \"decision_summary\": \"<2-3 sentence direct thesis — what you would do and why, citing key metric values>\",\n  \"technical_analysis\": {\n    \"setup_quality_assessment\": \"<2-3 sentences evaluating the technical setup, citing specific metrics>\",\n    \"key_metrics_cited\": {\"<metric_name>\": <value>, ...},\n    \"trend_context\": \"<1 sentence on trend, citing SMA positions/slopes>\",\n    \"momentum_read\": \"<1 sentence on momentum, citing RSI/ROC/returns>\",\n    \"volatility_read\": \"<1 sentence on volatility, citing ATR/BB/vol>\",\n    \"volume_read\": \"<1 sentence on volume, citing vol ratio/today vs avg>\"\n  },\n  \"factors_considered\": [\n    {\n      \"category\": \"<trade_setup|market_environment|risk_reward|timing|data_quality>\",\n      \"factor\": \"<factor name>\",\n      \"assessment\": \"<favorable|unfavorable|neutral|concerning>\",\n      \"weight\": \"<high|medium|low>\",\n      \"detail\": \"<one sentence explanation, cite specific numbers>\"\n    }\n  ],\n  \"market_alignment\": {\n    \"overall\": \"<aligned|neutral|conflicting>\",\n    \"detail\": \"<1-2 sentences on how market conditions support or undermine this trade>\"\n  },\n  \"risk_assessment\": {\n    \"primary_risks\": [\"<risk 1>\", \"<risk 2>\"],\n    \"biggest_concern\": \"<the single thing most likely to kill this trade>\",\n    \"risk_reward_verdict\": \"<favorable|marginal|unfavorable>\"\n  },\n  \"what_would_change_my_mind\": \"<what conditions would flip your decision>\",\n  \"engine_comparison\": {\n    \"engine_score\": <number from input>,\n    \"model_score\": <your independent 0-100 score>,\n    \"agreement\": \"<agree|disagree|partial>\",\n    \"reasoning\": \"<why you agree or disagree with the engine>\"\n  }\n}\n\nREMEMBER: Raw JSON only. No prose. No fences. Start with { end with }.\n",
+    "user_prompt": {
+      "trade_setup": {
+        "symbol": "AAPL",
+        "price": 178.42,
+        "as_of": "2026-03-18T15:30:00+00:00",
+        "strategy_id": "stock_pullback_swing",
+        "strategy_description": "Pullback Swing: buys healthy pullbacks in confirmed uptrends, expecting price to resume upward. Hold 3-15 days. Ideal: strong trend, modest pullback (-1% to -6% from 20D high), RSI reset to 40-60, near SMA-20 support.",
+        "direction": "long",
+        "engine": {
+          "composite_score": 82,
+          "thesis": [
+            "Price pulled back 3.2% from 20-day high into SMA-20 support",
+            "RSI reset from 68 to 48 — healthy momentum reset",
+            "Volume declining on pullback — selling exhaustion pattern",
+            "Price holding above rising SMA-50 trend line"
+          ],
+          "score_breakdown": {
+            "trend_score": 22,
+            "momentum_score": 20,
+            "volatility_score": 18,
+            "pullback_score": 15,
+            "catalyst_score": 7
+          },
+          "confidence": 0.75
+        }
+      },
+      "technical_metrics": {
+        "trend": {
+          "trend_state": "uptrend",
+          "sma20": 179.85,
+          "sma50": 174.6,
+          "sma200": 168.22,
+          "slope_20": 0.42,
+          "slope_50": 0.28,
+          "dist_sma20": -0.8,
+          "dist_sma50": 2.19
+        },
+        "momentum": {
+          "rsi14": 48.3,
+          "rsi2": 22.1,
+          "rsi_change_5d": -19.7,
+          "roc_10": -1.8,
+          "roc_20": 3.2,
+          "return_1d": -0.45,
+          "return_2d": -1.12,
+          "return_5d": -2.85,
+          "return_20d": 3.2
+        },
+        "volatility": {
+          "atr_pct": 1.65,
+          "atr_ratio_10": 1.12,
+          "bb_width_20": 0.058,
+          "realized_vol_20": 0.22,
+          "range_20_pct": 8.4
+        },
+        "volume_liquidity": {
+          "avg_vol_20": 62500000,
+          "avg_dollar_vol_20": 11150000000,
+          "today_vol": 48200000,
+          "today_vol_vs_avg": 0.77,
+          "volume_ratio": 0.77
+        },
+        "price_levels": {
+          "price": 178.42,
+          "high_20": 184.31,
+          "high_55": 186.5,
+          "high_252": 199.62,
+          "pullback_from_20d_high": -3.19,
+          "pullback_from_50d_high": -4.33,
+          "pct_from_52w_high": -10.62,
+          "drawdown_20": -3.19
+        },
+        "scores": {
+          "composite_score": 82
+        }
+      },
+      "market_environment": {
+        "description": "Current market environment from BenTrade's intelligence modules. Each module provides an independent assessment of market conditions. Use these to judge whether the broader environment supports this trade.",
+        "engines": {
+          "breadth_participation": {
+            "score": 22.09,
+            "label": "Deteriorating",
+            "confidence": 95.0,
+            "summary": "Breadth is deteriorating (composite 22/100). Weaknesses: participation breadth.",
+            "trader_takeaway": "Internal structure is deteriorating. Broad participation is absent. Defensive posture recommended — consider hedging, reducing exposure, or focusing on highest-conviction setups only.",
+            "bull_factors": [],
+            "bear_factors": [
+              "Participation Breadth is weak (27/100)",
+              "Trend Breadth is weak (17/100)"
+            ],
+            "risks": [
+              "[trend_breadth] trend_momentum_long: unavailable",
+              "[volume_breadth] accumulation_distribution_bias: not yet implemented"
+            ]
+          },
+          "volatility_options": {
+            "score": 60.18,
+            "label": "Mixed but Tradable",
+            "confidence": 95.0,
+            "summary": "Volatility regime is mixed but tradable (composite 60/100). Strengths: volatility structure. Concerns: volatility regime fragility.",
+            "trader_takeaway": "Mixed but tradable conditions. Premium selling is viable but use smaller position sizes and tighter risk management. Watch for vol expansion.",
+            "bull_factors": [
+              "Volatility Structure is constructive (64/100)",
+              "Tail Risk Skew is favorable (72/100)"
+            ],
+            "bear_factors": [
+              "Volatility Regime is fragile (47/100)"
+            ],
+            "risks": [
+              "[tail_risk_skew] cboe_skew: CBOE SKEW index unavailable",
+              "missing_data: 1 inputs missing (-5.0)"
+            ]
+          },
+          "cross_asset_macro": {
+            "score": 61.24,
+            "label": "Partial Confirmation",
+            "confidence": 92.0,
+            "summary": "Cross-asset confirmation is partial confirmation (composite 61/100). Confirming: credit risk appetite.",
+            "trader_takeaway": "Cross-asset signals partially confirm equities. Some markets support the bull case but others are neutral or cautionary. Favor quality setups.",
+            "bull_factors": [
+              "Credit Risk Appetite confirms equities (75/100)"
+            ],
+            "bear_factors": [],
+            "risks": [
+              "Copper (PCOPPUSDM) is 77 days stale"
+            ]
+          },
+          "flows_positioning": {
+            "score": 63.51,
+            "label": "Mixed but Tradable",
+            "confidence": 70.0,
+            "summary": "Flows & positioning composite is mixed but tradable (64/100). Supportive: crowding / stretch. Risk area: flow direction.",
+            "trader_takeaway": "Flows are mixed but tradable. Some positioning metrics are supportive while others show early signs of crowding or stress. Stay selective.",
+            "bull_factors": [
+              "Crowding / Stretch is supportive (72/100)",
+              "Squeeze / Unwind Risk is supportive (71/100)"
+            ],
+            "bear_factors": [
+              "Flow Direction & Persistence signals risk (42/100)"
+            ],
+            "risks": [
+              "Heavy proxy reliance (11 proxy sources) (-8)",
+              "No direct institutional flow data — proxy only (-5)"
+            ]
+          },
+          "liquidity_financial_conditions": {
+            "score": 51.95,
+            "label": "Neutral / Tightening",
+            "confidence": 84.3,
+            "summary": "Liquidity & conditions composite is neutral / tightening (52/100). Supportive: credit & funding stress. Pressure from: dollar / global liquidity.",
+            "trader_takeaway": "Conditions are tightening. Rate pressure, credit widening, or dollar strength may be creating headwinds. Reduce position sizing and be more selective.",
+            "bull_factors": [
+              "Credit & Funding Stress is supportive (75/100)"
+            ],
+            "bear_factors": [
+              "Dollar / Global Liquidity signals stress (17/100)"
+            ],
+            "risks": [
+              "Funding stress is a PROXY (VIX + rate heuristic), not direct measurement",
+              "High cross-pillar disagreement (58pp range) — liquidity picture is fractured"
+            ]
+          },
+          "news_sentiment": {
+            "score": 62.61,
+            "label": "Neutral",
+            "confidence": 0,
+            "summary": "The engine sees a broadly neutral market backdrop (score: 62.6, regime: Neutral). The strongest positive contributor is negative pressure / risk load, and the largest drag is Macro Stress.",
+            "trader_takeaway": "The engine leans mildly constructive. Standard premium-selling is reasonable but keep position sizes moderate. The signal quality is limited.",
+            "bull_factors": [
+              "negative_pressure: negative_pressure",
+              "narrative_severity: narrative_severity"
+            ],
+            "bear_factors": [
+              "macro_stress: macro_stress"
+            ],
+            "risks": []
+          }
+        }
+      },
+      "regime_context": {
+        "market_regime": "neutral",
+        "risk_environment": "moderate",
+        "vix": 19.8,
+        "regime_tags": [
+          "breadth_deteriorating",
+          "vol_mixed",
+          "flows_supportive"
+        ],
+        "support_state": "near_support"
+      },
+      "signals_and_flags": {
+        "supporting_signals": [
+          "Price at SMA-20 support zone",
+          "RSI reset from overbought — healthy pullback",
+          "Volume declining on pullback — no panic selling",
+          "Positive earnings estimate revisions last 30d"
+        ],
+        "risk_flags": [
+          "Breadth deteriorating across market (22/100)",
+          "VIX elevated at 19.8 — positioning caution",
+          "Near-term macro uncertainty (tariffs / FOMC)"
+        ],
+        "entry_context": "Pullback into SMA-20 support in confirmed uptrend with momentum reset"
+      },
+      "decision_prompt": "Based on ALL the above data — trade setup, technical metrics, full market environment, and regime context — make your decision. Would you put real money on this trade right now in your own short-term portfolio?  Be direct and serious.  If the setup is marginal or the market environment doesn't support it, say PASS with conviction.  If this is a genuine edge with favorable conditions, say EXECUTE and explain exactly why you believe it."
+    }
+  },
+  {
+    "prompt_id": "active_trade_review",
+    "prompt_name": "Active Trade Position Review",
+    "source_file": "app/api/routes_active_trades.py",
+    "model_params": {
+      "temperature": 0.2,
+      "max_tokens": 900
+    },
+    "system_prompt": "You are a senior portfolio and risk analyst writing a structured active-position review for a trading desk UI.\n\nRULES — follow these exactly:\n1. Use ONLY the provided position and market context data.\n2. Do NOT invent catalysts, fundamentals, or news.\n3. Do NOT output chain-of-thought, reasoning tags, <think> tags, markdown fences, or any text outside the JSON.\n4. Return a single valid JSON object using the schema below.\n5. Be concise, specific, and decision-oriented. Reference actual price levels, P&L numbers, and indicator values.\n6. Avoid filler, generic advice, and educational explanations.\n7. Keep risk/action language specific to the provided data.\n8. confidence is an integer 0-100, NOT a float.\n9. stance must be exactly one of: HOLD, REDUCE, EXIT, ADD, WATCH\n10. thesis_status must be exactly: INTACT, WEAKENING, or BROKEN\n11. urgency must be exactly: LOW, MEDIUM, or HIGH\n\nRequired JSON schema:\n{\n  \"headline\": \"<short attention-grabbing headline>\",\n  \"stance\": \"HOLD|REDUCE|EXIT|ADD|WATCH\",\n  \"confidence\": 0-100,\n  \"thesis_status\": \"INTACT|WEAKENING|BROKEN\",\n  \"summary\": \"<2-3 sentence executive summary>\",\n  \"key_risks\": [\"<risk 1>\", \"<risk 2>\"],\n  \"key_supports\": [\"<support 1>\", \"<support 2>\"],\n  \"technical_state\": {\n    \"price_vs_sma20\": \"ABOVE|BELOW|NEAR\",\n    \"price_vs_sma50\": \"ABOVE|BELOW|NEAR\",\n    \"trend_assessment\": \"<1 sentence>\",\n    \"drawdown_assessment\": \"<1 sentence>\"\n  },\n  \"action_plan\": {\n    \"primary_action\": \"<what to do>\",\n    \"urgency\": \"LOW|MEDIUM|HIGH\",\n    \"next_step\": \"<concrete next step>\",\n    \"risk_trigger\": \"<what would force an exit>\",\n    \"upside_trigger\": \"<what would justify adding>\"\n  },\n  \"memo\": {\n    \"thesis_check\": \"<is original thesis intact?>\",\n    \"what_changed\": \"<what moved since entry?>\",\n    \"decision\": \"<clear recommendation>\"\n  }\n}",
+    "user_prompt": "Evaluate this active position using ONLY the data below.\n\nPOSITION SNAPSHOT\n  Symbol: MSFT\n  Strategy: single\n  Direction: Long\n  Quantity: 50\n  Avg Entry Price: $412.35\n  Current Price: $398.20\n  Cost Basis (total): $20617.50\n  Market Value: $19910.00\n  Unrealized P&L: $-707.50 (-3.4%)\n  Day Change: -$2.85\n\nMARKET CONTEXT\n  Regime: Neutral (score: 48/100)\n  SMA 20-day: $405.60  — Price vs SMA20: BELOW (-1.8%)\n  SMA 50-day: $410.25  — Price vs SMA50: BELOW (-2.9%)\n  RSI 14-day: 38.2\n\nProduce a concise position review memo as JSON. Be decisive."
+  },
+  {
+    "prompt_id": "decision_prompt_payload",
+    "prompt_name": "Decision Prompt Payload (Orchestrator → Model)",
+    "source_file": "app/services/decision_prompt_payload.py",
+    "model_params": {
+      "note": "This is a packaging layer — not sent directly to LLM. It structures data for downstream decision calls."
+    },
+    "payload": {
+      "payload_version": "1.1",
+      "generated_at": "2026-03-19T05:09:20.055587+00:00",
+      "status": "partial",
+      "summary_block": "Decision payload is partial — some context is missing. Candidate: AAPL (None). Market state: None.",
+      "candidate_block": {
+        "symbol": "AAPL",
+        "strategy_family": null,
+        "setup_type": null,
+        "direction": null,
+        "time_horizon": null,
+        "confidence": null,
+        "setup_quality": null,
+        "thesis_summary": null,
+        "entry_context": null,
+        "risk_definition": null,
+        "reward_profile": null,
+        "key_metrics": null,
+        "risk_flags": [],
+        "data_quality": null
+      },
+      "market_block": {
+        "market_state": null,
+        "support_state": null,
+        "stability_state": null,
+        "confidence": null,
+        "status": null,
+        "summary": null
+      },
+      "portfolio_block": null,
+      "policy_block": null,
+      "event_block": null,
+      "conflict_block": null,
+      "model_context_block": null,
+      "quality_block": {
+        "decision_ready": false,
+        "readiness_note": "Payload is incomplete — some sections missing.",
+        "coverage_ratio": 0.29,
+        "subsystems_present": [
+          "candidate",
+          "market"
+        ],
+        "subsystems_missing": [
+          "conflicts",
+          "events",
+          "model_context",
+          "policy",
+          "portfolio"
+        ],
+        "subsystems_degraded": [],
+        "confidence_assessment": {
+          "framework_version": "1.1",
+          "generated_at": "2026-03-19T05:09:20.056332+00:00",
+          "source": "decision_prompt_payload_fallback",
+          "raw_input": 0.29,
+          "base_score": 0.29,
+          "adjusted_score": 0.04,
+          "confidence_label": "none",
+          "signal_quality": "low",
+          "impacts": [
+            {
+              "category": "coverage",
+              "penalty": 0.25,
+              "reason": "coverage: minimal",
+              "source": "decision_prompt_payload_fallback"
+            }
+          ],
+          "total_penalty": 0.25,
+          "confidence_reasons": [
+            "weak base confidence (0.29)",
+            "total penalty of 0.25 applied from 1 impact(s)"
+          ],
+          "uncertainty_reasons": [
+            "coverage: minimal",
+            "adjusted confidence below minimum threshold"
+          ],
+          "uncertainty_score": 0.96,
+          "uncertainty_level": "very_high",
+          "context": {}
+        }
+      },
+      "instruction_block": {
+        "role": "decision_reviewer",
+        "guidance": [
+          "You are reviewing a structured trade decision payload.",
+          "Prioritise policy guardrails and structural risk over narrative tone.",
+          "Respect missing or degraded inputs — do not invent context that is absent.",
+          "Treat conflicts as uncertainty, not automatic rejection.",
+          "Distinguish market context from portfolio fit.",
+          "Avoid overconfidence when data quality is weak or sections are missing.",
+          "If the payload status is 'partial' or 'insufficient_data', acknowledge the limitations explicitly before rendering a decision.",
+          "Base your assessment on the structured evidence provided, not assumptions."
+        ],
+        "version": "1.1"
+      },
+      "warning_flags": [
+        "conflicts_not_available",
+        "portfolio_not_available",
+        "policy_not_available",
+        "events_not_available",
+        "model_context_not_available",
+        "candidate_from_fallback",
+        "market_from_fallback"
+      ],
+      "metadata": {
+        "payload_version": "1.1",
+        "generated_at": "2026-03-19T05:09:20.055587+00:00",
+        "packet_provided": false,
+        "source_packet_version": null,
+        "source_packet_status": null,
+        "fallbacks_used": [
+          "candidate",
+          "market"
+        ],
+        "sections_included": [
+          "candidate",
+          "market"
+        ],
+        "sections_missing": [
+          "conflicts",
+          "events",
+          "model_context",
+          "policy",
+          "portfolio"
+        ],
+        "model_context_input_form": null,
+        "model_context_count": 0,
+        "compression_limits": {
+          "max_top_checks": 5,
+          "max_nearest_events": 5
+        },
+        "token_budget": null
+      }
+    }
+  }
+]

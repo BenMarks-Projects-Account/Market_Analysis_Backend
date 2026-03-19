@@ -89,6 +89,22 @@ class _DummyRiskPolicyService:
         }
 
 
+class _DummyTradierClient:
+    async def get_quotes(self, symbols: list[str]) -> dict:
+        out = {}
+        for s in symbols:
+            out[s] = {
+                "symbol": s,
+                "last": 500.0,
+                "open": 498.0,
+                "change": 2.0,
+                "change_percentage": 0.40,
+                "bid": 499.9,
+                "ask": 500.1,
+            }
+        return out
+
+
 def _build_client() -> TestClient:
     from app.api import routes_active_trades
 
@@ -97,6 +113,7 @@ def _build_client() -> TestClient:
     app.state.spread_service = _DummySpreadService()
     app.state.base_data_service = _DummyBaseDataService()
     app.state.risk_policy_service = _DummyRiskPolicyService()
+    app.state.tradier_client = _DummyTradierClient()
     
     _original = routes_active_trades._build_active_payload
 
@@ -182,5 +199,31 @@ def test_route_presence_and_top_level_shapes() -> None:
         assert "source_health" in payload
         assert "validation_events" in payload
         assert "rollups" in payload
+    finally:
+        client._restore_active_payload()
+
+
+def test_batch_quotes_endpoint() -> None:
+    """Verify /api/stock/quotes returns quote data for valid symbols."""
+    client = _build_client()
+    try:
+        r = client.get("/api/stock/quotes?symbols=SPY,QQQ")
+        assert r.status_code == 200
+        body = r.json()
+        assert "quotes" in body
+        assert "SPY" in body["quotes"]
+        assert body["quotes"]["SPY"]["last"] == 500.0
+        assert body["quotes"]["SPY"]["change"] == 2.0
+        assert "as_of" in body
+    finally:
+        client._restore_active_payload()
+
+
+def test_batch_quotes_empty_symbols() -> None:
+    """Verify /api/stock/quotes handles empty/invalid symbols gracefully."""
+    client = _build_client()
+    try:
+        r = client.get("/api/stock/quotes?symbols=")
+        assert r.status_code in (200, 422)
     finally:
         client._restore_active_payload()

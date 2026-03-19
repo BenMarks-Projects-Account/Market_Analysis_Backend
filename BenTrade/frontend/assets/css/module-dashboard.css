@@ -46,20 +46,20 @@
 }
 
 .mod-banner-breadcrumb {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 8px;
   font-weight: 600;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
   color: var(--muted, #93a7b6);
   text-transform: uppercase;
   opacity: 0.65;
 }
 
 .mod-banner-title {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-display);
   font-size: 16px;
   font-weight: 700;
-  letter-spacing: 0.10em;
+  letter-spacing: 0.05em;
   color: var(--cyan, #00eaff);
   text-transform: uppercase;
   line-height: 1.2;
@@ -81,10 +81,10 @@
 }
 
 .mod-banner-tag {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.10em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 3px 10px;
   border-radius: 4px;
@@ -117,10 +117,10 @@
 }
 .mod-page-title-group { display: flex; flex-direction: column; gap: 2px; }
 .mod-page-title {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-display);
   font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.06em;
   color: var(--cyan, #00eaff);
   text-transform: uppercase;
 }
@@ -142,9 +142,9 @@
   opacity: 0.8;
 }
 .mod-placeholder-tag {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 8px;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.06em;
   color: rgba(244,200,95,0.7);
   border: 1px solid rgba(244,200,95,0.2);
   padding: 2px 6px;
@@ -213,10 +213,10 @@
   border-bottom: 1px solid rgba(0,234,255,0.06);
 }
 .mod-card-title {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-display);
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.06em;
   color: var(--cyan, #00eaff);
   text-transform: uppercase;
 }
@@ -225,7 +225,7 @@
 /* ── Hero Score Card ──────────────────────────────────────────────────────── */
 .mod-hero-card .mod-card-body { text-align: center; padding: 20px 16px; }
 .mod-hero-score {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-display);
   font-size: 42px;
   font-weight: 900;
   letter-spacing: 0.04em;
@@ -235,10 +235,10 @@
   margin: 6px 0;
 }
 .mod-hero-label {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-display);
   font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   margin-bottom: 4px;
 }
@@ -246,10 +246,10 @@
 /* ── Regime / Status Chips ────────────────────────────────────────────────── */
 .mod-chip {
   display: inline-block;
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
   padding: 3px 10px;
   border-radius: 4px;
   text-transform: uppercase;
@@ -275,10 +275,10 @@
 
 /* ── Section Titles ───────────────────────────────────────────────────────── */
 .mod-section-title {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-display);
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.06em;
   color: var(--cyan, #00eaff);
   text-transform: uppercase;
   margin-bottom: 6px;
@@ -302,7 +302,7 @@
   letter-spacing: 0.04em;
 }
 .mod-metric-val {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 14px;
   font-weight: 700;
   color: var(--text, #d7fbff);
@@ -358,7 +358,7 @@
   box-shadow: 0 0 6px rgba(0,234,255,0.12);
 }
 .mod-bar-val {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 10px;
   font-weight: 700;
   color: var(--text, #d7fbff);
@@ -476,10 +476,10 @@
   margin-top: 8px;
 }
 .mod-details > summary {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.06em;
   color: var(--cyan, #00eaff);
   opacity: 0.6;
   cursor: pointer;
@@ -498,12 +498,12 @@
 /* ── Signal Quality Chip ──────────────────────────────────────────────────── */
 .mod-signal-chip {
   display: inline-block;
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 8px;
   font-weight: 700;
   padding: 2px 8px;
   border-radius: 3px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 .mod-signal-high     { background: rgba(0,230,118,0.12); color: #00e676; border: 1px solid rgba(0,230,118,0.22); }
@@ -524,7 +524,7 @@
   margin: 0 auto;
 }
 .mod-gauge-val {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-display);
   font-size: 18px;
   font-weight: 900;
   color: var(--text, #d7fbff);
@@ -543,10 +543,10 @@
   font-size: 11px;
 }
 .mod-matrix th {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
   color: var(--cyan, #00eaff);
   text-transform: uppercase;
   padding: 6px 8px;
@@ -587,10 +587,10 @@
 /* ── Module Refresh / Action Button ───────────────────────────────────────── */
 .mod-refresh-btn,
 .mod-action-btn {
-  font-family: 'Orbitron', 'Segoe UI', sans-serif;
+  font-family: var(--font-body);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   color: rgba(0,234,255,0.96);
   background:
     linear-gradient(180deg, rgba(226,242,255,0.08), rgba(226,242,255,0.0) 22%),
@@ -652,18 +652,18 @@
   opacity: 0.12;
 }
 .mod-trend-chart .spark-label {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 8px;
   font-weight: 600;
   fill: rgba(170,210,224,0.5);
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
 }
 .mod-trend-chart .spark-axis {
   stroke: rgba(0,234,255,0.06);
   stroke-width: 1;
 }
 .mod-trend-chart .spark-val {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-body);
   font-size: 7px;
   fill: rgba(170,210,224,0.4);
 }
@@ -689,8 +689,8 @@
 .pm-toolbar-left { display: flex; align-items: baseline; gap: 12px; }
 .pm-toolbar-right { display: flex; gap: 8px; }
 .pm-title {
-  font-family: 'Orbitron', sans-serif; font-size: 18px; font-weight: 700;
-  color: var(--cyan, #00eaff); letter-spacing: 0.08em; margin: 0;
+  font-family: var(--font-display); font-size: 18px; font-weight: 700;
+  color: var(--cyan, #00eaff); letter-spacing: 0.04em; margin: 0;
 }
 .pm-run-count {
   font-size: 12px; color: rgba(170,210,224,0.6);
@@ -729,7 +729,7 @@
 }
 .pm-empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
 .pm-empty h3 {
-  font-family: 'Orbitron', sans-serif; font-size: 16px;
+  font-family: var(--font-display); font-size: 16px;
   color: rgba(170,210,224,0.7); margin: 0 0 8px;
 }
 .pm-empty p { font-size: 13px; max-width: 400px; margin: 0 auto; }
@@ -743,7 +743,7 @@
 .pm-run-table th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .pm-run-row { cursor: pointer; transition: background 0.15s; }
 .pm-run-row:hover { background: rgba(0,234,255,0.04); }
-.pm-cell-id { font-family: 'Courier New', monospace; font-size: 12px; }
+.pm-cell-id { font-family: var(--font-mono); font-size: 12px; }
 .pm-error-count {
   background: rgba(255,79,102,0.15); color: var(--danger, #ff4f66);
   padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
@@ -902,7 +902,7 @@ span.pm-status-ready_degraded { background: rgba(244,200,95,0.12); color: var(--
 .pm-artifact-json {
   background: rgba(2,4,10,0.6); border: 1px solid rgba(0,234,255,0.08);
   border-radius: 6px; padding: 12px; max-height: 400px; overflow: auto;
-  font-family: 'Courier New', monospace; font-size: 11px;
+  font-family: var(--font-mono); font-size: 11px;
   color: rgba(170,210,224,0.8); white-space: pre-wrap; word-break: break-word;
   line-height: 1.5;
 }
@@ -921,8 +921,8 @@ span.pm-status-ready_degraded { background: rgba(244,200,95,0.12); color: var(--
 .sr-toolbar-left { display: flex; align-items: baseline; gap: 12px; }
 .sr-toolbar-right { display: flex; gap: 8px; }
 .sr-title {
-  font-family: 'Orbitron', sans-serif; font-size: 18px; font-weight: 700;
-  color: var(--cyan, #00eaff); letter-spacing: 0.08em; margin: 0;
+  font-family: var(--font-display); font-size: 18px; font-weight: 700;
+  color: var(--cyan, #00eaff); letter-spacing: 0.04em; margin: 0;
 }
 .sr-subtitle { font-size: 12px; color: rgba(170,210,224,0.6); }
 .sr-btn {
@@ -975,7 +975,7 @@ span.pm-status-ready_degraded { background: rgba(244,200,95,0.12); color: var(--
 }
 .sr-key-routing { display: flex; flex-wrap: wrap; gap: 6px 16px; }
 .sr-key-route-row { display: inline-flex; align-items: center; gap: 6px; }
-.sr-key-name { font-family: 'Courier New', monospace; font-size: 12px; color: var(--text, #d7fbff); }
+.sr-key-name { font-family: var(--font-mono); font-size: 12px; color: var(--text, #d7fbff); }
 
 /* ── Path pills ──────────────────────────────────────────────────────────── */
 .sr-path-v2 { background: rgba(0,234,255,0.12); color: var(--cyan, #00eaff); border-color: rgba(0,234,255,0.25); }
@@ -1009,7 +1009,7 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
 .sr-family-card-scanners { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
 .sr-scanner-chip {
   display: inline-block; padding: 2px 8px; border-radius: 3px;
-  font-size: 10px; font-family: 'Courier New', monospace;
+  font-size: 10px; font-family: var(--font-mono);
   background: rgba(0,234,255,0.06); border: 1px solid rgba(0,234,255,0.1);
   color: rgba(170,210,224,0.7);
 }
@@ -1070,7 +1070,7 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
 .sr-scanner-table th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .sr-scanner-row { transition: background 0.15s; }
 .sr-scanner-row:hover { background: rgba(0,234,255,0.04); }
-.sr-cell-key { font-family: 'Courier New', monospace; font-size: 12px; }
+.sr-cell-key { font-family: var(--font-mono); font-size: 12px; }
 
 /* ── Diagnostics inline expansion ────────────────────────────────────────── */
 .sr-diag-row td { padding: 0 !important; }
@@ -1102,14 +1102,14 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
   border-bottom: 1px solid rgba(0,234,255,0.03);
 }
 .sr-diag-reason-code {
-  font-family: 'Courier New', monospace; font-size: 11px;
+  font-family: var(--font-mono); font-size: 11px;
   color: rgba(170,210,224,0.7);
 }
 .sr-diag-reason-count { font-weight: 600; color: var(--text, #d7fbff); }
 .sr-diag-funnel { font-size: 13px; color: var(--text, #d7fbff); }
 .sr-trace-json {
   background: rgba(2,4,10,0.6); border: 1px solid rgba(0,234,255,0.08);
-  border-radius: 4px; padding: 8px; font-family: 'Courier New', monospace;
+  border-radius: 4px; padding: 8px; font-family: var(--font-mono);
   font-size: 11px; color: rgba(170,210,224,0.7); white-space: pre-wrap;
   word-break: break-word; max-height: 200px; overflow: auto;
 }
@@ -1142,7 +1142,7 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
   padding: 16px 20px; border-bottom: 1px solid rgba(0,234,255,0.1);
 }
 .sr-detail-header span {
-  font-family: 'Orbitron', sans-serif; font-size: 14px; font-weight: 600;
+  font-family: var(--font-display); font-size: 14px; font-weight: 600;
   color: var(--cyan, #00eaff);
 }
 .sr-detail-body {
@@ -1167,7 +1167,7 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
 .sr-detail-json {
   background: rgba(2,4,10,0.6); border: 1px solid rgba(0,234,255,0.08);
   border-radius: 6px; padding: 12px; max-height: 300px; overflow: auto;
-  font-family: 'Courier New', monospace; font-size: 11px;
+  font-family: var(--font-mono); font-size: 11px;
   color: rgba(170,210,224,0.8); white-space: pre-wrap; word-break: break-word;
   margin-top: 8px;
 }
@@ -1202,7 +1202,7 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
 }
 .tbp-run-id {
   font-size: 12px; color: var(--muted, #93a7b6);
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-mono);
 }
 .tbp-run-status {
   font-size: 11px; font-weight: 600; text-transform: uppercase;
@@ -1432,7 +1432,7 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
 .tbp-cp-active.tbp-cp-badge { background: rgba(0,234,255,0.12); color: var(--cyan, #00eaff); }
 .tbp-cp-time {
   font-size: 10px; color: var(--muted, #93a7b6);
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-mono);
 }
 
 /* Candidate event log */
@@ -1454,7 +1454,7 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
 .tbp-cp-pos {
   font-size: 9px; color: var(--muted, #93a7b6);
   min-width: 16px; text-align: right;
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-mono);
 }
 
 
@@ -1478,10 +1478,10 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
   box-shadow: 0 8px 20px rgba(0,0,0,0.46), inset 0 1px 0 rgba(226,242,255,0.16);
 }
 .tmc-banner-title {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-display);
   font-size: 18px;
   font-weight: 700;
-  letter-spacing: 1.5px;
+  letter-spacing: 0.8px;
   text-transform: uppercase;
   color: var(--cyan, #00eaff);
   margin: 0 0 4px;
@@ -1564,10 +1564,10 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
   padding: 0 4px;
 }
 .tmc-section-title {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-display);
   font-size: 13px;
   font-weight: 600;
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
   color: var(--text, #d7fbff);
   margin: 0;
@@ -1773,7 +1773,7 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
   gap: 10px;
 }
 .tmc-card-symbol {
-  font-family: 'Orbitron', monospace;
+  font-family: var(--font-display);
   font-size: 16px;
   font-weight: 700;
   color: var(--text, #d7fbff);
@@ -1933,10 +1933,10 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
   margin-bottom: 12px;
 }
 .atp-results-title {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-display);
   font-size: 13px;
   font-weight: 600;
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
   color: var(--text, #d7fbff);
 }
@@ -1975,11 +1975,11 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
   border-color: rgba(0,234,255,0.35);
 }
 .atp-mini-symbol {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-display);
   font-size: 13px;
   font-weight: 700;
   color: var(--text, #d7fbff);
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
   min-width: 60px;
 }
 .atp-mini-conviction,
@@ -2125,13 +2125,13 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
   font-size: 11px; color: var(--danger, #ff4f66);
   background: rgba(255,79,102,0.06); border: 1px solid rgba(255,79,102,0.15);
   border-radius: 6px; padding: 8px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-mono);
   word-break: break-word; white-space: pre-wrap;
 }
 
 /* Artifact refs */
 .tbp-artifact-ref {
-  font-size: 10px; font-family: 'Courier New', monospace;
+  font-size: 10px; font-family: var(--font-mono);
   padding: 3px 6px; margin: 2px 0;
   background: rgba(0,234,255,0.04); border-radius: 4px;
   color: var(--muted, #93a7b6);

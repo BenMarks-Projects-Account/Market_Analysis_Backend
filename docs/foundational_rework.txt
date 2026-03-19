@@ -1,0 +1,1899 @@
+Trade Decision Prompt — Gap Analysis & Polished Prompts
+Part 1: What's Missing (Organized by Priority)
+CRITICAL GAPS (Would Materially Change Decisions)
+1. Earnings & Event Calendar
+	• Earnings date — If ER falls within the 3-15 day holding window, the entire thesis changes. This is the single biggest omission.
+	• Ex-dividend date — Mechanical price impact on ex-date.
+	• Economic event calendar with dates — FOMC, CPI, jobs report, etc. with actual dates relative to the holding window. The current prompt mentions "tariffs/FOMC" as a risk flag but gives no dates. A pullback swing that spans an FOMC meeting is a fundamentally different risk profile.
+2. Trade Structure (Entry/Exit/Sizing)
+	• Proposed stop loss level — Where does the thesis break? Without this, risk/reward is literally incalculable.
+	• Target price(s) — Upside case. Retest of 20-day high? Prior resistance?
+	• Explicit R:R ratio — Derived from stop/target.
+	• Proposed position size — As % of portfolio. A 1% position at 60 conviction vs 5% changes the calculus entirely.
+	• Entry type — Market order at 178.42, or limit order at a specific level?
+	• Expected holding period — The strategy says 3-15 days, but what's the engine's estimate for THIS setup?
+3. Index & Sector Context
+	• SPY/QQQ trend state — Same format as the stock's trend data (SMA positions, slope, RSI). A pullback buy while the index is breaking down is a different trade.
+	• Sector ETF (XLK) trend state — Is AAPL pulling back with its sector or underperforming it?
+	• AAPL vs SPY relative strength — Is this stock leading or lagging?
+	• AAPL beta / correlation to SPY — How much index risk is embedded in this position?
+HIGH-VALUE ADDITIONS (Would Increase Confidence Meaningfully)
+4. Historical Strategy Performance
+	• Strategy win rate — At this composite score range (e.g., 75-85).
+	• Average winner / average loser — Expected value calculation.
+	• Sample size — How many trades match this profile historically?
+	• Recent regime performance — Has pullback_swing been working in the CURRENT market regime? Win rate last 30/60/90 days.
+	• Max adverse excursion — Worst drawdown before recovery for similar setups.
+5. Stock-Specific Fundamentals
+	• Material news last 5 days — Not market sentiment (you have that), but AAPL-specific: downgrade, antitrust, product launch, supply chain issue.
+	• Earnings estimate revision direction — You mention "positive revisions" in signals but don't quantify. EPS revision % last 30d/90d.
+	• Short interest / days to cover — Relevant for squeeze dynamics on a bounce.
+	• Analyst consensus / price target — Not for fundamental analysis, but as a sentiment gauge.
+6. Data Quality & Freshness
+	• Per-metric timestamps — Are market environment scores from today's close or yesterday's? The top-level as_of is the stock price, but module data freshness is unclear.
+	• Missing data summary — A clean, centralized list rather than buried in individual module risks arrays.
+	• Data staleness flags — The copper data being "77 days stale" is buried deep. Surface this.
+NICE-TO-HAVE (Would Refine Edge Cases)
+7. Intraday Context
+	• Today's price range and position within it — Is 178.42 the low of the day (catching a falling knife) or a bounce from the low (confirmation)?
+	• VWAP position — Above or below VWAP gives institutional context.
+	• Time of day — 3:30 PM eval is different from 10:00 AM. End-of-day closes are more reliable signals.
+8. Options-Derived Data
+	• Implied volatility rank/percentile for AAPL specifically (not just market-level VIX).
+	• Put/call ratio — Sentiment gauge.
+	• Max pain / gamma exposure levels — Can act as magnets for price.
+9. Correlation & Portfolio Context
+	• Current portfolio holdings — Does adding AAPL concentrate sector risk?
+	• Current portfolio exposure — Net long/short, sector weights.
+	• Correlation to existing positions — Diversification benefit or concentration risk.
+
+Part 2: Polished System Prompt
+You are a disciplined short-term portfolio manager making real allocation
+decisions with real capital. This is not an academic exercise — you are
+deciding whether to commit money to a specific trade right now.
+
+YOUR MANDATE:
+- You manage a short-term equity portfolio (1-30 day holding periods).
+- You prioritize capital preservation over any single trade's upside.
+- You are risk-aware: a skipped good trade costs nothing; a bad trade
+  costs capital and opportunity.
+- You have access to the complete trade context: setup data, technical
+  metrics, market environment from 6 independent intelligence modules,
+  historical strategy performance, and event risk.
+DECISION FRAMEWORK (evaluate in this order):
+1. EVENT RISK SCREEN: Are there earnings, FOMC, CPI, or other
+   binary-outcome events within the holding window? If yes, does the
+   setup justify the event risk, or should you wait?
+2. MARKET ALIGNMENT: Does the broader environment support this trade
+   type? A great pullback buy in a deteriorating market is not a great
+   trade. Weight breadth, volatility regime, and index trend heavily.
+3. TRADE SETUP QUALITY: Does the technical setup have genuine edge?
+   Evaluate the engine's thesis and metrics critically. Compare to
+   historical performance of similar setups.
+4. RISK/REWARD STRUCTURE: Is the R:R ratio favorable given the stop
+   loss, target, and position sizing? Consider max adverse excursion
+   from historical data. Evaluate the downside scenario, not just the
+   base case.
+5. SECTOR & RELATIVE STRENGTH: Is the stock leading or lagging its
+   sector and the index? A pullback in a leading stock is different
+   from a pullback in a laggard.
+6. TIMING & ENTRY: Is this the right moment? Consider intraday
+   context, support/resistance proximity, and whether patience could
+   improve the entry.
+7. DATA QUALITY: Is the data trustworthy and complete? Flag stale
+   inputs, missing data, proxy reliance, or low-confidence modules.
+DECISION RULES:
+- "EXECUTE" means you would size this position for your own portfolio
+  right now at the proposed entry.
+- "PASS" means the edge is insufficient, risk too high, market
+  environment wrong, timing poor, or event risk unacceptable.
+- If you are on the fence, PASS. Conviction below 60 must be a PASS.
+- Be brutally honest. Do not recommend trades you wouldn't take yourself.
+- Account for regime context: what works in a strong breadth environment
+  may fail in a deteriorating one. Adjust your conviction accordingly.
+FACTOR ANALYSIS:
+For each factor, report:
+- category: "event_risk" | "trade_setup" | "market_environment" |
+  "risk_reward" | "sector_relative" | "timing" | "data_quality"
+- assessment: "favorable" | "unfavorable" | "neutral" | "concerning"
+- weight: "critical" | "high" | "medium" | "low"
+- detail: one sentence citing specific numbers/metrics from input data
+TECHNICAL ANALYSIS:
+Provide a granular assessment citing actual metric values:
+- setup_quality_assessment: 2-3 sentences, reference specific metrics.
+- key_metrics_cited: flat dict of most relevant metrics relied on.
+- trend_context: one sentence on trend, citing SMA positions or slopes.
+- momentum_read: one sentence citing RSI, ROC, or return values.
+- volatility_read: one sentence citing ATR, BB width, or vol ratio.
+- volume_read: one sentence citing volume ratio or today's vs average.
+- relative_strength_read: one sentence on stock vs sector/index.
+HISTORICAL CONTEXT:
+Compare the current setup to the strategy's track record:
+- Does the win rate at this composite score support the trade?
+- Is the strategy performing well in the current regime?
+- What does max adverse excursion suggest about stop placement?
+CRITICAL FORMATTING RULES:
+- Return ONLY raw JSON. No markdown fences, no backticks, no commentary.
+- Start with { and end with }. Nothing before or after.
+- Every key must be a double-quoted string. Every string value must be
+  double-quoted.
+- Do NOT use trailing commas after the last item in arrays or objects.
+- All numbers must be numeric literals (not strings). Use null for unknowns.
+- Keep the key even if the value is null or an empty array.
+OUTPUT JSON SCHEMA (return this exact structure):
+{
+  "decision": "EXECUTE" or "PASS",
+  "conviction": <int 0-100>,
+  "decision_summary": "<2-3 sentence direct thesis>",
+  "event_risk_screen": {
+    "events_in_window": ["<event 1 with date>", ...],
+    "event_risk_level": "<none|low|moderate|high|blocking>",
+    "detail": "<1-2 sentences on how events affect this trade>"
+  },
+  "technical_analysis": {
+    "setup_quality_assessment": "<2-3 sentences>",
+    "key_metrics_cited": {"<metric>": <value>, ...},
+    "trend_context": "<1 sentence>",
+    "momentum_read": "<1 sentence>",
+    "volatility_read": "<1 sentence>",
+    "volume_read": "<1 sentence>",
+    "relative_strength_read": "<1 sentence>"
+  },
+  "factors_considered": [
+    {
+      "category": "<category>",
+      "factor": "<factor name>",
+      "assessment": "<favorable|unfavorable|neutral|concerning>",
+      "weight": "<critical|high|medium|low>",
+      "detail": "<one sentence, cite specific numbers>"
+    }
+  ],
+  "market_alignment": {
+    "overall": "<aligned|neutral|conflicting>",
+    "breadth_support": "<1 sentence>",
+    "index_trend_support": "<1 sentence>",
+    "sector_support": "<1 sentence>",
+    "detail": "<1-2 sentences synthesizing>"
+  },
+  "risk_assessment": {
+    "stop_loss_evaluation": "<assessment of proposed stop level>",
+    "target_evaluation": "<assessment of proposed target>",
+    "rr_ratio": <number or null>,
+    "position_size_assessment": "<appropriate|aggressive|conservative>",
+    "primary_risks": ["<risk 1>", "<risk 2>", "<risk 3>"],
+    "biggest_concern": "<single thing most likely to kill this trade>",
+    "risk_reward_verdict": "<favorable|marginal|unfavorable>",
+    "max_loss_scenario": "<worst case description and approximate loss>"
+  },
+  "historical_context": {
+    "strategy_edge_assessment": "<1-2 sentences on historical performance>",
+    "regime_fit": "<1 sentence on strategy performance in current regime>",
+    "sample_reliability": "<1 sentence on sample size adequacy>"
+  },
+  "what_would_change_my_mind": "<conditions that would flip your decision>",
+  "engine_comparison": {
+    "engine_score": <number from input>,
+    "model_score": <your independent 0-100 score>,
+    "agreement": "<agree|disagree|partial>",
+    "reasoning": "<why you agree or disagree with the engine>"
+  }
+}
+REMEMBER: Raw JSON only. No prose. No fences. Start with { end with }.
+
+Part 3: Polished User Prompt (JSON Payload Schema)
+{
+  "trade_setup": {
+    "symbol": "AAPL",
+    "price": 178.42,
+    "as_of": "2026-03-18T15:30:00+00:00",
+    "strategy_id": "stock_pullback_swing",
+    "strategy_description": "Pullback Swing: buys healthy pullbacks in confirmed uptrends, expecting price to resume upward. Hold 3-15 days.",
+    "direction": "long",
+    "engine": {
+      "composite_score": 82,
+      "thesis": [
+        "Price pulled back 3.2% from 20-day high into SMA-20 support",
+        "RSI reset from 68 to 48 — healthy momentum reset",
+        "Volume declining on pullback — selling exhaustion pattern",
+        "Price holding above rising SMA-50 trend line"
+      ],
+      "score_breakdown": {
+        "trend_score": 22,
+        "momentum_score": 20,
+        "volatility_score": 18,
+        "pullback_score": 15,
+        "catalyst_score": 7
+      },
+      "confidence": 0.75
+    },
+    "proposed_trade": {
+      "entry_price": 178.42,
+      "entry_type": "market",
+      "stop_loss": 174.50,
+      "stop_loss_basis": "Below SMA-50 at 174.60 with buffer",
+      "target_1": 184.31,
+      "target_1_basis": "Retest of 20-day high",
+      "target_2": null,
+      "rr_ratio": 1.5,
+      "position_size_pct": 3.0,
+      "expected_hold_days": 8
+    }
+  },
+
+"technical_metrics": {
+    "trend": {
+      "trend_state": "uptrend",
+      "sma20": 179.85,
+      "sma50": 174.60,
+      "sma200": 168.22,
+      "slope_20": 0.42,
+      "slope_50": 0.28,
+      "dist_sma20": -0.80,
+      "dist_sma50": 2.19
+    },
+    "momentum": {
+      "rsi14": 48.3,
+      "rsi2": 22.1,
+      "rsi_change_5d": -19.7,
+      "roc_10": -1.8,
+      "roc_20": 3.2,
+      "return_1d": -0.45,
+      "return_2d": -1.12,
+      "return_5d": -2.85,
+      "return_20d": 3.2
+    },
+    "volatility": {
+      "atr_pct": 1.65,
+      "atr_ratio_10": 1.12,
+      "bb_width_20": 0.058,
+      "realized_vol_20": 0.22,
+      "range_20_pct": 8.4
+    },
+    "volume_liquidity": {
+      "avg_vol_20": 62500000,
+      "avg_dollar_vol_20": 11150000000,
+      "today_vol": 48200000,
+      "today_vol_vs_avg": 0.77,
+      "volume_ratio": 0.77
+    },
+    "price_levels": {
+      "price": 178.42,
+      "high_20": 184.31,
+      "high_55": 186.50,
+      "high_252": 199.62,
+      "pullback_from_20d_high": -3.19,
+      "pullback_from_50d_high": -4.33,
+      "pct_from_52w_high": -10.62,
+      "drawdown_20": -3.19
+    },
+    "intraday": {
+      "today_open": 179.10,
+      "today_high": 179.85,
+      "today_low": 177.90,
+      "current_price": 178.42,
+      "pct_of_day_range": 0.27,
+      "vwap": 178.75,
+      "price_vs_vwap": -0.18,
+      "eval_time": "15:30 ET"
+    },
+    "scores": {
+      "composite_score": 82
+    }
+  },
+"sector_and_relative": {
+    "sector_etf": "XLK",
+    "sector_trend_state": "uptrend",
+    "sector_sma20_slope": 0.35,
+    "sector_rsi14": 52.1,
+    "sector_return_5d": -1.20,
+    "stock_vs_sector_5d": -1.65,
+    "stock_vs_spy_5d": -1.45,
+    "relative_strength_20d": 1.08,
+    "beta_60d": 1.18,
+    "correlation_spy_60d": 0.82
+  },
+"fundamentals_snapshot": {
+    "next_earnings_date": "2026-04-24",
+    "days_to_earnings": 37,
+    "earnings_in_holding_window": false,
+    "ex_dividend_date": "2026-05-09",
+    "eps_revision_30d_pct": 2.1,
+    "eps_revision_90d_pct": 4.8,
+    "short_interest_pct_float": 0.7,
+    "short_interest_days_to_cover": 1.2,
+    "material_news_last_5d": false,
+    "news_headline": null,
+    "analyst_consensus": "Overweight",
+    "consensus_price_target": 210.50
+  },
+"event_calendar": {
+    "events_in_holding_window": [
+      {
+        "event": "FOMC Rate Decision",
+        "date": "2026-03-19",
+        "days_away": 1,
+        "expected_impact": "high"
+      }
+    ],
+    "events_near_window": [
+      {
+        "event": "CPI Release",
+        "date": "2026-04-10",
+        "days_away": 23,
+        "expected_impact": "medium"
+      }
+    ]
+  },
+"strategy_historical_performance": {
+    "overall_win_rate": 0.62,
+    "win_rate_at_score_range": {
+      "score_range": "75-85",
+      "win_rate": 0.68,
+      "sample_size": 142,
+      "avg_winner_pct": 3.8,
+      "avg_loser_pct": -2.1,
+      "avg_hold_days_winner": 7,
+      "avg_hold_days_loser": 4,
+      "expected_value_pct": 0.91
+    },
+    "current_regime_performance": {
+      "regime": "breadth_deteriorating",
+      "win_rate_in_regime": 0.54,
+      "sample_size_in_regime": 38,
+      "avg_return_in_regime": 0.3,
+      "note": "Strategy underperforms when breadth is deteriorating"
+    },
+    "max_adverse_excursion": {
+      "median_mae_pct": -1.8,
+      "p90_mae_pct": -3.5,
+      "max_mae_pct": -6.2
+    }
+  },
+"market_environment": {
+    "description": "Current market environment from 6 independent intelligence modules.",
+    "data_freshness": "2026-03-18T16:00:00+00:00",
+    "stale_inputs_summary": [
+      "Copper (PCOPPUSDM): 77 days stale",
+      "CBOE SKEW index: unavailable"
+    ],
+    "missing_data_count": 3,
+"index_context": {
+      "spy_price": 542.30,
+      "spy_sma20": 545.10,
+      "spy_sma50": 538.40,
+      "spy_slope_20": 0.15,
+      "spy_rsi14": 46.5,
+      "spy_trend_state": "neutral_to_uptrend",
+      "spy_return_5d": -1.40,
+      "qqq_price": 460.80,
+      "qqq_rsi14": 44.2,
+      "qqq_return_5d": -1.95
+    },
+"engines": {
+      "breadth_participation": {
+        "score": 22.09,
+        "label": "Deteriorating",
+        "confidence": 95.0,
+        "summary": "Breadth is deteriorating (22/100). Broad participation is absent.",
+        "trader_takeaway": "Defensive posture recommended — reduce exposure or focus on highest-conviction only.",
+        "bull_factors": [],
+        "bear_factors": [
+          "Participation Breadth is weak (27/100)",
+          "Trend Breadth is weak (17/100)"
+        ]
+      },
+      "volatility_options": {
+        "score": 60.18,
+        "label": "Mixed but Tradable",
+        "confidence": 95.0,
+        "summary": "Volatility regime is mixed but tradable (60/100).",
+        "trader_takeaway": "Use smaller position sizes and tighter risk management. Watch for vol expansion.",
+        "bull_factors": [
+          "Volatility Structure is constructive (64/100)",
+          "Tail Risk Skew is favorable (72/100)"
+        ],
+        "bear_factors": [
+          "Volatility Regime is fragile (47/100)"
+        ]
+      },
+      "cross_asset_macro": {
+        "score": 61.24,
+        "label": "Partial Confirmation",
+        "confidence": 92.0,
+        "summary": "Cross-asset confirmation is partial (61/100).",
+        "trader_takeaway": "Some markets support the bull case but others are neutral or cautionary. Favor quality setups.",
+        "bull_factors": [
+          "Credit Risk Appetite confirms equities (75/100)"
+        ],
+        "bear_factors": []
+      },
+      "flows_positioning": {
+        "score": 63.51,
+        "label": "Mixed but Tradable",
+        "confidence": 70.0,
+        "summary": "Flows & positioning is mixed but tradable (64/100).",
+        "trader_takeaway": "Some positioning metrics are supportive while others show early signs of stress. Stay selective.",
+        "bull_factors": [
+          "Crowding / Stretch is supportive (72/100)",
+          "Squeeze / Unwind Risk is supportive (71/100)"
+        ],
+        "bear_factors": [
+          "Flow Direction & Persistence signals risk (42/100)"
+        ]
+      },
+      "liquidity_financial_conditions": {
+        "score": 51.95,
+        "label": "Neutral / Tightening",
+        "confidence": 84.3,
+        "summary": "Liquidity & conditions are neutral / tightening (52/100).",
+        "trader_takeaway": "Rate pressure or dollar strength creating headwinds. Reduce position sizing.",
+        "bull_factors": [
+          "Credit & Funding Stress is supportive (75/100)"
+        ],
+        "bear_factors": [
+          "Dollar / Global Liquidity signals stress (17/100)"
+        ]
+      },
+      "news_sentiment": {
+        "score": 62.61,
+        "label": "Neutral",
+        "confidence": 0,
+        "summary": "Broadly neutral market backdrop (62.6).",
+        "trader_takeaway": "Mildly constructive. Standard setups viable but moderate sizing.",
+        "bull_factors": [
+          "Negative pressure load is low",
+          "Narrative severity is contained"
+        ],
+        "bear_factors": [
+          "Macro stress elevated"
+        ]
+      }
+    }
+  },
+
+"regime_context": {
+    "market_regime": "neutral",
+    "risk_environment": "moderate",
+    "vix": 19.8,
+    "vix_percentile_1y": 68,
+    "regime_tags": [
+      "breadth_deteriorating",
+      "vol_mixed",
+      "flows_supportive"
+    ],
+    "support_state": "near_support"
+  },
+"signals_and_flags": {
+    "supporting_signals": [
+      "Price at SMA-20 support zone",
+      "RSI reset from overbought — healthy pullback",
+      "Volume declining on pullback — no panic selling",
+      "Positive earnings estimate revisions last 30d (+2.1%)"
+    ],
+    "risk_flags": [
+      "Breadth deteriorating across market (22/100)",
+      "VIX elevated at 19.8 (68th percentile) — positioning caution",
+      "FOMC decision tomorrow — binary event risk",
+      "Strategy win rate drops to 54% in breadth_deteriorating regime"
+    ],
+    "entry_context": "Pullback into SMA-20 support in confirmed uptrend with momentum reset. FOMC tomorrow is key timing risk."
+  },
+
+"portfolio_context": {
+    "current_equity_exposure_pct": 72,
+    "current_tech_exposure_pct": 18,
+    "open_positions_count": 8,
+    "max_position_size_pct": 5,
+    "correlation_to_existing_portfolio": 0.65
+  },
+"data_quality_summary": {
+    "overall_data_quality": "good",
+    "stale_inputs": 2,
+    "missing_inputs": 3,
+    "proxy_reliance_count": 11,
+    "low_confidence_modules": ["news_sentiment", "flows_positioning"],
+    "known_gaps": [
+      "No direct institutional flow data — proxy only",
+      "CBOE SKEW unavailable — tail risk assessment is proxy-based",
+      "Copper data 77 days stale — cross-asset macro may be degraded"
+    ]
+  },
+
+"decision_prompt": "Based on ALL the above data — trade setup, technical metrics, proposed trade structure, event calendar, strategy historical performance, full market environment, sector/relative context, and data quality — make your decision. Would you put real money on this trade right now in your own short-term portfolio? Be direct and serious. If the setup is marginal, the market environment doesn't support it, or event risk is unacceptable, say PASS with conviction. If this is a genuine edge with favorable conditions, say EXECUTE and explain exactly why."
+}
+
+
+Part 4: How Much to Trust the Model Output
+Trust Assessment: 6.5/10 → with these improvements: 7.5-8/10
+What this system does well (high trust):
+	• Structured reasoning with forced factor analysis prevents lazy "sounds good" responses
+	• The JSON schema forces the model to take specific positions on every dimension
+	• Engine comparison forces independent thinking rather than rubber-stamping
+	• The "conviction below 60 = PASS" rule adds a safety ratchet
+What limits trust (even with perfect prompts):
+	• The model has no skin in the game. It will never feel the drawdown. This makes it structurally biased toward action (EXECUTE) because generating insight feels more valuable than saying "pass." Mitigation: the decision rules help, but monitor EXECUTE rates — if it's above 60%, the threshold is too loose.
+	• No temporal learning. Each call is stateless. The model can't learn that pullback swings have been chopping up for 2 weeks. You partially solve this with current_regime_performance, but the model can't build intuition across calls.
+	• Calibration is unknown. A conviction of 72 from the model doesn't map to a 72% win rate. You'd need to log predictions and outcomes to calibrate, which I'd strongly recommend.
+	• Garbage in, garbage out. The model trusts the data you feed it. If breadth is 22/100 but based on flawed calculations, the model can't catch that. Data quality flags help but don't solve this.
+	• Anchoring to engine score. Despite asking for independent assessment, models anchor heavily to the composite_score: 82. The engine_comparison section helps surface disagreement but doesn't eliminate anchoring.
+Recommendations to increase trust:
+	1. Log every decision with outcome. Build a calibration curve over 100+ decisions.
+	2. A/B test EXECUTE vs PASS decisions. Paper-trade the passes to see if the model is correctly filtering.
+	3. Run the same payload through 3-5 calls and measure consistency. If conviction swings from 45 to 75 on the same data, the signal is noisy.
+	4. Set temperature to 0 or very low for consistency.
+	5. Add a "devil's advocate" pass — a second prompt that explicitly argues against the first decision to stress-test it.
+	6. Never use as sole decision-maker. Best as a structured pre-analysis that a human reviews before execution. The model is excellent at organizing the factors and surfacing conflicts; it's less reliable at the final judgment.
+Bottom Line
+With the enhanced prompts, you have a solid analytical framework that will catch most obvious mistakes (trading into earnings, ignoring breadth deterioration, bad R:R). The model will be most valuable as a structured filter — surfacing conflicts between the setup and environment, flagging event risk, and forcing explicit R:R evaluation. Where it'll be weakest is marginal calls — the 55-70 conviction zone where the decision really matters. That's where human judgment still has the biggest edge.
+
+From <https://claude.ai/new> 
+
+
+
+
+
+
+PART 2: STRATEGY PROMPT REVIEW (Prompts 1-4)
+All four strategy prompts share the same system prompt. This is efficient but creates issues.
+What's Good
+	• JSON-only output enforcement is clear and well-specified
+	• The engine_vs_model comparison forces independent thinking
+	• Temperature at 0.2 is reasonable for structured analysis
+	• The analysis_questions per strategy are well-targeted
+Issues to Fix
+A. The System Prompt Is Generic — It Should Be Strategy-Aware
+All 4 strategies use the identical system prompt. This means the model gets no guidance on what makes a GOOD pullback vs a GOOD breakout vs a GOOD mean reversion. The strategy_description in the user prompt partially compensates, but the system prompt should prime the model with strategy-specific evaluation criteria.
+Fix: Either:
+	1. Add a strategy_evaluation_criteria block to the system prompt per strategy, OR
+	2. Add a what_makes_this_strategy_work section to the user prompt that explicitly tells the model what the ideal metrics look like
+Example for pullback_swing:
+STRATEGY-SPECIFIC EVALUATION CRITERIA:
+This is a pullback swing trade. The edge comes from buying a temporary
+dip in a strong trend. Key quality signals:
+- Pullback depth: -1% to -6% from 20D high (sweet spot: -2% to -4%)
+- RSI reset: 40-55 range (must have FALLEN from above 60)
+- Volume: declining on pullback days (selling exhaustion)
+- SMA-20: price within 1% of SMA-20 (support zone)
+- SMA-50: price ABOVE rising SMA-50 (trend intact)
+- Failure mode: pullback that becomes a breakdown (price loses SMA-50)
+B. max_tokens: 1500 May Be Too Tight
+With the full market_picture payload included, the user prompt is already ~3000+ tokens. The model needs to process all 6 market intelligence modules AND produce structured JSON. 1500 output tokens is workable for the current schema but leaves no headroom. If you expand the schema (as recommended), bump to 2000-2500.
+C. The Output Schema Is Too Shallow for Good Decisions
+The current schema asks for:
+	• recommendation (BUY/PASS)
+	• score (0-100)
+	• confidence (0-100)
+	• summary (1-2 sentences)
+	• key_drivers (array)
+	• risk_review (basic)
+	• engine_vs_model comparison
+	• data_quality
+What's missing from the strategy-level schema:
+	1. Market environment assessment — The model receives 6 modules of market data but has no dedicated field to report how it weighted them. Add:
+json
+"market_assessment": {
+  "overall_support": "supportive|neutral|headwind",
+  "critical_module": "<which module most influenced the decision>",
+  "detail": "<1 sentence>"
+}
+	1. Entry timing assessment — The model has no field to say "the setup is good but wait." The BUY/PASS binary doesn't capture "BUY but only at a better price." Add:
+json
+"timing_assessment": {
+  "entry_quality": "optimal|acceptable|premature|late",
+  "detail": "<1 sentence>"
+}
+	1. Failure mode identification — You ask analysis_questions about failure modes but have no dedicated output field. Add:
+json
+"failure_mode": "<1 sentence describing the most likely way this trade loses money>"
+D. The "BUY or PASS" Binary Is Limiting
+The current prompt says "never SELL / SHORT / HOLD / WAIT." This makes sense for initial screening, but it loses nuance. A trade could be:
+	• BUY now at market
+	• BUY with a limit order below current price
+	• PASS now, WATCH for better entry
+	• PASS entirely (no edge)
+Consider at minimum adding "WATCH" as a third option for setups that have merit but aren't ready yet. The current binary forces the model to either commit or walk away, when "wait for confirmation" is often the correct answer.
+E. Strategy-Specific Metric Gaps in User Prompts
+Pullback Swing (AAPL):
+	• Missing: prior RSI peak value (says "RSI reset from 68 to 48" in thesis but rsi14 field only shows current 48.3)
+	• Missing: number of consecutive down days (pullback duration matters)
+	• Missing: SMA-20 slope context (is the support zone rising into price, or flattening?)
+	• Has slope_20: 0.42 but doesn't contextualize it
+Momentum Breakout (NVDA):
+	• Missing: breakout day count (is this day 1 of the breakout or day 3?)
+	• Missing: prior base duration (how many days in the compression?)
+	• Missing: follow-through metrics (did price hold gains intraday or fade?)
+	• Missing: prior breakout failure rate for this level
+Mean Reversion (META):
+	• Missing: catalyst for the selloff (was it stock-specific or market-wide?)
+	• Missing: historical mean reversion success rate at this RSI/Z-score level
+	• Missing: support levels below current price (where's the next floor if it keeps falling?)
+	• Missing: sector relative performance (is META alone or is all social media down?)
+Volatility Expansion (AMZN):
+	• Missing: expansion direction history (do vol expansions for AMZN tend to be bullish or mixed?)
+	• Missing: implied volatility vs realized volatility (is the market pricing in more or less movement?)
+	• Missing: time since compression started (longer compression = more reliable expansion)
+
+PART 3: TMC FINAL DECISION PROMPT REVIEW (Prompt 5)
+This was reviewed in detail in the previous conversation. Key improvements from that analysis:
+	1. Add event risk screen as the first evaluation step
+	2. Add proposed trade structure (stop, target, R:R, position size)
+	3. Add index/sector context
+	4. Add historical strategy performance
+	5. Add portfolio context
+	6. Expand the output schema accordingly
+Additional observations from seeing it alongside the strategy prompts:
+The TMC prompt receives the same market_picture data as the strategy prompts, but with a completely different (and much better) system prompt. The gap between the strategy-level analysis quality and the TMC-level analysis quality will be significant. Consider whether the strategy prompts need to be upgraded to a similar depth, or whether the TMC prompt should be the ONLY decision-making prompt (with strategies doing setup identification only, not BUY/PASS recommendations).
+Architectural question: Are you running the strategy prompt FIRST, getting a BUY/PASS, then running TMC on the same data for a second opinion? Or does the strategy prompt output feed into the TMC prompt? The current setup looks like both get the same raw data and make independent calls. If so, you have a potential conflict problem: strategy says BUY, TMC says PASS. How do you resolve that? The TMC prompt should probably receive the strategy prompt's output as an additional input.
+
+PART 4: ACTIVE TRADE REVIEW PROMPT (Prompt 6)
+What's Good
+	• The stance options (HOLD/REDUCE/EXIT/ADD/WATCH) are practical
+	• thesis_status (INTACT/WEAKENING/BROKEN) forces a clear assessment
+	• The output schema is well-structured for a dashboard UI
+	• The action_plan section with triggers is excellent
+Issues to Fix
+A. The Data Provided Is Extremely Sparse
+The position review gets:
+	• Price, entry, P&L (good)
+	• SMA 20 and 50 with distance (minimal)
+	• RSI 14 (minimal)
+	• Regime score (minimal)
+Missing for a useful position review:
+	• Original strategy and setup type (was this a pullback? breakout? mean reversion?)
+	• Original thesis (what was the expected move?)
+	• Entry date and holding period so far
+	• Stop loss and target from the original trade plan
+	• ATR and volatility context (is a -3.4% drawdown normal for this stock?)
+	• Volume trend since entry (is selling accelerating or exhausting?)
+	• The full market_picture that the entry decision was based on (to compare then vs now)
+	• SMA-200 (only 20 and 50 are provided)
+	• Return since entry vs time elapsed (is it on track or behind schedule?)
+B. No Historical Context
+The model has no way to know if -3.4% drawdown on MSFT is concerning or normal. For a volatile biotech, that's nothing. For MSFT, it's meaningful. Provide:
+	• Stock's typical drawdown range (median and P90 drawdown from entry for similar trades)
+	• ATR-based context (current drawdown as multiple of ATR)
+	• Strategy's historical max adverse excursion
+C. max_tokens: 900 Is Tight
+This is probably fine for the current schema, but if you add more data fields, you'll need to bump it. The risk is truncated JSON output.
+D. The Prompt Says "Do NOT invent catalysts" But Gives No Alternative
+If the model can't reference catalysts, it needs to be told what TO reference. Add explicit guidance like:
+Base your assessment on: price action relative to SMAs, momentum
+(RSI trend), P&L trajectory, holding period vs expected duration,
+and current market regime vs entry regime.
+
+PART 5: DECISION PROMPT PAYLOAD (Prompt 7)
+This is the orchestrator layer, not a model prompt. Observations:
+What's Good
+	• The quality_block with coverage_ratio and confidence scoring is excellent
+	• Warning flags for missing subsystems are practical
+	• The instruction_block guidance is well-written
+	• subsystems_present/missing tracking enables graceful degradation
+Issues
+A. The Payload Is Mostly Empty
+The example shows a "partial" status with coverage_ratio: 0.29. Most blocks are null:
+	• portfolio_block: null
+	• policy_block: null
+	• event_block: null
+	• conflict_block: null
+	• model_context_block: null
+This means the downstream model gets almost no context. The confidence_assessment correctly flags this (adjusted_score: 0.04, uncertainty_level: "very_high"), but the question is: are these blocks actually implemented in your system, or are they aspirational?
+B. The candidate_block Has No Data
+Even though AAPL data exists elsewhere, the candidate_block shows all nulls:
+json
+"strategy_family": null,
+"setup_type": null,
+"direction": null,
+...
+This suggests the orchestrator isn't properly populating the candidate data from the strategy engine output. This is a pipeline bug, not a prompt issue.
+C. Missing Portfolio Block Is Critical
+Without portfolio context, the model can't assess:
+	• Concentration risk (already heavy in tech?)
+	• Total exposure level (90% invested vs 50%?)
+	• Correlation to existing positions
+	• Available capital for this trade
+This should be a high-priority implementation.
+
+PART 6: MISSING MARKET INTELLIGENCE DIMENSIONS
+This is the most important section. Your 6 current engines cover:
+Engine	What It Measures	Coverage
+breadth_participation	Market internals, advance/decline, trend breadth	Good
+volatility_options	VIX regime, term structure, skew, tail risk	Good
+cross_asset_macro	Credit, commodities, rates, FX cross-asset signals	Moderate
+flows_positioning	Institutional flows, crowding, squeeze risk	Moderate (heavy proxy)
+liquidity_financial_conditions	Funding stress, dollar liquidity, credit conditions	Moderate
+news_sentiment	Headline sentiment, macro stress, narrative severity	Weak
+What's Missing Entirely
+1. INDEX TREND & STRUCTURE ENGINE (CRITICAL)
+What: Dedicated technical analysis of SPY/QQQ — trend state, SMA positions, RSI, support/resistance levels, drawdown context.
+Why it matters: Every individual stock trade happens within the index context. A pullback buy on AAPL when SPY is in a confirmed downtrend is a fundamentally different trade than when SPY is at support in an uptrend. Your current system has NO direct index price action analysis.
+What it should score:
+	• SPY/QQQ trend state (uptrend/neutral/downtrend)
+	• Index distance from key SMAs (20/50/200)
+	• Index RSI and momentum
+	• Index support/resistance proximity
+	• Whether the index is confirming or diverging from individual stock setups
+Suggested engine name: index_trend_structure Score interpretation: High = index supports long trades, Low = index is a headwind
+2. SECTOR RELATIVE STRENGTH ENGINE (HIGH VALUE)
+What: Measures whether the target stock's sector is leading or lagging the broad market.
+Why it matters: Sector rotation is one of the strongest short-term signals. A stock in a sector that's rotating OUT will face headwinds regardless of its individual setup quality.
+What it should score:
+	• Sector ETF vs SPY relative performance (5d, 20d)
+	• Sector ETF trend state and momentum
+	• Sector ETF money flow (using ETF volume patterns)
+	• Sector rank among 11 GICS sectors
+	• Whether the sector is in a rotation sweet spot or being sold
+Suggested engine name: sector_relative_strength Score interpretation: High = sector tailwind, Low = sector headwind
+3. EVENT RISK / CALENDAR ENGINE (CRITICAL)
+What: Identifies binary-outcome events within and near the trading window.
+Why it matters: FOMC, CPI, earnings, ex-dividend dates, options expiration — these create discontinuous price action that can invalidate any technical setup. Your current system mentions "tariffs/FOMC" in risk flags but doesn't systematically track or score event risk.
+What it should score:
+	• Stock-specific earnings date proximity
+	• Fed meeting dates within window
+	• Economic data releases (CPI, NFP, GDP) within window
+	• Options expiration (monthly/quarterly) proximity
+	• Ex-dividend date proximity
+	• Overall event density score
+Suggested engine name: event_calendar_risk Score interpretation: High = clear calendar (low risk), Low = heavy event load (high risk)
+This engine is different from the others — it's more factual/calendar-based than analytical. It could be implemented without a model, using a simple calendar lookup + scoring function.
+4. INTERMARKET CORRELATION ENGINE (MODERATE VALUE)
+What: Measures real-time correlation shifts between the target stock/sector and macro drivers (rates, dollar, oil, etc.)
+Why it matters: Correlation regimes shift. AAPL might normally have low sensitivity to rates, but during certain regimes (like QT cycles), the correlation spikes. Your cross_asset_macro engine captures some of this, but it's market-level, not stock-specific.
+What it should score:
+	• Stock's rolling correlation to SPY (30d, 60d)
+	• Stock's rolling correlation to 10Y yield
+	• Stock's rolling correlation to DXY
+	• Whether correlations are stable or shifting (regime detection)
+	• Beta-adjusted expected move given current macro drivers
+Suggested engine name: intermarket_correlation
+5. TECHNICAL REGIME / MARKET STRUCTURE ENGINE (MODERATE VALUE)
+What: Classifies the current market microstructure — trending, mean-reverting, choppy, or transitioning.
+Why it matters: Different strategies work in different regimes. Pullback swings work in trending markets. Mean reversion works in choppy/range-bound markets. Breakouts work after compression. Your current regime_context captures some of this (regime_tags), but it's not a dedicated scored analysis.
+What it should score:
+	• Market regime classification (trending/choppy/transitioning)
+	• Regime persistence probability (how long is this regime likely to last?)
+	• Strategy-regime fit score (does the current regime support this strategy type?)
+	• Hurst exponent or similar trending/mean-reverting metric
+	• Average true range trend (expanding/contracting/stable)
+Suggested engine name: market_structure_regime
+What's Weak in Existing Engines
+news_sentiment (confidence: 0 — the engine itself reports zero confidence)
+This is your weakest module. Issues:
+	• confidence: 0 means the engine doesn't trust its own output
+	• The bull/bear factors are generic ("negative_pressure: negative_pressure" is not useful)
+	• No stock-specific sentiment, only market-level
+	• No source attribution (where is sentiment data coming from?)
+To fix:
+	• If the data source is unreliable, either fix the source or drop this engine. Zero-confidence data is worse than no data — it adds noise.
+	• Add stock-specific sentiment (is there unusual put activity on AAPL? unusual social media volume?)
+	• Add source transparency (what feeds into this score?)
+flows_positioning (confidence: 70 — heavy proxy reliance)
+	• 11 proxy sources and no direct institutional flow data
+	• The engine acknowledges this with penalty deductions
+	• This is honest, which is good, but the question is whether proxy-only flow data adds signal or noise
+To fix:
+	• If you can get real institutional flow data (13F filings, ETF flow data, dark pool prints), prioritize this
+	• If you're stuck with proxies, consider reducing the weight of this engine in the composite
+	• Add proxy reliability tracking — which proxies have been predictive historically?
+liquidity_financial_conditions (58pp cross-pillar disagreement)
+	• High internal disagreement (58pp range between sub-pillars) means the composite score is averaging out conflicting signals
+	• A score of 52 that's the average of 17 and 75 is very different from a stable 52
+To fix:
+	• Surface the disagreement more prominently — add a "coherence" or "agreement" sub-score
+	• Consider reporting the range, not just the composite
+	• Flag when cross-pillar disagreement exceeds a threshold (e.g., >30pp)
+
+PART 7: RECOMMENDED ENGINE ARCHITECTURE
+Current (6 engines):
+breadth_participation ──┐
+volatility_options ─────┤
+cross_asset_macro ──────┼──→ market_picture ──→ TMC Final Decision
+flows_positioning ──────┤
+liquidity_conditions ───┤
+news_sentiment ─────────┘
+Recommended (9 engines):
+breadth_participation ──────┐
+volatility_options ─────────┤
+cross_asset_macro ──────────┤
+flows_positioning ──────────┤
+liquidity_conditions ───────┼──→ market_picture ──→ TMC Final Decision
+news_sentiment (fixed) ─────┤
+index_trend_structure (NEW) ┤
+sector_relative (NEW) ──────┤
+event_calendar_risk (NEW) ──┘
+Priority order for new engines:
+	1. event_calendar_risk — Highest impact, easiest to build (calendar lookup, no model needed)
+	2. index_trend_structure — High impact, moderate effort (same technical metrics you already compute for stocks, just applied to SPY/QQQ)
+	3. sector_relative_strength — Moderate impact, moderate effort (sector ETF analysis)
+The intermarket_correlation and market_structure_regime engines are lower priority — add them once the first three are working.
+
+PART 8: CROSS-CUTTING PROMPT IMPROVEMENTS
+1. Standardize the Market Picture Format
+The market_picture block is identical across all 4 strategy prompts and the TMC prompt. Good — consistency helps. But standardize the engine output format too. Currently:
+	• Some engines have regime_tags, some don't (in the TMC prompt)
+	• Some engines have structured bull/bear factors, others are vague
+	• confidence ranges from 0 to 95 with no clear calibration
+Create a standard engine output schema:
+json
+{
+  "score": 0-100,
+  "label": "<human-readable label>",
+  "confidence": 0-100,
+  "confidence_basis": "<what the confidence is based on>",
+  "summary": "<1 sentence>",
+  "trader_takeaway": "<1-2 sentences, action-oriented>",
+  "bull_factors": [{"factor": "<name>", "score": 0-100, "detail": "<1 sentence>"}],
+  "bear_factors": [{"factor": "<name>", "score": 0-100, "detail": "<1 sentence>"}],
+  "data_quality": {
+    "stale_inputs": [],
+    "missing_inputs": [],
+    "proxy_count": 0,
+    "coherence_score": 0-100
+  },
+  "regime_tags": []
+}
+2. Add a Composite Market Score
+The final decision prompt receives 6 individual module scores but no composite. The model has to mentally average them. Add:
+json
+"market_composite": {
+  "score": 53.6,
+  "label": "Cautious",
+  "weighted_components": {
+    "breadth": {"score": 22, "weight": 0.25},
+    "volatility": {"score": 60, "weight": 0.15},
+    "cross_asset": {"score": 61, "weight": 0.15},
+    "flows": {"score": 64, "weight": 0.10},
+    "liquidity": {"score": 52, "weight": 0.20},
+    "sentiment": {"score": 63, "weight": 0.05},
+    "index_trend": {"score": null, "weight": 0.10}
+  },
+  "agreement_level": "low",
+  "range": [22, 64],
+  "interpretation": "Significant disagreement across modules. Breadth is the clear drag. Reduce position sizing and require higher conviction for entries."
+}
+3. Temperature Settings
+Current settings:
+	• Strategy prompts: 0.2
+	• TMC final decision: 0.0
+	• Active trade review: 0.2
+Recommendation:
+	• Strategy prompts: 0.1 (tighter — you want consistency in setup evaluation)
+	• TMC final decision: 0.0 (correct — maximum determinism for the money decision)
+	• Active trade review: 0.1 (tighter — position management should be consistent)
+4. Token Budget Management
+For strategy prompts receiving the full market_picture, the input payload is ~3000-4000 tokens. With max_tokens at 1500, total context is ~5000-5500 tokens. This is fine for current models, but if you expand the market_picture (adding 3 new engines), the input grows to ~4500-5500 tokens. Budget accordingly.
+5. Add Explicit Regime-Strategy Compatibility Guidance
+The model receives regime_tags but no guidance on which regimes support which strategies. Add to each strategy prompt:
+REGIME COMPATIBILITY:
+This pullback swing strategy performs best when:
+- breadth is neutral or better (>40/100)
+- index trend is uptrend or neutral
+- volatility is stable or contracting
+- event calendar is clear within holding window
+This strategy struggles when:
+- breadth is deteriorating (<30/100)
+- index trend is downtrend
+- volatility is expanding rapidly
+- major events are imminent
+This is essentially a strategy-regime lookup table that removes guesswork from the model.
+
+PART 9: SUMMARY OF RECOMMENDATIONS
+Immediate (Do Now)
+	1. Share the 6 market intelligence engine prompts for review
+	2. Add event_calendar_risk engine (calendar-based, no model needed)
+	3. Add proposed_trade block to the TMC prompt (stop, target, R:R, size)
+	4. Fix the news_sentiment engine (confidence: 0 is a red flag)
+	5. Reduce temperature to 0.1 for strategy prompts
+Short-Term (Next Sprint)
+	1. Add index_trend_structure engine
+	2. Add sector_relative_strength engine
+	3. Add strategy-specific evaluation criteria to system prompts
+	4. Add composite market score to the market_picture block
+	5. Standardize engine output format across all 6 (soon 9) modules
+	6. Expand the strategy-level output schema (market_assessment, timing_assessment, failure_mode)
+Medium-Term (Next Month)
+	1. Add regime-strategy compatibility guidance
+	2. Implement the portfolio_block in the orchestrator
+	3. Build calibration logging (track predictions vs outcomes)
+	4. Add a devil's advocate pass (second prompt that argues against the decision)
+	5. Consider whether strategy prompts should make BUY/PASS calls at all, or just score setups for the TMC to decide
+
+
+
+
+
+
+Market Intelligence Engine Prompts — Full Review
+
+INVENTORY CHECK
+You mentioned 6 engines, but only 5 are in this document:
+#	Engine Key	Present?
+1	news_sentiment	YES
+2	breadth_participation	YES
+3	volatility_options	YES
+4	cross_asset_macro	YES
+5	flows_positioning	YES
+6	liquidity_financial_conditions	YES
+Actually all 6 are here. Good. Let me review each one.
+
+ENGINE 1: NEWS SENTIMENT
+What's Good
+	• Strong institutional tone with clear cluster-based analysis guidance
+	• The macro_snapshot inclusion (VIX, yields, oil, USD) alongside headlines is smart — it lets the model cross-reference headlines against actual data
+	• The "summary MUST explicitly answer" checklist is effective
+	• The market_implications breakdown by asset class is useful
+	• headline_drivers with theme clustering + strength rating is well-designed
+Issues to Fix
+A. No Temporal Weighting Guidance
+The 12 headlines span ~12 hours but are treated equally. A headline from 2 hours ago matters more than one from 12 hours ago for a trading decision. Add:
+TEMPORAL WEIGHTING:
+- Headlines from the last 4 hours should carry the most weight in your assessment
+- Headlines from 4-12 hours ago provide context but may already be priced in
+- If a recent headline directly contradicts an older one (e.g., Fed decision after earlier speculation), the recent one dominates
+- Note the time clustering — if most headlines are from a single window, the assessment may have recency gaps
+
+B. No Headline Reliability Weighting
+Reuters, Bloomberg, and FT carry different weight than MarketWatch for institutional traders. The prompt doesn't guide the model on source credibility. Add:
+SOURCE RELIABILITY:
+- Wire services (Reuters, AP, Bloomberg) carry highest factual weight
+- Financial broadsheets (FT, WSJ) carry high analytical weight  
+- Market-focused outlets (CNBC, MarketWatch) are useful for sentiment but may editorialize
+- Social media, blogs, or unknown sources should be flagged as low-reliability
+- When sources conflict, wire services take precedence
+C. The Scoring Is Anchored to Bullish/Bearish — But the TMC Prompt Needs "Support for Equities"
+The news engine scores 0-100 on a bearish-to-bullish axis. But the downstream TMC final decision prompt needs to know: "does the news environment support taking a LONG equity position right now?" These are related but not identical. Oil surging is "bullish" for energy but "bearish" for consumer discretionary and potentially inflationary. The current scoring doesn't capture this nuance.
+Fix: Add a secondary score or qualifier:
+"equity_support_score": <0-100>,
+"equity_support_note": "<1 sentence on whether news environment supports long equity positions specifically>"
+D. Headline Count Is Low
+12 headlines is a thin sample. For a comprehensive market picture, 25-40 headlines (as noted in the engine's own documentation: "Headlines capped at 40") would give much better cluster detection. If you're filtering down to 12, you might be losing important signals. Consider pushing closer to the 40-cap.
+E. Missing Data That Would Help
+	• Headline sentiment pre-scores — If your data pipeline can tag each headline with a sentiment score before sending to the model, the model can validate rather than compute from scratch. This reduces hallucination risk.
+	• Prior session's score — Was yesterday's news sentiment 45 or 75? The change matters as much as the level.
+	• Market reaction data — Did SPY actually move on the Fed headline? Headline says "Fed holds steady" but if SPY barely moved, the market already priced it in. Adding 1-hour price reaction data would be extremely valuable.
+	• Earnings calendar proximity — Which major names report this week? Earnings season creates a different news regime than non-earnings weeks.
+	• Social media velocity — Twitter/X volume spikes on specific tickers can front-run or amplify headline sentiment. Not essential, but would improve signal.
+
+ENGINE 2: BREADTH & PARTICIPATION
+What's Good
+	• Excellent 5-pillar structure with clear data for each pillar
+	• The raw_inputs are comprehensive and well-chosen (A/D ratio, new highs/lows, pct above MAs, volume thrust, leadership concentration)
+	• Pre-computed pillar_scores with explicit weights is great — it lets the model validate rather than compute
+	• Universe coverage stats (503 stocks, 99.6%) builds data confidence
+	• The leadership pillar (EW vs CW spread, top-5 concentration) is a genuinely sophisticated signal
+Issues to Fix
+A. The Prompt Is Framed for Options Income Traders — But the Downstream Consumer Is a Stock Swing Trader
+The system prompt says: "How breadth conditions affect risk for income-style options strategies" and the trader_takeaway asks for "practical trader takeaway for options income strategies."
+But the TMC final decision prompt is evaluating STOCK SWING TRADES (pullback buys, breakouts, mean reversion). The breadth assessment should be framed for its actual consumer. A deteriorating breadth environment means different things for an iron condor seller vs a pullback swing buyer.
+Fix: Either:
+	1. Reframe the prompt to be strategy-agnostic (recommended — since multiple consumers use it), OR
+	2. Add a section that translates breadth implications for different strategy types
+Recommended reframing of the key line:
+- How breadth conditions affect risk for EQUITY POSITIONS (both directional trades and options strategies)
+And change the trader_takeaway instruction to:
+"trader_takeaway": "<2-4 sentence practical takeaway — what does this breadth picture mean for someone deciding whether to take a new long equity position today?>"
+
+B. Missing Breadth Metrics
+	• McClellan Oscillator / Summation Index — The classic breadth momentum indicator. You have A/D data but not the oscillator derived from it.
+	• Percentage of stocks above 200 DMA — with trend — You have the level (28.5%) but not the 5-day change. Is 28.5% falling from 35% (deteriorating) or rising from 22% (recovering)? The delta matters enormously.
+	• Breadth thrust indicator — Zweig breadth thrust or similar. Captures the rare but powerful breadth expansion signals that precede strong rallies.
+	• Sector breadth breakdown — Is breadth weak across all sectors, or is one sector (like energy) dragging it down while tech breadth is fine? This matters for stock-specific decisions.
+	• New highs / new lows as a ratio or percentage — You have absolute numbers (18 highs, 142 lows) but not as a percentage of the universe. On a universe of 503, that's 3.6% new highs vs 28.2% new lows — extremely negative. The ratio/percentage makes cross-day comparison easier.
+C. The Stability Pillar Is Underpowered
+It only gets 10% weight and has thin data (consistency, z-score, volatility). Consider whether this is adding enough signal to justify a dedicated pillar, or whether its metrics should be folded into the other pillars as qualifiers.
+
+ENGINE 3: VOLATILITY & OPTIONS STRUCTURE
+What's Good
+	• Excellent pillar structure covering regime, structure, skew, positioning, and strategy suitability
+	• The IV vs RV spread (6.3 points) is a genuinely useful premium-selling signal
+	• Pre-computed strategy suitability scores (iron condor: 58, calendar: 71) are a nice touch
+	• Term structure data (VIX 9D vs 30D ratio) captures the contango/backwardation signal
+	• The scoring guide framed around "favorable for premium selling" is well-calibrated
+Issues to Fix
+A. Same Options-Centric Framing Problem
+Like breadth, this engine is framed for "options income traders." But the downstream stock swing trader needs to know: "Is the volatility environment supportive for taking a new directional long position?"
+High IV rank (72) means options are expensive, which is useful for an options seller but is actually a WARNING for a stock swing trader — it means the market is pricing in larger moves, which increases the chance of a stop-loss hit.
+Fix: Add a directional-trade perspective:
+"directional_equity_implications": {
+  "stop_risk_from_vol": "<low|moderate|elevated|high>",
+  "expected_daily_range": "<based on ATR/IV, what daily moves to expect>",
+  "vol_favors_direction": "<long|short|neutral — does vol regime favor a specific direction?>"
+}
+
+B. Missing Vol Metrics
+	• VIX of VIX (VVIX) — Measures volatility of volatility. High VVIX means the vol regime itself is unstable — critical for sizing.
+	• Historical VIX percentile context — You have 1Y percentile (78th) but not longer-term. Is VIX 25 in the 78th percentile of the last year but only the 50th percentile of the last 5 years? Context matters.
+	• Realized vol at different windows — You have RV 20d (18.2) but not 5d or 10d realized vol. Short-term RV spiking while 20d is still low = vol expansion just starting.
+	• Gamma exposure estimate — GEX from options market makers. Positive GEX = market pinned, negative GEX = amplified moves. This is available from public data sources.
+	• Implied vol term structure beyond VIX — Stock-specific IV term structure for the target name (e.g., AAPL 30d IV vs 60d IV).
+C. The Strategy Suitability Scores Are Unexplained
+"strategy_scores": {
+  "iron_condor": 58,
+  "credit_spread": 62,
+  "calendar": 71,
+  "debit_spread": 45
+}
+These are presented as inputs but the model doesn't know HOW they were computed. If these are derived from the pillar scores using a formula, tell the model the formula so it can validate. Otherwise it's just rubber-stamping numbers it can't evaluate.
+
+ENGINE 4: CROSS-ASSET & MACRO CONFIRMATION
+What's Good
+	• The DATA SOURCE AWARENESS block is excellent — calling out copper staleness, gold delay, credit lag, and oil ambiguity is exactly the kind of honest calibration that improves model output
+	• The oil interpretation guidance ($45-$85 = ambiguous) prevents false confidence
+	• The coherence pillar with cross_asset_agreement_pct and signal_conflicts is sophisticated
+	• Scoring on a confirmation/contradiction axis (rather than bullish/bearish) is the right framing for this engine's purpose
+Issues to Fix
+A. The Defensive vs Growth Pillar Is Extremely Thin
+"defensive_growth": {
+  "utilities_vs_tech_ratio_5d": 1.02,
+  "staples_vs_discretionary_ratio_5d": 0.98
+}
+Two ratios is not enough to score a pillar. Add:
+	• Healthcare vs tech relative performance (another defensive/growth proxy)
+	• Bond proxy equities vs growth (REIT performance, utility dividend stocks)
+	• High-beta vs low-beta spread — More direct measure of risk appetite
+	• Small cap vs large cap relative (IWM/SPY ratio) — Classic risk-on/risk-off signal
+	• Junk bonds vs investment grade spread change — Already partially captured in credit, but the relative change is a growth/defensive signal
+B. Missing Cross-Asset Signals
+	• Bitcoin / crypto — Like it or not, BTC has become a liquidity/risk-appetite indicator. BTC leading equities lower is a warning signal.
+	• Emerging market currencies — USD strength vs EM FX (not just the broad dollar index). EM currency stress = global liquidity tightening.
+	• Semiconductor index (SOX/SMH) — The SOX often leads the broader market by weeks. It's a growth bellwether.
+	• Transportation index — Dow Transports confirming or diverging from Dow Industrials (classic Dow Theory).
+	• Real yields (TIPS) — Nominal yields minus breakeven inflation. Rising real yields are a direct headwind for growth stocks.
+C. The Dollar at 120.55 Is Historically Extreme — The Prompt Should Flag This
+USD index at 120.55 is described as "highest since 2001" in the news headlines. This is not a normal data point — it's a regime extreme. The prompt's DATA SOURCE AWARENESS section should add guidance for extreme readings:
+EXTREME VALUE AWARENESS:
+- If USD index exceeds 110, treat this as a significant headwind for multinational 
+  earnings and EM markets. Weight the dollar pillar more heavily.
+- If VIX exceeds 30, shift to crisis-aware framing regardless of other pillars.
+- If yield curve inverts (spread < 0), flag recession risk explicitly.
+- If credit spreads (HY OAS) exceed 5.0, flag credit stress regardless of other signals.
+
+ENGINE 5: FLOWS & POSITIONING
+What's Good
+	• The DATA SOURCE AWARENESS section is the best of all engines — brutally honest about proxy limitations
+	• The "NEVER claim precision that the proxy data cannot support" instruction is excellent
+	• The squeeze/unwind risk pillar captures an important dynamic
+	• The stability pillar with regime_transition_risk and reversal_probability is thoughtful
+Issues to Fix
+A. This Is Your Weakest Engine by Data Quality — And It Knows It
+Every single metric is a proxy derived from VIX regime heuristics. The prompt is honest about this, which is good, but the question is: should this engine even produce a score, or should it just produce qualitative context?
+A score of 63.51 implies precision that VIX-derived proxies simply cannot deliver. The model will output "confidence: 0.55" but even that overstates what proxies can tell you.
+Options:
+	1. Cap the confidence at 0.4 for proxy-only data — Add to the prompt: "Given that ALL inputs are proxies, confidence MUST NOT exceed 0.40 regardless of signal clarity."
+	2. Reframe as qualitative — Instead of a score, produce a regime label + risk flags only
+	3. Invest in real data — ETF flow data (available from multiple providers), CFTC COT reports (weekly, free), exchange-reported put/call ratios (daily, free). Any of these would meaningfully improve signal quality.
+B. The Pillar Scores Don't Match the Raw Data's Limitations
+Crowding_stretch scores 71.54 and squeeze_unwind_risk scores 70.69 — these suggest meaningful positive signal. But the underlying data is:
+	• crowding_score: 38 (LOW crowding = good, ok)
+	• short_squeeze_risk_proxy: 35 (LOW squeeze risk = moderate)
+	• gamma_imbalance_proxy: -12 (negative = dealer short gamma = amplified moves)
+A negative gamma imbalance is actually a WARNING signal for a stock swing trader (it means market moves will be amplified), but the squeeze pillar scores it at 70.69. This suggests the pillar scoring formula may be inverting the signal. The model can't catch this because it doesn't know the formula.
+Fix: Add pillar score computation notes so the model can sanity-check:
+PILLAR SCORE CONTEXT:
+- Higher pillar scores = MORE favorable for long equity positions
+- Low crowding (crowding_score < 40) maps to HIGH crowding_stretch pillar score (less crowding risk)
+- Low short squeeze risk maps to HIGH squeeze_unwind_risk pillar score (less forced buying/selling)
+- Negative gamma imbalance means dealer short gamma — moves will be amplified in both directions
+
+C. Missing Flow Data That's Actually Available (Free or Cheap)
+	• ETF fund flows (ICI weekly, or daily from ETF providers) — Are investors putting money into or pulling money out of equity ETFs?
+	• CFTC Commitment of Traders — Weekly, free from CFTC.gov. Shows speculative vs commercial positioning in futures.
+	• Exchange-reported put/call ratio — CBOE publishes daily equity and index put/call ratios. Replace your VIX proxy with real data.
+	• Margin debt — FINRA publishes monthly margin debt data. Rising margin debt = increasing leverage in the system.
+	• Dark pool short volume — FINRA short volume data is available daily.
+
+ENGINE 6: LIQUIDITY & FINANCIAL CONDITIONS
+What's Good
+	• Clear separation of direct vs proxy data sources
+	• The stability pillar with cross-pillar disagreement (58pp range) is an important meta-signal
+	• The breakage_risk_score: 90 is a useful stress indicator
+	• Dollar at 120.55 with explicit "significant_headwind" assessment shows the pipeline is flagging extremes
+Issues to Fix
+A. The Cross-Pillar Disagreement Is Extreme and Underweighted
+The stability data shows:
+	• cross_pillar_range_pp: 58 (range between best and worst pillar is 58 points!)
+	• Dollar liquidity: 16.88 vs Credit: 75.28
+This is a 58-point spread. The composite score of ~52 is averaging a strong positive signal (credit) with a strong negative signal (dollar). The model needs explicit guidance that high disagreement REDUCES the reliability of the composite:
+DISAGREEMENT HANDLING:
+- If cross_pillar_range_pp exceeds 40, the composite score is unreliable as a single number
+- Report the disagreement explicitly and explain what would resolve it
+- When disagreement is high, the WORST pillar should carry disproportionate weight 
+  for risk management (the weakest link matters most)
+- A score of 52 averaging 75 and 17 is NOT the same as a score of 52 with all pillars near 50
+B. The FCI Proxy Needs More Transparency
+"fci_proxy_score": 57
+What goes into this proxy? The model can't evaluate a single number without knowing its components. Add:
+"fci_proxy_components": {
+  "rate_contribution": <value>,
+  "credit_contribution": <value>,
+  "equity_contribution": <value>,
+  "dollar_contribution": <value>
+}
+Or at minimum, describe the methodology in the DATA SOURCE AWARENESS block.
+C. Missing Liquidity Metrics
+	• Fed balance sheet trend — QT pace, reserve levels. The most important liquidity driver globally.
+	• Reverse repo facility usage — High RRP = excess liquidity parked at Fed. Declining RRP = liquidity being deployed (or drained).
+	• Bank reserves — Available from Fed H.4.1 weekly.
+	• Treasury General Account (TGA) — Rising TGA drains liquidity, falling TGA adds it.
+	• Commercial paper rates — CP-OIS spread is an early stress indicator.
+	• SOFR rate and anomalies — Replacement for LIBOR. Spikes indicate funding pressure.
+	• Cross-currency basis swaps — Measures offshore dollar funding stress. Widening = global dollar shortage.
+
+PART 2: CROSS-ENGINE ISSUES
+1. Inconsistent Framing: Options Income vs Stock Swing
+Engines 2 (breadth) and 3 (volatility) are explicitly framed for "options income traders" but the primary downstream consumer is the TMC final decision prompt evaluating stock swing trades. This creates a translation gap — the model assessing a pullback swing trade receives volatility analysis framed around iron condor suitability instead of directional risk.
+Fix: Make each engine strategy-agnostic in its analysis, then add a dedicated section for "implications by strategy type":
+"implications_by_strategy": {
+  "directional_long": "<what this means for swing/momentum longs>",
+  "premium_selling": "<what this means for options income>",
+  "mean_reversion": "<what this means for snapback trades>"
+}
+2. No Standardized Confidence Calibration
+Confidence across engines:
+	• breadth: 95.0% (out of 1.0 scale, so actually 0.95)
+	• volatility: 95.0%
+	• cross_asset: 92.0%
+	• flows: 70.0%
+	• liquidity: 84.3%
+	• news: 0% (!!)
+These are on wildly different scales and calibrations. A 95% confidence breadth score alongside a 0% confidence news score creates a false sense of precision in one and zero weight in the other.
+Fix: Standardize confidence with explicit bands:
+CONFIDENCE CALIBRATION (use consistently across all engines):
+- 0.90-1.00: All data is fresh, direct, and internally consistent
+- 0.70-0.89: Minor data gaps or proxy usage, signals mostly consistent
+- 0.50-0.69: Significant proxy reliance OR internal conflicts, interpret cautiously
+- 0.30-0.49: Heavy proxy reliance AND internal conflicts, low conviction
+- 0.00-0.29: Data critically incomplete or contradictory, score is unreliable
+3. The Excluded Fields Create a Subtle Problem
+Each engine has an excluded_fields list that strips out pre-computed scores before sending to the model. This is smart — it forces the model to derive its own score rather than rubber-stamp. But the model still receives pillar_scores, which are pre-computed. This creates an anchoring problem: the model will anchor its overall score to the weighted average of the pillar scores.
+Options:
+	1. Also exclude pillar_scores — Force the model to score from raw_inputs only (hardest, most independent)
+	2. Keep pillar_scores but add instructions — "The pillar_scores are algorithmic pre-computations. You may agree or disagree with them. Your overall score should reflect YOUR interpretation of the raw data, not just the weighted average of pillar scores."
+	3. Current approach — Acceptable compromise, but acknowledge the anchoring risk
+I recommend option 2 as the pragmatic choice.
+4. No Engine Provides Historical Context
+None of the 6 engines include their own prior scores. The model has no way to know:
+	• Was breadth at 22 yesterday too, or did it just crash from 65?
+	• Has VIX been elevated for a week or did it just spike today?
+	• Are credit spreads tightening from a stressed level or from an already-easy level?
+Fix: Add a prior_context block to each engine's data:
+"prior_context": {
+  "score_1d_ago": 28.5,
+  "score_5d_ago": 45.2,
+  "score_20d_ago": 62.1,
+  "trend": "deteriorating",
+  "notable_change": "Breadth dropped 20 points in 5 days — rapid deterioration"
+}
+
+This is probably the single highest-value addition across all engines.
+5. No Engine Knows About the Others
+Each engine operates in isolation. The breadth engine doesn't know that the dollar is at 120.55. The volatility engine doesn't know that breadth is at 22. This means cross-engine implications are only captured at the TMC level, which may be too late.
+This is probably fine architecturally (each engine should be a specialist), but consider adding a lightweight market_context_snapshot to each engine's input:
+"market_context_snapshot": {
+  "spy_return_5d": -1.4,
+  "vix": 25.09,
+  "breadth_score": 22,
+  "key_regime_tags": ["breadth_deteriorating", "vol_elevated"]
+}
+This lets each engine contextualize its own findings without doing the other engines' jobs.
+
+PART 3: MISSING ENGINES
+Based on everything I've reviewed across both conversations, here are the engines you're missing, in priority order:
+CRITICAL: Event Calendar Risk Engine
+Why: A FOMC meeting tomorrow changes every trade's risk profile. None of your 6 engines systematically capture binary event risk within the holding window.
+Implementation: This doesn't need a model at all. Build it as a deterministic scoring function:
+def score_event_risk(events_in_window, holding_days):
+    """
+    Score: 100 = clear calendar, 0 = multiple high-impact events imminent
+    """
+    score = 100
+    for event in events_in_window:
+        if event.impact == "high" and event.days_away <= 2:
+            score -= 30  # FOMC tomorrow
+        elif event.impact == "high" and event.days_away <= 5:
+            score -= 15  # FOMC this week
+        elif event.impact == "medium" and event.days_away <= 3:
+            score -= 10  # CPI in 3 days
+        # ... etc
+    
+    if holding_days <= 5 and any(e.type == "earnings" for e in events_in_window):
+        score -= 40  # Earnings within short hold = major risk
+    
+    return max(0, score)
+Output format:
+{
+  "engine_key": "event_calendar_risk",
+  "score": 35,
+  "label": "Heavy Event Load",
+  "events_in_window": [
+    {"event": "FOMC Rate Decision", "date": "2026-03-19", "days_away": 1, "impact": "high"},
+    {"event": "Quad Witching", "date": "2026-03-20", "days_away": 2, "impact": "medium"}
+  ],
+  "events_near_window": [
+    {"event": "CPI Release", "date": "2026-04-10", "days_away": 23, "impact": "medium"}
+  ],
+  "holding_window_risk": "high",
+  "recommendation": "FOMC tomorrow creates binary event risk. Wait for resolution or reduce size."
+}
+HIGH VALUE: Index Trend Structure Engine
+Why: Every stock trade happens in the context of the index. Your system has zero direct SPY/QQQ price action analysis.
+Implementation: Use the same technical metrics you already compute for individual stocks, applied to SPY and QQQ. This could even use the same model prompt framework as your stock engines.
+Data needed:
+{
+  "spy": {
+    "price": 542.30,
+    "sma20": 545.10,
+    "sma50": 538.40,
+    "sma200": 510.25,
+    "slope_20": 0.15,
+    "rsi14": 46.5,
+    "return_1d": -0.35,
+    "return_5d": -1.40,
+    "dist_sma20": -0.52,
+    "dist_sma50": 0.72,
+    "trend_state": "neutral",
+    "support_levels": [538, 530, 520],
+    "resistance_levels": [548, 555, 560]
+  },
+  "qqq": {
+    // Same structure
+  },
+  "spy_breadth_confirmation": true/false,
+  "index_vs_stock_divergence": "<stock leading | stock lagging | aligned>"
+}
+MODERATE VALUE: Sector Relative Strength Engine
+Why: Sector rotation drives 40-60% of individual stock returns in the short term. A pullback buy on AAPL when XLK is in a downtrend is a much lower-probability trade.
+Data needed:
+{
+  "target_sector_etf": "XLK",
+  "sector_vs_spy_5d": -0.85,
+  "sector_vs_spy_20d": 1.2,
+  "sector_rsi14": 48.5,
+  "sector_trend_state": "neutral",
+  "sector_rank_11": 4,
+  "sector_money_flow_5d": "outflow",
+  "top_sectors": ["XLE", "XLU", "XLV"],
+  "bottom_sectors": ["XLK", "XLC", "XLY"],
+  "rotation_regime": "defensive"
+}
+
+PART 4: POLISHED ENGINE PROMPTS
+Below are polished system prompts for each engine incorporating all fixes. I'm showing the system prompt only (user data structure stays the same but with the additional fields noted above).
+Engine 1: News Sentiment (Polished)
+You are the BenTrade Market News Analyst. Analyze the supplied headlines,
+macro snapshot, and market context. Return ONLY valid JSON matching the
+required schema.
+YOUR TASK: Produce an institutional-style market news brief that a
+portfolio manager can use to contextualize trade decisions in the next
+1-5 trading days.
+ANALYSIS APPROACH:
+1. Cluster headlines into 3-5 dominant themes (don't analyze individually)
+2. Cross-reference headline claims against the macro_snapshot data
+3. Identify conflicts between headlines and actual market data
+4. Weight recent headlines (last 4 hours) more heavily than older ones
+5. Consider whether key headlines are likely already priced in
+SOURCE RELIABILITY:
+- Wire services (Reuters, AP, Bloomberg): highest factual weight
+- Financial broadsheets (FT, WSJ): high analytical weight
+- Market outlets (CNBC, MarketWatch): useful for sentiment, may editorialize
+- Flag any unknown or low-reliability sources explicitly
+The summary MUST explicitly answer:
+- What are the 2-3 dominant market narratives right now?
+- What pushed risk appetite up?
+- What pushed risk appetite down?
+- Are headlines consistent with the macro_snapshot data, or diverging?
+- What does this mean for someone considering a new long equity position?
+SCORING GUIDE (overall market sentiment):
+- 0-20  = Strongly bearish / risk-off — headlines dominated by crisis, stress
+- 21-40 = Bearish — preponderance of negative catalysts
+- 41-59 = Mixed / conflicted — significant bull and bear narratives competing
+- 60-79 = Constructive / mildly bullish — positive tone with manageable risks
+- 80-100 = Strongly bullish / risk-on — broad positive catalysts, low fear
+
+CONFLICT HANDLING:
+- When evidence conflicts, use MIXED or NEUTRAL
+- Lower confidence proportionally to the severity of conflicts
+- Explicitly list offsetting factors — never ignore contradictions
+- If a single headline could plausibly be interpreted both ways, flag it
+
+CONFIDENCE CALIBRATION:
+- 0.80-1.00: Headlines are fresh, sources are reliable, signals are consistent
+- 0.60-0.79: Some conflicts or gaps, but overall picture is readable
+- 0.40-0.59: Significant conflicts, thin headline sample, or stale data
+- 0.00-0.39: Headlines contradictory, sample too thin, or data critically stale
+Required JSON schema (return EXACTLY this shape):
+{
+  "label": "BULLISH | BEARISH | MIXED | NEUTRAL | RISK-OFF | RISK-ON",
+  "score": <float 0-100>,
+  "confidence": <float 0-1>,
+  "tone": "<string describing market tone>",
+  "summary": "<2-4 sentence executive market brief>",
+  "headline_drivers": [
+    {
+      "theme": "<short theme title>",
+      "impact": "bullish|bearish|mixed|neutral",
+      "strength": <1-5>,
+      "explanation": "<why this theme matters for equity positions>"
+    }
+  ],
+  "major_headlines": [
+    {
+      "headline": "<cleaned headline>",
+      "category": "macro|geopolitics|rates|commodities|earnings|sector|policy|sentiment",
+      "market_impact": "bullish|bearish|mixed|neutral",
+      "priced_in": <true|false>,
+      "why_it_matters": "<1-2 sentence explanation>"
+    }
+  ],
+  "score_drivers": {
+    "bullish_factors": ["<specific factor>"],
+    "bearish_factors": ["<specific factor>"],
+    "offsetting_factors": ["<specific balancing/conflicting factor>"]
+  },
+  "equity_positioning_signal": {
+    "long_support": "<supportive|neutral|headwind|hostile>",
+    "detail": "<1 sentence — does this news environment support new long positions?>"
+  },
+  "market_implications": {
+    "equities": "<brief interpretation>",
+    "volatility": "<brief interpretation>",
+    "rates": "<brief interpretation>",
+    "energy_or_commodities": "<brief interpretation>",
+    "sector_rotation": "<brief interpretation>"
+  },
+  "uncertainty_flags": ["<uncertainty or conflict in the signal>"],
+  "trader_takeaway": "<2-4 sentence practical trader takeaway focused on equity positioning decisions>"
+}
+
+Rules:
+- Return JSON only. No markdown, prose, chain-of-thought, or <think> tags.
+- Do not include any keys beyond this schema.
+- Start with { and end with }.
+Engine 2: Breadth & Participation (Polished)
+You are the BenTrade Breadth & Participation Analyst. Analyze the supplied
+market breadth data and return ONLY valid JSON matching the required schema.
+YOUR TASK: Determine whether the current market move is broadly supported
+or driven by a narrow group of stocks, and what this means for taking new
+equity positions.
+ANALYSIS APPROACH:
+1. Evaluate each pillar using the raw data, not just the pre-computed scores
+2. The pillar_scores are algorithmic pre-computations — you may agree or
+   disagree with them. Your overall score should reflect YOUR interpretation
+   of the raw data.
+3. Look for confirmations AND divergences between pillars
+4. Consider what breadth at these levels historically implies for trade success
+
+The summary MUST explicitly answer:
+- Is the market move broadly supported or driven by a few names?
+- Are trend and volume confirming or diverging from price?
+- What does leadership quality tell us about sustainability?
+- What does this breadth picture mean for someone deciding whether to enter
+  a new long equity position today?
+SCORING GUIDE:
+- 0-20  = Extremely narrow / deteriorating — rally is a facade, high risk
+- 21-40 = Weak / selective participation — only leaders are working
+- 41-59 = Mixed / transitional — breadth is in flux, direction unclear
+- 60-79 = Constructive / broadening — healthy participation, supportive
+- 80-100 = Strong / robust — broad-based move, high conviction environment
+
+Label options: BROAD_RALLY | NARROW_RALLY | DETERIORATING | WEAK | RECOVERING | MIXED | STRONG
+CONFIDENCE CALIBRATION:
+- 0.80-1.00: All pillars have fresh data, signals consistent, coverage >95%
+- 0.60-0.79: Minor data gaps, most signals agree
+- 0.40-0.59: Significant pillar conflicts or data gaps
+- 0.00-0.39: Critical data missing or pillars severely contradictory
+Required JSON schema (return EXACTLY this shape):
+{
+  "label": "BROAD_RALLY | NARROW_RALLY | DETERIORATING | WEAK | RECOVERING | MIXED | STRONG",
+  "score": <float 0-100>,
+  "confidence": <float 0-1>,
+  "summary": "<2-4 sentence executive breadth brief>",
+  "pillar_analysis": {
+    "participation": "<interpretation of A/D data, pct advancing, new highs/lows>",
+    "trend": "<interpretation of MA breadth — pct above 200/50/20 DMA>",
+    "volume": "<interpretation of up/down volume balance>",
+    "leadership": "<interpretation of EW vs CW, outperformance, sector dispersion>",
+    "stability": "<interpretation of breadth consistency and mean reversion risk>"
+  },
+  "breadth_drivers": {
+    "constructive_factors": ["<factor supporting breadth>"],
+    "warning_factors": ["<factor weakening breadth>"],
+    "conflicting_factors": ["<signal conflict or divergence>"]
+  },
+  "implications_by_strategy": {
+    "directional_long": "<what breadth means for pullback/breakout/momentum longs>",
+    "mean_reversion": "<what breadth means for snapback trades>",
+    "premium_selling": "<what breadth means for options income>"
+  },
+  "market_implications": {
+    "directional_bias": "<bullish/bearish/neutral lean from breadth>",
+    "position_sizing": "<full/reduced/minimal — recommendation given breadth>",
+    "risk_level": "<low/moderate/elevated/high>",
+    "sector_tilt": "<sectors breadth favors or warns against>"
+  },
+  "uncertainty_flags": ["<data gap, divergence, or low-confidence area>"],
+  "trader_takeaway": "<2-4 sentence practical takeaway — what does this breadth picture mean for deciding whether to take a new long equity position today?>"
+}
+
+Rules:
+- Return JSON only. No markdown, prose, chain-of-thought, or <think> tags.
+- Do not include any keys beyond this schema.
+- Start with { and end with }.
+I'll omit the other 4 polished prompts for brevity — they follow the same pattern:
+	1. Reframe from options-centric to strategy-agnostic
+	2. Add confidence calibration bands
+	3. Add "implications_by_strategy" section
+	4. Instruct model to validate (not rubber-stamp) pillar_scores
+	5. Add trader_takeaway focused on equity positioning decisions
+	6. Add prior_context handling instructions
+
+PART 5: PRIORITY IMPLEMENTATION ROADMAP
+Immediate (This Week)
+	1. Add prior_context to each engine — Score from 1d, 5d, 20d ago + trend direction. Highest single-item ROI improvement.
+	2. Reframe breadth and vol engines — Remove options-income framing, make strategy-agnostic with strategy-specific implications.
+	3. Add confidence calibration bands — Standardize across all 6 engines.
+	4. Add pillar score validation instruction — "You may agree or disagree with pre-computed pillar_scores."
+	5. Cap flows_positioning confidence — At 0.40 given all-proxy data.
+Next Sprint
+	1. Build event_calendar_risk engine — Deterministic, no model needed. Highest-impact new engine.
+	2. Build index_trend_structure engine — Use existing technical metrics on SPY/QQQ.
+	3. Add prior_context data pipeline — Store engine scores daily for lookback.
+	4. Replace flows_positioning proxies — Exchange-reported put/call ratios (free), CFTC COT data (free, weekly).
+Next Month
+	1. Build sector_relative_strength engine
+	2. Add headline sentiment pre-scoring to news engine pipeline
+	3. Add market reaction data to news engine (1-hour SPY reaction to key headlines)
+	4. Add VVIX, realized vol windows, GEX to volatility engine
+	5. Add Fed balance sheet, RRP, TGA to liquidity engine
+	6. Add McClellan Oscillator, breadth thrust, sector breadth to breadth engine
+
+From <https://claude.ai/chat/94ca293c-e57a-4d9d-b6b6-1bdb61da9f02> 
+
+
+
+
+
+What You've Built Well
+Your architecture is sound. The pipeline makes sense: collect data → score market environment → scan for setups → filter → score setups → attach market context → final decision → rank → surface top 20. That's essentially what a quantitative trading desk does, just with LLM-based scoring instead of pure statistical models. The separation of market intelligence engines from trade-specific analysis is good design. The multi-pillar scoring with explicit weights is disciplined. The fact that you're surfacing the top 20 to yourself rather than auto-executing is wise — you're using the system as a structured filter with a human final decision, which is the right trust level for where this system is maturity-wise.
+Can It Be Profitable?
+The honest answer is: the architecture can support profitability, but the model layer is not where the edge comes from. Let me explain why.
+The LLM is doing two things in your pipeline: (1) interpreting structured data and producing a score, and (2) synthesizing multiple signals into a qualitative assessment. It's good at #2 — synthesis, conflict detection, narrative construction. It's mediocre at #1 — scoring. Here's the problem: a model scoring breadth data at 22/100 isn't adding much beyond what your algorithmic pillar scores already computed. The model is largely rubber-stamping the pre-computed scores with slightly different numbers and some prose justification. Where it genuinely adds value is in catching conflicts (credit says bullish but dollar says bearish), contextualizing (breadth at 22 with VIX at 25 is different from breadth at 22 with VIX at 15), and forcing you to confront the full picture before trading.
+What actually determines profitability for short-term strategies:
+The edge lives in your scanners, filters, and scoring algorithms — not in the LLM layer. Specifically, profitability depends on whether your setup detection (pullback at SMA-20 with RSI reset) actually identifies trades with positive expected value over hundreds of occurrences, whether your filters are tight enough to eliminate noise without killing real setups, and whether your position sizing and risk management preserve capital during losing streaks. The LLM layer is a quality-control and synthesis layer on top of this. It can prevent bad trades (which is valuable), but it can't create edge that isn't already in the data.
+My honest assessment: If your underlying scanners identify setups with genuine statistical edge (which requires backtesting, not model opinions), and your market environment filters correctly reduce exposure during hostile regimes, then yes, this can be profitable. The LLM layer adds maybe 10-15% improvement by catching context the algorithms miss. But if the underlying setups don't have positive expected value, no amount of LLM sophistication will fix that.
+How I'd Build This for Profitability
+If I were building this system from scratch with profitability as the explicit goal, here's what I'd do differently and what I'd keep.
+Phase 1: Prove the edge exists without any LLM involvement.
+This is the step most people skip. Before any model touches a trade, I'd want:
+A backtesting engine that runs every strategy (pullback swing, momentum breakout, mean reversion, vol expansion) across 5-10 years of data. Not optimized — walk-forward tested with out-of-sample validation. For each strategy, I'd want the win rate, average winner, average loser, expected value per trade, max drawdown, Sharpe ratio, and number of trades per year.
+Then I'd want regime-conditional backtests. The same strategies, but filtered by market environment: what's the pullback swing win rate when breadth is below 30? When VIX is above 20? When the index is below its 50-day MA? This tells you which strategies work in which environments — and that lookup table is worth more than any LLM opinion.
+If a strategy doesn't show positive expected value in backtesting, it doesn't go into production, period. No model can rescue a setup that doesn't have statistical edge.
+Phase 2: Build the algorithmic scoring and filtering layer.
+Your current pillar-based scoring system is the right idea. But I'd make it purely deterministic — no LLM in the loop for scoring. The scoring engine should be fast, consistent, and testable. Every score should be reproducible given the same inputs. The LLM introduces variance (different scores on the same data across runs) which makes it impossible to backtest or calibrate.
+For market environment scoring, I'd use the same pillar structure you have but with one key addition: regime classification with historical performance lookup. Instead of asking a model "is this environment good for pullback swings?", I'd compute the answer from data: "In the last 500 instances where breadth was 20-30, VIX was 20-30, and the index was near its 20-day MA, pullback swings had a 54% win rate and 0.3% expected value — below the 62% / 0.9% baseline."
+That's a table lookup, not a model call. And it's far more trustworthy.
+Phase 3: Use the LLM for what it's actually good at.
+Once the algorithmic layer has identified setups with statistical edge in a favorable regime, THEN bring in the LLM — but for specific, high-value tasks.
+First, conflict detection and red flag surfacing. Feed the model the setup data, market environment scores, and the historical performance context. Ask it: "Given all this data, what could go wrong that the algorithms might miss? Are there conflicts between signals that suggest this is riskier than the score implies?" This is where the model genuinely adds value — it can catch things like "the setup scores well but there's an FOMC meeting tomorrow that the scoring engine doesn't account for."
+Second, narrative synthesis for the human decision-maker (you). The model produces a concise brief that saves you 20 minutes of manual analysis per trade. This is genuinely valuable for workflow efficiency even if it doesn't change the statistical edge.
+Third, post-trade review. After trades close, feed the model the setup data, the outcome, and the market conditions. Ask it to identify patterns in your winners vs losers. This is where LLMs shine — pattern recognition across unstructured data.
+What I would NOT use the model for: final scoring, go/no-go decisions, or anything that feeds back into the trade selection pipeline in a way that can't be backtested.
+Phase 4: Risk management as the actual profit driver.
+This is the unsexy part that matters most. Short-term trading profitability is determined more by risk management than by entry selection. I'd build:
+A position sizing engine that scales with conviction AND regime. High-conviction setup in a strong breadth environment gets full size. Same setup in deteriorating breadth gets half size. Marginal setup in any environment gets minimum size or skip.
+A portfolio heat monitor — total open risk across all positions, sector concentration, correlation between open trades. If you're running 8 positions and 6 are tech longs, your actual exposure is much higher than it looks.
+Drawdown circuit breakers — if the portfolio hits -X% in a week, automatically reduce all position sizes by 50% for the next 5 trading days. This single rule prevents the catastrophic losing streaks that blow up short-term traders.
+Daily P&L attribution — which strategies are making money this month? Which are losing? Shift allocation toward what's working in the current regime. This is momentum-of-strategies, and it works.
+Phase 5: The feedback loop.
+Log everything: every setup scored, every trade taken, every trade passed, every outcome. After 100+ trades, you can build a calibration curve: when your system says 75/100 conviction, does the trade actually win ~75% of the time? If 75-conviction trades win 55% of the time, your scoring is miscalibrated and needs adjustment.
+Also log the passes — paper-trade the top setups you didn't take. If your passes would have been winners 60% of the time, your filter is too tight. If they would have been losers 70% of the time, your filter is working.
+Where Your Current System Fits
+Your current architecture maps well to this framework. You're doing Phase 2 (algorithmic scoring) and Phase 3 (LLM synthesis) simultaneously. What I'd prioritize adding:
+Backtesting is the biggest gap. You need to know the historical win rate of each strategy at each score range in each regime. Without this, you're making decisions based on the model's opinion of what should work, rather than data on what has worked.
+The event calendar engine I mentioned in the previous review — it's deterministic, easy to build, and would have caught the "FOMC tomorrow" risk that none of your current engines flag.
+Position sizing and portfolio-level risk — your orchestrator payload has a portfolio_block that's currently null. Implementing it would let the final decision prompt account for total exposure and concentration.
+Outcome logging and calibration — start tracking every recommendation vs actual outcome. This data becomes your most valuable asset over time.
+The system you've built is a serious, well-architected trading tool. The prompts are among the best I've seen for this use case. The question isn't whether the architecture is right — it is. The question is whether the underlying setups have statistical edge, and the only way to answer that is backtesting and live-trade logging. The LLM layer is the polish on top of what should be a data-proven foundation.
+
+
+
+
+
+
+This is the most important piece of your whole system. Let me think through this carefully, because a backtesting engine for your specific architecture has requirements that generic backtesting frameworks don't cover.
+The Core Problem Your Backtester Needs to Solve
+You're not backtesting a single strategy in isolation — you're backtesting a multi-stage pipeline: scanner → filter → score → rank → select → manage → exit. Each stage has parameters that affect the outcome. A traditional backtester tests "buy when RSI crosses 30, sell when it crosses 70." Yours needs to test "when the pullback scanner fires on a stock with composite score above 75 in a market environment where breadth is above 40, and the trade ranks in the top 20, what happens over the next 3-15 days?"
+That's a fundamentally different problem. Let me lay out how I'd build it.
+Architecture Overview
+I'd build it in four layers, each independent but composable:
+Layer 1: Data Foundation — Historical price data, market environment reconstruction, and event calendar. This is the "what was true on date X" layer.
+Layer 2: Signal Replay — Re-run your scanners and scoring engines against historical data to generate the same signals they would have produced on each historical date. This is the "what would my system have said" layer.
+Layer 3: Trade Simulation — Given the signals from Layer 2, simulate trade entry, management, and exit with realistic constraints. This is the "what would have happened" layer.
+Layer 4: Analysis & Calibration — Statistical analysis of results, strategy comparison, regime decomposition, and parameter sensitivity. This is the "what did I learn" layer.
+Let me go deep on each one.
+Layer 1: Data Foundation
+This is where most backtesting projects fail — not because the logic is wrong, but because the data is incomplete or has survivorship bias.
+What you need stored, per trading day, for every stock in your universe:
+Price data is the obvious part — OHLCV daily bars. But you also need the derived metrics your scanners use: SMA values, RSI, ATR, Bollinger width, volume ratios, distance from highs, slope values. You have two choices here. You can store raw OHLCV and recompute indicators on the fly during backtesting, which is flexible but slow. Or you can pre-compute and store the full metric set for each stock on each day, which is fast but storage-heavy. I'd go with pre-compute and store. Disk is cheap, and backtesting speed matters enormously for iteration. You want to be able to run 1000 parameter variations in minutes, not hours.
+The universe problem: Your scanners run against some universe of stocks (S&P 500, Russell 1000, whatever). That universe changes over time — stocks get added and removed. If you only backtest against today's S&P 500, you have survivorship bias. The stocks that are in the index today are the winners. The ones that got kicked out (and might have triggered your scanners and lost money) are invisible. You need a point-in-time universe: on March 18, 2024, what stocks were in the S&P 500? This data is available from providers like Sharadar, Norgate, or you can reconstruct it from index change announcements.
+Market environment reconstruction: For each historical date, you need to be able to reconstruct what your 6 market intelligence engines would have scored. This means storing the inputs to each engine historically: breadth metrics (advance/decline, new highs/lows, pct above MAs), volatility metrics (VIX, term structure, IV/RV), cross-asset data (yields, credit spreads, dollar, commodities), and so on. You don't need the LLM outputs historically — you need the raw inputs so your algorithmic pillar scoring can be re-run.
+Event calendar: Historical FOMC dates, CPI releases, earnings dates per stock, ex-dividend dates, options expiration dates. All of these affect trade outcomes and need to be available during simulation.
+The data schema I'd use:
+daily_stock_metrics (one row per stock per day)
+├── date, symbol
+├── open, high, low, close, volume, adj_close
+├── sma_20, sma_50, sma_200, slope_20, slope_50
+├── rsi_14, rsi_2, roc_10, roc_20
+├── atr, atr_pct, bb_width, realized_vol_20
+├── dist_sma20, dist_sma50, high_20, high_55, high_252
+├── pullback_from_20d_high, volume_ratio
+└── [every metric your scanners use]
+
+daily_market_environment (one row per day)
+├── date
+├── breadth_inputs (A/D ratio, pct_advancing, new_highs, new_lows, pct_above_200dma, etc.)
+├── volatility_inputs (vix, vix_term_structure, iv_rank, iv_rv_spread, etc.)
+├── cross_asset_inputs (us_10y, us_2y, ig_oas, hy_oas, usd_index, oil, gold, copper)
+├── flows_inputs (put_call_ratio, etf_flows, etc.)
+├── liquidity_inputs (fed_funds, yield_curve_spread, etc.)
+└── computed_pillar_scores (breadth_composite, vol_composite, etc.)
+
+events_calendar (one row per event)
+├── date, event_type, impact_level
+├── symbol (null for macro events)
+└── details
+
+universe_membership (one row per stock per day)
+├── date, symbol, index_name, is_member
+How much data: I'd want a minimum of 5 years for statistical significance on short-term strategies. 10 years is better because it covers multiple regime cycles (bull, bear, high-vol, low-vol, rate hiking, rate cutting). At ~500 stocks × ~2520 trading days × ~50 metrics, that's roughly 63 million rows in the stock metrics table. Sounds like a lot but it's straightforward in PostgreSQL or even SQLite with proper indexing.
+Layer 2: Signal Replay
+This is where your actual scanners and scoring engines get re-run against historical data. The key design principle: the replay must use exactly the same code as your live system. If your live pullback scanner uses a specific set of conditions and scoring formula, the backtester must call that same code with historical inputs. Any divergence between live and backtest logic will produce misleading results.
+How I'd structure this:
+Your scanner code should be written as pure functions that take a date and a stock metrics row as input and produce a signal as output. No database calls, no API calls, no side effects inside the scanner logic itself. The backtesting harness feeds historical data into these functions and collects the outputs.
+For each historical date in the test window:
+  1. Load that day's universe membership
+  2. Load stock metrics for all universe members
+  3. Load market environment data for that day
+  4. Run each scanner (pullback, breakout, mean_reversion, vol_expansion)
+     against each stock using that day's metrics
+  5. For stocks that pass the scanner, run the scoring engine
+  6. Run market environment scoring using that day's market data
+  7. Attach market scores to each candidate
+  8. Rank candidates
+  9. Select top N (matching your live selection logic)
+  10. Record: date, symbol, strategy, composite_score, market_scores,
+      entry_price, all relevant metrics at signal time
+The output of Layer 2 is a table of historical signals — every trade your system would have surfaced on every historical day. This table is the input to Layer 3.
+Critical detail: look-ahead bias prevention. When computing metrics for date T, you can only use data available on date T. This sounds obvious but it's the most common backtesting bug. Your SMA-20 on March 18 must use closes from February 19 through March 18, not March 19. Your "today's volume vs 20-day average" must use today's volume at the time of signal (if your scanner runs intraday, you need intraday volume data) vs the average of the prior 20 completed days. If your live scanner runs at 3:30 PM, your backtester should use data available at 3:30 PM, not the closing price.
+For daily-resolution backtesting (which is where I'd start), using the previous day's close for signal generation and the current day's open or close for entry is a safe approach that avoids look-ahead.
+Layer 3: Trade Simulation
+Given a signal from Layer 2, simulate what happens to the trade. This is where most of the complexity lives.
+Entry logic: When a signal fires on day T, what price do you enter at? Options include the close of day T (assumes you can act on the signal same-day), the open of day T+1 (more realistic — you see the signal after close, enter next morning), or a limit order at a specific price on T+1 (most realistic for pullback entries). I'd default to T+1 open as the baseline, with the option to test T close and limit entries as variants.
+Entry slippage: For liquid large-caps (AAPL, NVDA, META), slippage is minimal. For mid-caps or less liquid names, add a slippage model. A simple approach: entry price = open + (0.05% × ATR_pct). This penalizes entries on volatile stocks slightly, which is realistic.
+Exit logic — this is where strategies diverge:
+For pullback swings: exit when price reaches the 20-day high (target), when price closes below SMA-50 (stop), or after 15 trading days (time stop), whichever comes first.
+For momentum breakouts: exit when RSI exceeds 75 (overbought target), when price closes below the breakout level (failed breakout stop), or after 20 trading days (time stop).
+For mean reversion: exit when price reaches SMA-20 (mean target), when price makes a new 20-day low (stop — the snapback failed), or after 7 trading days (time stop).
+For each strategy, you need to parameterize the stop, target, and time limit so you can test variations. The backtester should support testing "what if I used a 2-ATR stop instead of an SMA-50 stop?" without rewriting code.
+Position sizing: Start with equal-weight positions (same dollar amount per trade). Later, test conviction-weighted sizing (higher-scoring setups get larger positions).
+Portfolio constraints: On any given day, limit the number of concurrent positions (e.g., max 10 open positions). If you already have 10 and a new signal fires, either skip it or replace the weakest current position. This is important because it simulates real capital constraints.
+Trade record schema:
+trades (one row per trade)
+├── trade_id, signal_date, entry_date, exit_date
+├── symbol, strategy, direction
+├── entry_price, exit_price, exit_reason (target|stop|time)
+├── return_pct, return_dollar
+├── holding_days
+├── composite_score_at_entry, market_scores_at_entry
+├── max_favorable_excursion (highest unrealized gain during trade)
+├── max_adverse_excursion (deepest unrealized loss during trade)
+├── all_metrics_at_entry (for later analysis)
+Max favorable excursion (MFE) and max adverse excursion (MAE) are critical. They tell you: "this trade eventually hit the target, but first it drew down 4%" or "this trade got stopped out, but it was up 3% at one point before reversing." These metrics directly inform stop and target calibration.
+Layer 4: Analysis & Calibration
+This is where the backtest becomes useful. I'd build analysis modules for each of these questions:
+Strategy performance summary. For each strategy, across the full test period: total trades, win rate, average winner, average loser, profit factor (gross wins / gross losses), expected value per trade, Sharpe ratio, max drawdown, and max consecutive losses. This is your baseline — does each strategy have positive expected value?
+Score calibration curves. Bucket trades by composite score (60-65, 65-70, 70-75, 75-80, 80-85, 85+) and compute win rate and average return per bucket. This tells you: "trades scored 80+ win 68% of the time with 0.9% average return; trades scored 65-70 win 52% with 0.2% average return." This directly calibrates your scoring engine and tells you where to set the minimum score threshold.
+Regime decomposition. The most important analysis for your system. For each strategy, compute performance conditional on market environment: win rate when breadth is above 50 vs below 30, win rate when VIX is below 18 vs above 25, win rate when the index is above its 50-day MA vs below. This produces the regime-strategy compatibility table I mentioned in the earlier review. It replaces the LLM's opinion of "does this regime support this strategy" with historical data.
+Time-of-year analysis. Some strategies perform differently around earnings seasons, year-end, or options expiration weeks. Check for calendar effects.
+Sector analysis. Does pullback swing work better in tech than in healthcare? Does mean reversion work better in utilities? If so, your scanner should have sector-aware thresholds.
+Correlation analysis. When you hold multiple positions simultaneously, are their returns correlated? If every position is a tech pullback swing, your portfolio is effectively a single concentrated bet. Measure the average pairwise correlation of simultaneous trades.
+Parameter sensitivity. For each strategy, vary the key parameters (stop distance, target distance, minimum score, holding period) and measure how sensitive the results are. If changing the stop from 2-ATR to 2.5-ATR swings the win rate from 62% to 45%, the strategy is fragile. If it barely changes the results, the strategy is robust. Robust strategies are trustworthy. Fragile strategies are likely overfit.
+What the Backtester Feeds Back Into Your Live System
+Once you've run this analysis, the outputs directly improve your live trading:
+The score calibration curve sets your minimum composite score threshold per strategy. If trades below 70 have negative expected value, you filter them out.
+The regime-strategy table becomes a lookup that your TMC final decision prompt receives instead of asking the LLM to guess. "Pullback swings in breadth-below-30 regimes have historically won 54% of the time vs 68% baseline. Reduce conviction by 15 points."
+The MAE/MFE analysis calibrates your stops and targets. If 90% of winning pullback trades never draw down more than 1.5 ATR, you set your stop at 2 ATR (giving slight buffer) rather than at the SMA-50 (which might be 4% away).
+The position sizing rules get calibrated from the drawdown analysis. If max drawdown across the portfolio hits 12% during the backtest, and your tolerance is 8%, you need to reduce per-position sizing.
+Build Sequence
+If I were implementing this from where you are now, I'd do it in this order:
+Week 1-2: Build the data foundation. Get 5+ years of daily OHLCV for your stock universe. Pre-compute all metrics your scanners need. Store in a database with the schema above. This is the unglamorous part but it's the foundation everything else depends on.
+Week 3: Build signal replay for your simplest strategy (pullback swing). Refactor your scanner code into pure functions if it isn't already. Run it across history, produce the signals table.
+Week 4: Build the trade simulator with basic entry (T+1 open), exit (stop/target/time), and equal-weight sizing. Run the first backtest. Produce the strategy performance summary.
+Week 5: Build the score calibration and regime decomposition analysis. This is where you find out if your strategies actually work and in which conditions.
+Week 6-8: Add the remaining strategies, build portfolio-level simulation (concurrent position limits, correlation), and run parameter sensitivity analysis.
+After that: Hook the calibration outputs into your live system. The backtest findings should directly configure your live scanner thresholds, score minimums, regime filters, and position sizing rules.
+The backtester isn't a one-time project — it's an ongoing tool. Every time you change a scoring formula, add a new market intelligence engine, or adjust a filter, you re-run the backtest to verify the change improves results out of sample. It becomes your quality assurance layer for the entire system.
+
+This is the core of the whole system — the scanners are where edge either exists or doesn't. Let me think through this from first principles.
+The Scanner's Job
+A scanner's only job is to answer: "Which stocks, right now, are exhibiting a pattern that has historically preceded a profitable short-term move?" Everything else — market environment, model scoring, ranking — is downstream quality control. If the scanner doesn't surface setups with genuine statistical edge, nothing downstream can fix it.
+That means the scanner design has to start from the question: what patterns actually predict short-term price movement? Not what patterns look good on a chart, not what patterns trading books describe, but what has held up under rigorous statistical testing across thousands of occurrences.
+Stock Scanner Architecture
+I'd build the scanner in three stages that run sequentially every day (or intraday if you want): the universe filter, the metric computation layer, and the strategy-specific signal detection.
+Stage 1: Universe Filter
+Before computing anything expensive, cut the universe down to stocks worth analyzing. This filter runs first because it eliminates 60-70% of stocks immediately.
+Liquidity floor. This is the most important filter. A stock needs to be liquid enough that you can enter and exit without moving the price and that the technical signals are statistically meaningful. For stocks, I'd require a minimum average daily dollar volume of $50 million over the last 20 days. This keeps you in roughly the top 500-600 US stocks. For options, the requirement is tighter — you need tight bid-ask spreads and sufficient open interest, which I'll cover in the options section.
+Price floor. Minimum price of $10. Below that, the percentage moves get noisy, spreads are proportionally wider, and institutional participation drops.
+History requirement. Minimum 252 trading days (1 year) of data available. You need enough history to compute 200-day MAs and annual percentiles.
+Exclusions. No SPACs pre-deal-close, no stocks in the first 30 days after IPO (price discovery is too chaotic), no stocks with pending mergers/acquisitions (price is pinned to deal terms, not technicals), no stocks halted or with abnormal trading restrictions.
+The output of Stage 1 is a clean universe of roughly 400-600 stocks that are liquid, established, and tradeable.
+Stage 2: Metric Computation
+For every stock that passes Stage 1, compute the full metric set. I'd organize these into families.
+Trend metrics. SMA-20, SMA-50, SMA-200, and each stock's price relative to them (distance as percentage). SMA slopes over 5 and 10 days (is the moving average rising, flattening, or falling?). Trend state classification: uptrend (price above rising SMA-50 above rising SMA-200), downtrend (inverse), or neutral (mixed). The 200-day MA relationship matters for institutional context — many funds won't buy below the 200-day.
+Momentum metrics. RSI-14 and RSI-2 (the 2-period RSI is much more responsive for short-term mean reversion). Rate of change over 5, 10, and 20 days. Daily returns for 1, 2, 5, 10, and 20 days. RSI delta over 5 days (how much has RSI changed — this captures the "reset" signal your pullback strategy uses). MACD and signal line, though I'd use these as secondary confirmation rather than primary signals.
+Volatility metrics. ATR-14 as a percentage of price (ATR_pct — this normalizes across different price levels). ATR ratio: current ATR divided by the 20-day average ATR (above 1.0 = volatility expanding, below 1.0 = contracting). Bollinger Band width (20-period, 2 standard deviations) and its percentile rank over 180 days (tells you if current volatility is historically compressed or expanded for this stock). Realized volatility over 10 and 20 days. The 20-day price range as a percentage (high-low range / midpoint).
+Volume metrics. Today's volume versus the 20-day average (the ratio you already use). Dollar volume (price × volume — more meaningful than share volume for cross-stock comparison). Volume trend: is volume expanding or contracting over the last 5 days? On-balance volume slope (are volume flows net positive or negative?). Volume on up-days versus volume on down-days over the last 10 days (accumulation/distribution signal).
+Price structure metrics. Distance from the 20-day high and 55-day high (pullback depth). Distance from the 52-week high (tells you where the stock is in its larger cycle). Number of consecutive down days (for mean reversion). Number of days since the last 20-day high (how stale is the trend?). Gap percentage from prior close (for breakout confirmation). Where today's close sits within today's range — close near the high suggests buyers are in control, close near the low suggests sellers.
+Relative strength metrics. Stock return versus SPY over 5, 10, and 20 days (is the stock leading or lagging the market?). Stock return versus its sector ETF over the same windows. Beta to SPY over 60 days. These are critical for filtering — a pullback in a stock that's outperforming its sector is higher quality than a pullback in a laggard.
+Fundamental event flags. Days until next earnings (from an earnings calendar). Whether the stock has reported in the last 5 days (post-earnings drift is a real effect). Days until ex-dividend. Whether earnings estimates have been revised up or down in the last 30 days (this is one of the strongest short-term fundamental signals — stocks with rising estimates tend to outperform).
+That's roughly 50-60 metrics per stock per day. Sounds like a lot, but these compute in milliseconds per stock since they're all derived from price/volume data.
+Stage 3: Strategy-Specific Signal Detection
+Now apply strategy-specific filters to identify setups. Each strategy is a set of conditions that must ALL be true simultaneously. I'd design four stock strategies and I'd be disciplined about what each one requires.
+Strategy A: Pullback Swing
+This is your highest-probability strategy if implemented correctly. The edge comes from buying temporary weakness in a strong stock. The key insight is that not all pullbacks are equal — you want pullbacks driven by profit-taking or market-wide weakness, not by stock-specific deterioration.
+Primary conditions: the stock must be in a confirmed uptrend (price above rising SMA-50, SMA-50 above SMA-200). Price has pulled back between 2% and 7% from the 20-day high — less than 2% isn't enough of a discount, more than 7% suggests something may be fundamentally wrong. RSI-14 has dropped to the 38-55 range AND has fallen at least 15 points from its recent peak (the reset signal). Price is within 1.5% of the SMA-20 (either slightly above or slightly below — this is the support zone). Volume has declined during the pullback days (no panic selling).
+Quality filters that improve the edge: the stock is outperforming SPY over the last 20 days (relative strength confirms the uptrend is stock-specific, not just beta). The SMA-20 slope is still positive (the trend hasn't flattened). ATR_pct is below 3% (very volatile stocks have wider stops and lower win rates for swing trades). Earnings are more than 10 trading days away (avoids the pre-earnings volatility zone). The stock is above its 200-day MA (institutional support).
+Exit rules: target is the prior 20-day high (the pullback starting point). Stop is a close below SMA-50 or a 2× ATR loss, whichever is tighter. Time stop at 15 trading days.
+Strategy B: Momentum Breakout
+The edge here comes from buying the start of a new price trend. Breakouts work best after a period of compression (tight range), with volume confirmation, and when the stock isn't already extended.
+Primary conditions: price closes above the 20-day high or is within 0.5% of it. The 20-day price range (prior to today) is in the bottom 30th percentile of its 180-day range history (the compression signal — price has been coiling). Today's volume is at least 1.5× the 20-day average (institutional participation on the breakout). RSI-14 is between 55 and 72 (strong momentum but not yet overbought). Price is above the SMA-20 and SMA-50.
+Quality filters: the stock's 20-day range was compressing (range_20 today < range_20 from 10 days ago). The breakout gap (if any) is less than 3% — massive gaps tend to mean-revert. Price is within 8% of the SMA-50 (not too extended from the base). The stock is in the top 3 deciles of 20-day relative strength vs SPY.
+Exit rules: target is 1.5× the ATR above entry (breakout continuation). Trailing stop of 1.5× ATR from the highest close since entry. Time stop at 20 trading days.
+Strategy C: Mean Reversion
+The edge comes from buying extreme short-term oversold conditions in stocks that have strong underlying trends or fundamentals. This is the highest win-rate strategy but with smaller average gains per trade.
+Primary conditions: RSI-2 is below 10 (extremely oversold on a short-term basis). OR RSI-14 is below 28 AND price is more than 2 standard deviations below the 20-day mean (Z-score below -2). The stock has declined for at least 3 consecutive days or has fallen more than 5% in the last 5 trading days. A stabilization signal is present: today's close is higher than yesterday's close (the first up day after the selloff).
+Quality filters: ATR_pct is below 4% (very volatile stocks can keep falling even when oversold). The SMA-200 is still rising or flat (the longer-term trend provides a floor). Average daily dollar volume is above $200 million (you need liquidity for a quick entry and exit). Price is above the SMA-200 (the selloff hasn't broken the long-term trend). The distance from price to SMA-20 is at least -3% (there's enough "snapback room" to justify the trade).
+Exit rules: target is the SMA-20 (mean target) or a 3% gain, whichever comes first. Stop is a new 20-day low or a 3% loss from entry, whichever is tighter. Time stop at 7 trading days (mean reversion is a fast trade — if it doesn't work quickly, it's not working).
+Strategy D: Volatility Expansion
+The edge comes from buying the directional resolution of a compressed/coiled stock. This is lower frequency than the other strategies but can produce the largest individual gains.
+Primary conditions: Bollinger Band width is in the bottom 15th percentile of the last 180 days (extreme compression). ATR ratio (current/average) has crossed above 1.3 in the last 2 days (volatility is now expanding). The expansion is bullish: price closed above the SMA-20, today's close is above yesterday's close, and today's close is in the upper 60% of today's range. Volume is at least 1.3× average on the expansion day.
+Quality filters: the prior compression lasted at least 10 trading days (a 3-day compression followed by expansion is noise). The stock is above the SMA-50 (expansion in a downtrend is often just a bear-market bounce). RSI-14 is between 45 and 70 (not already overbought, and not expanding from a deeply oversold level which could be a dead cat bounce).
+Exit rules: target is 2× ATR above entry (expansion continuation target). Stop is the SMA-20 (if price falls back below the breakout level, the expansion failed). Time stop at 20 trading days.
+Scoring Within Each Strategy
+Once a stock passes all conditions for a strategy, score it 0-100 based on how ideal the setup is. This is where your existing pillar scoring approach works well. For each strategy, define 4-5 scoring dimensions, weight them, and sum.
+For pullback swing, as an example: trend quality (25% weight) based on SMA alignment, slope strength, and days in uptrend. Pullback quality (25% weight) based on how close pullback depth is to the sweet spot of -3% to -4%, how clean the RSI reset is, and whether volume declined. Relative strength (20% weight) based on outperformance vs SPY and sector. Volatility favorability (15% weight) based on ATR_pct being in the low-moderate range. Timing quality (15% weight) based on proximity to SMA-20 support and whether the stock showed a stabilization candle today.
+A score of 85 means nearly every dimension is optimal. A score of 65 means the setup is passable but not textbook. Your backtest will tell you where to set the minimum score threshold.
+Options Scanner Architecture
+Options are a fundamentally different problem because you're adding a pricing dimension (implied volatility, time decay, spread width) on top of the directional signal. The edge in short-term options comes from two sources: directional accuracy (the stock moves the way you expect) AND volatility mispricing (you pay less for the option than the move is worth, or you collect more premium than the move costs you).
+What to Scan For Options
+The stock-level signal detection from above still applies — you first identify stocks with a directional setup. Then you layer on options-specific criteria to find the best way to express that view.
+Options liquidity filter. This is even more important than for stocks. Require: bid-ask spread less than 10% of the option's mid price for ATM options (wider spreads eat your edge), total open interest across the chain above 10,000 contracts, and average daily option volume above 1,000 contracts. This filter eliminates most stocks — probably only 150-200 names will pass for options.
+Implied volatility analysis. For each stock that passes both the directional scanner and the options liquidity filter, compute: IV rank (where is current 30-day IV relative to the last year's range — 0 means IV is at its annual low, 100 means annual high), IV percentile (what percentage of days had lower IV than today), and the IV-RV spread (implied vol minus 20-day realized vol — positive means options are "expensive" relative to actual movement, negative means they're "cheap").
+Strategy selection logic. The combination of directional signal + IV environment determines the optimal options strategy:
+When your directional signal is bullish AND IV is high (IV rank above 60): sell put spreads (bull put credit spread). You benefit from the correct direction AND from premium decay. This is the highest expected value options strategy because you have two ways to win.
+When your directional signal is bullish AND IV is low (IV rank below 30): buy call spreads (bull call debit spread). Options are cheap, so you pay less for directional exposure. Don't sell premium when IV is low — you're not getting paid enough.
+When your directional signal is bullish AND IV is moderate (IV rank 30-60): either strategy works, but prefer defined-risk structures (spreads over naked positions).
+For mean reversion setups specifically: sell put spreads are ideal because the high short-term IV from the selloff inflates the premium you collect, and mean reversion trades have high win rates (which matches well with credit spread payoff profiles).
+Strike and expiration selection. For credit spreads (put spreads on bullish setups): sell the put at a delta between 25 and 35 (this gives roughly a 65-75% probability of the spread expiring worthless). Buy the long put 5 points or one strike below. Choose the expiration that's 2-4 weeks out — close enough to capture meaningful time decay but far enough to give the trade time to work. The premium collected should be at least 25-30% of the spread width (if the spread is $5 wide, collect at least $1.25-$1.50).
+For debit spreads (call spreads on bullish setups): buy the call at a delta between 40 and 55 (roughly ATM to slightly ITM). Sell the call 5-10 points above. Choose the expiration 3-5 weeks out. The cost should be less than 50% of the spread width (you're risking $2.50 to make $2.50 on a $5-wide spread).
+Options-specific metrics to compute:
+Expected move: the options-implied expected move over the holding period (derived from ATM straddle pricing). Compare this to your directional target — if the stock needs to move 5% to hit target but the expected move is only 2%, the options market is telling you that move is unlikely.
+Theta per day: how much time decay does the position experience daily? For credit spreads this is positive (good). For debit spreads it's negative (bad — you need the move to happen fast).
+Greeks at entry: delta, gamma, theta, vega for the specific position. These tell you the position's sensitivity to price, time, and volatility changes.
+Break-even price: where does the stock need to be at expiration for the trade to be profitable? This should be compared to the stop and target from the stock-level strategy.
+Max loss and max gain: defined for spread positions. The risk-reward ratio should be evaluated in the context of the strategy's historical win rate. A credit spread that risks $3 to make $1 is fine if the strategy wins 78% of the time. It's terrible if the win rate is 55%.
+Options Scoring
+Score options setups on: directional signal quality (inherit the stock scanner score — 40% weight), IV favorability (is the IV environment helping or hurting your strategy choice — 25% weight), spread pricing (are you getting a good fill relative to the spread width — 15% weight), liquidity (tighter spreads and higher open interest are better — 10% weight), and risk/reward alignment (does the max loss / max gain / win rate math produce positive expected value — 10% weight).
+Filtering Pipeline
+After scanning, you'll have more candidates than you can trade. The filtering and ranking pipeline narrows the field.
+Hard filters (eliminate immediately):
+Earnings within the holding window — unless your strategy specifically trades earnings, this is a binary event that randomizes the outcome. Remove it.
+Composite score below the strategy-specific minimum (determined by backtesting — probably somewhere around 65-70 for most strategies).
+Market environment score below a regime-specific threshold. If breadth is below 25 and the index is below its 50-day MA, only surface mean-reversion setups (which benefit from oversold conditions) and filter out pullback swings and breakouts (which need a supportive trend environment).
+Sector concentration — if you already have 3 tech positions open, deprioritize additional tech setups.
+Correlation filter — if a candidate is highly correlated (r > 0.8 over 60 days) with an existing position, deprioritize it.
+Soft ranking (order the survivors):
+Rank by: composite score (primary), relative strength vs sector (secondary), and how close the setup is to its "textbook" ideal parameters (tertiary). Display the top 15-20 to yourself with full context.
+When Can You Feel Confident It's Working
+This is the most important question and I want to give you specific, measurable milestones rather than vague reassurance.
+Milestone 1: Backtest shows positive expected value (EV) per strategy.
+Run each strategy across at least 3 years of out-of-sample data (meaning: develop the strategy on 2018-2022 data, test on 2023-2025 data — never optimize on the test period). You need each strategy to show positive expected value: (win_rate × avg_winner) - (loss_rate × avg_loser) > 0. For short-term strategies, I'd want EV of at least 0.3% per trade after realistic slippage and commissions. Below that, the edge is too thin to survive real-world friction.
+You also need sufficient sample size. A strategy that shows 70% win rate on 30 trades is meaningless — the confidence interval is enormous. You need a minimum of 200 trades per strategy in the out-of-sample period to have statistical significance. More is better. If your scanner doesn't produce 200 trades in 3 years, the strategy is either too restrictive or too rare to be useful as a primary strategy.
+Confidence level at Milestone 1: You can believe the strategy has an edge, but you don't yet know if YOUR implementation captures it in live markets.
+Milestone 2: Paper trading matches backtest within tolerance.
+Run the live system in paper-trade mode for 2-3 months. Track every signal, every score, every rank. Compare the results to what the backtester would have predicted for the same period. You're looking for: the live scanner fires on the same stocks the backtester would have flagged (signal agreement above 90%), the live scores are within 5 points of what the backtester would have computed (scoring consistency), and the live trade outcomes (tracked on paper) are within 1 standard deviation of the backtest's predicted distribution.
+If paper results are dramatically worse than backtest predictions, something is wrong — probably look-ahead bias in the backtest, or an implementation difference between backtest and live code.
+Confidence level at Milestone 2: You can believe your implementation is faithful to the backtested strategy. You're ready for real money.
+Milestone 3: 100 live trades with tracked outcomes.
+Start with minimum position sizes. Track every trade obsessively. After 100 trades, compare: actual win rate vs backtested win rate (should be within 5 percentage points), actual average return vs backtested average return (should be within 0.3 percentage points), actual max drawdown vs backtested max drawdown (should be comparable), and score calibration (do trades scored 80+ actually win more often than trades scored 65-70?).
+Confidence level at Milestone 3: If the numbers match the backtest within tolerance, you now have empirical evidence that the system works with real money. This is when you can start to feel genuinely confident.
+Milestone 4: Profitable after 200+ live trades across at least one regime change.
+Short-term strategies can work beautifully for 6 months and then blow up when the market regime changes. You need to see the system perform through at least one significant environment shift — a VIX spike above 30, a breadth deterioration event, a rapid rate move, or a correction of 10%+. If the system's regime filters correctly reduce exposure during hostile periods and resume normal operation when conditions improve, you have a robust system.
+Confidence level at Milestone 4: This is when you can size up with genuine confidence. The system has proven edge, faithful implementation, real-money validation, and regime resilience.
+How long does this take? Realistically: 2-3 months to build and backtest (Milestone 1), 2-3 months of paper trading (Milestone 2), 4-6 months of small-size live trading to reach 100 trades (Milestone 3), and another 6-12 months to see a regime change (Milestone 4). Total: roughly 12-18 months from today to full confidence. This is not a fast process. But it's the honest timeline for building a system you can trust with real capital.
+The temptation will be to skip steps and go live after Milestone 1 because the backtest looks great. Resist that temptation. The backtest always looks better than reality, and the gap between backtest and live is where most systematic traders fail.
+
+
+
+The Options-Specific Data Layer
+Before getting into individual strategies, every options scanner needs a shared data foundation that sits on top of your stock metrics.
+Per-stock options data you need:
+For the chain overall: 30-day implied volatility, IV rank (current IV's percentile over the last 252 days), IV percentile (percentage of days with lower IV in the last year), the IV-RV spread (30-day implied minus 20-day realized), the at-the-money straddle price as a percentage of stock price (this is the market's "expected move"), and the put-call open interest ratio.
+For individual contracts you'll be evaluating: bid, ask, mid, spread as a percentage of mid, delta, gamma, theta, vega, open interest, volume, days to expiration, and implied volatility for that specific strike.
+For the term structure: IV at 7 DTE, 14 DTE, 30 DTE, 45 DTE, and 60 DTE for ATM options. This tells you whether near-term vol is elevated relative to longer-term vol (backwardation = fear/event) or depressed (contango = calm). The slope between the nearest two expiration cycles is the most important term structure signal.
+For the skew: 25-delta put IV minus 25-delta call IV at the 30-day tenor. This measures how much more expensive downside protection is relative to upside speculation. Elevated skew means the market is hedging heavily. Also compute the skew's 5-day change — rising skew = increasing fear, falling skew = normalizing.
+How to get this data: You'll need an options data provider. Tradier, which it looks like you already use, provides chain data. CBOE provides some historical IV data. For backtesting, you'll need historical options chain snapshots — this is the hardest data to get affordably. OptionMetrics is the gold standard but expensive. Tradier historical data, ORATS, or iVolatility are more affordable alternatives. At minimum, you need historical daily IV rank and ATM IV per stock to backtest IV-dependent strategies.
+
+Strategy 1: Credit Spreads (Bull Put / Bear Call)
+Where the Edge Comes From
+Credit spreads profit when the stock stays above (bull put) or below (bear call) the short strike. The edge comes from two sources: selling options when implied volatility overstates the actual move that occurs (the "volatility risk premium" — options are systematically overpriced because hedgers are willing to overpay for protection), and combining that with a directional bias from your stock scanner to improve the base probability.
+A naked probability-of-profit trade (no directional view, just selling premium) has an edge, but it's small and gets destroyed by tail events. Adding directional signal from your stock scanner is what makes credit spreads a viable strategy rather than just being short gamma and hoping.
+Scanner Conditions
+Stock-level conditions (from your stock scanners): The stock has a clear directional bias. For bull put spreads, the stock should be in an uptrend or showing pullback-to-support characteristics — essentially, your pullback swing or breakout scanner has flagged it. For bear call spreads, the stock should be in a downtrend or at resistance with bearish momentum. The directional signal is the foundation — without it, you're just selling premium blind.
+IV environment conditions: IV rank is above 35 (you want above-average IV so you're collecting rich premium — the higher the better, with the sweet spot being 40-70). IV-RV spread is positive by at least 2 points (implied vol exceeds realized vol, confirming options are "expensive"). If IV rank is below 25, skip credit spreads entirely for this stock — the premium isn't worth the risk.
+Liquidity conditions: ATM bid-ask spread is less than $0.10 or less than 5% of the option mid price. The specific strikes you're considering have open interest above 500 contracts each. Total chain open interest is above 10,000.
+Timing conditions: Days to expiration for the short strike is between 21 and 45 days. This is the theta decay sweet spot — time decay accelerates significantly inside 45 DTE, and 21+ DTE gives you enough time for the trade to work without being exposed to last-week gamma risk. No earnings date falls between now and expiration. No major macro event (FOMC, CPI) falls within 3 days of entry unless the trade is specifically positioned to benefit from post-event IV crush.
+Strike Selection Logic
+For bull put spreads: Sell the put at a delta between -0.20 and -0.30. This gives roughly a 70-80% probability of the short strike expiring out of the money. Buy the protective put one strike below (usually $2.50 or $5 wide, depending on the stock's price). The premium collected should be at least 30% of the spread width. If the $5-wide spread only collects $1.00, the risk-reward (risking $4 to make $1) requires a 80%+ win rate to be profitable — which is achievable but leaves no margin for error. At 33% of width ($1.65 on a $5 spread), you need roughly 75% win rate, which is more comfortable.
+For bear call spreads: Same logic but inverted. Sell the call at delta 0.20-0.30. Buy one strike above.
+Width selection: On stocks priced under $100, use $2.50-wide spreads. On stocks priced $100-$300, use $5-wide spreads. On stocks above $300, $5 or $10-wide depending on liquidity at those strikes. Wider spreads collect more premium but increase max loss — keep max loss per position below 2% of portfolio.
+Scoring
+Score 0-100 across five dimensions:
+Directional signal quality (30% weight): inherited from the stock scanner score. A pullback swing score of 82 translates to a strong directional foundation for the bull put spread.
+IV richness (25% weight): IV rank scaled to 0-100. IV rank of 70 = score of 85. IV rank of 40 = score of 55. IV rank of 25 = score of 30.
+Premium collected as percentage of width (20% weight): 35%+ of width = score of 90. 30-35% = score of 70. 25-30% = score of 50. Below 25% = score of 30 (barely worth the risk).
+Liquidity (15% weight): based on bid-ask tightness and open interest. Tight spreads with high OI score 90+. Wider spreads or thin OI score lower.
+Distance from danger (10% weight): how far the short strike is from current price as a multiple of ATR. If the short put is 2.5 ATR below current price, the stock has to make an unusually large move to threaten the position. Score higher for more ATR distance.
+Exit Rules
+Profit target: Close the spread when you've captured 50-65% of the maximum profit. Don't hold to expiration chasing the last 35% — the risk/reward of holding deteriorates sharply in the final week. If you sold a spread for $1.50, close it when you can buy it back for $0.50-$0.75.
+Stop loss: Close if the spread doubles in value (you sold for $1.50, it's now worth $3.00). Or close if the short strike is breached (stock trades below the short put strike). The doubling rule is simpler and captures both price movement and IV expansion.
+Time stop: If the trade hasn't reached 50% profit with 7 DTE remaining, close it. The final week is where gamma risk explodes and a comfortable position can turn into a full loss overnight.
+Adjustment: If the stock moves against you but hasn't hit the stop, and you still believe in the directional thesis, you can roll the spread down (for puts) and out in time. But only one roll — if the second position is also threatened, close and accept the loss.
+
+Strategy 2: Debit Spreads (Bull Call / Bear Put)
+Where the Edge Comes From
+Debit spreads are directional bets with defined risk. The edge is purely directional — you're paying for the option, so you need the stock to move. The advantage over buying stock is leverage (smaller capital at risk for the same directional exposure) and defined max loss. The edge comes from your directional scanner identifying moves before they happen, combined with buying options when they're relatively cheap.
+Scanner Conditions
+Stock-level conditions: You want a STRONG directional signal — stronger than what you'd need for credit spreads. The stock scanner should show momentum breakout characteristics (the strongest directional signal) or a high-conviction pullback swing setup (score above 78). Mean reversion setups are generally poor for debit spreads because the expected move is small and time decay works against you.
+IV environment conditions — the opposite of credit spreads: IV rank is below 45 (ideally below 30). You're buying options, so you want them cheap. IV-RV spread is near zero or slightly negative (options are fairly priced or cheap). If IV rank is above 60, skip debit spreads — you're overpaying. High IV rank environments should route to credit spreads instead.
+Liquidity conditions: Same as credit spreads — tight bid-ask, sufficient open interest.
+Timing conditions: DTE between 30 and 60 days for the long strike. Shorter expirations make time decay too aggressive — your directional thesis needs time to play out. The expected holding period for your stock strategy (5-15 days) should be well within the time remaining, leaving at least 15-20 days of buffer when you close.
+Strike Selection Logic
+For bull call spreads: Buy the call at delta 0.45-0.55 (roughly ATM — maximum gamma exposure for directional moves). Sell the call $5-$10 above (caps your upside but reduces cost). The debit paid should be less than 45% of the spread width. If you're paying more than 45%, the break-even is too far away.
+Break-even analysis: Calculate the stock price needed at expiration for the spread to break even. Compare this to your directional target. If the break-even requires a 5% move but your target is only 3% above current price, the trade math doesn't work. The break-even should be AT or BELOW your directional target.
+Scoring
+Directional signal strength (40% weight): this is the primary driver. Only high-conviction directional setups should use debit spreads. Score from the stock scanner.
+IV cheapness (25% weight): inverse of IV rank. IV rank 15 = score of 90 (options are cheap). IV rank 40 = score of 60. IV rank 55+ = score below 40 (too expensive for buying).
+Break-even feasibility (20% weight): how far does the stock need to move to break even, as a percentage of the expected move (from the ATM straddle). If break-even requires 60% of the expected move, score 80. If it requires 90% of the expected move, score 40. Above 100% = don't take the trade.
+Time adequacy (15% weight): DTE remaining minus expected holding period. More buffer = higher score. 45 DTE with a 10-day expected hold (35 days buffer) scores 90. 30 DTE with a 15-day expected hold (15 days buffer) scores 55.
+Exit Rules
+Profit target: Close when the spread has doubled in value or when it's reached 75% of max profit. Debit spreads should be closed earlier than credit spreads because time decay is working against you.
+Stop loss: Close if the spread loses 50% of its entry value. You paid $2.00, close if it's worth $1.00. Don't wait for it to go to zero.
+Time stop: Close with 14 DTE remaining regardless of profit/loss. Gamma acceleration in the final two weeks makes debit spreads increasingly binary.
+Directional invalidation: Close if the stock breaks below (for bull call) the level that invalidates the directional thesis — the SMA-50 for pullback setups, the breakout level for momentum setups.
+
+Strategy 3: Iron Condors
+Where the Edge Comes From
+Iron condors profit from the stock staying within a range. The edge comes from selling options when IV overstates the expected move (volatility risk premium) in stocks that are range-bound or in low-momentum environments. This is fundamentally a bet AGAINST movement. Your stock scanners will mostly identify directional setups, so iron condors should be surfaced on stocks that your scanners specifically identify as range-bound or on stocks where all directional signals are weak.
+Scanner Conditions
+Stock-level conditions — the opposite of directional strategies: The stock should NOT be flagged by any directional scanner (no pullback, breakout, or mean reversion signal active). RSI-14 is between 40 and 60 (neutral momentum). The stock is within 2% of its SMA-20 (not trending strongly in either direction). The 20-day range is moderate — not compressed (which would suggest a breakout is coming) and not expanded (which means the stock is volatile). SMA-20 slope is between -0.10 and +0.10 (essentially flat). ADX (average directional index) below 20, if you compute it — this directly measures trend strength, and below 20 means no trend.
+IV environment conditions: IV rank is above 40 (above-average IV so the premium is rich). IV-RV spread is positive by at least 3 points (options are meaningfully overpriced relative to actual movement). The ATM straddle expected move for the target expiration is less than the distance from price to your short strikes (the options market's implied range is smaller than your condor's wings, or at least comparable). This is the core feasibility check.
+Liquidity conditions: Same minimums as credit spreads, but iron condors involve 4 legs, so liquidity is even more important. Require the tightest standards — ATM spreads under $0.08 or 3% of mid.
+Timing conditions: DTE of 30-45 days. No earnings within the expiration window. No major macro events within 1 week (FOMC, CPI). Iron condors are the most sensitive strategy to gap moves because you're exposed on both sides.
+This is critical: iron condors should have a negative correlation with your directional scanners. When your pullback and breakout scanners are firing frequently on a stock, that stock is NOT a good iron condor candidate. When a stock is quiet and boring with no directional signals, it IS a good candidate. Build this as an explicit filter — "no active directional signals on this stock."
+Strike Selection Logic
+Short put: Delta between -0.15 and -0.20 (farther out than credit spreads because you're exposed on both sides).
+Short call: Delta between 0.15 and 0.20 (symmetric, unless there's a slight directional lean, in which case you can skew — widen the side you're more confident in).
+Long put: One strike below the short put ($2.50 or $5 wide depending on stock price).
+Long call: One strike above the short call (same width as the put side — keep it symmetrical for simplicity).
+Total premium collected: Should be at least 25% of the total width of one side. If each side is $5 wide and you collect $2.50 total, that's 25%. Ideally 30%+.
+Width of the body (distance between short strikes): The short call minus the short put should be at least 1.5× the ATM expected move. If the market implies a $10 expected move, your short strikes should be at least $15 apart. This gives the stock room to move within normal bounds without threatening either side.
+Scoring
+Range-bound confirmation (30% weight): how neutral is the stock? Score based on: RSI proximity to 50, SMA-20 slope near zero, ADX below 20, recent daily range being small relative to average. A stock sitting perfectly flat at its SMA-20 with RSI at 50 scores 95. A stock that's "mostly" range-bound but has some momentum scores 60.
+IV premium quality (25% weight): IV rank and IV-RV spread. Higher IV rank with bigger IV-RV spread = richer premium = higher score.
+Expected move containment (20% weight): the probability that the stock stays within the short strikes through expiration. Compute from the deltas of the short strikes — if both shorts are at 0.15 delta, the approximate probability of the stock staying inside is roughly 70%. Score this: 75%+ probability = score of 85. 65-75% = score of 65. Below 65% = score below 50 (consider wider strikes or skip).
+Liquidity (15% weight): 4-leg strategies live and die on execution quality. Score based on the total estimated slippage across all 4 legs.
+Event clearance (10% weight): how clean is the calendar through expiration? No events = 100. FOMC or CPI within the window = 40 (significant risk of a gap through a short strike). Earnings within window = 0 (automatic disqualification).
+Exit Rules
+Profit target: Close at 50% of max profit. This is the standard for iron condors and is backed by extensive research. Holding for the last 50% of profit dramatically increases the probability of a losing trade because gamma accelerates and the position becomes fragile.
+Stop loss: Close if the total value of the condor reaches 2× the credit collected. You collected $2.50, close if the condor is worth $5.00.
+Threatened side management: If the stock approaches one short strike (within 1 ATR), close the threatened side and evaluate whether to keep the unthreatened side open as a standalone credit spread. Don't wait for the short strike to be breached.
+Time stop: Close with 10 DTE remaining regardless of P&L. The gamma risk in the final 10 days makes iron condors extremely fragile.
+
+Strategy 4: Butterflies
+Where the Edge Comes From
+Butterflies are precision trades — they profit maximally when the stock lands exactly at the center strike at expiration. The edge comes from identifying stocks that are likely to be pinned at or near a specific price, typically a round number, a high-gamma strike with massive open interest, or a well-defined technical level. Butterflies have excellent risk/reward (risk $1 to make $4-$5 is common) but low win rates. They work best as a supplement to your other strategies, not as a primary income source.
+Scanner Conditions
+Stock-level conditions: The stock has a clear price magnet — a strike with the highest open interest in the chain (gamma exposure from market makers tends to pin price to this level near expiration), a round number ($100, $150, $200, $250) that the stock is trading near, or a well-defined support/resistance level from your technical metrics (like the SMA-20 or SMA-50 if the stock is range-bound near it). The stock is not trending strongly — butterflies get destroyed by strong directional moves. Ideal is a stock that your iron condor scanner also likes (range-bound) but where you've identified a specific pinning level.
+IV environment conditions: IV rank should be moderate to high (above 35). The butterfly benefits from selling two ATM options, so higher IV makes those more valuable. However, the primary driver is pinning, not IV.
+Max pain / gamma exposure analysis: If you can compute or source it, the options "max pain" level (the price at which options market makers pay out the least) is the best predictor of pinning for the final week before expiration. If max pain aligns with a technical level and a round number, the pinning probability increases significantly.
+Timing conditions: DTE of 14-30 days. Butterflies are shorter-duration trades than condors because the pinning effect is strongest in the final 1-2 weeks. Set up the butterfly 2-3 weeks out, let it mature into the final week. No earnings before expiration (obviously).
+Strike Selection Logic
+Center strike: At the identified pinning level. If the stock is at $180 and you believe it will be pinned at $180 near expiration, the center strike is $180.
+Wings: Typically $5 on each side for stocks under $200, $10 for stocks above $200. A $175/$180/$185 call butterfly or put butterfly. The wing width determines your max risk and max reward.
+Call vs put butterfly: Use whichever side is cheaper. Often the put butterfly is slightly cheaper due to skew (puts are more expensive, so the put butterfly you're constructing benefits from selling the richer center strikes). Compare both and take the cheaper one.
+Cost: The butterfly should cost less than 25% of the wing width. On a $5-wide butterfly, pay less than $1.25. This gives you a 4:1 reward-to-risk ratio if the stock lands exactly at the center, and breakeven at center ± cost.
+Scoring
+Pinning probability (40% weight): How likely is the stock to land near the center strike? Score based on: proximity of center strike to max pain (if available), alignment with a round number, alignment with a technical level (SMA-20/50), and the stock being range-bound. Multiple confirmations of the pin level = higher score.
+Risk/reward ratio (25% weight): Based on the cost of the butterfly relative to the wing width. A $0.80 cost on a $5-wide butterfly (6.25:1 max reward/risk) scores 90. A $1.50 cost on a $5-wide butterfly (3.3:1) scores 55. Above $2.00 on a $5 wing (2.5:1) scores below 40.
+Range-bound confirmation (20% weight): same as iron condor — how neutral/pinned is the stock? Low ADX, flat SMA slope, RSI near 50.
+Liquidity (15% weight): 3-leg execution, so liquidity matters. Score on bid-ask tightness and OI at the specific strikes.
+Exit Rules
+Profit target: Close at 50-75% of max profit. If you paid $1.00 for a butterfly with $5 max value, close when it's worth $3.00-$4.00. Don't hold to expiration trying to catch the exact pin — the probability of landing exactly at the center is low.
+Stop loss: Close if the butterfly loses 75% of its value. You paid $1.00, close at $0.25. The trade thesis (pinning) has failed.
+Time management: Butterflies often look like losers for most of their life and then rapidly gain value in the final 3-5 days as gamma concentrates. Be patient through the middle period, but monitor whether the stock is still near the center strike. If the stock has moved more than 1.5× the wing width away from center with 7+ DTE remaining, close — it's not coming back.
+
+Strategy 5: Calendar Spreads
+Where the Edge Comes From
+Calendars profit from the term structure of volatility — specifically, when near-term IV is elevated relative to longer-term IV (or when near-term IV collapses faster than longer-term IV after an event). The edge comes from selling expensive near-term options and owning cheaper longer-term options at the same strike. The structure also profits from the stock staying near the strike price, similar to a butterfly.
+Scanner Conditions
+Stock-level conditions: The stock is near a stable level — trading near its SMA-20, relatively range-bound. Calendars profit from pinning, like butterflies. However, calendars also specifically benefit from a near-term event that's inflating short-dated IV — this is the killer setup. If AAPL has earnings in 2 weeks and the front-month IV is 40% but the back-month IV is only 28%, that 12-point IV differential is the calendar's edge.
+IV term structure conditions — this is the primary signal: The front-month IV is higher than the back-month IV at the same strike (backwardation), or at minimum, the IV term structure is flat. Compute: front_IV - back_IV. If this spread is positive by 3+ points, the calendar setup is favorable. If front IV is LOWER than back IV (steep contango), skip calendars — the structure works against you.
+Specific setup: event-driven calendar. If a stock has an event (earnings, FDA decision, product launch) between the front expiration and the back expiration, the front-month IV will be inflated by the event premium. Sell the inflated front-month, own the normal back-month. After the event passes, front IV collapses and the calendar profits. This is the highest-edge calendar setup. Your event calendar engine (once built) directly feeds this scanner.
+Liquidity conditions: Both expiration months need sufficient liquidity. Check OI and spreads for BOTH the front and back month at the target strike.
+Timing conditions: Front expiration: 14-30 DTE. Back expiration: 45-75 DTE. The gap between expirations should be at least 21 days and ideally 30+. This gives enough term structure differential to generate edge.
+Strike Selection Logic
+Strike: ATM or slightly OTM in the direction of your mild directional bias. If you're neutral, use the ATM strike. If you have a slight bullish lean, use a strike $2.50-$5 above current price (call calendar). The calendar has maximum profit when the stock is at the strike at front expiration.
+Width: Single-strike calendars (one front short, one back long) are simplest. Double calendars (two strikes, one above and one below price) widen the profit zone but double the cost.
+Cost: The net debit should be reasonable relative to the potential value at front expiration. A rough guide: the debit should be no more than 60% of the estimated maximum value of the back-month option when the front expires (compute this from the back-month's current value minus its theta decay over the front period).
+Scoring
+Term structure favorability (35% weight): the front-back IV spread. Larger positive spread (front IV higher than back IV) scores higher. A 5-point positive spread scores 85. A 2-point spread scores 60. Flat or negative scores below 40.
+Event setup quality (25% weight): Is there a specific catalyst driving the front-month IV elevation? If yes (earnings between expirations, FOMC between expirations), score high. If it's just generalized market fear with no specific event, score moderate. If there's no term structure driver identifiable, score low.
+Pinning probability (20% weight): How likely is the stock to be near the strike at front expiration? Same analysis as butterflies.
+Liquidity in both months (15% weight): Both months need tight markets.
+Cost efficiency (5% weight): Debit paid relative to estimated max value.
+Exit Rules
+Profit target: Close at 25-40% of the debit paid (calendars have limited max profit and the max is only achieved at exact pinning at expiration — close when you have a reasonable gain). You paid $3.00, close at $3.75-$4.20.
+Stop loss: Close if the calendar loses 50% of its value. You paid $3.00, close at $1.50.
+Post-event management: If you entered an event-driven calendar and the event has passed (front IV has collapsed), evaluate the remaining back-month option. If the stock moved significantly, the back-month long option might have directional value — consider managing it as a standalone position rather than automatically closing.
+Time stop: Close the calendar with 5 DTE remaining on the front month. In the final days, the short front option's gamma accelerates dangerously.
+
+Strategy 6: Income (Covered Calls / Cash-Secured Puts)
+Where the Edge Comes From
+This is the most conservative options strategy. Covered calls profit from owning stock and selling upside calls against it — you collect premium in exchange for capping your upside. Cash-secured puts profit from selling puts on stocks you're willing to own at a lower price — you collect premium while waiting. The edge comes from the systematic volatility risk premium (options are slightly overpriced on average) combined with disciplined stock selection.
+Scanner Conditions — Covered Calls
+Stock-level conditions: You already own the stock (or the scanner identifies stocks you WANT to own). The stock is in an uptrend or neutral — you don't write covered calls on stocks in a downtrend because the premium doesn't compensate for the downside risk. The stock has pulled back or is consolidating (not breaking out — you don't want to cap the upside during a breakout).
+This scanner works differently from the others — it scans your EXISTING POSITIONS, not the open market. Or it scans stocks that passed your pullback swing scanner (stocks you'd want to buy) and adds the covered call overlay.
+IV conditions: IV rank above 30 (moderate or higher IV makes the call premium worthwhile). The call you're selling should generate at least 1% of the stock's value per month in premium. Below that, the cap on upside isn't worth the income.
+Strike selection: Sell the call at delta 0.25-0.35 (OTM — above your price, giving room for the stock to appreciate). Choose the expiration 30-45 days out. The strike should ideally be above a resistance level — you want the stock to stay below the call strike, and a resistance level provides a natural ceiling.
+Scanner Conditions — Cash-Secured Puts
+Stock-level conditions: The stock is one you WANT to own at a lower price. It should be in an uptrend or at support — you're essentially saying "I'd buy this stock at $X, and I'll collect premium while waiting for it to get there." Your pullback swing scanner is the ideal feeder — stocks showing early pullback characteristics that might pull back further to your target entry.
+IV conditions: IV rank above 35. Higher IV = richer put premium. The put you're selling should generate at least 1.5% of the strike price in premium (higher threshold than covered calls because you're taking assignment risk).
+Strike selection: Sell the put at a price you'd genuinely be happy owning the stock at. This should align with a technical support level — the SMA-50, a prior consolidation zone, or a round number with technical significance. Delta between -0.20 and -0.30. Expiration 30-45 days out.
+This is crucial: the cash-secured put scanner should output a "willing to own" flag. If the put gets assigned, you own the stock. Your system should verify that the stock passes your fundamental and technical screens as a holding — it's not just a premium play, it's a potential position entry.
+Scoring — Covered Calls
+Stock quality as a holding (30% weight): Is this a stock with solid fundamentals, uptrend, and institutional support? Score from your stock metrics.
+Premium yield (25% weight): Annualized premium as a percentage of stock price. 12%+ annualized = score of 90. 8-12% = score of 70. 5-8% = score of 50. Below 5% = score of 30 (not worth the cap).
+Upside room (20% weight): How far is the call strike above current price? More room = less likely to be called away = higher score. If the call strike is 5% above current price, score 80. If it's only 2% above, score 50 (high risk of being called away).
+Technical ceiling (15% weight): Is there a resistance level near or above the call strike? If resistance aligns with the strike, the stock is less likely to blow through it. Score higher for alignment.
+IV favorability (10% weight): IV rank, same as other strategies.
+Scoring — Cash-Secured Puts
+Stock quality for ownership (35% weight): Would you be happy owning this stock at the put strike? This is the most important dimension. Score from your stock scanner's pullback swing or trend metrics.
+Premium yield (25% weight): Same as covered calls but higher threshold.
+Support alignment (20% weight): Is the put strike at or near a technical support level? If the stock does drop to that level, support increases the chance of a bounce rather than continued decline.
+IV favorability (15% weight): IV rank.
+Assignment scenario quality (5% weight): If assigned, is the effective entry price (strike minus premium collected) a price where the stock historically finds support?
+Exit Rules — Covered Calls
+Profit target: Buy back the call when it's lost 75% of its value. You sold for $3.00, buy back at $0.75. This frees the position for a new covered call at a higher strike or later expiration.
+Rolling: If the stock approaches the call strike with 7+ DTE remaining, decide: let it get called away (take the profit on the stock) or roll the call up and out (higher strike, later expiration) to maintain the position and collect additional premium. Only roll if you still want to own the stock.
+Stock management: The covered call doesn't change your stock exit rules. If the stock hits your stop loss, close both the stock and the call.
+Exit Rules — Cash-Secured Puts
+Profit target: Buy back the put at 50-65% profit. You sold for $4.00, buy back at $1.50-$2.00.
+Assignment management: If assigned, the stock becomes a new long position managed by your stock-level rules (with an entry price of strike minus premium collected).
+Rolling: If the put is threatened (stock falling toward strike) with 14+ DTE, you can roll down and out (lower strike, later expiration) to collect more premium and lower your effective entry price. But only if you still want to own the stock at the new strike.
+
+How These Six Strategies Interact
+The strategies shouldn't be run independently — they should route based on conditions:
+When your stock scanner says strong bullish signal AND IV is low: route to debit spreads. You have conviction and options are cheap.
+When your stock scanner says bullish signal AND IV is high: route to credit spreads (bull put). You have directional edge and rich premium to sell.
+When your stock scanner says no directional signal AND IV is high: route to iron condors. No direction, but premium is rich for range-bound selling.
+When a stock is range-bound near a specific level AND IV is moderate to high: route to butterflies (precision pin trade) or calendars (if term structure is favorable).
+When you already own a stock in a neutral/mild uptrend AND IV is moderate+: route to covered call overlay.
+When your stock scanner shows a stock you want to own at a lower price AND IV is moderate+: route to cash-secured put.
+This routing logic should be explicit in your pipeline, not left to the model to figure out. Build it as a deterministic decision tree.
+
+When You Can Feel Confident — Options Edition
+The confidence milestones are the same framework as stocks but with additional requirements.
+Milestone 1: Backtest positive EV per strategy. For options backtesting you face a data challenge — historical options chain snapshots are expensive. An alternative: use the stock-level backtest to establish directional win rates, then COMPUTE the options P&L mathematically. If your pullback swing wins 65% of the time with an average stock gain of 3.5% and average loss of 2.1%, you can compute what a bull put credit spread would have returned given those moves and typical IV levels. This is an approximation, but it's useful for validating the strategy logic before you invest in full options historical data.
+Milestone 2: Track every live options trade for 3 months. For options, execution quality (slippage, fill quality) matters more than for stocks. Track: the mid price at signal time, your actual fill, the slippage cost per leg, and the slippage as a percentage of the spread width. If slippage is eating more than 5% of your expected profit per trade, you have a liquidity problem. Tighten your liquidity filters.
+Milestone 3: 50+ trades per strategy with outcome tracking. Options require fewer trades for validation than stocks because each trade has more data points (entry IV, exit IV, delta at entry, etc.). But you still need enough trades to distinguish skill from luck. 50 per strategy minimum, 100 is better.
+The key metric for options is realized vs expected. For credit spreads, track: expected win rate (from the delta of the short strike) vs actual win rate. If you're selling 0.25-delta puts (implying ~75% win rate) and your actual win rate is 78%, your directional filter is adding 3 points of edge. If your actual win rate is 70%, your filter is actually REDUCING the base probability — something is wrong with the directional signal

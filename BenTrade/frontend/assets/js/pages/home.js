@@ -3420,7 +3420,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
       var mColor = POSTURE_COLORS[m.stock] || 'rgba(215,251,255,0.3)';
       posturesSvg += '<line x1="' + mx.toFixed(1) + '" y1="' + margin.top + '" x2="' + mx.toFixed(1) + '" y2="' + (height - margin.bottom) + '" stroke="' + mColor + '" stroke-width="1" stroke-dasharray="4,3" opacity="0.7"></line>';
       // Small posture label at top
-      posturesSvg += '<text x="' + (mx + 3).toFixed(1) + '" y="' + (margin.top + 10) + '" fill="' + mColor + '" font-size="8" font-family="Orbitron,sans-serif" letter-spacing="0.05em">' + m.stock.charAt(0).toUpperCase() + m.stock.slice(1) + '</text>';
+      posturesSvg += '<text x="' + (mx + 3).toFixed(1) + '" y="' + (margin.top + 10) + '" fill="' + mColor + '" font-size="8" font-family="Inter,sans-serif" letter-spacing="0.03em">' + m.stock.charAt(0).toUpperCase() + m.stock.slice(1) + '</text>';
     }
 
     mpHistorySvgEl.innerHTML = bandsSvg + yGrid + xGrid + axes + yLabels + xLabels + posturesSvg + paths;
@@ -4263,14 +4263,19 @@ window.BenTradePages.initHome = function initHome(rootEl){
       } catch(_e) {
         bindRetry();
       }
+      bootUI.setPhaseDone('dashboard');
       // Auto-trigger Market Regime model analysis now that regime data is loaded.
       // Result populates the right-side Regime Guidance area (comparison table + model output).
+      bootUI.activatePhase('dashboard_model');
+      bootUI.setRegimeStatus('running');
       try {
         await runRegimeModelAnalysis();
+        bootUI.setRegimeStatus('done');
       } catch(_e) {
         // Non-fatal — guidance area retains engine-derived chips as baseline
+        bootUI.setRegimeStatus('failed');
       }
-      bootUI.setPhaseDone('dashboard');
+      bootUI.setPhaseDone('dashboard_model');
     })();
 
     // ── Wait for both branches, then dismiss modal ──

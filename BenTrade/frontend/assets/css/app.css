@@ -23,18 +23,24 @@
             --select-border: rgba(0,234,255,0.28);
 
             --surface-gunmetal: linear-gradient(180deg, rgba(10,14,22,0.92) 0%, rgba(7,11,18,0.9) 48%, rgba(5,8,14,0.94) 100%);
+            --surface-gunmetal-glass: linear-gradient(180deg, rgba(10,14,22,0.62) 0%, rgba(7,11,18,0.55) 48%, rgba(5,8,14,0.60) 100%);
             --surface-top-sheen: linear-gradient(180deg, rgba(228,243,255,0.065) 0%, rgba(228,243,255,0.018) 16%, rgba(228,243,255,0.0) 34%);
             --surface-edge-light: rgba(206,231,255,0.18);
             --surface-edge-dark: rgba(0,0,0,0.48);
             --surface-shadow-tight: 0 14px 28px rgba(0,0,0,0.46), 0 4px 10px rgba(2,8,16,0.34);
             --metal-texture-opacity: 0.17;
             --metal-scanline-opacity: 0.045;
+
+            /* Typography system */
+            --font-display: 'Exo 2', sans-serif;
+            --font-body: 'Inter', 'Segoe UI', Roboto, system-ui, -apple-system, sans-serif;
+            --font-mono: 'Courier New', monospace;
         }
 
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         html,body { height:100%; overflow: hidden; }
         html,body {
-            font-family: 'Inter', 'Segoe UI', Roboto, system-ui, -apple-system, sans-serif;
+            font-family: var(--font-body);
             color: var(--text);
             -webkit-font-smoothing:antialiased;
             padding: 0;
@@ -119,7 +125,7 @@
             border-radius:14px;
                         background:
                             var(--surface-top-sheen),
-                            var(--surface-gunmetal);
+                            var(--surface-gunmetal-glass);
                         border:1px solid rgba(118,160,192,0.34);
                         box-shadow:
                             var(--surface-shadow-tight),
@@ -209,17 +215,17 @@
         }
 .hero{ display:flex; flex-direction:column; align-items:center; justify-content:center; flex:1; gap:6px; }
         .hero-title{
-            font-family:'Orbitron',sans-serif;
-            font-weight:900;
-            letter-spacing:0.28em;
+            font-family: var(--font-display);
+            font-weight:800;
+            letter-spacing:0.06em;
             font-size:28px;
             color: var(--cyan);
             text-shadow: 0 0 26px rgba(0,234,255,0.26);
         }
         .hero-subtitle{
-            font-family:'Orbitron',sans-serif;
+            font-family: var(--font-display);
             font-size:12px;
-            letter-spacing:0.22em;
+            letter-spacing:0.10em;
             text-transform:uppercase;
             color: rgba(215,251,255,0.86);
             opacity:0.92;
@@ -252,7 +258,7 @@
             filter: blur(10px);
         }
         .brand-badge .bt{
-            font-family:'Orbitron',sans-serif;
+            font-family: var(--font-display);
             letter-spacing:0.08em;
             font-weight:800;
             font-size:16px;
@@ -260,7 +266,7 @@
             text-shadow: 0 0 24px rgba(0,234,255,0.30);
         }
         .brand-badge .brand-name{
-            font-family:'Orbitron',sans-serif;
+            font-family: var(--font-display);
             font-size:11px;
             letter-spacing:0.22em;
             text-transform:uppercase;
@@ -279,6 +285,7 @@
                         opacity:0.46;
             pointer-events:none;
                         filter: blur(8px);
+            z-index:1;
         }
 
         .titlebar::before{
@@ -289,12 +296,13 @@
             opacity:0.52;
             filter:blur(10px);
             pointer-events:none;
+            z-index:1;
         }
         .title{
-            font-family:'Orbitron', sans-serif;
+            font-family: var(--font-display);
             color:var(--cyan);
             font-size:28px;
-            letter-spacing:0.18em;
+            letter-spacing:0.08em;
             text-transform:uppercase;
             text-align:center;
             text-shadow:0 2px 22px rgba(0,220,255,0.18);
@@ -351,9 +359,9 @@
             pointer-events:none;
         }
         .nav-title{
-            font-family:'Orbitron',sans-serif;
+            font-family: var(--font-display);
             font-size:11px;
-            letter-spacing:0.22em;
+            letter-spacing:0.08em;
             text-transform:uppercase;
             color: rgba(215,251,255,0.85);
             margin-bottom:12px;
@@ -498,7 +506,7 @@
         details.section > summary{ list-style:none; }
         details.section > summary::-webkit-details-marker{display:none}
         .section-summary{display:flex;align-items:center;justify-content:center;gap:10px;padding:16px 16px;background:linear-gradient(180deg, rgba(0,220,255,0.06), rgba(0,234,255,0.04));border-bottom:1px solid rgba(255,255,255,0.06);text-align:center}
-        .section-summary .section-title{font-family:'Orbitron',sans-serif;letter-spacing:0.18em;text-transform:uppercase;color:var(--accent-cyan);font-size:12px;opacity:0.95;text-align:center;width:100%}
+        .section-summary .section-title{font-family: var(--font-display);letter-spacing:0.08em;text-transform:uppercase;color:var(--accent-cyan);font-size:12px;opacity:0.95;text-align:center;width:100%}
         .section-summary .section-hint{
             color: rgba(169,180,204,0.88);
             font-size:12px;
@@ -584,10 +592,10 @@
             transform: translateY(0) scale(1);
         }
         .ben-tip-title{
-            font-family: 'Orbitron', sans-serif;
+            font-family: var(--font-display);
             font-size: 12px;
             font-weight: 700;
-            letter-spacing: 0.08em;
+            letter-spacing: 0.04em;
             text-transform: uppercase;
             color: var(--accent-cyan);
             margin-bottom: 6px;
@@ -907,15 +915,15 @@
         }
         .section-title .left{
             display:flex; align-items:center; gap:10px;
-            font-family: 'Orbitron', sans-serif;
+            font-family: var(--font-display);
             color: var(--accent-cyan);
             font-size: 12px;
-            letter-spacing: 0.14em;
+            letter-spacing: 0.06em;
             text-transform: uppercase;
             text-shadow: 0 0 18px rgba(0,220,255,0.10);
         }
         .section-title .chip{
-            font-family: 'Inter', sans-serif;
+            font-family: var(--font-body);
             font-size: 11px;
             font-weight: 800;
             letter-spacing: 0.08em;
@@ -1215,9 +1223,9 @@
             border-bottom:1px solid rgba(0,234,255,0.16);
         }
         .admin-workbench-panel-title{
-            font-family:'Orbitron',sans-serif;
+            font-family: var(--font-display);
             font-size:12px;
-            letter-spacing:0.14em;
+            letter-spacing:0.06em;
             text-transform:uppercase;
             color:rgba(214,250,255,0.98);
         }
@@ -1277,7 +1285,7 @@
 /* Modal */
         #modal{display:none; position:fixed; inset:0; background:rgba(2,6,18,0.72); backdrop-filter: blur(10px); z-index:3000; align-items:center; justify-content:center;}
         #modalCard{width:min(520px,92vw); border-radius:16px; padding:18px 16px; background:linear-gradient(180deg, rgba(6,6,18,0.94), rgba(10,8,26,0.86)); border:1px solid rgba(0,234,255,0.22); box-shadow:0 24px 80px rgba(0,220,255,0.12);}
-        #modalTitle{font-family:'Orbitron',sans-serif; letter-spacing:0.16em; color:var(--accent-cyan); font-size:14px; text-transform:uppercase; margin-bottom:10px; text-align:center;}
+        #modalTitle{font-family: var(--font-display); letter-spacing:0.06em; color:var(--accent-cyan); font-size:14px; text-transform:uppercase; margin-bottom:10px; text-align:center;}
         #modalMsg{color:#e6fbff; font-size:14px; line-height:1.45; text-align:center; margin-bottom:14px;}
         #modalClose{width:100%;}
 
@@ -1325,8 +1333,8 @@
             text-align: center;
         }
         .tt-header-title{
-            font-family: 'Orbitron', sans-serif;
-            letter-spacing: 0.18em;
+            font-family: var(--font-display);
+            letter-spacing: 0.08em;
             font-size: 13px;
             color: var(--accent-cyan, #00eaff);
             text-transform: uppercase;
@@ -1376,9 +1384,9 @@
             margin-top: 14px;
         }
         .tt-section-title{
-            font-family: 'Orbitron', sans-serif;
+            font-family: var(--font-display);
             font-size: 10px;
-            letter-spacing: 0.14em;
+            letter-spacing: 0.06em;
             text-transform: uppercase;
             color: rgba(0,234,255,0.65);
             margin-bottom: 8px;
@@ -1471,7 +1479,7 @@
         .tt-occ{
             font-size: 10px;
             color: rgba(210,247,255,0.45);
-            font-family: 'Courier New', monospace;
+            font-family: var(--font-mono);
         }
 
         /* ── Slippage warning ────────────────────────── */
@@ -2021,9 +2029,9 @@ main.main{
 }
 
 .diagnosticTitle{
-    font-family: 'Orbitron', sans-serif;
+    font-family: var(--font-display);
     font-size: 11px;
-    letter-spacing: 0.22em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     color: rgba(215,251,255,0.88);
     margin-bottom: 10px;
@@ -2200,9 +2208,9 @@ main.main{
 }
 
 .placeholder-title{
-    font-family:'Orbitron', sans-serif;
+    font-family: var(--font-display);
     font-size:15px;
-    letter-spacing:0.14em;
+    letter-spacing:0.06em;
     text-transform:uppercase;
     color: var(--cyan);
     margin-bottom: 8px;
@@ -2291,8 +2299,8 @@ main.main{
 .tron-holo-sign::after{ right:14px; }
 
 .tron-holo-title{
-    font-family:'Orbitron', sans-serif;
-    letter-spacing:0.24em;
+    font-family: var(--font-display);
+    letter-spacing:0.10em;
     font-size: clamp(22px, 4vw, 40px);
     color: var(--cyan);
     text-transform:uppercase;
@@ -2520,8 +2528,8 @@ main.main{
 }
 
 .active-empty-title{
-    font-family:'Orbitron',sans-serif;
-    letter-spacing:0.22em;
+    font-family: var(--font-display);
+    letter-spacing:0.08em;
     color:var(--cyan);
     text-shadow: 0 0 22px rgba(0,234,255,0.3);
 }
@@ -2559,9 +2567,9 @@ main.main{
 }
 
 .active-modal-title{
-    font-family:'Orbitron',sans-serif;
+    font-family: var(--font-display);
     text-transform:uppercase;
-    letter-spacing:0.14em;
+    letter-spacing:0.06em;
     color:var(--cyan);
     font-size:12px;
 }
@@ -2622,7 +2630,7 @@ main.main{
     font-weight:700;
     letter-spacing:0.02em;
     color:var(--text);
-    font-family:'Orbitron',sans-serif;
+    font-family: var(--font-body);
 }
 
 .at-risk-value.positive{ color:#7ef7b8; text-shadow: 0 0 8px rgba(126,247,184,0.25); }
@@ -2746,10 +2754,10 @@ main.main{
 /* (old AT header-left/symbol/strategy/meta/right removed — now using scanner .trade-header-* classes) */
 
 .at-header-pnl{
-    font-family:'Orbitron',sans-serif;
+    font-family: var(--font-body);
     font-size:16px;
     font-weight:700;
-    letter-spacing:0.04em;
+    letter-spacing:0.02em;
 }
 
 .at-header-pnl.positive{ color:#7ef7b8; text-shadow: 0 0 10px rgba(126,247,184,0.25); }
@@ -3488,10 +3496,10 @@ main.main{
 }
 
 .at-symbol-badge{
-    font-family:'Orbitron',sans-serif;
+    font-family: var(--font-display);
     font-size:14px;
     font-weight:800;
-    letter-spacing:0.08em;
+    letter-spacing:0.04em;
     color:#00eaff;
     text-shadow: 0 0 10px rgba(0,234,255,0.22);
     white-space:nowrap;
@@ -3549,10 +3557,10 @@ main.main{
     margin-left:auto;
 }
 .at-pnl-readout{
-    font-family:'Orbitron',sans-serif;
+    font-family: var(--font-body);
     font-size:17px;
     font-weight:700;
-    letter-spacing:0.04em;
+    letter-spacing:0.02em;
     white-space:nowrap;
 }
 .at-pnl-readout.positive{
@@ -4213,8 +4221,8 @@ main.main{
 }
 
 .workbench-title{
-    font-family:'Orbitron',sans-serif;
-    letter-spacing:0.14em;
+    font-family: var(--font-display);
+    letter-spacing:0.06em;
     text-transform:uppercase;
     font-size:11px;
     color:var(--cyan);
@@ -4410,8 +4418,8 @@ main.main{
 }
 
 .stock-card-title{
-    font-family:'Orbitron',sans-serif;
-    letter-spacing:0.14em;
+    font-family: var(--font-display);
+    letter-spacing:0.06em;
     text-transform:uppercase;
     font-size:11px;
     color:var(--cyan);
@@ -4589,9 +4597,10 @@ main.main{
 }
 
 .bt-panel-title {
+    font-family: var(--font-display);
     font-size: 18px;
     font-weight: 700;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.06em;
     color: var(--cyan);
     text-shadow:
         0 0 6px rgba(0,234,255,0.35),
@@ -4599,8 +4608,6 @@ main.main{
         0 0 22px rgba(255,255,255,0.10);
     padding: 10px 0 12px 0;
     animation: btFlicker 8s ease-in-out infinite;
-    /* DEV VERIFY — remove after confirming class lands in DOM */
-    /* outline: 1px solid magenta; */
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4771,9 +4778,10 @@ main.main{
 }
 
 .home-page-title{
-    font-size:16px;
+    font-family: var(--font-display);
+    font-size:14px;
     color:var(--text);
-    letter-spacing:0.02em;
+    letter-spacing:0.05em;
     font-weight:700;
 }
 
@@ -5310,10 +5318,27 @@ main.main{
 
 .boot-welcome-phases{
     display:grid;
-    grid-template-columns: 1fr 1.4fr 1fr;
-    grid-template-rows: auto auto;
-    gap:14px;
+    grid-template-columns: 1fr 1fr;
+    gap:24px;
     width:100%;
+}
+
+/* ── Workflow column (vertical sequence of cards + connector) ── */
+.boot-workflow-col{
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    gap:0;
+}
+
+/* ── Workflow connector line between cards ── */
+.boot-workflow-connector{
+    width:2px;
+    height:22px;
+    margin:0 auto;
+    background: linear-gradient(180deg, rgba(0,234,255,0.35), rgba(0,234,255,0.10));
+    border-radius:1px;
+    flex-shrink:0;
 }
 
 .boot-phase{
@@ -5329,14 +5354,13 @@ main.main{
     transition: border-color 0.2s, color 0.2s;
 }
 
-/* Model Analysis box spans its column + the row below for engine sub-items */
-.boot-phase[data-phase="model_analysis"]{
+/* Nested phase cards (Model Analysis under Market Data / Dashboard) */
+.boot-phase.boot-phase-nested{
     flex-direction:column;
     align-items:flex-start;
-    grid-row: 1 / 3;
-    grid-column: 2;
 }
-.boot-phase[data-phase="model_analysis"] .boot-phase-label{
+
+.boot-phase.boot-phase-nested .boot-phase-label{
     display:flex;
     align-items:center;
     gap:8px;
@@ -5384,6 +5408,17 @@ main.main{
 .boot-engine-running .boot-engine-icon{ animation: boot-spin 1s linear infinite; }
 .boot-engine-done{ color:rgba(126,247,184,0.85); }
 .boot-engine-failed{ color:rgba(255,110,110,0.85); }
+
+/* ── Right-side Model Regime sub-progress ── */
+.boot-model-regime{
+    display:flex;
+    flex-direction:column;
+    gap:5px;
+    margin-top:8px;
+    width:100%;
+    padding-top:8px;
+    border-top:1px solid rgba(0,234,255,0.10);
+}
 
 .boot-choice-footer{
     text-align:center;
@@ -5446,8 +5481,8 @@ main.main{
     font-weight:700;
     color:var(--text);
     margin-top:2px;
-    font-family:'Orbitron',sans-serif;
-    letter-spacing:0.06em;
+    font-family: var(--font-body);
+    letter-spacing:0.02em;
 }
 .home-regime-pill.bullish{ border-color:rgba(126,247,184,0.40); }
 .home-regime-pill.bullish .home-regime-pill-label{ color:#7ef7b8; }
@@ -5756,7 +5791,7 @@ main.main{
     margin-bottom:10px;
 }
 .home-regime-section-header{
-    font-family:'Orbitron',sans-serif;
+    font-family: var(--font-display);
     font-size:11px;
     font-weight:700;
     color:rgba(0,234,255,0.60);
@@ -6099,8 +6134,8 @@ main.main{
     gap:5px;
     font-size:11px;
     color:var(--muted);
-    font-family:'Orbitron',sans-serif;
-    letter-spacing:0.05em;
+    font-family: var(--font-body);
+    letter-spacing:0.02em;
 }
 .home-mp-legend-swatch{
     width:14px;
@@ -6134,8 +6169,8 @@ main.main{
     height:180px;
     color:rgba(215,251,255,0.45);
     font-size:13px;
-    font-family:'Orbitron',sans-serif;
-    letter-spacing:0.06em;
+    font-family: var(--font-body);
+    letter-spacing:0.03em;
     text-align:center;
     border:1px dashed rgba(0,234,255,0.18);
     border-radius:10px;
@@ -6156,8 +6191,8 @@ main.main{
     height:180px;
     color:rgba(215,251,255,0.45);
     font-size:13px;
-    font-family:'Orbitron',sans-serif;
-    letter-spacing:0.06em;
+    font-family: var(--font-body);
+    letter-spacing:0.03em;
     text-align:center;
     border:1px dashed rgba(0,234,255,0.18);
     border-radius:10px;
@@ -6549,8 +6584,8 @@ main.main{
 }
 
 .risk-card-title{
-    font-family:'Orbitron',sans-serif;
-    letter-spacing:0.14em;
+    font-family: var(--font-display);
+    letter-spacing:0.06em;
     text-transform:uppercase;
     font-size:11px;
     color:var(--cyan);
@@ -6628,9 +6663,9 @@ main.main{
 }
 
 .risk-table th{
-    font-family:'Orbitron',sans-serif;
+    font-family: var(--font-body);
     font-size:10px;
-    letter-spacing:0.10em;
+    letter-spacing:0.06em;
     text-transform:uppercase;
     color:var(--muted);
     background: linear-gradient(180deg, rgba(220,238,255,0.08), rgba(220,238,255,0.02));
@@ -6690,7 +6725,7 @@ main.main{
 .symbol-chip{
     display:inline-flex; align-items:center; gap:4px;
     padding:2px 10px; border-radius:999px;
-    font-size:11px; font-family:'Orbitron',monospace;
+    font-size:11px; font-family: var(--font-body);
     background:rgba(0,234,255,0.10); color:var(--text-primary, #e6fbff);
     border:1px solid rgba(0,234,255,0.30);
     box-shadow:0 0 4px rgba(0,234,255,0.15);
@@ -6707,7 +6742,7 @@ main.main{
 .symbol-chip-remove:hover{ color:#ff4444; }
 .symbol-add-input{
     width:72px; padding:4px 8px; border-radius:6px;
-    font-size:11px; font-family:'Orbitron',monospace;
+    font-size:11px; font-family: var(--font-body);
     background:rgba(0,0,0,0.25); color:var(--text-primary, #e6fbff);
     border:1px solid rgba(0,234,255,0.22); text-transform:uppercase;
 }
@@ -6718,7 +6753,7 @@ main.main{
 .symbol-add-input::placeholder{ color:rgba(230,251,255,0.3); }
 .symbol-add-btn{
     padding:4px 12px; border-radius:6px;
-    font-size:11px; font-family:'Orbitron',monospace; font-weight:600;
+    font-size:11px; font-family: var(--font-body); font-weight:600;
     color:var(--cyan, #00eaff); background:rgba(0,234,255,0.08);
     border:1px solid rgba(0,234,255,0.30);
     cursor:pointer; transition:background 0.15s, box-shadow 0.15s;
@@ -7492,10 +7527,10 @@ main.main{
 }
 
 .bt-brand-label{
-    font-family:'Orbitron', sans-serif;
+    font-family: var(--font-display);
     font-size:18px;
     font-weight:700;
-    letter-spacing:0.20em;
+    letter-spacing:0.08em;
     color:var(--cyan);
     text-shadow:0 0 24px rgba(0,234,255,0.45), 0 0 48px rgba(0,234,255,0.15);
     margin-bottom:3px;
@@ -7608,11 +7643,11 @@ main.main{
 
 .bt-status-text{
     flex:1;
-    font-family:'Orbitron', monospace;
+    font-family: var(--font-body);
     text-transform:uppercase;
 }
 .bt-status-val{
-    font-family:'Orbitron', monospace;
+    font-family: var(--font-body);
     color:rgba(0,234,255,0.7);
 }
 
@@ -7758,10 +7793,11 @@ main.main{
     min-width:0;
 }
 .bt-chat-header-title{
-    font-size:0.85rem;
+    font-family: var(--font-display);
+    font-size:0.82rem;
     font-weight:700;
     color:var(--cyan);
-    letter-spacing:0.3px;
+    letter-spacing:0.04em;
     line-height:1.2;
 }
 .bt-chat-header-subtitle{
@@ -8171,4 +8207,223 @@ main.main{
 }
 .bt-chat-bubble:hover .bt-chat-bubble-end{
     opacity:1;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BANNER TICKER MARQUEE — atmospheric smoked-glass market ribbon
+   ═══════════════════════════════════════════════════════════════════════════
+   Layering order (bottom → top):
+     0  .banner-ticker-track            (container, inset:0)
+     0  .banner-ticker-track::before    (fog / haze layer)
+     1  .banner-ticker-belt             (scrolling glow items)
+     2  .banner-ticker-track::after     (smoked-glass overlay + center band)
+     3  .titlebar > * (foreground)       (nav buttons, title, controls)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.banner-ticker-track{
+    position:absolute;
+    inset:0;
+    overflow:hidden;
+    pointer-events:none;
+    z-index:0;
+}
+
+/* ── Fog / haze layer — diffused ambient glow behind the ticker text ───── */
+.banner-ticker-track::before{
+    content:"";
+    position:absolute;
+    inset:-6px;
+    z-index:0;
+    pointer-events:none;
+    filter:blur(10px);
+    background:
+        radial-gradient(ellipse 130% 120% at 50% 50%,
+            rgba(0,234,255,0.050) 0%,
+            transparent 55%),
+        radial-gradient(ellipse 90% 70% at 25% 55%,
+            rgba(0,200,255,0.035) 0%,
+            transparent 45%),
+        radial-gradient(ellipse 90% 70% at 75% 45%,
+            rgba(170,50,50,0.028) 0%,
+            transparent 45%),
+        radial-gradient(ellipse 60% 40% at 50% 50%,
+            rgba(180,220,255,0.022) 0%,
+            transparent 50%);
+}
+
+/* ── Smoked-glass overlay + center visibility band ────────────────────── *
+ * Acts as a glass layer ON TOP of the belt.  Ticker glows bleed through
+ * the transparent center strip while the top/bottom edges are deep-dark
+ * to keep the effect contained inside the banner.                        */
+.banner-ticker-track::after{
+    content:"";
+    position:absolute;
+    inset:0;
+    z-index:2;
+    pointer-events:none;
+    background:
+        linear-gradient(180deg,
+            rgba(6,10,16,0.88)  0%,
+            rgba(6,10,16,0.50) 25%,
+            rgba(6,10,16,0.12) 42%,
+            transparent         50%,
+            rgba(6,10,16,0.12) 58%,
+            rgba(6,10,16,0.50) 75%,
+            rgba(6,10,16,0.88) 100%);
+}
+
+/* ── Scrolling belt ──────────────────────────────────────────────────── */
+.banner-ticker-belt{
+    display:flex;
+    align-items:center;
+    gap:48px;
+    position:absolute;
+    top:50%;
+    transform:translateY(-50%);
+    white-space:nowrap;
+    will-change:transform;
+    animation:bannerTickerScroll var(--ticker-duration, 60s) linear infinite;
+    z-index:1;
+}
+@keyframes bannerTickerScroll{
+    0%  { transform:translateY(-50%) translateX(0); }
+    100%{ transform:translateY(-50%) translateX(-50%); }
+}
+
+/* ── Ticker items — atmospheric glow-first rendering ─────────────────── *
+ * Text is intentionally soft (low opacity, slight blur) so the colored
+ * text-shadow glow dominates.  The result reads as diffused light
+ * drifting behind smoked glass rather than crisp text on a screen.       */
+.banner-ticker-item{
+    display:inline-flex;
+    align-items:center;
+    gap:9px;
+    font-family: var(--font-body);
+    font-size:20px;
+    font-weight:600;
+    letter-spacing:0.04em;
+    opacity:0.46;
+    filter:blur(0.8px);
+    transition:opacity 0.4s;
+}
+
+/* ── Symbol glyph — cyan glow by default ─────────────────────────── */
+.banner-ticker-sym{
+    color:rgba(180,230,255,0.52);
+    font-weight:700;
+    text-shadow:
+        0 0 18px rgba(0,234,255,0.46),
+        0 0 40px rgba(0,234,255,0.22),
+        0 0 7px  rgba(0,234,255,0.17);
+}
+
+/* ── Price — neutral soft glow ───────────────────────────────────── */
+.banner-ticker-price{
+    color:rgba(200,230,245,0.38);
+    font-variant-numeric:tabular-nums;
+    text-shadow:
+        0 0 14px rgba(180,220,255,0.20),
+        0 0 32px rgba(180,220,255,0.10);
+}
+
+/* ── Change value — color logic ──────────────────────────────────── */
+.banner-ticker-chg{
+    font-variant-numeric:tabular-nums;
+    font-size:16px;
+}
+
+/* Positive → green glow */
+.banner-ticker-chg.positive{
+    color:rgba(0,230,118,0.56);
+    text-shadow:
+        0 0 18px rgba(0,230,118,0.64),
+        0 0 42px rgba(0,230,118,0.30),
+        0 0 7px  rgba(0,230,118,0.22);
+}
+
+/* Negative → burnt-red / deep-crimson glow */
+.banner-ticker-chg.negative{
+    color:rgba(200,55,55,0.62);
+    text-shadow:
+        0 0 18px rgba(200,55,55,0.64),
+        0 0 42px rgba(200,55,55,0.30),
+        0 0 7px  rgba(200,55,55,0.22);
+}
+
+/* Neutral/flat → cyan glow */
+.banner-ticker-chg.neutral{
+    color:rgba(180,230,255,0.34);
+    text-shadow:
+        0 0 14px rgba(0,234,255,0.22),
+        0 0 32px rgba(0,234,255,0.10);
+}
+
+/* ── Direction-aware symbol glow override ────────────────────────── *
+ * When the item carries a positive/negative direction, tint the
+ * symbol glow to match so the entire cluster reads as one color.     */
+.banner-ticker-item[data-dir="positive"] .banner-ticker-sym{
+    color:rgba(140,255,200,0.46);
+    text-shadow:
+        0 0 18px rgba(0,230,118,0.44),
+        0 0 40px rgba(0,230,118,0.22),
+        0 0 7px  rgba(0,230,118,0.17);
+}
+.banner-ticker-item[data-dir="negative"] .banner-ticker-sym{
+    color:rgba(255,160,140,0.46);
+    text-shadow:
+        0 0 18px rgba(200,55,55,0.44),
+        0 0 40px rgba(200,55,55,0.22),
+        0 0 7px  rgba(200,55,55,0.17);
+}
+.banner-ticker-item[data-dir="positive"] .banner-ticker-price{
+    color:rgba(160,255,200,0.34);
+    text-shadow:
+        0 0 14px rgba(0,230,118,0.20),
+        0 0 32px rgba(0,230,118,0.10);
+}
+.banner-ticker-item[data-dir="negative"] .banner-ticker-price{
+    color:rgba(255,180,160,0.34);
+    text-shadow:
+        0 0 14px rgba(200,55,55,0.20),
+        0 0 32px rgba(200,55,55,0.10);
+}
+
+/* ── Dot separator — subtle glow orb ─────────────────────────────── */
+.banner-ticker-dot{
+    width:3px; height:3px;
+    border-radius:50%;
+    background:rgba(0,234,255,0.18);
+    box-shadow:
+        0 0 6px  rgba(0,234,255,0.15),
+        0 0 14px rgba(0,234,255,0.06);
+    flex-shrink:0;
+}
+
+/* ── Foreground layering — all banner children sit above ticker ───── */
+.titlebar > *{
+    position:relative;
+    z-index:3;
+}
+/* The ticker track must keep position:absolute and z-index:0 —
+   override the .titlebar > * rule which would set position:relative. */
+.titlebar > .banner-ticker-track{
+    position:absolute;
+    inset:0;
+    z-index:0;
+}
+
+/* ── Unified smoked-glass foreground panels ──
+   Transparent panels so the ticker ghosts through uniformly.
+   No solid dark boxes — keeps the glass effect continuous. */
+.brand-stack,
+.titlebar-right{
+    background: transparent;
+    border-radius:8px;
+    padding-left:6px;
+    padding-right:6px;
+}
+.hero{
+    background: transparent;
+    border-radius:10px;
+    padding:4px 18px;
 }

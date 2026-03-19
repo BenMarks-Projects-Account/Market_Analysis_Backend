@@ -163,23 +163,32 @@ class DataPopulationService:
                     self._status.run_count += 1
                     return
 
-                # ── Phase 2: Per-engine model analysis (6 LLM calls) ────
+                # ── Phase 2: Per-engine model analysis (concurrent dispatch) ──
                 self._status.phase = "model_analysis"
                 logger.info("event=data_population_phase phase=model_analysis run=%d", self._status.run_count + 1)
 
-                model_errors: list[str] = []
+                # Initialize all engines to "pending" so the UI shows labels immediately.
+                for _, label in _ENGINE_MODEL_CALLS:
+                    self._status.model_progress[label] = "pending"
+
+                # Build list of runnable engine tasks.
+                runnable: list[tuple[str, str, object]] = []
                 for attr, label in _ENGINE_MODEL_CALLS:
                     svc = getattr(self._mi_deps, attr, None)
                     if svc is None or not hasattr(svc, "run_model_analysis"):
                         self._status.model_progress[label] = "skipped"
                         logger.warning("event=model_analysis_skip engine=%s reason=no_service", label)
                         continue
+                    runnable.append((attr, label, svc))
 
+                model_errors: list[str] = []
+
+                async def _run_engine(label: str, svc: object) -> None:
+                    """Run a single engine's model analysis, updating status."""
                     self._status.model_progress[label] = "running"
                     logger.info("event=model_analysis_start engine=%s", label)
                     try:
-                        model_result = await svc.run_model_analysis(force=True)
-                        # Persist model score for history snapshots
+                        model_result = await svc.run_model_analysis(force=True)  # type: ignore[union-attr]
                         if model_result.get("model_analysis"):
                             try:
                                 from app.services.model_score_store import save_model_score
@@ -197,6 +206,13 @@ class DataPopulationService:
                         self._status.model_progress[label] = "failed"
                         model_errors.append(f"{label}: {exc}")
                         logger.error("event=model_analysis_error engine=%s error=%s", label, exc, exc_info=True)
+
+                # Dispatch all engines concurrently. The per-provider execution
+                # gate ensures only one prompt is sent to each model endpoint at
+                # a time, so this effectively feeds the next prompt to the next
+                # available provider as soon as the previous one completes.
+                tasks = [_run_engine(label, svc) for _, label, svc in runnable]
+                await asyncio.gather(*tasks, return_exceptions=False)
 
                 # ── Finalize ─────────────────────────────────────────────
                 if model_errors:

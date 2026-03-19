@@ -34,7 +34,9 @@ function createMockBootUI(){
     market_data: makePhaseEl(),
     model_analysis: makePhaseEl(),
     dashboard: makePhaseEl(),
+    dashboard_model: makePhaseEl(),
   };
+  let regimeStatus = 'pending';
 
   function activatePhase(phase){
     const el = phases[phase];
@@ -61,7 +63,11 @@ function createMockBootUI(){
     activatePhase(phase);
   }
 
-  return { phases, activatePhase, setPhaseDone, setPhaseActive };
+  function setRegimeStatus(status){
+    regimeStatus = status;
+  }
+
+  return { phases, activatePhase, setPhaseDone, setPhaseActive, setRegimeStatus, getRegimeStatus: () => regimeStatus };
 }
 
 // Test: activatePhase does NOT deactivate other phases
@@ -102,7 +108,7 @@ function createMockBootUI(){
    2. Parallel phase transitions — simulates the new startup flow
    ═══════════════════════════════════════════════════════════════════ */
 
-// Test: parallel startup phase transitions match expected sequence
+// Test: parallel startup phase transitions match expected sequence (workflow layout)
 (function test_parallel_phase_sequence(){
   const ui = createMockBootUI();
 
@@ -112,11 +118,24 @@ function createMockBootUI(){
   assert(ui.phases.market_data.classes.has('active'), 'start: market_data active');
   assert(ui.phases.dashboard.classes.has('active'), 'start: dashboard active');
   assert(!ui.phases.model_analysis.classes.has('active'), 'start: model_analysis idle');
+  assert(!ui.phases.dashboard_model.classes.has('active'), 'start: dashboard_model idle');
 
-  // Step 2: Dashboard finishes first (Branch B complete)
+  // Step 2: Dashboard finishes first (Branch B load sequence done)
   ui.setPhaseDone('dashboard');
   assert(ui.phases.market_data.classes.has('active'), 'after dash done: market_data still active');
   assert(ui.phases.dashboard.classes.has('done'), 'after dash done: dashboard done');
+
+  // Step 2b: Right-side Model Analysis activates for regime
+  ui.activatePhase('dashboard_model');
+  ui.setRegimeStatus('running');
+  assert(ui.phases.dashboard_model.classes.has('active'), 'right model analysis active');
+  assert(ui.getRegimeStatus() === 'running', 'regime running');
+
+  // Step 2c: Regime model analysis completes
+  ui.setRegimeStatus('done');
+  ui.setPhaseDone('dashboard_model');
+  assert(ui.phases.dashboard_model.classes.has('done'), 'right model analysis done');
+  assert(ui.getRegimeStatus() === 'done', 'regime done');
 
   // Step 3: Backend transitions market_data → model_analysis
   ui.setPhaseDone('market_data');
@@ -129,7 +148,7 @@ function createMockBootUI(){
   ui.setPhaseDone('model_analysis');
   assert(ui.phases.model_analysis.classes.has('done'), 'end: model_analysis done');
   // All phases now done
-  const allDone = ['market_data', 'model_analysis', 'dashboard'].every(
+  const allDone = ['market_data', 'model_analysis', 'dashboard', 'dashboard_model'].every(
     p => ui.phases[p].classes.has('done')
   );
   assert(allDone, 'end: all phases done');
@@ -151,12 +170,17 @@ function createMockBootUI(){
   assert(ui.phases.model_analysis.classes.has('done'), 'model_analysis done');
   assert(ui.phases.market_data.classes.has('done'), 'market_data done');
 
-  // Dashboard finally finishes
+  // Dashboard finally finishes, then regime runs
   ui.setPhaseDone('dashboard');
-  const allDone = ['market_data', 'model_analysis', 'dashboard'].every(
+  ui.activatePhase('dashboard_model');
+  ui.setRegimeStatus('running');
+  ui.setRegimeStatus('done');
+  ui.setPhaseDone('dashboard_model');
+
+  const allDone = ['market_data', 'model_analysis', 'dashboard', 'dashboard_model'].every(
     p => ui.phases[p].classes.has('done')
   );
-  assert(allDone, 'all phases done after dashboard completes');
+  assert(allDone, 'all phases done after dashboard + regime complete');
 })();
 
 /* ═══════════════════════════════════════════════════════════════════

@@ -272,6 +272,11 @@ window.BenTradeApi = (function(){
     return jsonFetch(`/api/stock/summary?symbol=${sym}&range=${rng}`);
   }
 
+  function getBatchQuotes(symbols){
+    var syms = (symbols || []).map(function(s){ return String(s).toUpperCase(); }).join(',');
+    return jsonFetch('/api/stock/quotes?symbols=' + encodeURIComponent(syms));
+  }
+
   function getStockWatchlist(){
     return jsonFetch('/api/stock/watchlist');
   }
@@ -558,6 +563,7 @@ window.BenTradeApi = (function(){
     saveWorkbenchScenario,
     deleteWorkbenchScenario,
     getStockSummary,
+    getBatchQuotes,
     getStockWatchlist,
     getStockScanner,
     addStockWatchlist,

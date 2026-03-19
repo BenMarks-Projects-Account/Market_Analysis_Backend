@@ -10,6 +10,9 @@
   <link rel="icon" type="image/png" sizes="16x16" href="assets/icons/favicon-16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/favicon-180.png">
 
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="assets/css/app.css">
   <link rel="stylesheet" href="assets/css/module-dashboard.css?v=20260310d">
   <style>
@@ -89,6 +92,10 @@
       padding:0;
       transition:opacity 0.28s ease, max-height 0.32s ease;
     }
+    /* Hide dashboard-level top banner in expanded mode */
+    .bt-view-expanded .home-topbar-card{
+      display:none;
+    }
     .bt-view-expanded > .shell-layout{
       grid-template-columns:1fr;
       gap:0;
@@ -155,9 +162,9 @@
     .nav-group{ margin-top:16px; flex:0 0 auto; }
     .nav-group:first-of-type{ margin-top:0; }
     .nav-group-header{
-      font-family:'Orbitron',sans-serif;
+      font-family: var(--font-display);
       font-size:11px;
-      letter-spacing:0.2em;
+      letter-spacing:0.08em;
       text-transform:uppercase;
       color: rgba(215,251,255,0.88);
       margin:6px 0 4px;
@@ -261,10 +268,6 @@
     <!-- Header banner (matches dashboard) -->
     <div class="titlebar">
       <div class="brand-stack">
-        <div class="brand-badge" aria-hidden="true">
-          <span class="bt">BT</span>
-          <span class="brand-name">BenTrade</span>
-        </div>
         <div class="brand-nav" aria-label="App navigation controls">
           <button id="headerBackBtn" class="btn brand-nav-btn" type="button" title="Back" aria-label="Back" disabled>◀ Back</button>
           <button id="headerForwardBtn" class="btn brand-nav-btn" type="button" title="Forward" aria-label="Forward" disabled>Forward ▶</button>
@@ -272,7 +275,7 @@
         </div>
       </div>
       <div class="hero">
-        <div class="hero-title">BENTRADE</div>
+        <div class="hero-title">BenTrade</div>
         <div class="hero-subtitle">Credit Spread Analysis</div>
         <div class="hero-context" id="heroContext">Analysis → Options → Credit Spreads</div>
       </div>
@@ -745,7 +748,7 @@
   <script src="assets/js/utils/debug.js?v=20260217a"></script>
   <script src="assets/js/utils/overlayRoot.js?v=20260227a"></script>
   <script src="assets/js/state/session_state.js?v=20260215a"></script>
-  <script src="assets/js/api/client.js?v=20260302e"></script>
+  <script src="assets/js/api/client.js?v=20260319a"></script>
   <script src="assets/js/utils/tradeKey.js?v=20260216a"></script>
   <script src="assets/js/utils/format.js?v=20260217a"></script>
   <script src="assets/js/utils/tradeAccessor.js?v=20260217a"></script>
@@ -756,7 +759,7 @@
   <script src="assets/js/ui/trade_card.js?v=20260217a"></script>
   <script src="assets/js/ui/model_analysis.js?v=20260227a"></script>
   <script src="assets/js/ui/source_health.js?v=20260215a"></script>
-  <script src="assets/js/ui/boot_choice_modal.js?v=20260218a"></script>
+  <script src="assets/js/ui/boot_choice_modal.js?v=20260319b"></script>
   <script src="assets/js/ui/data_workbench_modal.js?v=20260225a"></script>
   <script src="assets/js/ui/home_loading_overlay.js?v=20260216b"></script>
   <script src="assets/js/ui/chat_drawer.js?v=20260614a"></script>
@@ -775,6 +778,7 @@
   <script src="assets/js/strategies/defaults.js?v=20260218a"></script>
   <script src="assets/js/stores/symbolUniverse.js?v=20260218a"></script>
   <script src="assets/js/ui/symbolUniverseSelector.js?v=20260218a"></script>
+  <script src="assets/js/ui/banner_ticker.js?v=20260319h"></script>
   <script src="assets/js/config/strategy_card_config.js?v=20260218a"></script>
   <script src="assets/js/config/stock_strategies.js?v=20260302a"></script>
   <script src="assets/js/models/option_trade_card_model.js?v=20260218a"></script>
@@ -791,7 +795,7 @@
   <script src="assets/js/pages/stock_momentum_breakout.js?v=20260302e"></script>
   <script src="assets/js/pages/stock_mean_reversion.js?v=20260302e"></script>
   <script src="assets/js/pages/stock_volatility_expansion.js?v=20260302e"></script>
-  <script src="assets/js/pages/home.js?v=20260306a"></script>
+  <script src="assets/js/pages/home.js?v=20260319a"></script>
   <script src="assets/js/pages/risk_capital.js?v=20260306a"></script>
   <script src="assets/js/pages/portfolio_risk.js?v=20260306a"></script>
   <script src="assets/js/pages/trade_lifecycle.js?v=20260216a"></script>
