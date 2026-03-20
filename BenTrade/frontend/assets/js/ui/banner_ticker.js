@@ -29,7 +29,7 @@ window.BenTradeBannerTicker = (function(){
   /* ── Config ─────────────────────────────────────────────────────── */
   var SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000; // re-fetch snapshot every 5 min
   var ROTATION_INTERVAL_MS = 30 * 1000;     // rotate DOM window every 30s
-  var SCROLL_DURATION_S    = 188;           // seconds for one full belt loop
+  var SCROLL_DURATION_S    = 270;           // seconds for one full belt loop
   var WINDOW_SIZE          = 50;            // symbols rendered per cycle
   var ROTATE_STEP          = 12;            // advance window by N symbols each rotation
 

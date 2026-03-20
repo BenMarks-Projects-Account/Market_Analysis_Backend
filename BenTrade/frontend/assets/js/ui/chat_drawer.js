@@ -176,7 +176,11 @@ window.BenTradeChat = (function () {
     _bubbleEl.addEventListener('click', function (e) {
       if (e.target.closest('.bt-chat-bubble-end')) {
         e.stopPropagation();
-        endChat();
+        // Clear session context but keep bubble visible
+        _session = null;
+        _inflight = false;
+        _lastFailedText = null;
+        _bubbleEl.removeAttribute('data-has-session');
         return;
       }
       _onBubbleClick();
@@ -189,6 +193,20 @@ window.BenTradeChat = (function () {
     // Position bubble inside the .main panel visually
     _positionBubble();
     window.addEventListener('resize', _positionBubble);
+
+    // Watch for expanded-view class changes on .shell to hide/show bubble
+    var shellEl = document.querySelector('.shell');
+    if (shellEl) {
+      var _expandObserver = new MutationObserver(function () {
+        var expanded = shellEl.classList.contains('bt-view-expanded');
+        if (expanded) {
+          _hideBubble();
+        } else if (!isOpen()) {
+          _showBubble();
+        }
+      });
+      _expandObserver.observe(shellEl, { attributes: true, attributeFilter: ['class'] });
+    }
 
     // Re-parent into overlay-root on fullscreen changes
     document.addEventListener('fullscreenchange', _rehomeDrawer);
@@ -271,7 +289,7 @@ window.BenTradeChat = (function () {
     if (_session) _showBubble();
   }
 
-  /** End chat: destroy session, remove bubble, fully close. */
+  /** End chat: destroy session, close drawer, keep bubble visible for next use. */
   function endChat() {
     _session = null;
     _inflight = false;
@@ -283,7 +301,9 @@ window.BenTradeChat = (function () {
       _backdropEl.classList.remove('bt-chat-backdrop--visible');
     }
     document.body.classList.remove('bt-chat-body-lock');
+    // Keep bubble visible — just remove session indicator
     if (_bubbleEl) _bubbleEl.removeAttribute('data-has-session');
+    _showBubble();
   }
 
   function isOpen() {
@@ -340,6 +360,7 @@ window.BenTradeChat = (function () {
   function _onBubbleClick() {
     if (_session) {
       // Reopen existing minimized session
+      _hideBubble();
       _showDrawer();
       _scrollToBottom();
       _inputEl.focus();
@@ -356,14 +377,25 @@ window.BenTradeChat = (function () {
   }
 
   function _showDrawer() {
+    _hideBubble();
     _drawerEl.classList.add('bt-chat-drawer--open');
     _backdropEl.classList.add('bt-chat-backdrop--visible');
     document.body.classList.add('bt-chat-body-lock');
   }
 
-  /** Bubble is always visible; these are no-ops kept for API compat. */
-  function _showBubble() { /* always visible */ }
-  function _hideBubble() { /* always visible */ }
+  /** Show the floating bubble (unless drawer is open or view is expanded). */
+  function _showBubble() {
+    if (!_bubbleEl) return;
+    if (isOpen()) return;
+    if (window.BenTradeExpand && window.BenTradeExpand.isExpanded()) return;
+    _bubbleEl.style.display = '';
+  }
+
+  /** Hide the floating bubble. */
+  function _hideBubble() {
+    if (!_bubbleEl) return;
+    _bubbleEl.style.display = 'none';
+  }
 
   // ══════════════════════════════════════════════════════════════════
   // Internal: Quick starters
@@ -745,9 +777,10 @@ window.BenTradeChat = (function () {
    *  Called automatically; also safe to call again after DOM changes. */
   function _initBubble() {
     _ensureDOM();
+    _showBubble();
   }
 
-  // Auto-init when DOM is ready so the bubble is always visible
+  // Auto-init when DOM is ready so the bubble is visible on app load
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', _initBubble);
   } else {

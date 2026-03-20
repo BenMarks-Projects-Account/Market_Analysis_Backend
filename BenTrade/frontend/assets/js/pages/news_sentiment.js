@@ -293,6 +293,12 @@ window.BenTradePages.initNewsSentiment = function initNewsSentiment(rootEl) {
       // ── Summary ──────────────────────────────────────────────
       var summary = model.summary || model.executive_summary;
       if (summary) {
+        if (typeof summary === 'string' && summary.charAt(0) === '{') {
+          try { var sp = JSON.parse(summary); summary = sp.summary || sp.executive_summary || summary; } catch(_e) {
+            var sm = summary.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+            if (sm && sm[1]) summary = sm[1];
+          }
+        }
         html += '<div class="ns-model-section ns-model-summary-text">' +
                 escapeHtml(summary) + '</div>';
       }

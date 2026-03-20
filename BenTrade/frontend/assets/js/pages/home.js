@@ -33,7 +33,6 @@ window.BenTradePages.initHome = function initHome(rootEl){
   const riskTilesEl = scope.querySelector('#homeRiskTiles');
   const macroTilesEl = scope.querySelector('#homeMacroTiles');
   const strategyPlaybookEl = scope.querySelector('#homeStrategyPlaybook');
-  const fullRefreshBtnEl = scope.querySelector('#homeFullRefreshBtn');
   const refreshBtnEl = scope.querySelector('#homeRefreshBtn');
   const refreshingBadgeEl = scope.querySelector('#homeRefreshingBadge');
   const lastUpdatedEl = scope.querySelector('#homeLastUpdated');
@@ -79,7 +78,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   /* Guard: only require elements that are actually in the new layout */
-  if(!regimeStripEl || !indexTilesEl || !spyChartEl || !sectorBarsEl || !riskTilesEl || !macroTilesEl || !fullRefreshBtnEl || !refreshBtnEl || !refreshingBadgeEl || !lastUpdatedEl || !vixChartEl || !errorEl){
+  if(!regimeStripEl || !indexTilesEl || !spyChartEl || !sectorBarsEl || !riskTilesEl || !macroTilesEl || !refreshBtnEl || !refreshingBadgeEl || !lastUpdatedEl || !vixChartEl || !errorEl){
     return;
   }
 
@@ -488,6 +487,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
           <summary class="regime-comparison-header">
             <span class="regime-comparison-title">Market Regime: Engine vs Model</span>
             <span class="regime-comparison-badge ${badgeCls}">${badgeText}</span>
+            <button class="regime-model-rerun-btn" type="button" title="Rerun model analysis">⟳ Rerun</button>
           </summary>
           <div class="regime-comparison-body">
             ${truncationHtml}
@@ -501,6 +501,15 @@ window.BenTradePages.initHome = function initHome(rootEl){
         </details>
       </div>`;
     regimeComparisonEl.style.display = 'block';
+    // Wire up rerun button
+    const rerunBtn = regimeComparisonEl.querySelector('.regime-model-rerun-btn');
+    if(rerunBtn){
+      rerunBtn.addEventListener('click', function(e){
+        e.preventDefault();
+        e.stopPropagation();
+        runRegimeModelAnalysis().catch(function(){});
+      });
+    }
     console.debug('[REGIME_COMPARISON] rendered', {
       disagreement_count: dc, deltas, isTruncated, allModelNull,
       model_summary: model,
@@ -620,11 +629,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
     return el.innerHTML;
   }
 
-  async function runRegimeModelAnalysis(){
+  async function runRegimeModelAnalysis({ _isRetry = false } = {}){
     if(_regimeModelInflight){
       return; // ignore duplicate clicks while in-flight
     }
-    if(!_latestRegimePayload){
+    if(!_latestRegimePayload || !_latestRegimePayload.regime_label){
       _renderRegimeModelError('No regime data available. Load the dashboard first.');
       return;
     }
@@ -641,6 +650,15 @@ window.BenTradePages.initHome = function initHome(rootEl){
     try{
       const result = await promise;
       if(_regimeModelInflight !== promise) return; // stale
+      // Detect all-null model labels — indicates cold-start / incomplete response
+      const ms = result?.model_summary;
+      const allModelNull = ms && !ms.risk_regime_label && !ms.trend_label && !ms.vol_regime_label && ms.confidence == null;
+      if(allModelNull && !_isRetry){
+        console.warn('[REGIME_MODEL] All model labels null on first attempt — auto-retrying in 4s');
+        _regimeModelInflight = null;
+        await new Promise(function(r){ setTimeout(r, 4000); });
+        return runRegimeModelAnalysis({ _isRetry: true });
+      }
       _latestRegimeModelResult = result;
       // Persist result into home cache for SPA re-mount restoration
       _persistRegimeModelResult(result);
@@ -659,7 +677,14 @@ window.BenTradePages.initHome = function initHome(rootEl){
   function _renderRegimeModelError(message){
     if(!regimeModelOutputEl) return;
     regimeModelOutputEl.style.display = 'block';
-    regimeModelOutputEl.innerHTML = `<div class="regime-model-error">${_esc(message)}</div>`;
+    regimeModelOutputEl.innerHTML = `<div class="regime-model-error">${_esc(message)}<button class="regime-model-rerun-btn" type="button" title="Retry model analysis" style="margin-left:10px;">⟳ Retry</button></div>`;
+    const retryBtn = regimeModelOutputEl.querySelector('.regime-model-rerun-btn');
+    if(retryBtn){
+      retryBtn.addEventListener('click', function(e){
+        e.preventDefault();
+        runRegimeModelAnalysis().catch(function(){});
+      });
+    }
   }
 
   /** Persist regime model analysis result into home cache snapshot. */
@@ -1470,8 +1495,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
       return { value, y: yFor(value) };
     });
 
-    const yGrid = yTicks.map((tick) => `<line x1="${margin.left}" y1="${tick.y.toFixed(2)}" x2="${(width - margin.right).toFixed(2)}" y2="${tick.y.toFixed(2)}" stroke="rgba(0,234,255,0.12)" stroke-width="1"></line>`).join('');
-    const yLabels = yTicks.map((tick) => `<text x="${(margin.left - 8).toFixed(2)}" y="${(tick.y + 3).toFixed(2)}" text-anchor="end" fill="rgba(215,251,255,0.85)" font-size="10">${Number(tick.value).toFixed(2)}</text>`).join('');
+    const yGrid = yTicks.map((tick) => `<line x1="${margin.left}" y1="${tick.y.toFixed(2)}" x2="${(width - margin.right).toFixed(2)}" y2="${tick.y.toFixed(2)}" stroke="rgba(0,234,255,0.12)" stroke-width="1" shape-rendering="crispEdges"></line>`).join('');
+    const yLabels = yTicks.map((tick) => `<text x="${(margin.left - 8).toFixed(2)}" y="${(tick.y + 3).toFixed(2)}" text-anchor="end" fill="rgba(215,251,255,0.85)" font-size="10" font-family="var(--font-body)">${Number(tick.value).toFixed(2)}</text>`).join('');
 
     /* ── X ticks (weekly, only when dates are available) ── */
     let xGrid = '';
@@ -1503,8 +1528,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
         const px = xPixel(cursor.getTime());
         if(px >= margin.left && px <= width - margin.right){
           const yBottom = height - margin.bottom;
-          tickLines.push(`<line x1="${px.toFixed(2)}" y1="${margin.top}" x2="${px.toFixed(2)}" y2="${yBottom.toFixed(2)}" stroke="rgba(0,234,255,0.08)" stroke-width="1"></line>`);
-          tickLabels.push(`<text x="${px.toFixed(2)}" y="${(yBottom + 14).toFixed(2)}" text-anchor="middle" fill="rgba(215,251,255,0.7)" font-size="9">${monthNames[cursor.getMonth()]} ${cursor.getDate()}</text>`);
+          tickLines.push(`<line x1="${px.toFixed(2)}" y1="${margin.top}" x2="${px.toFixed(2)}" y2="${yBottom.toFixed(2)}" stroke="rgba(0,234,255,0.08)" stroke-width="1" shape-rendering="crispEdges"></line>`);
+          tickLabels.push(`<text x="${px.toFixed(2)}" y="${(yBottom + 14).toFixed(2)}" text-anchor="middle" fill="rgba(215,251,255,0.7)" font-size="9" font-family="var(--font-body)">${monthNames[cursor.getMonth()]} ${cursor.getDate()}</text>`);
         }
         cursor.setDate(cursor.getDate() + 7 * weekStep);
       }
@@ -1516,11 +1541,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
     svgEl.innerHTML = `
       ${yGrid}
       ${xGrid}
-      <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${(height - margin.bottom).toFixed(2)}" stroke="rgba(0,234,255,0.45)" stroke-width="1"></line>
-      <line x1="${margin.left}" y1="${(height - margin.bottom).toFixed(2)}" x2="${(width - margin.right).toFixed(2)}" y2="${(height - margin.bottom).toFixed(2)}" stroke="rgba(0,234,255,0.45)" stroke-width="1"></line>
+      <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${(height - margin.bottom).toFixed(2)}" stroke="rgba(0,234,255,0.45)" stroke-width="1" shape-rendering="crispEdges"></line>
+      <line x1="${margin.left}" y1="${(height - margin.bottom).toFixed(2)}" x2="${(width - margin.right).toFixed(2)}" y2="${(height - margin.bottom).toFixed(2)}" stroke="rgba(0,234,255,0.45)" stroke-width="1" shape-rendering="crispEdges"></line>
       ${yLabels}
       ${xLabels}
-      <path d="${path}" fill="none" stroke="${options?.stroke || 'rgba(0,234,255,0.95)'}" stroke-width="3"></path>
+      <path d="${path}" fill="none" stroke="${options?.stroke || 'rgba(0,234,255,0.95)'}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></path>
     `;
   }
 
@@ -1610,8 +1635,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
           <stop offset="50%" stop-color="${gradMid}" stop-opacity="0.12"/>
           <stop offset="100%" stop-color="${gradBottom}" stop-opacity="0.02"/>
         </linearGradient>
-        <filter id="${glowId}" x="-8%" y="-8%" width="116%" height="116%">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="1.2" result="blur"/>
+        <filter id="${glowId}" x="-4%" y="-4%" width="108%" height="108%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="0.5" result="blur"/>
           <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
         </filter>
       </defs>`;
@@ -1621,8 +1646,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
       const v = max - span * r;
       return { v, y: yFor(v) };
     });
-    const yGrid = yTicks.map(t => `<line x1="${margin.left}" y1="${t.y.toFixed(1)}" x2="${(width - margin.right)}" y2="${t.y.toFixed(1)}" stroke="rgba(0,234,255,0.06)" stroke-width="0.5"/>`).join('');
-    const yLabels = yTicks.map(t => `<text x="${margin.left - 4}" y="${(t.y + 3).toFixed(1)}" text-anchor="end" fill="rgba(215,251,255,0.50)" font-size="7.5">${t.v.toFixed(1)}</text>`).join('');
+    const yGrid = yTicks.map(t => `<line x1="${margin.left}" y1="${t.y.toFixed(1)}" x2="${(width - margin.right)}" y2="${t.y.toFixed(1)}" stroke="rgba(0,234,255,0.06)" stroke-width="0.5" shape-rendering="crispEdges"/>`).join('');
+    const yLabels = yTicks.map(t => `<text x="${margin.left - 4}" y="${(t.y + 3).toFixed(1)}" text-anchor="end" fill="rgba(215,251,255,0.50)" font-size="7.5" font-family="var(--font-body)">${t.v.toFixed(1)}</text>`).join('');
 
     /* X labels + subtle day separators using INDEX-based positioning */
     let xLabels = '';
@@ -1639,8 +1664,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
           : `${months[d.getMonth()]} ${d.getFullYear().toString().slice(2)}`;
       };
       xLabels = `
-        <text x="${margin.left}" y="${yBase}" fill="rgba(215,251,255,0.45)" font-size="7.5">${fmtDate(first)}</text>
-        <text x="${(width - margin.right)}" y="${yBase}" text-anchor="end" fill="rgba(215,251,255,0.45)" font-size="7.5">${fmtDate(last)}</text>`;
+        <text x="${margin.left}" y="${yBase}" fill="rgba(215,251,255,0.45)" font-size="7.5" font-family="var(--font-body)">${fmtDate(first)}</text>
+        <text x="${(width - margin.right)}" y="${yBase}" text-anchor="end" fill="rgba(215,251,255,0.45)" font-size="7.5" font-family="var(--font-body)">${fmtDate(last)}</text>`;
 
       /* Day separators — very subtle, only at actual day transitions */
       if(daySpan > 1){
@@ -1651,7 +1676,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
           if(!seenDays.has(ds)){
             seenDays.add(ds);
             const x = xFor(di).toFixed(1);
-            dayGridLines += `<line x1="${x}" y1="${margin.top}" x2="${x}" y2="${(height - margin.bottom)}" stroke="rgba(0,234,255,0.05)" stroke-width="0.5"/>`;
+            dayGridLines += `<line x1="${x}" y1="${margin.top}" x2="${x}" y2="${(height - margin.bottom)}" stroke="rgba(0,234,255,0.05)" stroke-width="0.5" shape-rendering="crispEdges"/>`;
           }
         }
       }
@@ -1676,10 +1701,10 @@ window.BenTradePages.initHome = function initHome(rootEl){
       ${gradientDef}
       ${yGrid}
       ${dayGridLines}
-      <text x="${margin.left}" y="14" fill="rgba(215,251,255,0.9)" font-size="11" font-weight="600">${symbol}</text>
-      <text x="${width - margin.right}" y="14" text-anchor="end" fill="${returnColor}" font-size="10" font-weight="500">${returnStr}</text>
+      <text x="${margin.left}" y="14" fill="rgba(215,251,255,0.9)" font-size="11" font-weight="600" font-family="var(--font-body)">${symbol}</text>
+      <text x="${width - margin.right}" y="14" text-anchor="end" fill="${returnColor}" font-size="10" font-weight="500" font-family="var(--font-body)">${returnStr}</text>
       <path d="${fillPath}" fill="url(#${gradientId})" />
-      <path d="${linePath}" fill="none" stroke="${stroke}" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" filter="url(#${glowId})"/>
+      <path d="${linePath}" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" filter="url(#${glowId})"/>
       ${yLabels}
       ${xLabels}
     </svg>`;
@@ -2189,15 +2214,15 @@ window.BenTradePages.initHome = function initHome(rootEl){
     for(let i = 0; i <= gridCount; i++){
       const v = yMin + (ySpan * i / gridCount);
       const y = yFor(v);
-      yGrid += `<line x1="${m.left}" y1="${y.toFixed(1)}" x2="${(W - m.right)}" y2="${y.toFixed(1)}" stroke="rgba(0,234,255,0.08)" stroke-width="0.5"/>`;
-      yLabels += `<text x="${m.left - 4}" y="${(y + 3).toFixed(1)}" text-anchor="end" fill="rgba(215,251,255,0.55)" font-size="8">${v.toFixed(1)}%</text>`;
+      yGrid += `<line x1="${m.left}" y1="${y.toFixed(1)}" x2="${(W - m.right)}" y2="${y.toFixed(1)}" stroke="rgba(0,234,255,0.08)" stroke-width="0.5" shape-rendering="crispEdges"/>`;
+      yLabels += `<text x="${m.left - 4}" y="${(y + 3).toFixed(1)}" text-anchor="end" fill="rgba(215,251,255,0.55)" font-size="8" font-family="var(--font-body)">${v.toFixed(1)}%</text>`;
     }
 
     // Data point dots + labels
     const dots = pts.map((p, i) =>
       `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="${strokeColor}" stroke="rgba(0,0,0,0.4)" stroke-width="0.5"/>` +
-      `<text x="${p.x.toFixed(1)}" y="${(H - m.bottom + 13).toFixed(1)}" text-anchor="middle" fill="rgba(215,251,255,0.65)" font-size="8">${tenors[i].label}</text>` +
-      `<text x="${p.x.toFixed(1)}" y="${(p.y - 6).toFixed(1)}" text-anchor="middle" fill="rgba(215,251,255,0.80)" font-size="7.5" font-weight="600">${tenors[i].yield.toFixed(2)}%</text>`
+      `<text x="${p.x.toFixed(1)}" y="${(H - m.bottom + 13).toFixed(1)}" text-anchor="middle" fill="rgba(215,251,255,0.65)" font-size="8" font-family="var(--font-body)">${tenors[i].label}</text>` +
+      `<text x="${p.x.toFixed(1)}" y="${(p.y - 6).toFixed(1)}" text-anchor="middle" fill="rgba(215,251,255,0.80)" font-size="7.5" font-weight="600" font-family="var(--font-body)">${tenors[i].yield.toFixed(2)}%</text>`
     ).join('');
 
     const gradId = 'ycGrad_' + Math.random().toString(36).slice(2, 6);
@@ -2211,8 +2236,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
           </linearGradient>
         </defs>
         ${yGrid}
-        <text x="${m.left}" y="14" fill="rgba(215,251,255,0.9)" font-size="11" font-weight="600">Yield Curve</text>
-        <text x="${W - m.right}" y="14" text-anchor="end" fill="${strokeColor}" font-size="9.5" font-weight="500">${shape}${spread !== null ? ' (' + (spread >= 0 ? '+' : '') + (spread * 100).toFixed(0) + 'bp ' + spreadLabel + ')' : ''}</text>
+        <text x="${m.left}" y="14" fill="rgba(215,251,255,0.9)" font-size="11" font-weight="600" font-family="var(--font-body)">Yield Curve</text>
+        <text x="${W - m.right}" y="14" text-anchor="end" fill="${strokeColor}" font-size="9.5" font-weight="500" font-family="var(--font-body)">${shape}${spread !== null ? ' (' + (spread >= 0 ? '+' : '') + (spread * 100).toFixed(0) + 'bp ' + spreadLabel + ')' : ''}</text>
         <path d="${fillPath}" fill="url(#${gradId})" />
         <path d="${linePath}" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
         ${dots}
@@ -2280,15 +2305,24 @@ window.BenTradePages.initHome = function initHome(rootEl){
             text = parts.length ? parts.join(' ') : '';
           }
         }
-      }catch(_e){}
+      }catch(_e){
+        // JSON.parse failed — try regex extraction from malformed JSON
+        var summaryMatch = text.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        if(summaryMatch && summaryMatch[1]){
+          text = summaryMatch[1].trim();
+        } else {
+          // Can't extract anything useful — show a clean message
+          text = 'Model analysis completed — re-run recommended for full display.';
+        }
+      }
     }
     // Strip markdown heading markers
     text = text.replace(/^#{1,6}\s+/gm, '');
     // Strip markdown bold/italic/code
     text = text.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1');
     text = text.replace(/`([^`]+)`/g, '$1');
-    // Strip any remaining raw JSON-like blocks (multiline { } or [ ])
-    text = text.replace(/\{[^}]{10,}\}/g, '');
+    // Strip any remaining raw JSON-like blocks — use greedy nested brace matching
+    text = text.replace(/\{(?:[^{}]|\{[^{}]*\})*\}/g, '');
     text = text.replace(/\[[^\]]{10,}\]/g, '');
     // Collapse whitespace
     text = text.replace(/\s+/g, ' ').trim();
@@ -2310,7 +2344,14 @@ window.BenTradePages.initHome = function initHome(rootEl){
         var val = Number(parsed.score);
         if(!isNaN(val) && val >= 0 && val <= 100) return val;
       }
-    }catch(_e){}
+    }catch(_e){
+      // JSON.parse failed — try regex extraction from malformed JSON
+      var scoreMatch = trimmed.match(/"score"\s*:\s*([\d.]+)/);
+      if(scoreMatch){
+        var val = Number(scoreMatch[1]);
+        if(!isNaN(val) && val >= 0 && val <= 100) return val;
+      }
+    }
     return null;
   }
 
@@ -3331,8 +3372,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
     var yLabels = '';
     for(var t = 0; t < yTicks.length; t++){
       var yy = yFor(yTicks[t]);
-      yGrid += '<line x1="' + margin.left + '" y1="' + yy.toFixed(1) + '" x2="' + (width - margin.right) + '" y2="' + yy.toFixed(1) + '" stroke="rgba(0,234,255,0.10)" stroke-width="1"></line>';
-      yLabels += '<text x="' + (margin.left - 8) + '" y="' + (yy + 3).toFixed(1) + '" text-anchor="end" fill="rgba(215,251,255,0.7)" font-size="10">' + yTicks[t] + '</text>';
+      yGrid += '<line x1="' + margin.left + '" y1="' + yy.toFixed(1) + '" x2="' + (width - margin.right) + '" y2="' + yy.toFixed(1) + '" stroke="rgba(0,234,255,0.10)" stroke-width="1" shape-rendering="crispEdges"></line>';
+      yLabels += '<text x="' + (margin.left - 8) + '" y="' + (yy + 3).toFixed(1) + '" text-anchor="end" fill="rgba(215,251,255,0.7)" font-size="10" font-family="var(--font-body)">' + yTicks[t] + '</text>';
     }
 
     // X-axis date labels (daily ticks, skip to every 2 days if > 10)
@@ -3350,8 +3391,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
         var px = xFor(cursor.getTime());
         if(px >= margin.left && px <= width - margin.right){
           var yBottom = height - margin.bottom;
-          xGrid += '<line x1="' + px.toFixed(1) + '" y1="' + margin.top + '" x2="' + px.toFixed(1) + '" y2="' + yBottom.toFixed(1) + '" stroke="rgba(0,234,255,0.06)" stroke-width="1"></line>';
-          xLabels += '<text x="' + px.toFixed(1) + '" y="' + (yBottom + 14).toFixed(1) + '" text-anchor="middle" fill="rgba(215,251,255,0.55)" font-size="9">' + monthNames[cursor.getMonth()] + ' ' + cursor.getDate() + '</text>';
+          xGrid += '<line x1="' + px.toFixed(1) + '" y1="' + margin.top + '" x2="' + px.toFixed(1) + '" y2="' + yBottom.toFixed(1) + '" stroke="rgba(0,234,255,0.06)" stroke-width="1" shape-rendering="crispEdges"></line>';
+          xLabels += '<text x="' + px.toFixed(1) + '" y="' + (yBottom + 14).toFixed(1) + '" text-anchor="middle" fill="rgba(215,251,255,0.55)" font-size="9" font-family="var(--font-body)">' + monthNames[cursor.getMonth()] + ' ' + cursor.getDate() + '</text>';
         }
       }
       cursor = new Date(cursor.getTime() + dayMs);
@@ -3377,8 +3418,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
     }
 
     // Axes
-    var axes = '<line x1="' + margin.left + '" y1="' + margin.top + '" x2="' + margin.left + '" y2="' + (height - margin.bottom) + '" stroke="rgba(0,234,255,0.35)" stroke-width="1"></line>'
-             + '<line x1="' + margin.left + '" y1="' + (height - margin.bottom) + '" x2="' + (width - margin.right) + '" y2="' + (height - margin.bottom) + '" stroke="rgba(0,234,255,0.35)" stroke-width="1"></line>';
+    var axes = '<line x1="' + margin.left + '" y1="' + margin.top + '" x2="' + margin.left + '" y2="' + (height - margin.bottom) + '" stroke="rgba(0,234,255,0.35)" stroke-width="1" shape-rendering="crispEdges"></line>'
+             + '<line x1="' + margin.left + '" y1="' + (height - margin.bottom) + '" x2="' + (width - margin.right) + '" y2="' + (height - margin.bottom) + '" stroke="rgba(0,234,255,0.35)" stroke-width="1" shape-rendering="crispEdges"></line>';
 
     mpHistorySvgEl.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
 
@@ -3418,9 +3459,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
       var mx = xFor(m.ts);
       if(mx < margin.left || mx > width - margin.right) continue;
       var mColor = POSTURE_COLORS[m.stock] || 'rgba(215,251,255,0.3)';
-      posturesSvg += '<line x1="' + mx.toFixed(1) + '" y1="' + margin.top + '" x2="' + mx.toFixed(1) + '" y2="' + (height - margin.bottom) + '" stroke="' + mColor + '" stroke-width="1" stroke-dasharray="4,3" opacity="0.7"></line>';
+      posturesSvg += '<line x1="' + mx.toFixed(1) + '" y1="' + margin.top + '" x2="' + mx.toFixed(1) + '" y2="' + (height - margin.bottom) + '" stroke="' + mColor + '" stroke-width="1" stroke-dasharray="4,3" opacity="0.7" shape-rendering="crispEdges"></line>';
       // Small posture label at top
-      posturesSvg += '<text x="' + (mx + 3).toFixed(1) + '" y="' + (margin.top + 10) + '" fill="' + mColor + '" font-size="8" font-family="Inter,sans-serif" letter-spacing="0.03em">' + m.stock.charAt(0).toUpperCase() + m.stock.slice(1) + '</text>';
+      posturesSvg += '<text x="' + (mx + 3).toFixed(1) + '" y="' + (margin.top + 10) + '" fill="' + mColor + '" font-size="8" letter-spacing="0.03em" font-family="var(--font-body)">' + m.stock.charAt(0).toUpperCase() + m.stock.slice(1) + '</text>';
     }
 
     mpHistorySvgEl.innerHTML = bandsSvg + yGrid + xGrid + axes + yLabels + xLabels + posturesSvg + paths;
@@ -3591,11 +3632,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     stopRequested: false,
     runId: 0,
   };
-  const fullAppRefreshState = {
-    isRunning: false,
-    stopRequested: false,
-    runId: 0,
-  };
+
 
   function renderQueueLog(){
     if(!queueLogEl) return;
@@ -3691,282 +3728,6 @@ window.BenTradePages.initHome = function initHome(rootEl){
       data.sessionStats = window.BenTradeSessionStatsStore?.getState?.() || data.sessionStats || { total_candidates: 0, accepted_trades: 0, by_module: {} };
       cacheStore.setSnapshot({ ...snap, data });
     }catch(_err){
-    }
-  }
-
-  function buildFullAppRefreshSteps(){
-    const steps = [];
-
-    /* ── Step 0: Home Dashboard data first (regime, playbook, SPY, VIX, sectors, risk) ── */
-    steps.push({
-      id: 'home_dashboard',
-      label: 'Home Dashboard data',
-      provider: 'internal',
-      endpoint: 'homeCache.refreshCore',
-      timeoutMs: 60000,
-      critical: true,
-      optional: false,
-      fn: () => runLoadSequence({ force: true, showOverlay: false, homeOnly: true }),
-    });
-
-    steps.push({
-      id: 'broker_positions',
-      label: 'Broker sync: Positions',
-      provider: 'tradier',
-      endpoint: '/api/trading/positions',
-      timeoutMs: 20000,
-      critical: false,
-      optional: true,
-      fn: () => api.getTradingPositions(),
-      afterSuccess: async () => {
-        await api.refreshActiveTrades().catch(() => {});
-      },
-    });
-
-    steps.push({
-      id: 'broker_orders',
-      label: 'Broker sync: Open orders',
-      provider: 'tradier',
-      endpoint: '/api/trading/orders/open',
-      timeoutMs: 20000,
-      critical: false,
-      optional: true,
-      fn: () => api.getTradingOpenOrders(),
-    });
-
-    steps.push({
-      id: 'broker_account',
-      label: 'Broker sync: Account',
-      provider: 'tradier',
-      endpoint: '/api/trading/account',
-      timeoutMs: 20000,
-      critical: false,
-      optional: true,
-      fn: () => api.getTradingAccount(),
-    });
-
-    /* ── Scanner Suite (replaces individual stock + strategy steps) ── */
-    steps.push({
-      id: 'scanner_suite',
-      label: 'Scanner Suite (all scanners)',
-      provider: 'internal',
-      endpoint: 'orchestrator',
-      timeoutMs: 300000,
-      critical: true,
-      optional: false,
-      fn: () => {
-        const orchestrator = window.BenTradeScannerOrchestrator;
-        if(!orchestrator) return Promise.reject(new Error('Scanner orchestrator unavailable'));
-        const currentLevel = String(scanPresetEl?.value || 'balanced');
-        return orchestrator.runScannerSuite({
-          filterLevel: currentLevel,
-          logFn: pushLog,
-          onStepComplete: ({ label, ok, tradeCount }) => {
-            if(overlay?.isOpen?.()){
-              overlay.setStatus(`Full App Refresh • Scanners • ${label}${ok ? ` (${tradeCount})` : ' failed'}`);
-            }
-          },
-        });
-      },
-      afterSuccess: async () => {
-        updateHomeSessionSnapshot();
-      },
-    });
-
-    steps.push({
-      id: 'regime_refresh',
-      label: 'Regime refresh',
-      provider: 'internal',
-      endpoint: '/api/regime',
-      timeoutMs: 15000,
-      critical: false,
-      optional: false,
-      fn: () => api.getRegime(),
-    });
-
-    steps.push({
-      id: 'signals_refresh',
-      label: 'Signals refresh',
-      provider: 'internal',
-      endpoint: '/api/signals',
-      timeoutMs: 15000,
-      critical: false,
-      optional: true,
-      fn: () => api.getSignals('SPY', '6mo'),
-    });
-
-    steps.push({
-      id: 'source_health_refresh',
-      label: 'Source health refresh',
-      provider: 'internal',
-      endpoint: '/api/health/sources',
-      timeoutMs: 12000,
-      critical: false,
-      optional: false,
-      fn: () => window.BenTradeSourceHealthStore?.fetchSourceHealth?.({ force: true }) || Promise.resolve({}),
-    });
-
-    return steps;
-  }
-
-  async function runFullAppRefresh(){
-    if(fullAppRefreshState.isRunning) return;
-    const limiter = window.BenTradeRateLimiter?.create?.({
-      minDelayMs: 750,
-      maxRetries: 3,
-      backoffBaseMs: 2000,
-      backoffCapMs: 30000,
-    });
-    if(!limiter){
-      setScanError('Rate limiter unavailable');
-      return;
-    }
-
-    const steps = buildFullAppRefreshSteps();
-    const total = steps.length;
-    const runId = ++fullAppRefreshState.runId;
-    let completed = 0;
-    let warnings = 0;
-    let fatalFailure = null;
-
-    fullAppRefreshState.isRunning = true;
-    fullAppRefreshState.stopRequested = false;
-    fullRefreshBtnEl.disabled = true;
-    setScanError('');
-    setScanStatus('');
-    pushLog('Full App Refresh started');
-
-    // Only show overlay on first session load when no cached data exists.
-    // After initial load, refresh runs in background with inline indicator.
-    const shouldOverlay = !cacheStore.isUsable?.() && overlay;
-
-    if(shouldOverlay){
-      overlay.open({
-        status: `Full App Refresh • 0/${total}`,
-        logs: logHistory,
-        cancelLabel: 'Stop',
-        showRetry: false,
-        onCancel: () => {
-          fullAppRefreshState.stopRequested = true;
-          overlay.setStatus('Stopping Full App Refresh...');
-          pushLog('Full App Refresh stop requested');
-        },
-        onRetry: null,
-      });
-    } else {
-      // Background mode: inline spinner + refreshing badge
-      fullRefreshBtnEl.classList.add('btn-refreshing');
-      fullRefreshBtnEl.innerHTML = '<span class="btn-spinner"></span>Full Refresh\u2026';
-      setRefreshingBadge(true);
-    }
-
-    try{
-      for(let i = 0; i < steps.length; i += 1){
-        const step = steps[i];
-        if(runId !== fullAppRefreshState.runId || fullAppRefreshState.stopRequested){
-          break;
-        }
-
-        const stepIndex = i + 1;
-        const startText = `Starting: ${step.label}`;
-        pushLog(startText);
-        if(overlay?.isOpen?.()){
-          overlay.setStatus(`Full App Refresh • ${completed}/${total} • ${step.label}`);
-        }
-
-        try{
-          const response = await limiter.runStep({
-            provider: step.provider,
-            label: step.label,
-            fn: () => withTimeout(Promise.resolve(step.fn()), step.timeoutMs, step.label),
-          });
-
-          if(runId !== fullAppRefreshState.runId || fullAppRefreshState.stopRequested){
-            break;
-          }
-
-          const value = response?.value;
-          if(value && typeof value === 'object' && value.ok === false){
-            const detail = readErrorMessageFromPayload(value) || 'n/a';
-            const nonFatalText = `Broker sync failed (non-fatal): ${step.label} endpoint=${step.endpoint || 'n/a'} detail=${detail}`;
-            pushLog(nonFatalText);
-            warnings += 1;
-            continue;
-          }
-
-          pushLog(`Success: ${step.label}`);
-          completed += 1;
-
-          if(typeof step.afterSuccess === 'function'){
-            await step.afterSuccess(value);
-          }
-
-          if(overlay?.isOpen?.()){
-            overlay.setStatus(`Full App Refresh • ${completed}/${total} • Step ${stepIndex} complete`);
-          }
-        }catch(err){
-          if(isNotImplementedError(err) && step.optional){
-            warnings += 1;
-            pushLog(`Not implemented: ${step.label}`);
-            continue;
-          }
-
-          const parsed = describeRefreshError(err, step);
-          const failLine = `Failed: ${step.label} (${parsed.status}) endpoint=${parsed.endpoint} detail=${parsed.detail}`;
-          pushLog(failLine);
-          if(parsed.bodySnippet){
-            pushLog(`Body: ${parsed.bodySnippet}`);
-          }
-
-          if(step.optional){
-            if(String(step.id || '').startsWith('broker_')){
-              pushLog(`Broker sync failed (non-fatal): ${step.label}`);
-            }
-            warnings += 1;
-            continue;
-          }
-
-          if(step.critical){
-            fatalFailure = { label: step.label, detail: parsed.detail };
-            break;
-          }
-          warnings += 1;
-        }
-      }
-
-      if(runId !== fullAppRefreshState.runId){
-        return;
-      }
-
-      if(fullAppRefreshState.stopRequested){
-        setScanStatus('Full App Refresh stopped');
-        pushLog('Full App Refresh stopped');
-      }else if(fatalFailure){
-        setScanError(`Full App Refresh failed at ${fatalFailure.label}: ${fatalFailure.detail}`);
-        setScanStatus('Full App Refresh stopped on critical failure');
-      }else{
-        await runLoadSequence({ force: true, showOverlay: false, homeOnly: false, reason: 'full_app_refresh' }).catch(() => {});
-        setScanStatus(`Full App Refresh complete${warnings ? ` (${warnings} warnings)` : ''} • ${new Date().toLocaleTimeString()}`);
-        pushLog('Full App Refresh complete');
-        updateHomeScanCacheUI();
-      }
-    }finally{
-      if(runId === fullAppRefreshState.runId){
-        fullAppRefreshState.isRunning = false;
-        fullAppRefreshState.stopRequested = false;
-        fullRefreshBtnEl.disabled = false;
-        fullRefreshBtnEl.classList.remove('btn-refreshing');
-        fullRefreshBtnEl.textContent = 'Full App Refresh';
-        setRefreshingBadge(false);
-      }
-      if(overlay?.isOpen?.()){
-        overlay.setStatus('Full App Refresh finished');
-        window.setTimeout(() => {
-          if(overlay?.isOpen?.()){
-            overlay.close();
-          }
-        }, 1200);
-      }
     }
   }
 
@@ -4326,12 +4087,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     }
   });
 
-  fullRefreshBtnEl.addEventListener('click', () => {
-    runFullAppRefresh().catch((err) => {
-      setScanError(String(err?.message || err || 'Full App Refresh failed'));
-      setScanStatus('');
-    });
-  });
+
 
   if(runQueueBtnEl){
     runQueueBtnEl.addEventListener('click', () => {
@@ -4358,9 +4114,6 @@ window.BenTradePages.initHome = function initHome(rootEl){
   updateHomeScanCacheUI();
 
   return function cleanupHome(){
-    fullAppRefreshState.stopRequested = true;
-    fullAppRefreshState.isRunning = false;
-    fullAppRefreshState.runId += 1;
     queueState.stopRequested = true;
     queueState.isRunning = false;
     queueState.runId += 1;

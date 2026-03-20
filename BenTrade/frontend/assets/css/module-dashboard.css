@@ -7,105 +7,232 @@
 /* ── Page Layout ──────────────────────────────────────────────────────────── */
 .mod-page { width: 100%; }
 
-/* ── Module Banner (sticky — matches Home topbar) ─────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   Module Banner — Premium Dashboard Section Header
+   Layered dark-glass surface with left accent rail, compact chips,
+   and integrated action controls. Intentionally separate from the
+   global top banner (.titlebar).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 .mod-banner {
   position: sticky;
   top: 0;
   z-index: 120;
   display: flex;
-  align-items: stretch;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 20px 13px;
-  margin-bottom: 14px;
+  align-items: center;
+  gap: 0;
+  padding: 0;
+  margin-bottom: 12px;
   background:
-    linear-gradient(180deg, rgba(222,240,255,0.08), rgba(222,240,255,0.0) 20%),
-    linear-gradient(180deg, rgba(10,14,22,0.96), rgba(6,10,16,0.98));
-  backdrop-filter: blur(10px);
-  border: none;
-  border-bottom: 1px solid rgba(126,170,200,0.34);
+    linear-gradient(180deg,
+      rgba(18,24,34,0.98) 0%,
+      rgba(10,14,22,0.99) 100%);
+  border: 1px solid rgba(80,120,150,0.18);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
   overflow: hidden;
   box-shadow:
-    0 8px 20px rgba(0,0,0,0.46),
-    inset 0 1px 0 rgba(226,242,255,0.16);
-}
-/* Pseudo-elements removed — clean Home-style banner */
-.mod-banner::before,
-.mod-banner::after {
-  display: none;
+    0 4px 16px rgba(0,0,0,0.50),
+    inset 0 1px 0 rgba(180,220,245,0.06);
 }
 
-.mod-banner-left {
+/* Top sheen — faint highlight across the top edge */
+.mod-banner::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(0,234,255,0.12) 30%,
+    rgba(0,234,255,0.18) 50%,
+    rgba(0,234,255,0.12) 70%,
+    transparent 100%);
+  z-index: 1;
+}
+
+/* Faint radial glow near left title area */
+.mod-banner::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 280px; height: 100%;
+  background: radial-gradient(ellipse 180% 120% at 0% 50%,
+    rgba(0,234,255,0.03) 0%,
+    transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Left accent rail ─────────────────────────────────────────────────── */
+.mod-banner__rail {
+  width: 3px;
+  align-self: stretch;
+  flex-shrink: 0;
+  background: linear-gradient(180deg,
+    rgba(0,234,255,0.60) 0%,
+    rgba(0,234,255,0.20) 100%);
+  box-shadow: 0 0 8px rgba(0,234,255,0.15);
+}
+
+/* ── Left content area ────────────────────────────────────────────────── */
+.mod-banner__left {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 3px;
+  gap: 1px;
   min-width: 0;
   flex: 1;
-  padding-left: 10px;
+  padding: 8px 16px 8px 12px;
+  position: relative;
+  z-index: 1;
 }
 
-.mod-banner-breadcrumb {
+.mod-banner__eyebrow {
   font-family: var(--font-body);
   font-size: 8px;
   font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--muted, #93a7b6);
+  letter-spacing: 0.10em;
+  color: rgba(0,234,255,0.50);
   text-transform: uppercase;
-  opacity: 0.65;
+  line-height: 1;
 }
 
-.mod-banner-title {
+.mod-banner__title {
   font-family: var(--font-display);
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.05em;
-  color: var(--cyan, #00eaff);
+  letter-spacing: 0.04em;
+  color: rgba(215,251,255,0.94);
   text-transform: uppercase;
-  line-height: 1.2;
+  line-height: 1.25;
 }
 
-.mod-banner-subtitle {
-  font-size: 12px;
-  color: rgba(170,210,224,0.72);
-  line-height: 1.4;
-  max-width: 580px;
-  margin-top: 1px;
+.mod-banner__sub {
+  font-size: 10.5px;
+  color: rgba(147,167,182,0.72);
+  line-height: 1.35;
+  max-width: 520px;
 }
 
-.mod-banner-right {
+/* ── Right action cluster ─────────────────────────────────────────────── */
+.mod-banner__actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   flex-shrink: 0;
+  padding: 8px 12px 8px 0;
+  position: relative;
+  z-index: 1;
 }
 
-.mod-banner-tag {
+/* ── Chips — compact premium tag system ───────────────────────────────── */
+.mod-banner__chip {
   font-family: var(--font-body);
   font-size: 8px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  padding: 3px 10px;
-  border-radius: 4px;
-  color: var(--cyan, #00eaff);
-  background: rgba(0,234,255,0.06);
-  border: 1px solid rgba(0,234,255,0.16);
+  padding: 3px 8px;
+  border-radius: 3px;
+  color: rgba(147,167,182,0.85);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(100,140,170,0.16);
   white-space: nowrap;
+  line-height: 1;
 }
 
-/* ── Banner Accent Variants (neutralized — all use unified Home style) ──── */
-/* All accent classes kept for backward compat — no visual difference */
-/* (removed per-module accent overrides — unified Home-style banner) */
+/* Live status chip */
+.mod-banner__chip--live {
+  color: rgba(0,230,118,0.85);
+  background: rgba(0,230,118,0.06);
+  border-color: rgba(0,230,118,0.18);
+}
 
-/* Responsive: stack on narrow viewports */
+/* Timestamp chip */
+.mod-banner__chip--time {
+  color: rgba(147,167,182,0.65);
+  border-color: rgba(100,140,170,0.10);
+  background: transparent;
+  font-weight: 600;
+}
+
+/* ── Refresh / action button ──────────────────────────────────────────── */
+.mod-banner__btn {
+  font-family: var(--font-body);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: rgba(0,234,255,0.88);
+  background:
+    linear-gradient(180deg, rgba(20,28,40,0.95), rgba(12,16,24,0.98));
+  border: 1px solid rgba(0,234,255,0.22);
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  box-shadow:
+    0 2px 8px rgba(0,0,0,0.32),
+    inset 0 1px 0 rgba(200,230,245,0.06);
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.mod-banner__btn:hover {
+  border-color: rgba(0,234,255,0.45);
+  box-shadow:
+    0 0 12px rgba(0,234,255,0.08),
+    0 4px 12px rgba(0,0,0,0.38),
+    inset 0 1px 0 rgba(220,240,255,0.10);
+  transform: translateY(-1px);
+}
+
+.mod-banner__btn:active {
+  transform: translateY(0px);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.30);
+}
+
+.mod-banner__btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0,234,255,0.25), 0 2px 8px rgba(0,0,0,0.32);
+}
+
+.mod-banner__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ── Bottom accent line — segmented signal bar ────────────────────────── */
+.mod-banner > .mod-banner__rail ~ .mod-banner__left::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: -16px;
+  height: 1px;
+  background: linear-gradient(90deg,
+    rgba(0,234,255,0.14) 0%,
+    rgba(0,234,255,0.06) 60%,
+    transparent 100%);
+}
+
+/* ── Backward compat aliases for JS querySelector ─────────────────────── */
+/* Keep old class names working for any JS that hasn't been updated */
+.mod-banner-left   { /* alias: .mod-banner__left */ }
+.mod-banner-right  { /* alias: .mod-banner__actions */ }
+.mod-banner-tag    { /* alias: .mod-banner__chip */ }
+
+/* ── Responsive: stack on narrow viewports ────────────────────────────── */
 @media (max-width: 600px) {
   .mod-banner {
-    flex-direction: column;
-    gap: 8px;
-    padding: 12px 16px;
+    flex-wrap: wrap;
   }
-  .mod-banner-right { justify-content: flex-start; }
+  .mod-banner__left {
+    padding: 8px 12px 6px;
+  }
+  .mod-banner__actions {
+    padding: 4px 12px 8px;
+    flex-wrap: wrap;
+  }
 }
 
 /* ── Legacy page-header compat (still used for meta row below banner) ─────── */
@@ -196,6 +323,11 @@
   border-radius: 12px;
   overflow: hidden;
   position: relative;
+  box-shadow:
+    var(--elevation-2),
+    var(--card-edge-top),
+    var(--card-edge-bottom),
+    var(--card-edge-glow);
 }
 .mod-card::before {
   content: '';
@@ -657,15 +789,18 @@
   font-weight: 600;
   fill: rgba(170,210,224,0.5);
   letter-spacing: 0.04em;
+  text-rendering: optimizeLegibility;
 }
 .mod-trend-chart .spark-axis {
   stroke: rgba(0,234,255,0.06);
   stroke-width: 1;
+  shape-rendering: crispEdges;
 }
 .mod-trend-chart .spark-val {
   font-family: var(--font-body);
   font-size: 7px;
   fill: rgba(170,210,224,0.4);
+  text-rendering: optimizeLegibility;
 }
 
 /* ── Severity Chips ───────────────────────────────────────────────────────── */

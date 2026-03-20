@@ -102,11 +102,16 @@ async def _refresh_ticker_snap(tradier) -> dict:
     """Fetch quotes for the full universe in batches and compute derived fields.
 
     For each symbol the snapshot stores:
-      last, open, change, change_pct
+      last, prevclose, open, change, change_pct
     If the Tradier-native change/change_percentage fields are null or zero
     but last and prevclose are available, change is derived:
       change      = last - prevclose
       change_pct  = (change / prevclose) * 100
+
+    Extended-hours fallback:
+      When the regular session hasn't opened (open is null) and change is
+      still zero, bid/ask midpoint vs prevclose is used so the ticker
+      shows real-time extended-hours movement instead of flat zeros.
     """
     all_quotes: dict[str, dict] = {}
 
@@ -138,8 +143,23 @@ async def _refresh_ticker_snap(tradier) -> dict:
                     change = round(derived, 4)
                     change_pct = round((derived / prevclose) * 100, 4)
 
+            # Extended-hours fallback: when session hasn't opened (open is
+            # null) and change is still zero, use bid/ask midpoint vs
+            # prevclose to show after-hours / pre-market movement.
+            if (change is None or change == 0) and opn is None and prevclose and prevclose != 0:
+                bid = _safe_float(q.get("bid"))
+                ask = _safe_float(q.get("ask"))
+                if bid and ask and bid > 0 and ask > 0:
+                    mid = round((bid + ask) / 2, 4)
+                    eh_derived = mid - prevclose
+                    if abs(eh_derived) > 0.005:
+                        last = mid
+                        change = round(eh_derived, 4)
+                        change_pct = round((eh_derived / prevclose) * 100, 4)
+
             all_quotes[sym] = {
                 "last": last,
+                "prevclose": prevclose,
                 "open": opn,
                 "change": change,
                 "change_pct": change_pct,
@@ -298,8 +318,22 @@ async def get_batch_quotes(
                 change = round(derived, 4)
                 change_pct = round((derived / prevclose) * 100, 4)
 
+        # Extended-hours fallback: bid/ask midpoint vs prevclose
+        opn_f = _safe_float(opn)
+        if (change is None or change == 0) and opn_f is None and prevclose and prevclose != 0:
+            bid = _safe_float(q.get("bid"))
+            ask = _safe_float(q.get("ask"))
+            if bid and ask and bid > 0 and ask > 0:
+                mid = round((bid + ask) / 2, 4)
+                eh_derived = mid - prevclose
+                if abs(eh_derived) > 0.005:
+                    last = mid
+                    change = round(eh_derived, 4)
+                    change_pct = round((eh_derived / prevclose) * 100, 4)
+
         out[sym] = {
             "last": last,
+            "prevclose": prevclose,
             "open": opn,
             "change": change,
             "change_pct": change_pct,

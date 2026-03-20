@@ -100,9 +100,9 @@ window.BenTradePages.initStrategyAnalytics = function initStrategyAnalytics(root
     }).join(' ');
 
     curveEl.innerHTML = `
-      <line x1="${margin.left}" y1="${margin.top + ph}" x2="${width - margin.right}" y2="${margin.top + ph}" stroke="rgba(0,234,255,0.35)"></line>
-      <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${margin.top + ph}" stroke="rgba(0,234,255,0.35)"></line>
-      <path d="${path}" fill="none" stroke="rgba(0,234,255,0.95)" stroke-width="3"></path>
+      <line x1="${margin.left}" y1="${margin.top + ph}" x2="${width - margin.right}" y2="${margin.top + ph}" stroke="rgba(0,234,255,0.35)" shape-rendering="crispEdges"></line>
+      <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${margin.top + ph}" stroke="rgba(0,234,255,0.35)" shape-rendering="crispEdges"></line>
+      <path d="${path}" fill="none" stroke="rgba(0,234,255,0.95)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></path>
     `;
   }
 

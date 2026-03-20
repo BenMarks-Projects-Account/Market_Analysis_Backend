@@ -387,32 +387,32 @@ window.BenTradePages.initStockAnalysis = function initStockAnalysis(rootEl){
     };
 
     const yGrid = yTicks.map((tick) => `
-      <line x1="${margin.left}" y1="${tick.y.toFixed(2)}" x2="${(width - margin.right).toFixed(2)}" y2="${tick.y.toFixed(2)}" stroke="rgba(0,234,255,0.12)" stroke-width="1"></line>
+      <line x1="${margin.left}" y1="${tick.y.toFixed(2)}" x2="${(width - margin.right).toFixed(2)}" y2="${tick.y.toFixed(2)}" stroke="rgba(0,234,255,0.12)" stroke-width="1" shape-rendering="crispEdges"></line>
     `).join('');
 
     const yLabels = yTicks.map((tick) => `
-      <text x="${(margin.left - 8).toFixed(2)}" y="${(tick.y + 3).toFixed(2)}" text-anchor="end" fill="rgba(215,251,255,0.85)" font-size="10">${Number(tick.value).toFixed(2)}</text>
+      <text x="${(margin.left - 8).toFixed(2)}" y="${(tick.y + 3).toFixed(2)}" text-anchor="end" fill="rgba(215,251,255,0.85)" font-size="10" font-family="var(--font-body)">${Number(tick.value).toFixed(2)}</text>
     `).join('');
 
     const xTickLines = xTicks.map((index) => {
       const x = xFor(index);
-      return `<line x1="${x.toFixed(2)}" y1="${margin.top}" x2="${x.toFixed(2)}" y2="${(height - margin.bottom).toFixed(2)}" stroke="rgba(0,234,255,0.08)" stroke-width="1"></line>`;
+      return `<line x1="${x.toFixed(2)}" y1="${margin.top}" x2="${x.toFixed(2)}" y2="${(height - margin.bottom).toFixed(2)}" stroke="rgba(0,234,255,0.08)" stroke-width="1" shape-rendering="crispEdges"></line>`;
     }).join('');
 
     const xLabels = xTicks.map((index) => {
       const x = xFor(index);
       const dateLabel = fmtDate(dateForIndex(index));
-      return `<text x="${x.toFixed(2)}" y="${(height - 10).toFixed(2)}" text-anchor="middle" fill="rgba(215,251,255,0.82)" font-size="10">${dateLabel}</text>`;
+      return `<text x="${x.toFixed(2)}" y="${(height - 10).toFixed(2)}" text-anchor="middle" fill="rgba(215,251,255,0.82)" font-size="10" font-family="var(--font-body)">${dateLabel}</text>`;
     }).join('');
 
     sparklineEl.innerHTML = `
       ${yGrid}
       ${xTickLines}
-      <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${(height - margin.bottom).toFixed(2)}" stroke="rgba(0,234,255,0.45)" stroke-width="1"></line>
-      <line x1="${margin.left}" y1="${(height - margin.bottom).toFixed(2)}" x2="${(width - margin.right).toFixed(2)}" y2="${(height - margin.bottom).toFixed(2)}" stroke="rgba(0,234,255,0.45)" stroke-width="1"></line>
+      <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${(height - margin.bottom).toFixed(2)}" stroke="rgba(0,234,255,0.45)" stroke-width="1" shape-rendering="crispEdges"></line>
+      <line x1="${margin.left}" y1="${(height - margin.bottom).toFixed(2)}" x2="${(width - margin.right).toFixed(2)}" y2="${(height - margin.bottom).toFixed(2)}" stroke="rgba(0,234,255,0.45)" stroke-width="1" shape-rendering="crispEdges"></line>
       ${yLabels}
       ${xLabels}
-      <path d="${path}" fill="none" stroke="rgba(0,234,255,0.95)" stroke-width="3"></path>
+      <path d="${path}" fill="none" stroke="rgba(0,234,255,0.95)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></path>
     `;
 
     const recent = points.slice(-10).map(value => Number(value).toFixed(2));

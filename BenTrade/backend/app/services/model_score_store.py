@@ -41,6 +41,7 @@ def sanitize_model_summary(raw: str | None) -> str | None:
     Rules:
     - None / empty → None
     - If the string is a JSON object, extract the "summary" field
+    - Uses json_repair pipeline for malformed JSON before falling back
     - Strip whitespace, collapse internal whitespace runs
     - Truncate to MAX_SUMMARY_LENGTH characters
     - Returns final-answer text only (no reasoning traces)
@@ -48,20 +49,33 @@ def sanitize_model_summary(raw: str | None) -> str | None:
     if not raw or not isinstance(raw, str):
         return None
     text = raw.strip()
-    # If the raw summary is a JSON object, extract the actual summary text
-    if text.startswith("{"):
+    # If the raw summary looks like JSON, try to extract the actual summary text
+    if text.startswith("{") or text.startswith("```"):
+        extracted_text = None
+        # First try standard json.loads
         try:
             parsed = json.loads(text)
             if isinstance(parsed, dict):
-                extracted = (
+                extracted_text = (
                     parsed.get("summary")
                     or parsed.get("executive_summary")
                     or parsed.get("description")
                 )
-                if isinstance(extracted, str) and extracted.strip():
-                    text = extracted.strip()
         except (json.JSONDecodeError, TypeError):
-            pass
+            # Fall back to json_repair for malformed JSON
+            try:
+                from common.json_repair import extract_and_repair_json
+                parsed, _method = extract_and_repair_json(text)
+                if isinstance(parsed, dict):
+                    extracted_text = (
+                        parsed.get("summary")
+                        or parsed.get("executive_summary")
+                        or parsed.get("description")
+                    )
+            except Exception:
+                pass
+        if isinstance(extracted_text, str) and extracted_text.strip():
+            text = extracted_text.strip()
     text = " ".join(text.split())  # collapse whitespace
     if not text:
         return None

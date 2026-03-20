@@ -338,6 +338,7 @@ async def model_analyze_regime(payload: dict, request: Request):
         model_output = analyze_regime(
             regime_data=regime_data,
             playbook_data=playbook_data if isinstance(playbook_data, dict) else None,
+            retries=1,  # one transport-level retry for cold-start resilience
         )
 
         # Diagnostic: surface finish_reason and field population to logs

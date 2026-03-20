@@ -33,6 +33,7 @@ logger = logging.getLogger("bentrade.contextual_chat")
 # Valid context types — extend this set when adding new consumers.
 VALID_CONTEXT_TYPES = frozenset({
     "market_regime",
+    "general_market",
     # Future: "market_picture", "trade_card", "scanner_candidate",
     #         "position_monitor", "stock_analysis", ...
 })
@@ -108,6 +109,17 @@ _CONTEXT_PROMPTS: dict[str, str] = {
         "- If model analysis (AI second opinion) data is present, you may "
         "reference agreement or disagreement with the engine."
     ),
+    "general_market": (
+        "\n\nCONTEXT: The user is asking general questions about markets, "
+        "options trading, volatility, strategy mechanics, or trade structure.\n\n"
+        "INSTRUCTIONS:\n"
+        "- Answer as a senior market technician and options analyst.\n"
+        "- Focus on probability-based, risk-defined options strategies "
+        "on index ETFs (SPY, QQQ, IWM, DIA).\n"
+        "- Be concise, actionable, and grounded in market fundamentals.\n"
+        "- If the user asks about current market conditions and no live data "
+        "is provided, note that you are answering from general knowledge."
+    ),
     # Future context types add their wrapper here.
 }
 
@@ -145,6 +157,14 @@ QUICK_STARTERS: dict[str, list[str]] = {
         "How should I size risk right now?",
         "What would flip this regime?",
         "Why is the tape narrow?",
+    ],
+    "general_market": [
+        "What is the market doing today?",
+        "Explain implied volatility",
+        "What are credit spreads?",
+        "How do I read an options chain?",
+        "What is theta decay?",
+        "Bull vs bear spread \u2014 when to use each?",
     ],
     # Future: "market_picture": [...], "trade_card": [...], etc.
 }

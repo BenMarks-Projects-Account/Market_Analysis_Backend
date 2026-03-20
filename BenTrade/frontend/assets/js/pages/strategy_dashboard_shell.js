@@ -796,7 +796,7 @@ window.BenTradeStrategyShell = (function(){
 
       // Trade key (always visible in header) + copy button
       const tradeKeyDisplay = model.tradeKey
-        ? `<span class="trade-key-wrap"><span class="trade-key-label" style="font-size:10px;color:rgba(230,251,255,0.5);font-family:monospace;word-break:break-all;">${escapeHtml(model.tradeKey)}</span>${tc.copyTradeKeyButton(model.tradeKey)}</span>`
+        ? `<span class="trade-key-wrap"><span class="trade-key-label">${escapeHtml(model.tradeKey)}</span>${tc.copyTradeKeyButton(model.tradeKey)}</span>`
         : '';
 
       /* 4. (Removed — mini summary metrics row no longer rendered) */

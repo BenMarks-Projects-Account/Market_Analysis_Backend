@@ -440,8 +440,15 @@ window.BenTradePages.initVolatilityOptions = function initVolatilityOptions(root
     if (modelScore) modelScore.style.color = scoreColor(model.score);
 
     if (modelSummary) {
+      var summaryText = model.summary || '';
+      if (summaryText.charAt(0) === '{') {
+        try { var sp = JSON.parse(summaryText); summaryText = sp.summary || sp.executive_summary || summaryText; } catch(_e) {
+          var sm = summaryText.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+          if (sm && sm[1]) summaryText = sm[1];
+        }
+      }
       var html = '<div style="font-size:12px;line-height:1.6;margin-bottom:10px;">' +
-        escapeHtml(model.summary || '') + '</div>';
+        escapeHtml(summaryText) + '</div>';
 
       html += '<div style="font-size:11px;opacity:0.7;margin-bottom:8px;">Confidence: ' +
         (model.confidence != null ? (model.confidence * 100).toFixed(0) + '%' : '—') + '</div>';

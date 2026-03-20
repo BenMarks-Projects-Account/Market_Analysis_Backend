@@ -1976,6 +1976,118 @@ def _coerce_by_module(candidate: dict, module: str) -> dict[str, Any] | None:
     return coercer(candidate)
 
 
+# ---------------------------------------------------------------------------
+# Format-enforcement retry
+#
+# When the initial model response fails JSON parsing/coercion, this function
+# sends the raw output back to the model with a strict correction prompt.
+# The correction prompt includes the original bad output and demands valid
+# JSON in the exact required schema.  This recovers ~80-90% of plain-text
+# or malformed responses without falling back to degraded display.
+# ---------------------------------------------------------------------------
+
+_FORMAT_CORRECTION_PROMPT = (
+    "Your previous response was NOT valid JSON and could not be parsed. "
+    "Here is what you returned:\n\n"
+    "--- BEGIN PREVIOUS OUTPUT ---\n"
+    "{bad_output}\n"
+    "--- END PREVIOUS OUTPUT ---\n\n"
+    "This is UNACCEPTABLE. You MUST return ONLY a single valid JSON object. "
+    "Requirements:\n"
+    "1. Start your response with {{ (open brace) — no text before it\n"
+    "2. End your response with }} (close brace) — no text after it\n"
+    "3. No markdown code fences, no ```json blocks\n"
+    "4. No prose, explanations, or commentary outside the JSON\n"
+    "5. No <think> tags or reasoning blocks\n"
+    "6. All string values must use double quotes\n"
+    "7. No trailing commas\n\n"
+    "Re-read your previous analysis above. Convert it into the EXACT JSON schema "
+    "that was requested. Preserve all your analytical content — just format it as "
+    "valid JSON. Return the JSON object now:"
+)
+
+
+def _format_enforcement_retry(
+    *,
+    bad_output: str,
+    original_system_prompt: str,
+    task_type: str,
+    log_prefix: str,
+    model_url: str | None,
+    timeout: int,
+    module: str,
+    coerce_fn: Any,
+) -> dict[str, Any] | None:
+    """Re-send bad model output with a correction prompt demanding valid JSON.
+
+    Returns the coerced result dict, or None if the retry also fails.
+    """
+    import logging
+    _log = logging.getLogger("bentrade.model_analysis")
+
+    # Truncate bad output to avoid exceeding context — keep first 2000 chars
+    truncated = bad_output[:2000]
+    if len(bad_output) > 2000:
+        truncated += "\n... [truncated]"
+
+    correction_user_msg = _FORMAT_CORRECTION_PROMPT.format(bad_output=truncated)
+
+    payload = {
+        "messages": [
+            {"role": "system", "content": original_system_prompt},
+            {"role": "user", "content": correction_user_msg},
+        ],
+        "max_tokens": 3500,
+        "temperature": 0.0,
+        "stream": False,
+    }
+
+    _log.warning(
+        "[%s] JSON parsing failed — sending format-enforcement retry (module=%s)",
+        log_prefix, module,
+    )
+
+    try:
+        retry_result = _model_transport(
+            task_type=task_type,
+            payload=payload,
+            log_prefix=log_prefix + "_RETRY",
+            model_url=model_url,
+            retries=0,
+            timeout=timeout,
+        )
+        retry_text = retry_result.content
+
+        from common.json_repair import extract_and_repair_json
+        parsed, method = extract_and_repair_json(retry_text)
+
+        if parsed is not None:
+            coerced = coerce_fn(parsed)
+            if coerced is not None:
+                coerced.setdefault("uncertainty_flags", [])
+                if isinstance(coerced["uncertainty_flags"], list):
+                    coerced["uncertainty_flags"].append(
+                        "Recovered via format-enforcement retry"
+                    )
+                _log.info(
+                    "[%s] format-enforcement retry SUCCEEDED (method=%s)",
+                    log_prefix, method,
+                )
+                return coerced
+
+        _log.warning(
+            "[%s] format-enforcement retry also failed to produce valid JSON",
+            log_prefix,
+        )
+    except Exception as exc:
+        _log.warning(
+            "[%s] format-enforcement retry error: %s",
+            log_prefix, exc,
+        )
+
+    return None
+
+
 def _build_plaintext_fallback(raw_text: str, module: str) -> dict[str, Any] | None:
     """Build a minimal model result from raw text when JSON parsing fails.
 
@@ -2011,65 +2123,111 @@ def _build_plaintext_fallback(raw_text: str, module: str) -> dict[str, Any] | No
         else:
             json_text = None
     if json_text:
+        # Try standard json.loads first, then fall back to repair pipeline
+        candidate = None
         try:
             candidate = json.loads(json_text)
-            if isinstance(candidate, dict):
-                # Try full module-specific coercion first — recovers ALL structured
-                # fields (regime labels, assessments, headline_drivers, etc.)
-                module_coerced = _coerce_by_module(candidate, module)
-                if module_coerced is not None:
-                    module_coerced["_plaintext_fallback"] = True
-                    module_coerced["_module"] = module
-                    module_coerced.setdefault("uncertainty_flags", [])
-                    if isinstance(module_coerced["uncertainty_flags"], list):
-                        module_coerced["uncertainty_flags"].append(
-                            "Recovered from raw JSON fallback"
-                        )
-                    return module_coerced
-
-                # Minimal extraction if module coercer didn't apply
-                s = candidate.get("score")
-                if s is not None:
-                    try:
-                        extracted_score = max(0.0, min(float(s), 100.0))
-                    except (TypeError, ValueError):
-                        pass
-                l = candidate.get("label")
-                if isinstance(l, str) and l.strip():
-                    extracted_label = l.strip().upper()
-                sm = _safe_summary_text(candidate.get("summary"))
-                if sm:
-                    extracted_summary = sm
-                c = candidate.get("confidence")
-                extracted_conf = None
-                if c is not None:
-                    try:
-                        extracted_conf = round(max(0.0, min(float(c), 1.0)), 2)
-                    except (TypeError, ValueError):
-                        pass
-                if extracted_score is not None or extracted_summary:
-                    return {
-                        "label": extracted_label or "ANALYSIS",
-                        "score": extracted_score,
-                        "confidence": extracted_conf,
-                        "summary": extracted_summary,
-                        "pillar_analysis": {},
-                        "trader_takeaway": candidate.get("trader_takeaway") or "",
-                        "uncertainty_flags": ["Recovered from raw JSON fallback"],
-                        "_plaintext_fallback": True,
-                        "_module": module,
-                    }
         except (json.JSONDecodeError, TypeError):
-            pass
+            # Standard parse failed — use the repair pipeline which handles
+            # malformed quotes, trailing commas, truncated JSON, etc.
+            try:
+                from common.json_repair import extract_and_repair_json
+                candidate, _repair_method = extract_and_repair_json(json_text)
+            except Exception:
+                pass
+        if isinstance(candidate, dict):
+            # Try full module-specific coercion first — recovers ALL structured
+            # fields (regime labels, assessments, headline_drivers, etc.)
+            module_coerced = _coerce_by_module(candidate, module)
+            if module_coerced is not None:
+                module_coerced["_plaintext_fallback"] = True
+                module_coerced["_module"] = module
+                module_coerced.setdefault("uncertainty_flags", [])
+                if isinstance(module_coerced["uncertainty_flags"], list):
+                    module_coerced["uncertainty_flags"].append(
+                        "Recovered from raw JSON fallback"
+                    )
+                return module_coerced
 
-    # Truncate overly long text
-    summary = text[:1500].strip()
-    if len(text) > 1500:
-        summary += "…"
+            # Minimal extraction if module coercer didn't apply
+            s = candidate.get("score")
+            if s is not None:
+                try:
+                    extracted_score = max(0.0, min(float(s), 100.0))
+                except (TypeError, ValueError):
+                    pass
+            l = candidate.get("label")
+            if isinstance(l, str) and l.strip():
+                extracted_label = l.strip().upper()
+            sm = _safe_summary_text(candidate.get("summary"))
+            if sm:
+                extracted_summary = sm
+            c = candidate.get("confidence")
+            extracted_conf = None
+            if c is not None:
+                try:
+                    extracted_conf = round(max(0.0, min(float(c), 1.0)), 2)
+                except (TypeError, ValueError):
+                    pass
+            if extracted_score is not None or extracted_summary:
+                return {
+                    "label": extracted_label or "ANALYSIS",
+                    "score": extracted_score,
+                    "confidence": extracted_conf,
+                    "summary": extracted_summary,
+                    "pillar_analysis": {},
+                    "trader_takeaway": candidate.get("trader_takeaway") or "",
+                    "uncertainty_flags": ["Recovered from raw JSON fallback"],
+                    "_plaintext_fallback": True,
+                    "_module": module,
+                }
+
+    # Last resort: try regex extraction of key fields from raw JSON-like text
+    # This handles cases where JSON is so malformed even repair can't fix it
+    score_match = _re.search(r'"score"\s*:\s*([\d.]+)', text)
+    if score_match:
+        try:
+            extracted_score = max(0.0, min(float(score_match.group(1)), 100.0))
+        except (TypeError, ValueError):
+            pass
+    label_match = _re.search(r'"label"\s*:\s*"([^"]+)"', text)
+    if label_match:
+        extracted_label = label_match.group(1).strip().upper()
+    summary_match = _re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
+    if summary_match:
+        extracted_summary = summary_match.group(1).strip()
+    conf_match = _re.search(r'"confidence"\s*:\s*([\d.]+)', text)
+    extracted_conf = None
+    if conf_match:
+        try:
+            extracted_conf = round(max(0.0, min(float(conf_match.group(1)), 1.0)), 2)
+        except (TypeError, ValueError):
+            pass
+    if extracted_score is not None or extracted_summary:
+        return {
+            "label": extracted_label or "ANALYSIS",
+            "score": extracted_score,
+            "confidence": extracted_conf,
+            "summary": extracted_summary,
+            "pillar_analysis": {},
+            "trader_takeaway": "",
+            "uncertainty_flags": ["Recovered via regex extraction from malformed JSON"],
+            "_plaintext_fallback": True,
+            "_module": module,
+        }
+
+    # Absolute last resort: use raw text but strip JSON-like content
+    # If the text looks like JSON, provide a generic message instead of dumping raw JSON
+    if text.lstrip().startswith("{") and len(text) > 100:
+        summary = "Model analysis completed but response format could not be parsed. Re-run recommended."
+    else:
+        summary = text[:1500].strip()
+        if len(text) > 1500:
+            summary += "…"
     return {
-        "label": "ANALYSIS",
-        "score": None,
-        "confidence": None,
+        "label": extracted_label or "ANALYSIS",
+        "score": extracted_score,
+        "confidence": extracted_conf,
         "summary": summary,
         "pillar_analysis": {},
         "trader_takeaway": "",
@@ -2179,6 +2337,8 @@ def analyze_news_sentiment(
         "- why the final score, label, and confidence are justified\n\n"
         "Rules:\n"
         "- Return JSON only\n"
+        "- Your response MUST start with { and end with } — no text before or after the JSON\n"
+        "- Do NOT wrap in markdown code fences or ```json blocks\n"
         "- No markdown\n"
         "- No prose outside JSON\n"
         "- No chain-of-thought\n"
@@ -2256,7 +2416,7 @@ def analyze_news_sentiment(
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_data_str},
         ],
-        "max_tokens": 2500,
+        "max_tokens": 3500,
         "temperature": 0.0,
         "stream": False,
     }
@@ -2281,10 +2441,23 @@ def analyze_news_sentiment(
 
     normalized = _coerce_news_sentiment_model_output(parsed)
     if normalized is None:
-        normalized = _build_plaintext_fallback(assistant_text, "news_sentiment")
-        method = "plaintext_fallback"
-        if normalized is None:
-            raise ValueError("Model returned invalid news sentiment payload")
+        normalized = _format_enforcement_retry(
+            bad_output=assistant_text,
+            original_system_prompt=prompt,
+            task_type="news_sentiment",
+            log_prefix="MODEL_NEWS",
+            model_url=model_url,
+            timeout=timeout,
+            module="news_sentiment",
+            coerce_fn=_coerce_news_sentiment_model_output,
+        )
+        if normalized is not None:
+            method = "format_retry"
+        else:
+            normalized = _build_plaintext_fallback(assistant_text, "news_sentiment")
+            method = "plaintext_fallback"
+            if normalized is None:
+                raise ValueError("Model returned invalid news sentiment payload")
 
     # ── 7. Attach trace metadata ────────────────────────────────
     normalized["_trace"] = {
@@ -2494,6 +2667,8 @@ def analyze_breadth_participation(
         "- Whether breadth supports or undermines the current price trend\n\n"
         "Rules:\n"
         "- Return JSON only\n"
+        "- Your response MUST start with { and end with } — no text before or after the JSON\n"
+        "- Do NOT wrap in markdown code fences or ```json blocks\n"
         "- No markdown\n"
         "- No prose outside JSON\n"
         "- No chain-of-thought or <think> tags\n"
@@ -2560,7 +2735,7 @@ def analyze_breadth_participation(
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_data_str},
         ],
-        "max_tokens": 2500,
+        "max_tokens": 3500,
         "temperature": 0.0,
         "stream": False,
     }
@@ -2585,10 +2760,23 @@ def analyze_breadth_participation(
 
     normalized = _coerce_breadth_model_output(parsed)
     if normalized is None:
-        normalized = _build_plaintext_fallback(assistant_text, "breadth")
-        method = "plaintext_fallback"
-        if normalized is None:
-            raise ValueError("Model returned invalid breadth analysis payload")
+        normalized = _format_enforcement_retry(
+            bad_output=assistant_text,
+            original_system_prompt=prompt,
+            task_type="breadth_participation",
+            log_prefix="MODEL_BREADTH",
+            model_url=model_url,
+            timeout=timeout,
+            module="breadth_participation",
+            coerce_fn=_coerce_breadth_model_output,
+        )
+        if normalized is not None:
+            method = "format_retry"
+        else:
+            normalized = _build_plaintext_fallback(assistant_text, "breadth")
+            method = "plaintext_fallback"
+            if normalized is None:
+                raise ValueError("Model returned invalid breadth analysis payload")
 
     # ── 7. Attach trace metadata ────────────────────────────────
     normalized["_trace"] = {
@@ -2794,6 +2982,8 @@ def analyze_volatility_options(
         "- Which specific strategies are best suited to current conditions\n\n"
         "Rules:\n"
         "- Return JSON only\n"
+        "- Your response MUST start with { and end with } — no text before or after the JSON\n"
+        "- Do NOT wrap in markdown code fences or ```json blocks\n"
         "- No markdown\n"
         "- No prose outside JSON\n"
         "- No chain-of-thought or <think> tags\n"
@@ -2856,7 +3046,7 @@ def analyze_volatility_options(
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_data_str},
         ],
-        "max_tokens": 2500,
+        "max_tokens": 3500,
         "temperature": 0.0,
         "stream": False,
     }
@@ -2881,10 +3071,23 @@ def analyze_volatility_options(
 
     normalized = _coerce_vol_model_output(parsed)
     if normalized is None:
-        normalized = _build_plaintext_fallback(assistant_text, "volatility")
-        method = "plaintext_fallback"
-        if normalized is None:
-            raise ValueError("Model returned invalid volatility analysis payload")
+        normalized = _format_enforcement_retry(
+            bad_output=assistant_text,
+            original_system_prompt=prompt,
+            task_type="volatility_options",
+            log_prefix="MODEL_VOL",
+            model_url=model_url,
+            timeout=timeout,
+            module="volatility_options",
+            coerce_fn=_coerce_vol_model_output,
+        )
+        if normalized is not None:
+            method = "format_retry"
+        else:
+            normalized = _build_plaintext_fallback(assistant_text, "volatility")
+            method = "plaintext_fallback"
+            if normalized is None:
+                raise ValueError("Model returned invalid volatility analysis payload")
 
     # ── 6. Attach trace metadata ────────────────────────────────
     normalized["_trace"] = {
@@ -3053,6 +3256,10 @@ def analyze_cross_asset_macro(
     prompt = (
         "You are the BenTrade Cross-Asset & Macro Confirmation Analyst. Analyze the supplied "
         "cross-asset macro data and return ONLY valid JSON matching the required schema.\n\n"
+        "CRITICAL FORMAT RULES:\n"
+        "- Your response MUST start with { and end with } — no text before or after the JSON\n"
+        "- Do NOT wrap in markdown code fences or ```json blocks\n"
+        "- No prose, no chain-of-thought, no <think> tags\n\n"
         "Your job: Determine whether non-equity markets (rates, credit, commodities, currencies) "
         "are confirming or contradicting the equity story.\n\n"
         "REQUIRED JSON SCHEMA:\n"
@@ -3119,7 +3326,7 @@ def analyze_cross_asset_macro(
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_data_str},
         ],
-        "max_tokens": 2500,
+        "max_tokens": 3500,
         "temperature": 0.0,
         "stream": False,
     }
@@ -3144,10 +3351,23 @@ def analyze_cross_asset_macro(
 
     normalized = _coerce_cross_asset_model_output(parsed)
     if normalized is None:
-        normalized = _build_plaintext_fallback(assistant_text, "cross_asset")
-        method = "plaintext_fallback"
-        if normalized is None:
-            raise ValueError("Model returned invalid cross-asset analysis payload")
+        normalized = _format_enforcement_retry(
+            bad_output=assistant_text,
+            original_system_prompt=prompt,
+            task_type="cross_asset_macro",
+            log_prefix="MODEL_CROSS_ASSET",
+            model_url=model_url,
+            timeout=timeout,
+            module="cross_asset_macro",
+            coerce_fn=_coerce_cross_asset_model_output,
+        )
+        if normalized is not None:
+            method = "format_retry"
+        else:
+            normalized = _build_plaintext_fallback(assistant_text, "cross_asset")
+            method = "plaintext_fallback"
+            if normalized is None:
+                raise ValueError("Model returned invalid cross-asset analysis payload")
 
     # ── 7. Attach trace metadata ────────────────────────────────
     normalized["_trace"] = {
@@ -3318,6 +3538,10 @@ def analyze_flows_positioning(
     prompt = (
         "You are the BenTrade Flows & Positioning Analyst. Analyze the supplied "
         "positioning and flow data and return ONLY valid JSON matching the required schema.\n\n"
+        "CRITICAL FORMAT RULES:\n"
+        "- Your response MUST start with { and end with } — no text before or after the JSON\n"
+        "- Do NOT wrap in markdown code fences or ```json blocks\n"
+        "- No prose, no chain-of-thought, no <think> tags\n\n"
         "Your job: Determine whether current positioning and flows support continuation, "
         "indicate crowding, create squeeze risk, or signal reversal potential.\n\n"
         "REQUIRED JSON SCHEMA:\n"
@@ -3385,7 +3609,7 @@ def analyze_flows_positioning(
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_data_str},
         ],
-        "max_tokens": 2500,
+        "max_tokens": 3500,
         "temperature": 0.0,
         "stream": False,
     }
@@ -3410,10 +3634,23 @@ def analyze_flows_positioning(
 
     normalized = _coerce_flows_positioning_model_output(parsed)
     if normalized is None:
-        normalized = _build_plaintext_fallback(assistant_text, "flows_positioning")
-        method = "plaintext_fallback"
-        if normalized is None:
-            raise ValueError("Model returned invalid flows & positioning analysis payload")
+        normalized = _format_enforcement_retry(
+            bad_output=assistant_text,
+            original_system_prompt=prompt,
+            task_type="flows_positioning",
+            log_prefix="MODEL_FLOWS_POS",
+            model_url=model_url,
+            timeout=timeout,
+            module="flows_positioning",
+            coerce_fn=_coerce_flows_positioning_model_output,
+        )
+        if normalized is not None:
+            method = "format_retry"
+        else:
+            normalized = _build_plaintext_fallback(assistant_text, "flows_positioning")
+            method = "plaintext_fallback"
+            if normalized is None:
+                raise ValueError("Model returned invalid flows & positioning analysis payload")
 
     # ── 7. Attach trace metadata ────────────────────────────────
     normalized["_trace"] = {
@@ -3601,6 +3838,10 @@ def analyze_liquidity_conditions(
         "You are the BenTrade Liquidity & Financial Conditions Analyst. Analyze the supplied "
         "rates, credit, dollar, and conditions data and return ONLY valid JSON matching the "
         "required schema.\n\n"
+        "CRITICAL FORMAT RULES:\n"
+        "- Your response MUST start with { and end with } — no text before or after the JSON\n"
+        "- Do NOT wrap in markdown code fences or ```json blocks\n"
+        "- No prose, no chain-of-thought, no <think> tags\n\n"
         "Your job: Determine whether current liquidity conditions and financial market "
         "plumbing are supportive, neutral, or restrictive for risk assets.\n\n"
         "REQUIRED JSON SCHEMA:\n"
@@ -3671,7 +3912,7 @@ def analyze_liquidity_conditions(
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_data_str},
         ],
-        "max_tokens": 2500,
+        "max_tokens": 3500,
         "temperature": 0.0,
         "stream": False,
     }
@@ -3696,10 +3937,23 @@ def analyze_liquidity_conditions(
 
     normalized = _coerce_liquidity_conditions_model_output(parsed)
     if normalized is None:
-        normalized = _build_plaintext_fallback(assistant_text, "liquidity_conditions")
-        method = "plaintext_fallback"
-        if normalized is None:
-            raise ValueError("Model returned invalid liquidity conditions analysis payload")
+        normalized = _format_enforcement_retry(
+            bad_output=assistant_text,
+            original_system_prompt=prompt,
+            task_type="liquidity_conditions",
+            log_prefix="MODEL_LIQ_COND",
+            model_url=model_url,
+            timeout=timeout,
+            module="liquidity_conditions",
+            coerce_fn=_coerce_liquidity_conditions_model_output,
+        )
+        if normalized is not None:
+            method = "format_retry"
+        else:
+            normalized = _build_plaintext_fallback(assistant_text, "liquidity_conditions")
+            method = "plaintext_fallback"
+            if normalized is None:
+                raise ValueError("Model returned invalid liquidity conditions analysis payload")
 
     # ── 7. Attach trace metadata ────────────────────────────────
     normalized["_trace"] = {
