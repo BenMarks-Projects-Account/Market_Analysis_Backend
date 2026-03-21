@@ -641,7 +641,13 @@ WORKFLOW_POINTER_REQUIRED_KEYS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class WorkflowPointerData:
-    """Parsed contents of a stock/options workflow latest.json."""
+    """Parsed contents of a stock/options workflow latest.json.
+
+    ``batch_status`` tracks run completeness:
+    - ``"completed"`` — all stages ran successfully
+    - ``"partial"``   — pipeline interrupted, partial output packaged
+    Absent / None for legacy pointers written before this field existed.
+    """
 
     run_id: str
     workflow_id: str
@@ -649,6 +655,7 @@ class WorkflowPointerData:
     status: str
     output_filename: str
     contract_version: str
+    batch_status: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> WorkflowPointerData:
@@ -659,10 +666,11 @@ class WorkflowPointerData:
             status=d["status"],
             output_filename=d["output_filename"],
             contract_version=d["contract_version"],
+            batch_status=d.get("batch_status"),
         )
 
     def to_dict(self) -> dict[str, str]:
-        return {
+        d: dict[str, str] = {
             "run_id": self.run_id,
             "workflow_id": self.workflow_id,
             "completed_at": self.completed_at,
@@ -670,6 +678,9 @@ class WorkflowPointerData:
             "output_filename": self.output_filename,
             "contract_version": self.contract_version,
         }
+        if self.batch_status is not None:
+            d["batch_status"] = self.batch_status
+        return d
 
 
 def write_workflow_pointer(

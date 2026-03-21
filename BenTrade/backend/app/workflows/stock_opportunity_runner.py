@@ -44,6 +44,7 @@ from typing import Any
 from app.services.scanner_candidate_contract import normalize_candidate_output
 from app.workflows.architecture import FreshnessPolicy
 from app.workflows.artifact_strategy import (
+
     ManifestStageEntry,
     WorkflowPointerData,
     atomic_write_json,
@@ -62,8 +63,12 @@ from app.workflows.market_state_consumer import (
     MarketStateConsumerResult,
     load_market_state_for_consumer,
 )
+from app.workflows.workflow_debug_log import WorkflowDebugLogger
 
 logger = logging.getLogger(__name__)
+
+# Debug log file path — overwritten each run.
+_STOCK_DEBUG_LOG = Path(__file__).resolve().parents[2] / "data" / "workflows" / "stock_pipeline_debug.log"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -391,7 +396,13 @@ async def run_stock_opportunity(
     This is the primary entry point.  Returns a ``RunResult`` whether
     the run succeeds, degrades, or fails.  Never raises — all errors
     are captured in the result.
+
+    Handles ``asyncio.CancelledError`` so that if the HTTP connection
+    drops mid-pipeline, the runner still attempts to finish writing
+    output.json and latest.json (preventing stale TMC data).
     """
+    import asyncio
+
     now = datetime.now(timezone.utc)
     run_id = make_run_id(now)
     result = RunResult(run_id=run_id, started_at=now.isoformat())
@@ -401,81 +412,182 @@ async def run_stock_opportunity(
     warnings: list[str] = []
     policy = config.freshness_policy or FreshnessPolicy()
 
-    # ── Stage 1: load_market_state ───────────────────────────────
-    outcome = _stage_load_market_state(config, policy, stage_data, warnings)
-    stages.append(outcome)
-    _write_stage_artifact(config, run_id, outcome, stage_data, "load_market_state")
+    # ── Debug log: open (overwrite) ──────────────────────────────
+    dbg = WorkflowDebugLogger(_STOCK_DEBUG_LOG)
+    dbg.open(run_id=run_id, workflow_id=WORKFLOW_ID)
+    dbg.detail("Config", {
+        "data_dir": str(config.data_dir),
+        "top_n": config.top_n,
+        "freshness_policy": str(policy),
+    })
 
-    # Market state is enrichment-only — degraded is OK, only hard errors abort.
-    if outcome.status == "failed":
-        result.status = "failed"
-        result.error = f"load_market_state failed: {outcome.error}"
-        result.stages = [s.to_dict() for s in stages]
-        result.completed_at = _now_iso()
-        return result
+    logger.info("[stock_opportunity] Starting run %s", run_id)
 
-    # ── Stage 2: resolve_stock_scanner_suite ─────────────────────
-    outcome = _stage_resolve_stock_scanner_suite(stage_data, warnings)
-    stages.append(outcome)
-    _write_stage_artifact(config, run_id, outcome, stage_data, "resolve_stock_scanner_suite")
+    try:
+        # ── Stage 1: load_market_state ───────────────────────────────
+        dbg.stage_start("load_market_state", {"freshness_policy": str(policy)})
+        outcome = _stage_load_market_state(config, policy, stage_data, warnings)
+        stages.append(outcome)
+        _write_stage_artifact(config, run_id, outcome, stage_data, "load_market_state")
+        dbg.stage_end("load_market_state", outcome.status, {
+            "market_state_ref": stage_data.get("market_state_ref"),
+            "consumer_summary": stage_data.get("consumer_summary"),
+            "market_engines_available": len(stage_data.get("market_engines") or {}),
+            "error": outcome.error,
+        })
 
-    # ── Stage 3: run_stock_scanner_suite ─────────────────────────
-    outcome = await _stage_run_stock_scanner_suite(deps, stage_data, warnings)
-    stages.append(outcome)
-    _write_stage_artifact(config, run_id, outcome, stage_data, "run_stock_scanner_suite")
+        # Market state is enrichment-only — degraded is OK, only hard errors abort.
+        if outcome.status == "failed":
+            result.status = "failed"
+            result.error = f"load_market_state failed: {outcome.error}"
+            result.stages = [s.to_dict() for s in stages]
+            result.completed_at = _now_iso()
+            return result
 
-    if outcome.status == "failed":
-        result.status = "failed"
-        result.error = f"run_stock_scanner_suite failed: {outcome.error}"
-        result.stages = [s.to_dict() for s in stages]
-        result.completed_at = _now_iso()
-        return result
+        # ── Stage 2: resolve_stock_scanner_suite ─────────────────────
+        dbg.stage_start("resolve_stock_scanner_suite")
+        outcome = _stage_resolve_stock_scanner_suite(stage_data, warnings)
+        stages.append(outcome)
+        _write_stage_artifact(config, run_id, outcome, stage_data, "resolve_stock_scanner_suite")
+        dbg.stage_end("resolve_stock_scanner_suite", outcome.status, stage_data.get("scanner_suite"))
 
-    # ── Stage 4: aggregate_dedup_candidates ──────────────────────
-    outcome = _stage_aggregate_dedup_candidates(stage_data, warnings)
-    stages.append(outcome)
-    _write_stage_artifact(config, run_id, outcome, stage_data, "aggregate_dedup_candidates")
+        # ── Stage 3: run_stock_scanner_suite ─────────────────────────
+        dbg.stage_start("run_stock_scanner_suite")
+        outcome = await _stage_run_stock_scanner_suite(deps, stage_data, warnings)
+        stages.append(outcome)
+        _write_stage_artifact(config, run_id, outcome, stage_data, "run_stock_scanner_suite")
+        dbg.stage_end("run_stock_scanner_suite", outcome.status, {
+            "scanner_coverage": stage_data.get("scanner_coverage"),
+            "scanner_meta": stage_data.get("scanner_meta"),
+        })
+        raw = stage_data.get("raw_candidates", [])
+        dbg.candidates("Raw scanner candidates", raw,
+                        keys=["symbol", "strategy_id", "composite_score", "setup_quality"])
 
-    if outcome.status == "failed":
-        result.status = "failed"
-        result.error = f"aggregate_dedup_candidates failed: {outcome.error}"
-        result.stages = [s.to_dict() for s in stages]
-        result.completed_at = _now_iso()
-        return result
+        if outcome.status == "failed":
+            result.status = "failed"
+            result.error = f"run_stock_scanner_suite failed: {outcome.error}"
+            result.stages = [s.to_dict() for s in stages]
+            result.completed_at = _now_iso()
+            return result
 
-    # ── Stage 5: enrich_filter_rank_select ───────────────────────
-    outcome = _stage_enrich_filter_rank_select(config, stage_data, warnings)
-    stages.append(outcome)
-    _write_stage_artifact(config, run_id, outcome, stage_data, "enrich_filter_rank_select")
+        # ── Stage 4: aggregate_dedup_candidates ──────────────────────
+        dbg.stage_start("aggregate_dedup_candidates")
+        outcome = _stage_aggregate_dedup_candidates(stage_data, warnings)
+        stages.append(outcome)
+        _write_stage_artifact(config, run_id, outcome, stage_data, "aggregate_dedup_candidates")
+        dbg.stage_end("aggregate_dedup_candidates", outcome.status,
+                       stage_data.get("aggregation_counts"))
+        dbg.candidates("Normalized/deduped candidates",
+                        stage_data.get("normalized_candidates", []),
+                        keys=["symbol", "scanner_key", "setup_quality", "source_scanners"])
 
-    if outcome.status == "failed":
-        result.status = "failed"
-        result.error = f"enrich_filter_rank_select failed: {outcome.error}"
-        result.stages = [s.to_dict() for s in stages]
-        result.completed_at = _now_iso()
-        return result
+        if outcome.status == "failed":
+            result.status = "failed"
+            result.error = f"aggregate_dedup_candidates failed: {outcome.error}"
+            result.stages = [s.to_dict() for s in stages]
+            result.completed_at = _now_iso()
+            return result
 
-    # ── Stage 6: append_market_picture_context ───────────────────
-    outcome = _stage_append_market_picture_context(stage_data, warnings)
-    stages.append(outcome)
-    _write_stage_artifact(config, run_id, outcome, stage_data, "append_market_picture_context")
-    # Market picture is enrichment-only — degraded is OK.
+        # ── Stage 5: enrich_filter_rank_select ───────────────────────
+        dbg.stage_start("enrich_filter_rank_select", {
+            "min_setup_quality": MIN_SETUP_QUALITY,
+            "top_n": config.top_n,
+            "input_count": len(stage_data.get("normalized_candidates", [])),
+        })
+        outcome = _stage_enrich_filter_rank_select(config, stage_data, warnings)
+        stages.append(outcome)
+        _write_stage_artifact(config, run_id, outcome, stage_data, "enrich_filter_rank_select")
+        dbg.stage_end("enrich_filter_rank_select", outcome.status,
+                       stage_data.get("filter_counts"))
+        dbg.candidates("Selected candidates (post-filter)",
+                        stage_data.get("selected_candidates", []),
+                        keys=["symbol", "scanner_key", "setup_quality", "rank",
+                              "market_regime", "risk_environment"])
 
-    # ── Stage 7: run_final_model_analysis ────────────────────────
-    outcome = await _stage_run_final_model_analysis(deps, stage_data, warnings)
-    stages.append(outcome)
-    _write_stage_artifact(config, run_id, outcome, stage_data, "run_final_model_analysis")
-    # Model analysis is optional — degraded is OK.
+        if outcome.status == "failed":
+            result.status = "failed"
+            result.error = f"enrich_filter_rank_select failed: {outcome.error}"
+            result.stages = [s.to_dict() for s in stages]
+            result.completed_at = _now_iso()
+            return result
 
-    # ── Stage 7b: model_filter_rank ──────────────────────────────
-    #    Discard PASS recommendations, rank by model_score, keep top 10.
-    outcome = _stage_model_filter_rank(stage_data, warnings)
-    stages.append(outcome)
-    _write_stage_artifact(config, run_id, outcome, stage_data, "model_filter_rank")
+        # ── Stage 6: append_market_picture_context ───────────────────
+        dbg.stage_start("append_market_picture_context")
+        outcome = _stage_append_market_picture_context(stage_data, warnings)
+        stages.append(outcome)
+        _write_stage_artifact(config, run_id, outcome, stage_data, "append_market_picture_context")
+        dbg.stage_end("append_market_picture_context", outcome.status,
+                       stage_data.get("market_picture_summary"))
+        # Market picture is enrichment-only — degraded is OK.
+
+        # ── Stage 7: run_final_model_analysis ────────────────────────
+        dbg.stage_start("run_final_model_analysis", {
+            "candidate_count": len(stage_data.get("selected_candidates", [])),
+            "model_request_fn_configured": deps.model_request_fn is not None,
+        })
+        outcome = await _stage_run_final_model_analysis(deps, stage_data, warnings)
+        stages.append(outcome)
+        _write_stage_artifact(config, run_id, outcome, stage_data, "run_final_model_analysis")
+        dbg.stage_end("run_final_model_analysis", outcome.status,
+                       stage_data.get("model_analysis_counts"))
+        # Log per-candidate model results
+        for cand in stage_data.get("selected_candidates", []):
+            dbg.note(
+                f"  Model result: {cand.get('symbol')} → "
+                f"rec={cand.get('model_recommendation')} "
+                f"score={cand.get('model_score')} "
+                f"confidence={cand.get('model_confidence')}"
+            )
+        # Model analysis is optional — degraded is OK.
+
+        # ── Stage 7b: model_filter_rank ──────────────────────────────
+        #    Discard PASS recommendations, rank by model_score, keep top 10.
+        dbg.stage_start("model_filter_rank", {
+            "input_count": len(stage_data.get("selected_candidates", [])),
+            "MODEL_FILTER_TOP_N": MODEL_FILTER_TOP_N,
+        })
+        outcome = _stage_model_filter_rank(stage_data, warnings)
+        stages.append(outcome)
+        _write_stage_artifact(config, run_id, outcome, stage_data, "model_filter_rank")
+        dbg.stage_end("model_filter_rank", outcome.status,
+                       stage_data.get("model_filter_counts"))
+        dbg.candidates("Final candidates (post-model-filter)",
+                        stage_data.get("selected_candidates", []),
+                        keys=["symbol", "scanner_key", "model_recommendation",
+                              "model_score", "setup_quality", "rank"])
+
+    except asyncio.CancelledError:
+        # HTTP client disconnected or task was cancelled mid-pipeline.
+        # Still attempt to package whatever candidates we have so far so
+        # the latest.json pointer gets updated and TMC sees fresh data.
+        logger.warning(
+            "[stock_opportunity] CancelledError in run %s at stage %d — "
+            "attempting to package partial output",
+            run_id, len(stages),
+        )
+        warnings.append("[pipeline] Run interrupted (CancelledError) — packaging partial output")
+        dbg.note(f"⚠ CancelledError at stage {len(stages)} — packaging partial output")
+    except Exception as exc:
+        logger.error(
+            "[stock_opportunity] Unexpected error in run %s: %s",
+            run_id, exc, exc_info=True,
+        )
+        warnings.append(f"[pipeline] Unexpected error — packaging partial output: {exc}")
+        dbg.note(f"⚠ Unexpected error: {exc} — packaging partial output")
 
     # ── Stage 8: package_publish_output ──────────────────────────
+    # Always attempt stage 8 so output.json + latest.json are written.
+    dbg.stage_start("package_publish_output", {
+        "candidates_to_package": len(stage_data.get("selected_candidates", [])),
+    })
     outcome = _stage_package_publish_output(config, run_id, now, stage_data, stages, warnings)
     stages.append(outcome)
+    dbg.stage_end("package_publish_output", outcome.status, {
+        "publication_status": stage_data.get("publication_status"),
+        "artifact_filename": stage_data.get("artifact_filename"),
+        "artifact_path": str(stage_data.get("artifact_path", "")),
+    })
 
     # ── Post-pipeline: truth-audit & model-input-preview (12C) ───
     _write_truth_audit_artifact(config, run_id, stage_data, warnings)
@@ -495,6 +607,25 @@ async def run_stock_opportunity(
         result.error = f"package_publish_output failed: {outcome.error}"
     else:
         result.status = "completed"
+
+    logger.info(
+        "[stock_opportunity] Run %s finished: status=%s candidates=%d",
+        run_id, result.status,
+        len(stage_data.get("selected_candidates", [])),
+    )
+
+    # ── Debug log: close ─────────────────────────────────────────
+    dbg.section("Final Result")
+    dbg.detail("Result summary", {
+        "run_id": result.run_id,
+        "status": result.status,
+        "publication_status": result.publication_status,
+        "artifact_filename": result.artifact_filename,
+        "artifact_path": result.artifact_path,
+        "stages_completed": len(result.stages),
+        "selected_candidates": len(stage_data.get("selected_candidates", [])),
+    })
+    dbg.close(status=result.status, warnings=warnings)
 
     return result
 
@@ -1401,6 +1532,15 @@ def _stage_package_publish_output(
         elif scanners_ok < scanners_total:
             quality_level = "degraded"
 
+        # ── Determine batch status ───────────────────────────────
+        # batch_status: "completed" | "partial" | "failed"
+        # "partial" = CancelledError or unexpected error interrupted pipeline
+        _has_interruption = any(
+            "[pipeline] Run interrupted" in w or "[pipeline] Unexpected error" in w
+            for w in warnings
+        )
+        batch_status = "partial" if _has_interruption else "completed"
+
         # ── Build output.json ────────────────────────────────────
         compact_candidates = [
             _extract_compact_stock_candidate(c) for c in selected
@@ -1411,6 +1551,7 @@ def _stage_package_publish_output(
             "workflow_id": WORKFLOW_ID,
             "run_id": run_id,
             "generated_at": completed_at,
+            "batch_status": batch_status,
             "market_state_ref": market_state_ref,
             "publication": {
                 "status": "valid" if quality_level != "no_candidates" else "degraded",
@@ -1453,6 +1594,7 @@ def _stage_package_publish_output(
             "started_at": started_ts.isoformat(),
             "completed_at": completed_at,
             "status": "completed",
+            "batch_status": batch_status,
             "market_state_ref": market_state_ref,
             "total_candidates": total_candidates,
             "selected_count": selected_count,
@@ -1532,6 +1674,8 @@ def _stage_package_publish_output(
         atomic_write_json(manifest_path, manifest_data)
 
         # Update pointer (latest.json).
+        # batch_status is "completed" or "partial" — always update pointer.
+        # (If packaging itself fails, we never reach here.)
         pointer = WorkflowPointerData(
             run_id=run_id,
             workflow_id=WORKFLOW_ID,
@@ -1539,8 +1683,13 @@ def _stage_package_publish_output(
             status="valid",
             output_filename="output.json",
             contract_version=WORKFLOW_VERSION,
+            batch_status=batch_status,
         )
         write_workflow_pointer(data_dir, WORKFLOW_ID, pointer)
+        logger.info(
+            "[stock_opportunity] Pointer updated: run_id=%s batch_status=%s",
+            run_id, batch_status,
+        )
 
         # Store for result.
         stage_data["publication_status"] = output_data["publication"]["status"]

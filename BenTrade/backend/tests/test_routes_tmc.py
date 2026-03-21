@@ -500,7 +500,7 @@ class TestResponseModelShapes:
         data = body["data"]
         expected_data_keys = {
             "run_id", "workflow_id", "generated_at", "market_state_ref",
-            "status", "total_candidates", "selected_count",
+            "status", "batch_status", "total_candidates", "selected_count",
             "quality_level", "candidates", "warnings",
         }
         assert set(data.keys()) == expected_data_keys
@@ -519,7 +519,7 @@ class TestResponseModelShapes:
         data = body["data"]
         expected_data_keys = {
             "run_id", "workflow_id", "generated_at", "market_state_ref",
-            "status", "total_candidates", "selected_count",
+            "status", "batch_status", "total_candidates", "selected_count",
             "quality_level", "candidates", "warnings",
             "scan_diagnostics", "validation_summary",
         }

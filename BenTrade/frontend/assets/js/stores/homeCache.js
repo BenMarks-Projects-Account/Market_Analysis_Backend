@@ -5,7 +5,7 @@ window.BenTradeHomeCacheStore = (function(){
   const FRESH_TTL_MS = 60 * 1000;        // 60 s — triggers silent background refresh
   const MAX_STALE_MS = 60 * 60 * 1000;   // 60 min — hard localStorage expiry only
 
-  const INDEX_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA'];
+  const INDEX_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA', 'IWB', 'MDY'];
   const SECTOR_SYMBOLS = ['XLF', 'XLK', 'XLE', 'XLY', 'XLP', 'XLV', 'XLI', 'XLB', 'XLRE', 'XLU', 'XLC'];
 
   let renderer = null;
@@ -161,7 +161,7 @@ window.BenTradeHomeCacheStore = (function(){
       await runStage('regime', 'regime', () => api.getRegime());
       await runStage('playbook', 'playbook', () => api.getPlaybook());
       await runStage('SPY summary', 'spy', () => api.getStockSummary('SPY', '6mo'));
-      await runStage('VIX', 'vix', () => api.getStockSummary('VIXY', '3mo'));
+      await runStage('VIX', 'vix', () => api.getStockSummary('VIXY', '6mo'));
 
       await runStage('sectors', null, async () => {
         const symbolList = [...INDEX_SYMBOLS, ...SECTOR_SYMBOLS];

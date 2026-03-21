@@ -13,8 +13,16 @@
   'use strict';
 
   /* -- State --------------------------------------------------------- */
-  var _pollTimer     = null;
-  var _activeRunning = false;
+  var _pollTimer      = null;
+  var _activeRunning  = false;
+  /** Last loaded stock run_id from the /latest endpoint. */
+  var _lastStockRunId = null;
+  /** Last loaded options run_id from the /latest endpoint. */
+  var _lastOptionsRunId = null;
+  /** Completion-poll timer for stock workflow. */
+  var _stockPollTimer  = null;
+  /** Completion-poll timer for options workflow. */
+  var _optionsPollTimer = null;
 
   /* -- API ref -------------------------------------------------------- */
   var api = window.BenTradeApi;
@@ -59,6 +67,15 @@
     unavailable: { css: 'tmc-run-unavailable', label: 'UNAVAILABLE', isError: true,  isEmpty: true  },
   };
 
+  /**
+   * Batch-level status vocabulary — used by the section-header badge
+   * to distinguish complete vs partial pipeline runs.
+   */
+  var BATCH_STATUS_MAP = {
+    completed: { css: 'tmc-batch-completed', label: '' },
+    partial:   { css: 'tmc-batch-partial',   label: 'PARTIAL' },
+  };
+
   function getStatusInfo(status) {
     return TMC_STATUS_MAP[status] || { css: 'tmc-run-unknown', label: (status || 'UNKNOWN').toUpperCase(), isError: false, isEmpty: true };
   }
@@ -69,6 +86,41 @@
     var info = getStatusInfo(status);
     el.textContent = info.label;
     el.className = 'tmc-run-status ' + info.css;
+  }
+
+  /** Update a batch-status badge element. Shows nothing for "completed". */
+  function updateBatchStatusBadge(el, batchStatus) {
+    if (!el) return;
+    var info = BATCH_STATUS_MAP[batchStatus] || { css: '', label: '' };
+    el.textContent = info.label;
+    el.className = 'tmc-batch-status ' + info.css;
+  }
+
+  /** Update the freshness timestamp element with "Last updated X ago". */
+  function updateFreshness(el, generatedAt) {
+    if (!el) return;
+    if (!generatedAt) { el.textContent = ''; return; }
+    try {
+      var ts = new Date(generatedAt);
+      var diffMs = Date.now() - ts.getTime();
+      var label;
+      if (diffMs < 60000) {
+        label = 'just now';
+      } else if (diffMs < 3600000) {
+        var mins = Math.floor(diffMs / 60000);
+        label = mins + ' min ago';
+      } else if (diffMs < 86400000) {
+        var hrs = Math.floor(diffMs / 3600000);
+        label = hrs + 'h ago';
+      } else {
+        var days = Math.floor(diffMs / 86400000);
+        label = days + 'd ago';
+      }
+      el.textContent = 'Updated ' + label;
+      el.title = ts.toLocaleString();
+    } catch (_) {
+      el.textContent = '';
+    }
   }
 
   function actionClass(action) {
@@ -222,23 +274,38 @@
    *
    * Input fields (from OptionsOpportunityReadModel.candidates[*]):
    *   underlying | symbol, strategy_id | strategy_type | family,
-   *   ev, pop, max_loss, credit | net_premium | debit,
-   *   dte, width, legs[]
+   *   math.ev, math.pop, math.max_loss, math.net_credit | math.net_debit,
+   *   dte, math.width, legs[], math.max_profit, math.ror, math.pop_source
    */
   function normalizeOptionsCandidate(raw) {
+    var m = raw.math || {};
+    var credit = m.net_credit != null ? Number(m.net_credit) : null;
+    var debit  = m.net_debit  != null ? Number(m.net_debit)  : null;
+    // Show credit for credit strategies, debit for debit strategies
+    var premium = credit != null && credit > 0 ? credit : debit;
+    var premiumLabel = credit != null && credit > 0 ? 'credit' : 'debit';
     return {
-      symbol:   raw.underlying || raw.symbol || null,
-      strategy: raw.strategy_id || raw.strategy_type || raw.family || null,
-      ev:       raw.ev != null ? Number(raw.ev) : null,
-      pop:      raw.pop != null ? Number(raw.pop) : null,
-      maxLoss:  raw.max_loss != null ? Number(raw.max_loss) : null,
-      credit:   raw.credit != null ? Number(raw.credit)
-                : raw.net_premium != null ? Number(raw.net_premium)
-                : raw.debit != null ? Number(raw.debit)
-                : null,
-      dte:      raw.dte != null ? raw.dte : null,
-      width:    raw.width != null ? Number(raw.width) : null,
-      legs:     Array.isArray(raw.legs) ? raw.legs : [],
+      symbol:       raw.underlying || raw.symbol || null,
+      strategy:     raw.strategy_id || raw.strategy_type || raw.family_key || null,
+      family:       raw.family_key || null,
+      ev:           m.ev != null ? Number(m.ev) : null,
+      pop:          m.pop != null ? Number(m.pop) : null,
+      popSource:    m.pop_source || null,
+      maxLoss:      m.max_loss != null ? Number(m.max_loss) : null,
+      maxProfit:    m.max_profit != null ? Number(m.max_profit) : null,
+      credit:       credit,
+      debit:        debit,
+      premium:      premium,
+      premiumLabel: premiumLabel,
+      dte:          raw.dte != null ? raw.dte : null,
+      width:        m.width != null ? Number(m.width) : null,
+      ror:          m.ror != null ? Number(m.ror) : null,
+      evPerDay:     m.ev_per_day != null ? Number(m.ev_per_day) : null,
+      breakeven:    m.breakeven || [],
+      legs:         Array.isArray(raw.legs) ? raw.legs : [],
+      rank:         raw.rank || null,
+      expiration:   raw.expiration || null,
+      underlyingPrice: raw.underlying_price || null,
     };
   }
 
@@ -260,12 +327,29 @@
     var countEl  = document.getElementById('tmcStockCount');
     var qualEl   = document.getElementById('tmcStockQuality');
     var statusEl = document.getElementById('tmcStockStatus');
+    var batchEl  = document.getElementById('tmcStockBatchStatus');
+    var freshEl  = document.getElementById('tmcStockFreshness');
 
     updateStatusBadge(statusEl, null); // shows "loading"
     if (statusEl) statusEl.textContent = 'Loading...';
 
     api.tmcGetLatestStock()
       .then(function (resp) {
+        // Track run_id for freshness detection
+        var newRunId = resp && resp.data ? resp.data.run_id : null;
+        if (newRunId && newRunId !== _lastStockRunId) {
+          console.log('[TMC] Stock data refreshed: run_id=' + newRunId +
+            ' generated_at=' + (resp.data.generated_at || '?') +
+            ' batch_status=' + (resp.data.batch_status || '?') +
+            ' candidates=' + ((resp.data.candidates || []).length));
+        }
+        _lastStockRunId = newRunId;
+
+        // Update batch status and freshness indicators
+        var data = resp.data;
+        updateBatchStatusBadge(batchEl, data ? data.batch_status : null);
+        updateFreshness(freshEl, data ? data.generated_at : null);
+
         var result = handleWorkflowResponse(resp, grid, countEl, qualEl, statusEl, 'stock');
         if (!result) return;
         renderStockCandidates(grid, result.candidates, result.data);
@@ -273,6 +357,8 @@
       .catch(function (err) {
         console.error('[TMC] Failed to load stock opportunities:', err);
         updateStatusBadge(statusEl, 'failed');
+        updateBatchStatusBadge(batchEl, null);
+        updateFreshness(freshEl, null);
         showEmptyGrid(grid, countEl, 'Failed to load stock opportunities');
       });
   }
@@ -932,18 +1018,79 @@
     return card;
   }
 
+  /**
+   * Start a completion-poll that checks /stock/latest every interval
+   * until the run_id changes from the baseline, or maxAttempts is reached.
+   *
+   * @param {string|null} baselineRunId - run_id before the trigger
+   * @param {number} intervalMs - poll interval (default 15000)
+   * @param {number} maxAttempts - max polls (default 20 = ~5 min)
+   */
+  function _startStockCompletionPoll(baselineRunId, intervalMs, maxAttempts) {
+    _stopStockCompletionPoll();
+    var attempts = 0;
+    intervalMs = intervalMs || 15000;
+    maxAttempts = maxAttempts || 20;
+
+    console.log('[TMC] Starting stock completion poll (baseline run_id=' +
+      (baselineRunId || 'none') + ', interval=' + intervalMs + 'ms, max=' + maxAttempts + ')');
+
+    _stockPollTimer = setInterval(function () {
+      attempts++;
+      if (attempts > maxAttempts) {
+        console.log('[TMC] Stock completion poll exhausted (' + maxAttempts + ' attempts)');
+        _stopStockCompletionPoll();
+        return;
+      }
+
+      api.tmcGetLatestStock()
+        .then(function (resp) {
+          var newRunId = resp && resp.data ? resp.data.run_id : null;
+          if (newRunId && newRunId !== baselineRunId) {
+            console.log('[TMC] Stock completion poll detected new run: ' + newRunId);
+            _stopStockCompletionPoll();
+            // Full reload with rendering
+            loadStockOpportunities();
+          }
+        })
+        .catch(function () {
+          // Ignore poll errors — will retry on next interval
+        });
+    }, intervalMs);
+  }
+
+  function _stopStockCompletionPoll() {
+    if (_stockPollTimer) {
+      clearInterval(_stockPollTimer);
+      _stockPollTimer = null;
+    }
+  }
+
   function triggerStockRun() {
     var statusEl = document.getElementById('tmcStockStatus');
     if (statusEl) { statusEl.textContent = 'Running...'; statusEl.className = 'tmc-run-status'; }
 
+    var baselineRunId = _lastStockRunId;
+    console.log('[TMC] Triggering stock workflow (baseline run_id=' + (baselineRunId || 'none') + ')');
+
     api.tmcRunStock()
       .then(function (result) {
+        console.log('[TMC] Stock workflow trigger returned: status=' + result.status +
+          ' run_id=' + (result.run_id || '?') + ' candidates=' + (result.candidate_count || 0));
         updateStatusBadge(statusEl, result.status);
+        _stopStockCompletionPoll();
         loadStockOpportunities();
       })
       .catch(function (err) {
-        console.error('[TMC] Stock workflow run failed:', err);
+        console.error('[TMC] Stock workflow trigger failed:', err);
         updateStatusBadge(statusEl, 'failed');
+        // The workflow may still be running in the background (shielded
+        // from HTTP disconnect on the backend).  Start polling to detect
+        // when it completes and refresh automatically.
+        _startStockCompletionPoll(baselineRunId);
+        // Also try an immediate load — the trigger may have failed after
+        // the workflow already finished and wrote output.json.
+        loadStockOpportunities();
       });
   }
 
@@ -956,12 +1103,27 @@
     var countEl  = document.getElementById('tmcOptionsCount');
     var qualEl   = document.getElementById('tmcOptionsQuality');
     var statusEl = document.getElementById('tmcOptionsStatus');
+    var batchEl  = document.getElementById('tmcOptionsBatchStatus');
+    var freshEl  = document.getElementById('tmcOptionsFreshness');
 
     updateStatusBadge(statusEl, null);
     if (statusEl) statusEl.textContent = 'Loading...';
 
     api.tmcGetLatestOptions()
       .then(function (resp) {
+        var newRunId = resp && resp.data ? resp.data.run_id : null;
+        if (newRunId && newRunId !== _lastOptionsRunId) {
+          console.log('[TMC] Options data refreshed: run_id=' + newRunId +
+            ' batch_status=' + (resp.data.batch_status || '?') +
+            ' candidates=' + ((resp.data.candidates || []).length));
+        }
+        _lastOptionsRunId = newRunId;
+
+        // Update batch status and freshness indicators
+        var data = resp.data;
+        updateBatchStatusBadge(batchEl, data ? data.batch_status : null);
+        updateFreshness(freshEl, data ? data.generated_at : null);
+
         var result = handleWorkflowResponse(resp, grid, countEl, qualEl, statusEl, 'options');
         if (!result) return;
         renderOptionsCandidates(grid, result.candidates, result.data);
@@ -969,6 +1131,8 @@
       .catch(function (err) {
         console.error('[TMC] Failed to load options opportunities:', err);
         updateStatusBadge(statusEl, 'failed');
+        updateBatchStatusBadge(batchEl, null);
+        updateFreshness(freshEl, null);
         showEmptyGrid(grid, countEl, 'Failed to load options opportunities');
       });
   }
@@ -988,61 +1152,140 @@
     var symbol = c.symbol || '???';
     var strategyLabel = c.strategy ? c.strategy.replace(/_/g, ' ') : '--';
 
+    // ── Header: symbol + strategy + rank badge ──────────────────
+    var rankBadge = c.rank ? '<span class="tmc-options-rank">#' + c.rank + '</span>' : '';
     var header =
       '<div class="tmc-card-header">' +
         '<div class="tmc-card-symbol">' + esc(symbol) + '</div>' +
-        '<div class="tmc-card-strategy">' + esc(strategyLabel) + '</div>' +
+        rankBadge +
+        '<div class="tmc-card-strategy tmc-options-strategy-badge">' + esc(strategyLabel) + '</div>' +
       '</div>';
 
+    // ── Strike structure line ───────────────────────────────────
+    var strikeDisplay = '';
+    if (c.legs.length >= 2) {
+      var strikes = c.legs.map(function (l) { return l.strike; }).filter(function (s) { return s != null; });
+      var optType = (c.legs[0].option_type || '').toUpperCase();
+      strikeDisplay =
+        '<div class="tmc-options-strike-line">' +
+          '<span class="tmc-options-strikes">' + strikes.join(' / ') + '</span>' +
+          '<span class="tmc-options-type-badge">' + esc(optType) + '</span>' +
+          (c.expiration ? '<span class="tmc-options-exp">' + esc(c.expiration) + '</span>' : '') +
+        '</div>';
+    }
+
+    // ── Premium display (credit or debit) ───────────────────────
+    var premiumClass = c.premiumLabel === 'credit' ? 'tmc-premium-credit' : 'tmc-premium-debit';
+    var premiumRow =
+      '<div class="tmc-options-premium-row">' +
+        '<span class="tmc-options-premium-label">' + esc(c.premiumLabel.toUpperCase()) + '</span>' +
+        '<span class="tmc-options-premium-value ' + premiumClass + '">' +
+          fmtDollar(c.premium) +
+        '</span>' +
+      '</div>';
+
+    // ── Core metrics grid (3 columns) ───────────────────────────
     var metrics =
-      '<div class="tmc-metrics">' +
+      '<div class="tmc-metrics tmc-options-metrics">' +
         buildMetric('EV', fmtDollar(c.ev)) +
         buildMetric('POP', fmtPct(c.pop)) +
-        buildMetric('Max Loss', c.maxLoss != null ? fmtDollar(Math.abs(c.maxLoss)) : '--') +
-        buildMetric('Credit', fmtDollar(c.credit)) +
         buildMetric('DTE', c.dte != null ? c.dte + 'd' : '--') +
-        buildMetric('Width', fmtDollar(c.width)) +
+        buildMetric('Max Profit', fmtDollar(c.maxProfit)) +
+        buildMetric('Max Loss', c.maxLoss != null ? fmtDollar(Math.abs(c.maxLoss)) : '--') +
+        buildMetric('Width', c.width != null ? '$' + c.width.toFixed(0) : '--') +
+        buildMetric('RoR', c.ror != null ? (c.ror * 100).toFixed(0) + '%' : '--') +
+        buildMetric('EV/Day', fmtDollar(c.evPerDay)) +
       '</div>';
 
+    // ── Legs detail (compact) ───────────────────────────────────
     var legsHtml = '';
     if (c.legs.length > 0) {
-      legsHtml = '<div class="tmc-legs">';
+      legsHtml = '<div class="tmc-options-legs">';
       c.legs.forEach(function (leg) {
         var side = (leg.side || '').toUpperCase();
+        var sideClass = side === 'SHORT' ? 'tmc-leg-short' : 'tmc-leg-long';
         var strike = leg.strike != null ? String(leg.strike) : '?';
-        var type = leg.option_type || leg.type || '';
-        var exp = leg.expiration || '';
+        var type = (leg.option_type || '').toUpperCase();
+        var bidAsk = '';
+        if (leg.bid != null && leg.ask != null) {
+          bidAsk = ' ' + Number(leg.bid).toFixed(2) + '/' + Number(leg.ask).toFixed(2);
+        }
+        var delta = leg.delta != null ? ' Δ' + Number(leg.delta).toFixed(2) : '';
         legsHtml +=
-          '<span class="tmc-leg-item">' +
-            esc(side) + ' ' + esc(strike) + ' ' + esc(type) +
-            (exp ? ' ' + esc(exp) : '') +
-          '</span>';
+          '<div class="tmc-options-leg-row">' +
+            '<span class="tmc-leg-side ' + sideClass + '">' + esc(side) + '</span>' +
+            '<span class="tmc-leg-strike">' + esc(strike) + ' ' + esc(type) + '</span>' +
+            '<span class="tmc-leg-pricing">' + esc(bidAsk) + '</span>' +
+            '<span class="tmc-leg-delta">' + esc(delta) + '</span>' +
+          '</div>';
       });
       legsHtml += '</div>';
     }
 
+    // ── Footer: family badge + run metadata ─────────────────────
+    var familyLabel = c.family ? c.family.replace(/_/g, ' ') : '';
     var footer =
       '<div class="tmc-card-footer">' +
-        '<span class="tmc-scanner-badge">' + esc(c.strategy || '--') + '</span>' +
+        (familyLabel ? '<span class="tmc-scanner-badge">' + esc(familyLabel) + '</span>' : '') +
         '<span class="tmc-meta-item tmc-meta-muted">' + esc(data.run_id || '') + '</span>' +
       '</div>';
 
-    card.innerHTML = header + metrics + legsHtml + footer;
+    card.innerHTML = header + strikeDisplay + premiumRow + metrics + legsHtml + footer;
     return card;
+  }
+
+  function _startOptionsCompletionPoll(baselineRunId, intervalMs, maxAttempts) {
+    _stopOptionsCompletionPoll();
+    var attempts = 0;
+    intervalMs = intervalMs || 15000;
+    maxAttempts = maxAttempts || 20;
+
+    _optionsPollTimer = setInterval(function () {
+      attempts++;
+      if (attempts > maxAttempts) {
+        _stopOptionsCompletionPoll();
+        return;
+      }
+      api.tmcGetLatestOptions()
+        .then(function (resp) {
+          var newRunId = resp && resp.data ? resp.data.run_id : null;
+          if (newRunId && newRunId !== baselineRunId) {
+            console.log('[TMC] Options completion poll detected new run: ' + newRunId);
+            _stopOptionsCompletionPoll();
+            loadOptionsOpportunities();
+          }
+        })
+        .catch(function () {});
+    }, intervalMs);
+  }
+
+  function _stopOptionsCompletionPoll() {
+    if (_optionsPollTimer) {
+      clearInterval(_optionsPollTimer);
+      _optionsPollTimer = null;
+    }
   }
 
   function triggerOptionsRun() {
     var statusEl = document.getElementById('tmcOptionsStatus');
     if (statusEl) { statusEl.textContent = 'Running...'; statusEl.className = 'tmc-run-status'; }
 
+    var baselineRunId = _lastOptionsRunId;
+    console.log('[TMC] Triggering options workflow (baseline run_id=' + (baselineRunId || 'none') + ')');
+
     api.tmcRunOptions()
       .then(function (result) {
+        console.log('[TMC] Options workflow trigger returned: status=' + result.status +
+          ' run_id=' + (result.run_id || '?'));
         updateStatusBadge(statusEl, result.status);
+        _stopOptionsCompletionPoll();
         loadOptionsOpportunities();
       })
       .catch(function (err) {
-        console.error('[TMC] Options workflow run failed:', err);
+        console.error('[TMC] Options workflow trigger failed:', err);
         updateStatusBadge(statusEl, 'failed');
+        _startOptionsCompletionPoll(baselineRunId);
+        loadOptionsOpportunities();
       });
   }
 
@@ -1424,6 +1667,8 @@
     // Cleanup handler for SPA navigation
     window.BenTradeActiveViewCleanup = function () {
       if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+      _stopStockCompletionPoll();
+      _stopOptionsCompletionPoll();
       _activeRunning = false;
       var metaEl = document.getElementById('tmcActiveRunMeta');
       if (metaEl) metaEl.remove();

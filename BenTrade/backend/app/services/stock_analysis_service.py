@@ -765,6 +765,10 @@ class StockAnalysisService:
 
         source_health = self.base_data_service.get_source_health_snapshot()
 
+        # 52-week high/low derived from full 365-day history (history_all)
+        high_52w = max(history_all) if history_all else None
+        low_52w = min(history_all) if history_all else None
+
         return {
             "symbol": ticker,
             "as_of": self._utc_now_iso(),
@@ -775,6 +779,8 @@ class StockAnalysisService:
                 "change_pct": change_pct,
                 "range_high": max(history) if history else None,
                 "range_low": min(history) if history else None,
+                "high_52w": high_52w,
+                "low_52w": low_52w,
             },
             "history": [{"date": bar.get("date"), "close": bar["close"]} for bar in dated_history],
             "indicators": {

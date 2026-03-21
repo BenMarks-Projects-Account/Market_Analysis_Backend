@@ -11,12 +11,10 @@
   <div class="tmc-control-bar">
     <div class="tmc-control-left">
       <button id="tmcRunStock" class="btn tmc-btn" title="Run stock opportunity workflow">▶ Run Stock</button>
-      <button id="tmcRunOptions" class="btn tmc-btn" title="Run options opportunity workflow">▶ Run Options</button>
       <button id="tmcRefreshBtn" class="btn tmc-btn" title="Load latest results">↻ Refresh</button>
     </div>
     <div class="tmc-control-right">
       <span id="tmcStockStatus" class="tmc-run-status"></span>
-      <span id="tmcOptionsStatus" class="tmc-run-status"></span>
     </div>
   </div>
 
@@ -26,6 +24,8 @@
       <h3 class="tmc-section-title">Stock Opportunities</h3>
       <span id="tmcStockCount" class="tmc-count-badge">0</span>
       <span id="tmcStockQuality" class="tmc-quality-badge"></span>
+      <span id="tmcStockBatchStatus" class="tmc-batch-status"></span>
+      <span id="tmcStockFreshness" class="tmc-freshness"></span>
     </div>
     <div id="tmcStockGrid" class="tmc-candidate-grid">
       <div class="tmc-empty-state">
@@ -36,11 +36,25 @@
   </section>
 
   <!-- ═══ SECTION 2 — Options Opportunities ═══ -->
+
+  <!-- ── Options workflow control banner ───────────────────── -->
+  <div class="tmc-options-control-banner">
+    <div class="tmc-options-control-left">
+      <span class="tmc-options-control-label">Options Workflow</span>
+      <button id="tmcRunOptions" class="btn tmc-btn" title="Run options opportunity workflow">▶ Run Options</button>
+    </div>
+    <div class="tmc-options-control-right">
+      <span id="tmcOptionsStatus" class="tmc-run-status"></span>
+    </div>
+  </div>
+
   <section class="tmc-section">
     <div class="tmc-section-header">
       <h3 class="tmc-section-title">Options Opportunities</h3>
       <span id="tmcOptionsCount" class="tmc-count-badge">0</span>
       <span id="tmcOptionsQuality" class="tmc-quality-badge"></span>
+      <span id="tmcOptionsBatchStatus" class="tmc-batch-status"></span>
+      <span id="tmcOptionsFreshness" class="tmc-freshness"></span>
     </div>
     <div id="tmcOptionsGrid" class="tmc-candidate-grid">
       <div class="tmc-empty-state">

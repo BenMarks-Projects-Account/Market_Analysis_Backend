@@ -5538,8 +5538,7 @@ main.main{
     grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-/* Index / risk / macro tiles in scoreboard */
-.home-index-tiles,
+/* Risk / macro tiles in scoreboard */
 .home-risk-tiles,
 .home-macro-tiles{
     display:grid;
@@ -6302,6 +6301,200 @@ main.main{
     margin-top:2px;
 }
 
+/* ── Market Structure Panel ── */
+.home-market-structure-panel .stock-card-title{
+    margin-bottom:12px;
+}
+
+/* 6-up index card grid */
+.home-index-tiles{
+    display:grid;
+    gap:10px;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    margin-bottom:16px;
+}
+@media (max-width:1100px){
+    .home-index-tiles{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width:600px){
+    .home-index-tiles{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Index card inner layout */
+.home-index-tile{
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+    min-height:120px;
+}
+.home-index-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    gap:4px;
+    margin-bottom:4px;
+}
+.home-index-name{
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    color:var(--cyan);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+.home-index-etf{
+    font-size:10px;
+    color:var(--muted);
+    opacity:0.7;
+    flex-shrink:0;
+}
+.home-index-change{
+    font-size:12px;
+    font-weight:600;
+    color:var(--muted);
+}
+.home-index-change.positive{ color:rgba(126,247,184,0.95); }
+.home-index-change.negative{ color:rgba(255,105,97,0.95); }
+.home-index-descriptor{
+    font-size:10px;
+    color:var(--muted);
+    opacity:0.8;
+    margin-top:auto;
+}
+
+/* Drawdown / correction state */
+.home-index-drawdown{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    margin-top:4px;
+    padding:3px 6px;
+    border-radius:4px;
+    font-size:10px;
+    line-height:1.3;
+    background:rgba(255,255,255,0.03);
+    border:1px solid rgba(0,234,255,0.10);
+}
+.home-index-drawdown.bullish{
+    border-color:rgba(126,247,184,0.22);
+    color:rgba(126,247,184,0.9);
+}
+.home-index-drawdown.neutral{
+    border-color:rgba(255,199,88,0.22);
+    color:rgba(255,199,88,0.9);
+}
+.home-index-drawdown.riskoff{
+    border-color:rgba(255,105,97,0.28);
+    color:rgba(255,105,97,0.9);
+}
+.home-index-drawdown.bearish{
+    border-color:rgba(220,50,50,0.35);
+    color:rgba(255,80,80,0.95);
+    background:rgba(220,50,50,0.06);
+}
+.home-index-dd-pct{
+    white-space:nowrap;
+}
+.home-index-dd-label{
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.04em;
+    white-space:nowrap;
+}
+
+/* Chart title above each SVG */
+.home-chart-title{
+    font-size:11px;
+    font-weight:600;
+    color:var(--cyan);
+    text-transform:uppercase;
+    letter-spacing:0.05em;
+    margin-bottom:6px;
+    padding-left:2px;
+}
+
+/* ── Clickable chart links → Yahoo Finance ── */
+.home-chart-link{
+    display:block;
+    text-decoration:none;
+    color:inherit;
+    cursor:pointer;
+    border-radius:10px;
+    position:relative;
+    transition:box-shadow 0.25s ease;
+    min-width:0;
+    -webkit-tap-highlight-color:transparent;
+}
+.home-chart-link:hover{
+    box-shadow:0 0 16px rgba(0,234,255,0.10), inset 0 0 0 1px rgba(0,234,255,0.18);
+}
+.home-chart-link:hover .home-chart{
+    border-color:rgba(0,234,255,0.30);
+}
+.home-chart-link:focus-visible{
+    outline:2px solid var(--cyan);
+    outline-offset:2px;
+    border-radius:10px;
+}
+/* Subtle external-link hint on hover */
+.home-chart-link::after{
+    content:'\2197 Yahoo Finance';
+    position:absolute;
+    top:2px;
+    right:6px;
+    font-size:9px;
+    font-weight:500;
+    color:rgba(0,234,255,0);
+    transition:color 0.2s ease;
+    pointer-events:none;
+    font-family:var(--font-body);
+    z-index:2;
+    letter-spacing:0.02em;
+}
+.home-chart-link:hover::after{
+    color:rgba(0,234,255,0.50);
+}
+/* Proxy mini-chart link — tighter border radius, no inner .home-chart border */
+.home-chart-link--proxy{
+    border-radius:8px;
+}
+.home-chart-link--proxy::after{
+    top:3px;
+    right:30px;
+    font-size:8px;
+}
+.home-chart-link--proxy:hover .home-regime-proxy-card{
+    border-color:rgba(0,234,255,0.22);
+    box-shadow:0 0 14px rgba(0,234,255,0.08);
+}
+
+.home-chart-wrap{
+    min-width:0;
+}
+
+/* Top row: VIX + S&P 500 (2-col) */
+.home-chart-row-top{
+    display:grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap:12px;
+    margin-bottom:12px;
+}
+@media (max-width:720px){
+    .home-chart-row-top{ grid-template-columns:1fr; }
+}
+
+/* 2x2 chart grid below top row */
+.home-chart-grid-2x2{
+    display:grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap:12px;
+}
+@media (max-width:720px){
+    .home-chart-grid-2x2{ grid-template-columns:1fr; }
+}
+
 .home-sector-bars{
     display:grid;
     gap:8px;
@@ -6609,7 +6802,6 @@ main.main{
         max-width: 100%;
     }
     .home-regime-strip,
-    .home-index-tiles,
     .home-risk-tiles,
     .home-macro-tiles{
         grid-template-columns: repeat(2, minmax(0, 1fr));

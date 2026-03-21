@@ -21,6 +21,7 @@ Greenfield design — does NOT reference archived pipeline code.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -28,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.workflows.tmc_service import (
@@ -153,13 +155,29 @@ async def trigger_stock_workflow(
     """Trigger a Stock Opportunity workflow run.
 
     Returns a compact execution result — not the full runner output.
+    Uses asyncio.shield() so the workflow continues even if the HTTP
+    connection drops (e.g. browser timeout on long model calls).
     """
     tmc = _build_tmc_service(request)
     kwargs: dict[str, Any] = {}
     if body and body.top_n is not None:
         kwargs["top_n"] = body.top_n
 
-    result = await tmc.run_stock_opportunities(**kwargs)
+    # Shield the workflow from cancellation due to HTTP client disconnect.
+    # Without this, CancelledError (BaseException) kills the pipeline
+    # before stage 8 writes output.json / latest.json.
+    task = asyncio.ensure_future(tmc.run_stock_opportunities(**kwargs))
+    try:
+        result = await asyncio.shield(task)
+    except asyncio.CancelledError:
+        logger.warning(
+            "Client disconnected during stock workflow — run continues in background"
+        )
+        raise
+    logger.info(
+        "[TMC] Stock workflow trigger complete: run_id=%s status=%s candidates=%d",
+        result.run_id, result.status, result.candidate_count,
+    )
     return TMCTriggerResponse(**result.to_dict())
 
 
@@ -170,7 +188,8 @@ async def trigger_options_workflow(
 ) -> TMCTriggerResponse:
     """Trigger an Options Opportunity workflow run.
 
-    Returns a compact execution result — not the full runner output.
+    Uses asyncio.shield() so the workflow continues even if the HTTP
+    connection drops.
     """
     tmc = _build_tmc_service(request)
     kwargs: dict[str, Any] = {}
@@ -180,7 +199,18 @@ async def trigger_options_workflow(
         if body.symbols is not None:
             kwargs["symbols"] = body.symbols
 
-    result = await tmc.run_options_opportunities(**kwargs)
+    task = asyncio.ensure_future(tmc.run_options_opportunities(**kwargs))
+    try:
+        result = await asyncio.shield(task)
+    except asyncio.CancelledError:
+        logger.warning(
+            "Client disconnected during options workflow — run continues in background"
+        )
+        raise
+    logger.info(
+        "[TMC] Options workflow trigger complete: run_id=%s status=%s candidates=%d",
+        result.run_id, result.status, result.candidate_count,
+    )
     return TMCTriggerResponse(**result.to_dict())
 
 
@@ -189,49 +219,75 @@ async def trigger_options_workflow(
 # ═══════════════════════════════════════════════════════════════════════
 
 
+_NO_CACHE_HEADERS = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
+
+
 @router.get("/stock/latest", response_model=TMCStockOpportunitiesResponse)
 async def get_latest_stock_opportunities(
     request: Request,
-) -> TMCStockOpportunitiesResponse:
+) -> JSONResponse:
     """Return the latest stock opportunity compact read model.
 
     Returns ``status: "no_output"`` with null data if no output exists.
+    Cache-Control: no-store ensures the browser always hits the backend.
     """
     data_dir = _get_data_dir(request)
     model = load_latest_stock_output(data_dir)
 
     if model is None:
-        return TMCStockOpportunitiesResponse(
+        logger.debug("[TMC] stock/latest -> no_output (no pointer or output.json)")
+        body = TMCStockOpportunitiesResponse(
             status=TMCStatus.NO_OUTPUT,
             data=None,
         )
+    else:
+        logger.info(
+            "[TMC] stock/latest -> run_id=%s batch_status=%s candidates=%d generated_at=%s",
+            model.run_id, model.batch_status,
+            len(model.candidates), model.generated_at,
+        )
+        body = TMCStockOpportunitiesResponse(
+            status=model.status,
+            data=model.to_dict(),
+        )
 
-    return TMCStockOpportunitiesResponse(
-        status=model.status,
-        data=model.to_dict(),
+    return JSONResponse(
+        content=body.model_dump(),
+        headers=_NO_CACHE_HEADERS,
     )
 
 
 @router.get("/options/latest", response_model=TMCOptionsOpportunitiesResponse)
 async def get_latest_options_opportunities(
     request: Request,
-) -> TMCOptionsOpportunitiesResponse:
+) -> JSONResponse:
     """Return the latest options opportunity compact read model.
 
     Returns ``status: "no_output"`` with null data if no output exists.
+    Cache-Control: no-store ensures the browser always hits the backend.
     """
     data_dir = _get_data_dir(request)
     model = load_latest_options_output(data_dir)
 
     if model is None:
-        return TMCOptionsOpportunitiesResponse(
+        logger.debug("[TMC] options/latest -> no_output")
+        body = TMCOptionsOpportunitiesResponse(
             status=TMCStatus.NO_OUTPUT,
             data=None,
         )
+    else:
+        logger.info(
+            "[TMC] options/latest -> run_id=%s batch_status=%s candidates=%d",
+            model.run_id, model.batch_status, len(model.candidates),
+        )
+        body = TMCOptionsOpportunitiesResponse(
+            status=model.status,
+            data=model.to_dict(),
+        )
 
-    return TMCOptionsOpportunitiesResponse(
-        status=model.status,
-        data=model.to_dict(),
+    return JSONResponse(
+        content=body.model_dump(),
+        headers=_NO_CACHE_HEADERS,
     )
 
 

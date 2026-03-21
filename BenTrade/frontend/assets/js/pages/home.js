@@ -37,6 +37,10 @@ window.BenTradePages.initHome = function initHome(rootEl){
   const refreshingBadgeEl = scope.querySelector('#homeRefreshingBadge');
   const lastUpdatedEl = scope.querySelector('#homeLastUpdated');
   const vixChartEl = scope.querySelector('#homeVixChart');
+  const diaChartEl = scope.querySelector('#homeDiaChart');
+  const qqqChartEl = scope.querySelector('#homeQqqChart');
+  const iwmChartEl = scope.querySelector('#homeIwmChart');
+  const mdyChartEl = scope.querySelector('#homeMdyChart');
   const errorEl = scope.querySelector('#homeError');
   // regimeModelBtnEl removed — model analysis auto-runs on every refresh
   const regimeComparisonEl = scope.querySelector('#homeRegimeComparisonTable');
@@ -813,7 +817,15 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
   /* ── End Contextual Chat ──────────────────────────────────────── */
 
-  const INDEX_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA'];
+  const INDEX_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA', 'IWB', 'MDY'];
+  const INDEX_META = {
+    SPY: { name: 'S&P 500', descriptor: 'Large-cap benchmark', index: 'S&P 500' },
+    DIA: { name: 'Dow Jones', descriptor: 'Blue-chip price leadership', index: 'DJIA' },
+    QQQ: { name: 'Nasdaq Composite', descriptor: 'Growth-heavy market barometer', index: 'Nasdaq' },
+    IWM: { name: 'Russell 2000', descriptor: 'Small-cap risk appetite gauge', index: 'Russell 2000' },
+    IWB: { name: 'Russell 1000', descriptor: 'Large/mid-cap breadth proxy', index: 'Russell 1000' },
+    MDY: { name: 'S&P MidCap 400', descriptor: 'Mid-cap domestic cycle read', index: 'MidCap 400' },
+  };
   const SECTOR_SYMBOLS = ['XLF', 'XLK', 'XLE', 'XLY', 'XLP', 'XLV', 'XLI', 'XLB', 'XLRE', 'XLU', 'XLC'];
   const SECTOR_META = {
     XLF: { name: 'Financials', description: 'Banks, insurers, and diversified financial services firms' },
@@ -1449,6 +1461,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
   /* renderSourceHealth — REMOVED: Source Health is global-only (index.html / source_health.js) */
 
   function renderChart(svgEl, history, options){
+    if(!svgEl) return;
     const rows = Array.isArray(history) ? history : [];
     const points = rows.map((row) => toNumber(row?.close)).filter((v) => v !== null);
     if(!points.length){
@@ -1739,10 +1752,12 @@ window.BenTradePages.initHome = function initHome(rootEl){
         const entry = proxies[sym];
         if(!entry) return;
         const barTag = (entry.bar_size === '1h' || entry.bar_size === '15min') ? '1h' : 'D';
-        html += `<div class="home-regime-proxy-card">
+        const yahooUrl = 'https://finance.yahoo.com/quote/' + encodeURIComponent(sym);
+        html += `<a class="home-chart-link home-chart-link--proxy" href="${yahooUrl}" target="_blank" rel="noopener noreferrer" title="Open ${_esc(sym)} on Yahoo Finance">
+          <div class="home-regime-proxy-card">
           <span class="home-proxy-bar-tag">${barTag}</span>
           <svg class="home-regime-proxy-svg" viewBox="0 0 320 120" preserveAspectRatio="none"></svg>
-        </div>`;
+        </div></a>`;
       });
       // Append yield curve chart as the last tile in the grid
       html += _buildYieldCurveChartCard(macro || {});
@@ -2504,24 +2519,54 @@ window.BenTradePages.initHome = function initHome(rootEl){
     scoreboardCardsEl.innerHTML = html;
   }
 
+  /* ── Correction / drawdown state classification ── */
+  function classifyDrawdownState(last, high52w){
+    if(last === null || high52w === null || high52w <= 0) return null;
+    const drawdownPct = ((last - high52w) / high52w) * 100;
+    let label, tone;
+    if(drawdownPct >= -4.9){
+      label = 'Near High'; tone = 'bullish';
+    } else if(drawdownPct >= -9.9){
+      label = 'Pullback'; tone = 'neutral';
+    } else if(drawdownPct >= -19.9){
+      label = 'Correction'; tone = 'riskoff';
+    } else {
+      label = 'Bear Market'; tone = 'bearish';
+    }
+    return { drawdownPct, label, tone };
+  }
+
   function renderIndexes(indexSummaries){
     indexTilesEl.innerHTML = INDEX_SYMBOLS.map((symbol) => {
       const payload = indexSummaries[symbol] || {};
       const price = payload?.price || {};
-      const indicators = payload?.indicators || {};
+      const meta = INDEX_META[symbol] || { name: symbol, descriptor: symbol, index: symbol };
       const last = toNumber(price.last);
       const pct = toNumber(price.change_pct);
-      const rsi = toNumber(indicators.rsi14);
-      const ema20 = toNumber(indicators.ema20);
-      const trend = (last !== null && ema20 !== null)
-        ? (last >= ema20 ? 'Above EMA20' : 'Below EMA20')
-        : 'N/A';
+      const high52w = toNumber(price.high_52w);
+
+      const drawdown = classifyDrawdownState(last, high52w);
+      let drawdownHtml = '';
+      if(drawdown){
+        const ddPctStr = Math.abs(drawdown.drawdownPct).toFixed(1);
+        drawdownHtml = `
+          <div class="home-index-drawdown ${drawdown.tone}">
+            <span class="home-index-dd-pct">${ddPctStr}% below 52wk high</span>
+            <span class="home-index-dd-label">${drawdown.label}</span>
+          </div>
+        `;
+      }
+
       return `
         <div class="statTile home-index-tile">
-          <div class="statLabel" data-metric="index_price">${symbol}</div>
+          <div class="home-index-header">
+            <div class="statLabel home-index-name">${_esc(meta.name)}</div>
+            <div class="home-index-etf stock-note">${symbol}</div>
+          </div>
           <div class="statValue">${fmt(last)}</div>
-          <div class="stock-note">${fmtPct(pct)} • RSI ${fmt(rsi, 1)}</div>
-          <div class="stock-note">${trend}</div>
+          <div class="home-index-change ${pct !== null ? (pct >= 0 ? 'positive' : 'negative') : ''}">${fmtPct(pct)}</div>
+          <div class="home-index-descriptor stock-note">${_esc(meta.descriptor)}</div>
+          ${drawdownHtml}
         </div>
       `;
     }).join('');
@@ -3545,6 +3590,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
     renderChart(spyChartEl, spySummary?.history || [], { stroke: 'rgba(0,234,255,0.95)' });
     renderChart(vixChartEl, vixSummary?.history || [], { stroke: 'rgba(255,199,88,0.95)' });
+    /* Additional index charts */
+    renderChart(diaChartEl, indexSummaries?.DIA?.history || [], { stroke: 'rgba(0,234,255,0.85)' });
+    renderChart(qqqChartEl, indexSummaries?.QQQ?.history || [], { stroke: 'rgba(0,234,255,0.85)' });
+    renderChart(iwmChartEl, indexSummaries?.IWM?.history || [], { stroke: 'rgba(0,234,255,0.85)' });
+    renderChart(mdyChartEl, indexSummaries?.MDY?.history || [], { stroke: 'rgba(0,234,255,0.85)' });
 
     // Market Picture History — fire-and-forget async fetch + render
     loadAndRenderMarketPictureHistory();

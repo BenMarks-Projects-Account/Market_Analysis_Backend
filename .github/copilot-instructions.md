@@ -88,6 +88,7 @@ Include:
 - a note that unrelated failures were not addressed because they were outside scope
 
 Anchor docs (work must conform to these standards):
+- docs/architecture/bentrade_decision_system_current_state.md — durable current-state reference for the full decision system (scanners, engines, prompts, workflows, gaps, target direction). Read before any architecture-level work.
 - docs/standards/scanner-contract.md — required scanner output fields and filter trace schema.
 - docs/standards/rejection-taxonomy.md — stable rejection reason codes; never rename, only add.
 - docs/standards/presets.md — Strict / Balanced / Wide preset philosophy, required knobs, verification rule.

@@ -132,6 +132,7 @@ class StockOpportunityReadModel:
     generated_at: str
     market_state_ref: str | None
     status: str                     # TMCStatus value
+    batch_status: str               # "completed" | "partial" | unknown
     total_candidates: int
     selected_count: int
     quality_level: str
@@ -145,6 +146,7 @@ class StockOpportunityReadModel:
             "generated_at": self.generated_at,
             "market_state_ref": self.market_state_ref,
             "status": self.status,
+            "batch_status": self.batch_status,
             "total_candidates": self.total_candidates,
             "selected_count": self.selected_count,
             "quality_level": self.quality_level,
@@ -167,6 +169,7 @@ class OptionsOpportunityReadModel:
     generated_at: str
     market_state_ref: str | None
     status: str                     # TMCStatus value
+    batch_status: str               # "completed" | "partial" | unknown
     total_candidates: int
     selected_count: int
     quality_level: str
@@ -182,6 +185,7 @@ class OptionsOpportunityReadModel:
             "generated_at": self.generated_at,
             "market_state_ref": self.market_state_ref,
             "status": self.status,
+            "batch_status": self.batch_status,
             "total_candidates": self.total_candidates,
             "selected_count": self.selected_count,
             "quality_level": self.quality_level,
@@ -236,6 +240,7 @@ def _load_pointer(data_dir: Path, workflow_id: str) -> WorkflowPointerData | Non
     """Load and validate a workflow pointer.  Returns None on failure."""
     pointer_path = get_pointer_path(data_dir, workflow_id)
     if not pointer_path.is_file():
+        logger.debug("[TMC] No pointer file at %s", pointer_path)
         return None
     try:
         raw = json.loads(pointer_path.read_text(encoding="utf-8"))
@@ -243,7 +248,13 @@ def _load_pointer(data_dir: Path, workflow_id: str) -> WorkflowPointerData | Non
             if key not in raw:
                 logger.warning("Pointer missing key %s for %s", key, workflow_id)
                 return None
-        return WorkflowPointerData.from_dict(raw)
+        pointer = WorkflowPointerData.from_dict(raw)
+        logger.debug(
+            "[TMC] Loaded pointer for %s: run_id=%s completed_at=%s batch_status=%s",
+            workflow_id, pointer.run_id, pointer.completed_at,
+            pointer.batch_status or "n/a",
+        )
+        return pointer
     except Exception as exc:
         logger.warning("Failed to load pointer for %s: %s", workflow_id, exc)
         return None
@@ -316,6 +327,7 @@ def load_latest_stock_output(
         generated_at=output.get("generated_at", ""),
         market_state_ref=output.get("market_state_ref"),
         status=_run_status_to_tmc("completed", pub_status),
+        batch_status=output.get("batch_status") or pointer.batch_status or "completed",
         total_candidates=quality.get("total_candidates_found", 0),
         selected_count=quality.get("selected_count", 0),
         quality_level=quality.get("level", "unknown"),
@@ -363,6 +375,7 @@ def load_latest_options_output(
         generated_at=output.get("generated_at", ""),
         market_state_ref=output.get("market_state_ref"),
         status=_run_status_to_tmc("completed", pub_status),
+        batch_status=output.get("batch_status") or pointer.batch_status or "completed",
         total_candidates=quality.get("total_candidates_found", 0),
         selected_count=quality.get("selected_count", 0),
         quality_level=quality.get("level", "unknown"),

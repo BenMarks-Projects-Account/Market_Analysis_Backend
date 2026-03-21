@@ -510,13 +510,13 @@ window.BenTradeApi = (function(){
     });
   }
   function tmcGetLatestStock(){
-    return jsonFetch('/api/tmc/workflows/stock/latest');
+    return jsonFetch('/api/tmc/workflows/stock/latest?_t=' + Date.now());
   }
   function tmcGetLatestOptions(){
-    return jsonFetch('/api/tmc/workflows/options/latest');
+    return jsonFetch('/api/tmc/workflows/options/latest?_t=' + Date.now());
   }
   function tmcGetStockSummary(){
-    return jsonFetch('/api/tmc/workflows/stock/summary');
+    return jsonFetch('/api/tmc/workflows/stock/summary?_t=' + Date.now());
   }
   function tmcGetOptionsSummary(){
     return jsonFetch('/api/tmc/workflows/options/summary');

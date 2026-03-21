@@ -72,8 +72,12 @@ from app.workflows.market_state_consumer import (
     MarketStateConsumerResult,
     load_market_state_for_consumer,
 )
+from app.workflows.workflow_debug_log import WorkflowDebugLogger
 
 logger = logging.getLogger(__name__)
+
+# Debug log file path — overwritten each run.
+_OPTIONS_DEBUG_LOG = Path(__file__).resolve().parents[2] / "data" / "workflows" / "options_pipeline_debug.log"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -391,6 +395,8 @@ def _extract_scan_diagnostics(scan_results: list[dict[str, Any]]) -> dict[str, A
         for code, count in sr.get("warning_counts", {}).items():
             all_warning_counts[code] = all_warning_counts.get(code, 0) + count
 
+        # Per-family summary with narrowing and phase details
+        narrowing = sr.get("narrowing_diagnostics") or {}
         family_summaries.append({
             "scanner_key": sr.get("scanner_key"),
             "family_key": sr.get("family_key"),
@@ -398,6 +404,17 @@ def _extract_scan_diagnostics(scan_results: list[dict[str, Any]]) -> dict[str, A
             "total_constructed": sr.get("total_constructed", 0),
             "total_passed": sr.get("total_passed", 0),
             "total_rejected": sr.get("total_rejected", 0),
+            "reject_reason_counts": sr.get("reject_reason_counts", {}),
+            "phase_counts": sr.get("phase_counts", []),
+            "narrowing": {
+                "contracts_loaded": narrowing.get("total_contracts_loaded", 0),
+                "expirations_kept": narrowing.get("expirations_kept", 0),
+                "expirations_dropped": narrowing.get("expirations_dropped", 0),
+                "contracts_final": narrowing.get("contracts_final", 0),
+                "missing_bid": narrowing.get("contracts_missing_bid", 0),
+                "missing_ask": narrowing.get("contracts_missing_ask", 0),
+                "missing_delta": narrowing.get("contracts_missing_delta", 0),
+            },
             "elapsed_ms": sr.get("elapsed_ms", 0),
         })
 
@@ -420,12 +437,18 @@ async def run_options_opportunity(
     config: RunnerConfig,
     deps: OptionsOpportunityDeps,
 ) -> RunResult:
-    """Execute one complete Options Opportunity workflow run.
+    """Execute one complete Options Opportunity workflow run (5 stages).
 
     This is the primary entry point.  Returns a ``RunResult`` whether
     the run succeeds, degrades, or fails.  Never raises — all errors
     are captured in the result.
+
+    Handles ``asyncio.CancelledError`` so that if the HTTP connection
+    drops mid-pipeline, the runner still attempts to finish writing
+    output.json and latest.json (preventing stale TMC data).
     """
+    import asyncio
+
     now = datetime.now(timezone.utc)
     run_id = make_run_id(now)
     result = RunResult(run_id=run_id, started_at=now.isoformat())
@@ -435,53 +458,164 @@ async def run_options_opportunity(
     warnings: list[str] = []
     policy = config.freshness_policy or FreshnessPolicy()
 
-    # ── Stage 1: load_market_state ───────────────────────────────
-    outcome = _stage_load_market_state(config, policy, stage_data, warnings)
-    stages.append(outcome)
-    _write_stage_artifact(config, run_id, outcome, stage_data, "load_market_state")
+    # ── Debug log: open (overwrite) ──────────────────────────────
+    dbg = WorkflowDebugLogger(_OPTIONS_DEBUG_LOG)
+    dbg.open(run_id=run_id, workflow_id=WORKFLOW_ID)
+    dbg.detail("Config", {
+        "data_dir": str(config.data_dir),
+        "top_n": config.top_n,
+        "symbols": list(config.symbols),
+        "scanner_keys": list(config.scanner_keys),
+        "freshness_policy": str(policy),
+    })
 
-    # Market state is enrichment-only — degraded is OK, only hard errors abort.
-    if outcome.status == "failed":
-        result.status = "failed"
-        result.error = f"load_market_state failed: {outcome.error}"
-        result.stages = [s.to_dict() for s in stages]
-        result.completed_at = _now_iso()
-        return result
+    logger.info("[options_opportunity] Starting run %s", run_id)
 
-    market_state_degraded = outcome.status == "degraded"
+    try:
+        # ── Stage 1: load_market_state ───────────────────────────────
+        dbg.stage_start("load_market_state", {"freshness_policy": str(policy)})
+        outcome = _stage_load_market_state(config, policy, stage_data, warnings)
+        stages.append(outcome)
+        _write_stage_artifact(config, run_id, outcome, stage_data, "load_market_state")
+        dbg.stage_end("load_market_state", outcome.status, {
+            "market_state_ref": stage_data.get("market_state_ref"),
+            "consumer_summary": stage_data.get("consumer_summary"),
+            "error": outcome.error,
+        })
 
-    # ── Stage 2: scan ────────────────────────────────────────────
-    outcome = await _stage_scan(config, deps, stage_data, warnings)
-    stages.append(outcome)
-    _write_stage_artifact(config, run_id, outcome, stage_data, "scan")
+        # Market state is enrichment-only — degraded is OK, only hard errors abort.
+        if outcome.status == "failed":
+            result.status = "failed"
+            result.error = f"load_market_state failed: {outcome.error}"
+            result.stages = [s.to_dict() for s in stages]
+            result.completed_at = _now_iso()
+            return result
 
-    if outcome.status == "failed":
-        result.status = "failed"
-        result.error = f"scan failed: {outcome.error}"
-        result.stages = [s.to_dict() for s in stages]
-        result.completed_at = _now_iso()
-        return result
+        market_state_degraded = outcome.status == "degraded"
 
-    # ── Stage 3: validate_math ───────────────────────────────────
-    outcome = _stage_validate_math(stage_data, warnings)
-    stages.append(outcome)
-    _write_stage_artifact(config, run_id, outcome, stage_data, "validate_math")
+        # ── Stage 2: scan ────────────────────────────────────────────
+        dbg.stage_start("scan", {
+            "symbols": list(config.symbols),
+            "scanner_keys": list(config.scanner_keys),
+        })
+        outcome = await _stage_scan(config, deps, stage_data, warnings)
+        stages.append(outcome)
+        _write_stage_artifact(config, run_id, outcome, stage_data, "scan")
+        dbg.stage_end("scan", outcome.status, {
+            "scanners_total": stage_data.get("scanners_total"),
+            "scanners_ok": stage_data.get("scanners_ok"),
+            "scanners_failed": stage_data.get("scanners_failed"),
+            "passed_candidates": len(stage_data.get("raw_candidates", [])),
+            "rejected_candidates": len(stage_data.get("rejected_candidates", [])),
+            "scan_diagnostics": stage_data.get("scan_diagnostics"),
+        })
+        dbg.candidates("Passed candidates (from scan)",
+                        stage_data.get("raw_candidates", []),
+                        keys=["candidate_id", "scanner_key", "strategy_id",
+                              "symbol", "expiration", "passed",
+                              "downstream_usable"])
+        # Log rejected candidates summary
+        rejected = stage_data.get("rejected_candidates", [])
+        if rejected:
+            dbg.candidates("Rejected candidates (from scan)", rejected,
+                            keys=["candidate_id", "scanner_key", "symbol",
+                                  "expiration", "passed"],
+                            limit=30)
 
-    if outcome.status == "failed":
-        result.status = "failed"
-        result.error = f"validate_math failed: {outcome.error}"
-        result.stages = [s.to_dict() for s in stages]
-        result.completed_at = _now_iso()
-        return result
+        # Log family-by-family breakdown for diagnostic visibility
+        scan_diag = stage_data.get("scan_diagnostics", {})
+        fam_summaries = scan_diag.get("family_summaries", [])
+        if fam_summaries:
+            dbg.detail("Family-by-family scan breakdown", fam_summaries)
+        # Log aggregate reject reasons
+        agg_rejects = scan_diag.get("reject_reason_counts", {})
+        if agg_rejects:
+            dbg.detail("Aggregate reject reasons", agg_rejects)
 
-    # ── Stage 4: enrich_evaluate ─────────────────────────────────
-    outcome = _stage_enrich_evaluate(stage_data, warnings)
-    stages.append(outcome)
-    _write_stage_artifact(config, run_id, outcome, stage_data, "enrich_evaluate")
+        if outcome.status == "failed":
+            result.status = "failed"
+            result.error = f"scan failed: {outcome.error}"
+            result.stages = [s.to_dict() for s in stages]
+            result.completed_at = _now_iso()
+            return result
+
+        # ── Stage 3: validate_math ───────────────────────────────────
+        dbg.stage_start("validate_math", {
+            "input_count": len(stage_data.get("raw_candidates", [])),
+        })
+        outcome = _stage_validate_math(stage_data, warnings)
+        stages.append(outcome)
+        _write_stage_artifact(config, run_id, outcome, stage_data, "validate_math")
+        dbg.stage_end("validate_math", outcome.status, {
+            "validated_count": len(stage_data.get("validated_candidates", [])),
+            "filtered_count": stage_data.get("validation_filtered_count", 0),
+            "filter_reasons": stage_data.get("validation_filter_reasons", {}),
+            "validation_summary": stage_data.get("validation_summary", {}),
+        })
+        dbg.candidates("Validated candidates",
+                        stage_data.get("validated_candidates", []),
+                        keys=["candidate_id", "scanner_key", "symbol",
+                              "expiration", "downstream_usable"],
+                        limit=40)
+
+        if outcome.status == "failed":
+            result.status = "failed"
+            result.error = f"validate_math failed: {outcome.error}"
+            result.stages = [s.to_dict() for s in stages]
+            result.completed_at = _now_iso()
+            return result
+
+        # ── Stage 4: enrich_evaluate ─────────────────────────────────
+        dbg.stage_start("enrich_evaluate", {
+            "input_count": len(stage_data.get("validated_candidates", [])),
+        })
+        outcome = _stage_enrich_evaluate(stage_data, warnings)
+        stages.append(outcome)
+        _write_stage_artifact(config, run_id, outcome, stage_data, "enrich_evaluate")
+        dbg.stage_end("enrich_evaluate", outcome.status, {
+            "enriched_count": len(stage_data.get("enriched_candidates", [])),
+            "market_state_ref": stage_data.get("market_state_ref"),
+            "market_regime": (stage_data.get("consumer_summary") or {}).get("market_state"),
+            "credibility_filter": stage_data.get("credibility_filter"),
+        })
+        # Log full enriched candidates with math details
+        dbg.candidates("Enriched candidates (ranked by EV)",
+                        stage_data.get("enriched_candidates", []),
+                        keys=["candidate_id", "scanner_key", "symbol",
+                              "expiration", "rank", "math"])
+
+    except asyncio.CancelledError:
+        # HTTP client disconnected or task was cancelled mid-pipeline.
+        # Still attempt to package whatever candidates we have so far so
+        # the latest.json pointer gets updated and TMC sees fresh data.
+        logger.warning(
+            "[options_opportunity] CancelledError in run %s at stage %d — "
+            "attempting to package partial output",
+            run_id, len(stages),
+        )
+        warnings.append("[pipeline] Run interrupted (CancelledError) — packaging partial output")
+        dbg.note(f"⚠ CancelledError at stage {len(stages)} — packaging partial output")
+    except Exception as exc:
+        logger.error(
+            "[options_opportunity] Unexpected error in run %s: %s",
+            run_id, exc, exc_info=True,
+        )
+        warnings.append(f"[pipeline] Unexpected error — packaging partial output: {exc}")
+        dbg.note(f"⚠ Unexpected error: {exc} — packaging partial output")
 
     # ── Stage 5: select_package ──────────────────────────────────
+    # Always attempt stage 5 so output.json + latest.json are written.
+    dbg.stage_start("select_package", {
+        "candidates_to_package": len(stage_data.get("enriched_candidates", [])),
+        "top_n": config.top_n,
+    })
     outcome = _stage_select_package(config, run_id, now, stage_data, stages, warnings)
     stages.append(outcome)
+    dbg.stage_end("select_package", outcome.status, {
+        "publication_status": stage_data.get("publication_status"),
+        "artifact_filename": stage_data.get("artifact_filename"),
+        "artifact_path": str(stage_data.get("artifact_path", "")),
+    })
 
     # ── Finalize ─────────────────────────────────────────────────
     result.stages = [s.to_dict() for s in stages]
@@ -497,6 +631,25 @@ async def run_options_opportunity(
         result.error = f"select_package failed: {outcome.error}"
     else:
         result.status = "completed"
+
+    logger.info(
+        "[options_opportunity] Run %s finished: status=%s candidates=%d",
+        run_id, result.status,
+        len(stage_data.get("enriched_candidates", [])),
+    )
+
+    # ── Debug log: close ─────────────────────────────────────────
+    dbg.section("Final Result")
+    dbg.detail("Result summary", {
+        "run_id": result.run_id,
+        "status": result.status,
+        "publication_status": result.publication_status,
+        "artifact_filename": result.artifact_filename,
+        "artifact_path": result.artifact_path,
+        "stages_completed": len(result.stages),
+        "enriched_candidates": len(stage_data.get("enriched_candidates", [])),
+    })
+    dbg.close(status=result.status, warnings=warnings)
 
     return result
 
@@ -800,8 +953,64 @@ def _stage_enrich_evaluate(
             enriched_cand["risk_environment"] = risk_environment
             enriched.append(enriched_cand)
 
+        # ── Credibility gate ─────────────────────────────────────
+        # Filter out trades that are technically valid but represent
+        # worthless deep-OTM options with no real premium.
+        # Criteria:
+        #   1. net_credit or net_debit must be >= $0.05 per share
+        #   2. POP must be < 0.995 (pop=1.0 means short delta=0, worthless)
+        #   3. At least one leg must have bid > 0 (fillable)
+        MIN_PREMIUM = 0.05       # per-share minimum net premium
+        MAX_POP_THRESHOLD = 0.995  # reject delta-zero shorts
+        credible: list[dict[str, Any]] = []
+        credibility_rejections = 0
+        credibility_reasons: dict[str, int] = {}
+        for cand in enriched:
+            math = cand.get("math") or {}
+            legs = cand.get("legs", [])
+
+            net_credit = _safe_float(math.get("net_credit"))
+            net_debit = _safe_float(math.get("net_debit"))
+            pop = _safe_float(math.get("pop"))
+            max_premium = max(net_credit, net_debit)
+
+            # Check 1: minimum premium
+            if max_premium < MIN_PREMIUM:
+                credibility_rejections += 1
+                credibility_reasons["penny_premium"] = credibility_reasons.get("penny_premium", 0) + 1
+                continue
+
+            # Check 2: pop must indicate a real trade (delta != 0)
+            if pop >= MAX_POP_THRESHOLD:
+                credibility_rejections += 1
+                credibility_reasons["zero_delta_short"] = credibility_reasons.get("zero_delta_short", 0) + 1
+                continue
+
+            # Check 3: at least one leg must be fillable (bid > 0)
+            has_fillable_leg = any(
+                _safe_float(leg.get("bid")) > 0 for leg in legs
+            )
+            if not has_fillable_leg:
+                credibility_rejections += 1
+                credibility_reasons["all_legs_zero_bid"] = credibility_reasons.get("all_legs_zero_bid", 0) + 1
+                continue
+
+            credible.append(cand)
+
+        logger.info(
+            "[enrich] Credibility gate: %d → %d (rejected %d: %s)",
+            len(enriched), len(credible),
+            credibility_rejections, credibility_reasons,
+        )
+        stage_data["credibility_filter"] = {
+            "input_count": len(enriched),
+            "passed_count": len(credible),
+            "rejected_count": credibility_rejections,
+            "rejection_reasons": credibility_reasons,
+        }
+
         # Sort by EV descending (None → bottom), then RoR descending for ties.
-        enriched.sort(
+        credible.sort(
             key=lambda c: (
                 -_safe_float((c.get("math") or {}).get("ev")),
                 -_safe_float((c.get("math") or {}).get("ror")),
@@ -810,10 +1019,10 @@ def _stage_enrich_evaluate(
         )
 
         # Assign rank.
-        for i, cand in enumerate(enriched, start=1):
+        for i, cand in enumerate(credible, start=1):
             cand["rank"] = i
 
-        stage_data["enriched_candidates"] = enriched
+        stage_data["enriched_candidates"] = credible
 
         return StageOutcome(
             stage_key="enrich_evaluate",
@@ -877,6 +1086,15 @@ def _stage_select_package(
         elif scanners_ok < scanners_total:
             quality_level = "degraded"
 
+        # ── Determine batch status ───────────────────────────────
+        # batch_status: "completed" | "partial"
+        # "partial" = CancelledError or unexpected error interrupted pipeline
+        _has_interruption = any(
+            "[pipeline] Run interrupted" in w or "[pipeline] Unexpected error" in w
+            for w in warnings
+        )
+        batch_status = "partial" if _has_interruption else "completed"
+
         # ── Build compact candidates for output.json ─────────────
         compact_candidates = [_extract_compact_candidate(c) for c in selected]
 
@@ -885,6 +1103,38 @@ def _stage_select_package(
             cc["market_state_ref"] = market_state_ref
             cc["rank"] = i
 
+        # ── Log payload field completeness ────────────────────────
+        # Helps distinguish scanner success from card-contract completeness.
+        if compact_candidates:
+            sample = compact_candidates[0]
+            math_sample = sample.get("math", {})
+            _payload_fields = {
+                "candidate_id": sample.get("candidate_id") is not None,
+                "symbol": sample.get("symbol") is not None,
+                "strategy_id": sample.get("strategy_id") is not None,
+                "family_key": sample.get("family_key") is not None,
+                "expiration": sample.get("expiration") is not None,
+                "dte": sample.get("dte") is not None,
+                "underlying_price": sample.get("underlying_price") is not None,
+                "legs": len(sample.get("legs", [])) > 0,
+                "math.net_credit": math_sample.get("net_credit") is not None,
+                "math.net_debit": math_sample.get("net_debit") is not None,
+                "math.max_profit": math_sample.get("max_profit") is not None,
+                "math.max_loss": math_sample.get("max_loss") is not None,
+                "math.width": math_sample.get("width") is not None,
+                "math.pop": math_sample.get("pop") is not None,
+                "math.ev": math_sample.get("ev") is not None,
+                "math.ror": math_sample.get("ror") is not None,
+                "math.ev_per_day": math_sample.get("ev_per_day") is not None,
+                "math.breakeven": len(math_sample.get("breakeven", [])) > 0,
+            }
+            present = [k for k, v in _payload_fields.items() if v]
+            absent = [k for k, v in _payload_fields.items() if not v]
+            logger.info(
+                "[select_package] Payload field audit (%d selected): present=%s absent=%s",
+                selected_count, present, absent,
+            )
+
         # ── Build output.json ────────────────────────────────────
         completed_at = _now_iso()
         output_data: dict[str, Any] = {
@@ -892,6 +1142,7 @@ def _stage_select_package(
             "workflow_id": WORKFLOW_ID,
             "run_id": run_id,
             "generated_at": completed_at,
+            "batch_status": batch_status,
             "market_state_ref": market_state_ref,
             "publication": {
                 "status": "valid" if quality_level != "no_candidates" else "degraded",
@@ -905,6 +1156,7 @@ def _stage_select_package(
                 "top_n_cap": top_n,
                 "scanners_ok": scanners_ok,
                 "scanners_total": scanners_total,
+                "credibility_filter": stage_data.get("credibility_filter"),
             },
             "scan_diagnostics": {
                 "total_constructed": scan_diag.get("total_constructed", 0),
@@ -935,6 +1187,7 @@ def _stage_select_package(
             "started_at": started_ts.isoformat(),
             "completed_at": completed_at,
             "status": "completed",
+            "batch_status": batch_status,
             "market_state_ref": market_state_ref,
             "total_candidates": total_candidates,
             "selected_count": selected_count,
@@ -1015,6 +1268,8 @@ def _stage_select_package(
         atomic_write_json(manifest_path, manifest_data)
 
         # Update pointer (latest.json).
+        # batch_status is "completed" or "partial" — always update pointer.
+        # (If packaging itself fails, we never reach here.)
         pointer = WorkflowPointerData(
             run_id=run_id,
             workflow_id=WORKFLOW_ID,
@@ -1022,8 +1277,13 @@ def _stage_select_package(
             status="valid",
             output_filename="output.json",
             contract_version=WORKFLOW_VERSION,
+            batch_status=batch_status,
         )
         write_workflow_pointer(data_dir, WORKFLOW_ID, pointer)
+        logger.info(
+            "[options_opportunity] Pointer updated: run_id=%s batch_status=%s",
+            run_id, batch_status,
+        )
 
         # Store for result.
         stage_data["publication_status"] = output_data["publication"]["status"]

@@ -74,23 +74,61 @@
         <!-- Detail strip: indexes, charts, sectors, signals -->
         <div class="home-scoreboard-detail-strip">
           <div class="home-scoreboard-grid">
-            <div class="stock-card home-nested-card">
-              <div class="stock-card-title">Major Indexes</div>
+            <div class="stock-card home-nested-card home-market-structure-panel" style="grid-column: 1 / -1;">
+              <div class="stock-card-title">Market Structure</div>
+
+              <!-- Index state cards (6-up grid) -->
               <div id="homeIndexTiles" class="home-index-tiles"></div>
+
+              <!-- Top row: VIX + S&P 500 charts -->
+              <div class="home-chart-row-top">
+                <a class="home-chart-link" href="https://finance.yahoo.com/quote/%5EVIX" target="_blank" rel="noopener noreferrer" title="Open ^VIX on Yahoo Finance">
+                  <div class="home-chart-wrap">
+                    <div class="home-chart-title">VIX (6M)</div>
+                    <svg id="homeVixChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
+                  </div>
+                </a>
+                <a class="home-chart-link" href="https://finance.yahoo.com/quote/SPY" target="_blank" rel="noopener noreferrer" title="Open SPY on Yahoo Finance">
+                  <div class="home-chart-wrap">
+                    <div class="home-chart-title">S&amp;P 500 (6M)</div>
+                    <svg id="homeSpyChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
+                  </div>
+                </a>
+              </div>
+
+              <!-- 2x2 grid: remaining index charts -->
+              <div class="home-chart-grid-2x2">
+                <a class="home-chart-link" href="https://finance.yahoo.com/quote/DIA" target="_blank" rel="noopener noreferrer" title="Open DIA on Yahoo Finance">
+                  <div class="home-chart-wrap">
+                    <div class="home-chart-title">Dow Jones (6M)</div>
+                    <svg id="homeDiaChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
+                  </div>
+                </a>
+                <a class="home-chart-link" href="https://finance.yahoo.com/quote/QQQ" target="_blank" rel="noopener noreferrer" title="Open QQQ on Yahoo Finance">
+                  <div class="home-chart-wrap">
+                    <div class="home-chart-title">Nasdaq Composite (6M)</div>
+                    <svg id="homeQqqChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
+                  </div>
+                </a>
+                <a class="home-chart-link" href="https://finance.yahoo.com/quote/IWM" target="_blank" rel="noopener noreferrer" title="Open IWM on Yahoo Finance">
+                  <div class="home-chart-wrap">
+                    <div class="home-chart-title">Russell 2000 (6M)</div>
+                    <svg id="homeIwmChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
+                  </div>
+                </a>
+                <a class="home-chart-link" href="https://finance.yahoo.com/quote/MDY" target="_blank" rel="noopener noreferrer" title="Open MDY on Yahoo Finance">
+                  <div class="home-chart-wrap">
+                    <div class="home-chart-title">S&amp;P MidCap 400 (6M)</div>
+                    <svg id="homeMdyChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
+                  </div>
+                </a>
+              </div>
             </div>
+          </div>
+          <div class="home-scoreboard-fullwidth">
             <div class="stock-card home-nested-card">
               <div class="stock-card-title">Macro Indicators</div>
               <div id="homeMacroTiles" class="home-macro-tiles"></div>
-            </div>
-          </div>
-          <div class="home-scoreboard-grid">
-            <div class="stock-card home-nested-card">
-              <div class="stock-card-title">SPY Price Chart (6M)</div>
-              <svg id="homeSpyChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
-            </div>
-            <div class="stock-card home-nested-card">
-              <div class="stock-card-title">VIX Chart (3M)</div>
-              <svg id="homeVixChart" class="home-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
             </div>
           </div>
           <div class="home-scoreboard-fullwidth">

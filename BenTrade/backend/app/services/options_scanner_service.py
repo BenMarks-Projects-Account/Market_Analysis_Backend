@@ -163,13 +163,19 @@ class OptionsScannerService:
         # Get underlying price
         underlying_price = await self._bds.get_underlying_price(symbol)
 
-        # Fetch chains for available expirations and merge into one chain dict
+        # Fetch chains for available expirations and merge into one chain dict.
+        # base_data_service.get_analysis_inputs returns OptionContract (Pydantic)
+        # objects via normalize_chain, but V2 scanners expect raw dicts.
+        # Convert via .model_dump() at this boundary.
         merged_options: list[dict[str, Any]] = []
         for exp in expirations:
             try:
                 inputs = await self._bds.get_analysis_inputs(symbol, exp, include_prices_history=False)
                 contracts = inputs.get("contracts") or []
-                merged_options.extend(contracts)
+                for c in contracts:
+                    merged_options.append(
+                        c.model_dump() if hasattr(c, "model_dump") else c
+                    )
             except Exception as exc:
                 _log.debug(
                     "event=chain_fetch_skip scanner_key=%s symbol=%s exp=%s error=%s",
@@ -182,6 +188,11 @@ class OptionsScannerService:
                 "event=no_chain_data scanner_key=%s symbol=%s", scanner_key, symbol,
             )
             return self._empty_result(scanner_key, strategy_id, family_key, symbol)
+
+        _log.info(
+            "event=chain_merged scanner_key=%s symbol=%s expirations=%d contracts=%d",
+            scanner_key, symbol, len(expirations), len(merged_options),
+        )
 
         # Build chain dict in the shape V2 scanners expect
         chain = {"options": {"option": merged_options}}
@@ -196,7 +207,16 @@ class OptionsScannerService:
             context=context,
         )
 
-        return scan_result.to_dict()
+        result_dict = scan_result.to_dict()
+        _log.info(
+            "event=scanner_completed scanner_key=%s symbol=%s "
+            "constructed=%d passed=%d rejected=%d",
+            scanner_key, symbol,
+            result_dict.get("total_constructed", 0),
+            result_dict.get("total_passed", 0),
+            result_dict.get("total_rejected", 0),
+        )
+        return result_dict
 
     @staticmethod
     def _empty_result(
