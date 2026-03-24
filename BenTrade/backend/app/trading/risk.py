@@ -5,21 +5,13 @@ from datetime import datetime, timedelta, timezone
 
 from app.config import Settings
 from app.trading.models import OrderLeg, OrderTicket
+from app.utils.market_hours import is_market_open
 
 
 @dataclass
 class RiskResult:
     checks: dict[str, bool | float | int]
     warnings: list[str]
-
-
-def _is_market_open(now: datetime | None = None) -> bool:
-    ts = now or datetime.now(timezone.utc)
-    if ts.weekday() >= 5:
-        return False
-    # Simple UTC window for US regular session: 14:30-21:00 UTC (approx, DST not handled)
-    mins = ts.hour * 60 + ts.minute
-    return 14 * 60 + 30 <= mins <= 21 * 60
 
 
 def _spread_pct(leg: OrderLeg) -> float | None:
@@ -62,7 +54,7 @@ def evaluate_preview_risk(
     if short_spread_pct is not None and short_spread_pct > 0.10:
         warnings.append("Short leg bid-ask spread is wider than 10% of mid")
 
-    if not _is_market_open():
+    if not is_market_open():
         warnings.append("Market appears closed; fills may be delayed or less reliable")
 
     if is_credit:

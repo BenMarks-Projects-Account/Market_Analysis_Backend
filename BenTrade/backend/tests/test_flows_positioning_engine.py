@@ -845,7 +845,7 @@ class TestCrowdingGate:
             "flow_direction_persistence": {"score": 80},
             "positioning_stability": {"score": 70},
         }
-        full, short, warnings = _label_from_score_with_gates(75, pillars)
+        full, short, _adj, _applied, warnings, _details = _label_from_score_with_gates(75, pillars)
         assert "gated" in full.lower(), f"Expected gated label, got: {full}"
         assert len(warnings) > 0
         assert any("crowding" in w.lower() for w in warnings)
@@ -859,7 +859,7 @@ class TestCrowdingGate:
             "flow_direction_persistence": {"score": 80},
             "positioning_stability": {"score": 25},
         }
-        full, short, warnings = _label_from_score_with_gates(75, pillars)
+        full, short, _adj, _applied, warnings, _details = _label_from_score_with_gates(75, pillars)
         assert "gated" in full.lower(), f"Expected gated label, got: {full}"
         assert any("stability" in w.lower() for w in warnings)
 
@@ -872,7 +872,7 @@ class TestCrowdingGate:
             "flow_direction_persistence": {"score": 80},
             "positioning_stability": {"score": 70},
         }
-        full, short, warnings = _label_from_score_with_gates(75, pillars)
+        full, short, _adj, _applied, warnings, _details = _label_from_score_with_gates(75, pillars)
         assert "gated" in full.lower(), f"Expected gated label, got: {full}"
         assert any("squeeze" in w.lower() for w in warnings)
 
@@ -885,7 +885,7 @@ class TestCrowdingGate:
             "flow_direction_persistence": {"score": 75},
             "positioning_stability": {"score": 65},
         }
-        full, short, warnings = _label_from_score_with_gates(80, pillars)
+        full, short, _adj, _applied, warnings, _details = _label_from_score_with_gates(80, pillars)
         assert "gated" not in full.lower(), f"Unexpected gating: {full}"
         assert len(warnings) == 0
 
@@ -898,7 +898,7 @@ class TestCrowdingGate:
             "flow_direction_persistence": {"score": 30},
             "positioning_stability": {"score": 20},
         }
-        full, short, warnings = _label_from_score_with_gates(40, pillars)
+        full, short, _adj, _applied, warnings, _details = _label_from_score_with_gates(40, pillars)
         assert "gated" not in full.lower()
         assert len(warnings) == 0
 
@@ -927,7 +927,7 @@ class TestCrowdingGate:
             "flow_direction_persistence": {"score": 80},
             "positioning_stability": {"score": 20},
         }
-        full, short, warnings = _label_from_score_with_gates(75, pillars)
+        full, short, _adj, _applied, warnings, _details = _label_from_score_with_gates(75, pillars)
         assert "gated" in full.lower()
         assert len(warnings) >= 3, f"Expected 3+ gate warnings, got {len(warnings)}"
 

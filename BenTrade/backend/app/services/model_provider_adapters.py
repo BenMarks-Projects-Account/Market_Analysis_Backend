@@ -40,6 +40,11 @@ import logging
 import time
 from typing import Any
 
+# -- 429 backoff constants for inference calls --
+_RATE_LIMIT_MAX_RETRIES: int = 3
+_RATE_LIMIT_BACKOFF_BASE: float = 2.0   # seconds (2, 4, 8)
+_RATE_LIMIT_BACKOFF_CAP: float = 30.0   # max delay per attempt
+
 import requests as _requests
 
 from app.config import get_settings
@@ -258,70 +263,122 @@ def _openai_compat_call(
         body["temperature"] = overrides["temperature"]
 
     t0 = time.perf_counter()
-    try:
-        logger.info(
-            "[%s] POST %s (timeout=%ds, task=%s, max_tokens=%s, temperature=%s)",
-            provider_id, endpoint, timeout,
-            request.task_type, body.get("max_tokens"), body.get("temperature"),
-        )
-        resp = _requests.post(endpoint, json=body, timeout=timeout)
-        elapsed_ms = (time.perf_counter() - t0) * 1000
 
-        logger.info(
-            "[%s] HTTP %d (%d bytes, %.1fms)",
-            provider_id, resp.status_code, len(resp.content), elapsed_ms,
-        )
+    for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+        try:
+            logger.info(
+                "[%s] POST %s (timeout=%ds, task=%s, max_tokens=%s, temperature=%s)",
+                provider_id, endpoint, timeout,
+                request.task_type, body.get("max_tokens"), body.get("temperature"),
+            )
+            resp = _requests.post(endpoint, json=body, timeout=timeout)
+            elapsed_ms = (time.perf_counter() - t0) * 1000
 
-        resp.raise_for_status()
-        data = resp.json()
+            logger.info(
+                "[%s] HTTP %d (%d bytes, %.1fms)",
+                provider_id, resp.status_code, len(resp.content), elapsed_ms,
+            )
 
-        content = extract_content_from_openai_response(data)
+            # 429 rate-limit → backoff and retry
+            if resp.status_code == 429 and attempt < _RATE_LIMIT_MAX_RETRIES:
+                retry_after = resp.headers.get("Retry-After")
+                if retry_after:
+                    try:
+                        delay = min(float(retry_after), _RATE_LIMIT_BACKOFF_CAP)
+                    except (ValueError, TypeError):
+                        delay = _RATE_LIMIT_BACKOFF_BASE ** attempt
+                else:
+                    delay = _RATE_LIMIT_BACKOFF_BASE ** attempt
+                delay = min(delay, _RATE_LIMIT_BACKOFF_CAP)
+                logger.info(
+                    "event=llm_rate_limited provider=%s attempt=%d delay=%.1fs",
+                    provider_id, attempt + 1, delay,
+                )
+                time.sleep(delay)
+                continue
 
-        return ProviderResult(
-            provider=provider_id,
-            success=True,
-            execution_status=ExecutionStatus.SUCCESS.value,
-            raw_response=data,
-            content=content,
-            timing_ms=elapsed_ms,
-            provider_state_observed=ProviderState.AVAILABLE.value,
-        )
-    except _requests.ReadTimeout:
-        elapsed_ms = (time.perf_counter() - t0) * 1000
-        logger.error("[%s] TIMED OUT after %.0fms", provider_id, elapsed_ms)
-        return ProviderResult(
-            provider=provider_id,
-            success=False,
-            execution_status=ExecutionStatus.TIMEOUT.value,
-            error_code="timeout",
-            error_message=f"Read timeout after {timeout}s",
-            timing_ms=elapsed_ms,
-            provider_state_observed=ProviderState.DEGRADED.value,
-        )
-    except _requests.ConnectionError as exc:
-        elapsed_ms = (time.perf_counter() - t0) * 1000
-        logger.error("[%s] connection error: %s", provider_id, exc)
-        return ProviderResult(
-            provider=provider_id,
-            success=False,
-            execution_status=ExecutionStatus.FAILED.value,
-            error_code="connection_error",
-            error_message=str(exc),
-            timing_ms=elapsed_ms,
-            provider_state_observed=ProviderState.UNAVAILABLE.value,
-        )
-    except _requests.RequestException as exc:
-        elapsed_ms = (time.perf_counter() - t0) * 1000
-        logger.warning("[%s] request error: %s", provider_id, exc)
-        return ProviderResult(
-            provider=provider_id,
-            success=False,
-            execution_status=ExecutionStatus.FAILED.value,
-            error_code="request_error",
-            error_message=str(exc),
-            timing_ms=elapsed_ms,
-            provider_state_observed=ProviderState.FAILED.value,
-        )
+            resp.raise_for_status()
+            data = resp.json()
+
+            content = extract_content_from_openai_response(data)
+
+            return ProviderResult(
+                provider=provider_id,
+                success=True,
+                execution_status=ExecutionStatus.SUCCESS.value,
+                raw_response=data,
+                content=content,
+                timing_ms=elapsed_ms,
+                provider_state_observed=ProviderState.AVAILABLE.value,
+            )
+        except _requests.ReadTimeout:
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            logger.error("[%s] TIMED OUT after %.0fms", provider_id, elapsed_ms)
+            return ProviderResult(
+                provider=provider_id,
+                success=False,
+                execution_status=ExecutionStatus.TIMEOUT.value,
+                error_code="timeout",
+                error_message=f"Read timeout after {timeout}s",
+                timing_ms=elapsed_ms,
+                provider_state_observed=ProviderState.DEGRADED.value,
+            )
+        except _requests.ConnectionError as exc:
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            logger.error("[%s] connection error: %s", provider_id, exc)
+            return ProviderResult(
+                provider=provider_id,
+                success=False,
+                execution_status=ExecutionStatus.FAILED.value,
+                error_code="connection_error",
+                error_message=str(exc),
+                timing_ms=elapsed_ms,
+                provider_state_observed=ProviderState.UNAVAILABLE.value,
+            )
+        except _requests.RequestException as exc:
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            # If this was a 429 raise_for_status on the final attempt, report as rate_limited
+            status_code = getattr(getattr(exc, 'response', None), 'status_code', None)
+            if status_code == 429:
+                logger.warning(
+                    "event=llm_rate_limited_exhausted provider=%s attempts=%d",
+                    provider_id, attempt + 1,
+                )
+                return ProviderResult(
+                    provider=provider_id,
+                    success=False,
+                    execution_status=ExecutionStatus.FAILED.value,
+                    error_code="rate_limited",
+                    error_message=f"429 after {attempt + 1} attempts",
+                    timing_ms=elapsed_ms,
+                    provider_state_observed=ProviderState.BUSY.value,
+                )
+            logger.warning("[%s] request error: %s", provider_id, exc)
+            return ProviderResult(
+                provider=provider_id,
+                success=False,
+                execution_status=ExecutionStatus.FAILED.value,
+                error_code="request_error",
+                error_message=str(exc),
+                timing_ms=elapsed_ms,
+                provider_state_observed=ProviderState.FAILED.value,
+            )
+
+    # Final 429 after all retries exhausted (reached via continue path)
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    logger.warning(
+        "event=llm_rate_limited_exhausted provider=%s attempts=%d",
+        provider_id, _RATE_LIMIT_MAX_RETRIES + 1,
+    )
+    return ProviderResult(
+        provider=provider_id,
+        success=False,
+        execution_status=ExecutionStatus.FAILED.value,
+        error_code="rate_limited",
+        error_message=f"429 after {_RATE_LIMIT_MAX_RETRIES + 1} attempts",
+        timing_ms=elapsed_ms,
+        provider_state_observed=ProviderState.BUSY.value,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -620,90 +677,121 @@ class BedrockTitanNovaProProvider(ModelProviderBase):
         effective_timeout = timeout or settings.BEDROCK_TIMEOUT_SECONDS
 
         t0 = time.perf_counter()
-        try:
-            import botocore.config as _botocore_config
 
-            # Per-call read timeout via botocore config.
-            call_config = _botocore_config.Config(
-                read_timeout=int(effective_timeout),
-                retries={"max_attempts": 0},
-            )
-            scoped_client = client.meta.client_factory(
-                "bedrock-runtime",
-                config=call_config,
-            ) if hasattr(client, "meta") and hasattr(client.meta, "client_factory") else client
+        for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+            try:
+                import botocore.config as _botocore_config
 
-            kwargs: dict[str, Any] = {
-                "modelId": model_id,
-                "messages": messages,
-            }
-            if system_prompts:
-                kwargs["system"] = system_prompts
+                # Per-call read timeout via botocore config.
+                call_config = _botocore_config.Config(
+                    read_timeout=int(effective_timeout),
+                    retries={"max_attempts": 0},
+                )
+                scoped_client = client.meta.client_factory(
+                    "bedrock-runtime",
+                    config=call_config,
+                ) if hasattr(client, "meta") and hasattr(client.meta, "client_factory") else client
 
-            logger.info(
-                "[bedrock] Converse call → model=%s, messages=%d, system=%d, timeout=%ds",
-                model_id, len(messages), len(system_prompts), int(effective_timeout),
-            )
+                kwargs: dict[str, Any] = {
+                    "modelId": model_id,
+                    "messages": messages,
+                }
+                if system_prompts:
+                    kwargs["system"] = system_prompts
 
-            response = client.converse(**kwargs)
-            elapsed_ms = (time.perf_counter() - t0) * 1000
+                logger.info(
+                    "[bedrock] Converse call → model=%s, messages=%d, system=%d, timeout=%ds",
+                    model_id, len(messages), len(system_prompts), int(effective_timeout),
+                )
 
-            # Extract content from response.
-            content = _extract_content_from_converse_response(response)
-            stop_reason = response.get("stopReason", "unknown")
-            usage = response.get("usage", {})
+                response = client.converse(**kwargs)
+                elapsed_ms = (time.perf_counter() - t0) * 1000
 
-            logger.info(
-                "[bedrock] Converse success (%.0fms, stop=%s, input_tokens=%s, output_tokens=%s)",
-                elapsed_ms,
-                stop_reason,
-                usage.get("inputTokens", "?"),
-                usage.get("outputTokens", "?"),
-            )
+                # Extract content from response.
+                content = _extract_content_from_converse_response(response)
+                stop_reason = response.get("stopReason", "unknown")
+                usage = response.get("usage", {})
 
-            return ProviderResult(
-                provider=self.provider_id,
-                success=True,
-                execution_status=ExecutionStatus.SUCCESS.value,
-                raw_response=response,
-                content=content,
-                timing_ms=elapsed_ms,
-                provider_state_observed=ProviderState.AVAILABLE.value,
-                metadata={
-                    "model_id": model_id,
-                    "stop_reason": stop_reason,
-                    "usage": usage,
-                    "region": settings.BEDROCK_REGION,
-                },
-            )
+                logger.info(
+                    "[bedrock] Converse success (%.0fms, stop=%s, input_tokens=%s, output_tokens=%s)",
+                    elapsed_ms,
+                    stop_reason,
+                    usage.get("inputTokens", "?"),
+                    usage.get("outputTokens", "?"),
+                )
 
-        except Exception as exc:
-            elapsed_ms = (time.perf_counter() - t0) * 1000
-            exc_type = type(exc).__name__
+                return ProviderResult(
+                    provider=self.provider_id,
+                    success=True,
+                    execution_status=ExecutionStatus.SUCCESS.value,
+                    raw_response=response,
+                    content=content,
+                    timing_ms=elapsed_ms,
+                    provider_state_observed=ProviderState.AVAILABLE.value,
+                    metadata={
+                        "model_id": model_id,
+                        "stop_reason": stop_reason,
+                        "usage": usage,
+                        "region": settings.BEDROCK_REGION,
+                    },
+                )
 
-            # Classify error for retryability and state observation.
-            error_code, exec_status, observed_state = _classify_bedrock_error(exc)
+            except Exception as exc:
+                elapsed_ms = (time.perf_counter() - t0) * 1000
+                exc_type = type(exc).__name__
 
-            logger.error(
-                "[bedrock] Converse failed: %s: %s (%.0fms)",
-                exc_type, exc, elapsed_ms,
-            )
+                # Classify error for retryability and state observation.
+                error_code, exec_status, observed_state = _classify_bedrock_error(exc)
 
-            return ProviderResult(
-                provider=self.provider_id,
-                success=False,
-                execution_status=exec_status,
-                error_code=error_code,
-                error_message=f"{exc_type}: {exc}",
-                timing_ms=elapsed_ms,
-                provider_state_observed=observed_state,
-                metadata={
-                    "model_id": model_id,
-                    "region": settings.BEDROCK_REGION,
-                    "exception_type": exc_type,
-                },
-            )
+                # Throttling → backoff and retry
+                if error_code == "throttled" and attempt < _RATE_LIMIT_MAX_RETRIES:
+                    delay = min(_RATE_LIMIT_BACKOFF_BASE ** attempt, _RATE_LIMIT_BACKOFF_CAP)
+                    logger.info(
+                        "event=llm_rate_limited provider=bedrock attempt=%d delay=%.1fs",
+                        attempt + 1, delay,
+                    )
+                    time.sleep(delay)
+                    continue
 
+                logger.error(
+                    "[bedrock] Converse failed: %s: %s (%.0fms)",
+                    exc_type, exc, elapsed_ms,
+                )
+
+                return ProviderResult(
+                    provider=self.provider_id,
+                    success=False,
+                    execution_status=exec_status,
+                    error_code=error_code,
+                    error_message=f"{exc_type}: {exc}",
+                    timing_ms=elapsed_ms,
+                    provider_state_observed=observed_state,
+                    metadata={
+                        "model_id": model_id,
+                        "region": settings.BEDROCK_REGION,
+                        "exception_type": exc_type,
+                    },
+                )
+
+        # Throttled on all attempts
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.warning(
+            "event=llm_rate_limited_exhausted provider=bedrock attempts=%d",
+            _RATE_LIMIT_MAX_RETRIES + 1,
+        )
+        return ProviderResult(
+            provider=self.provider_id,
+            success=False,
+            execution_status=ExecutionStatus.FAILED.value,
+            error_code="rate_limited",
+            error_message=f"ThrottlingException after {_RATE_LIMIT_MAX_RETRIES + 1} attempts",
+            timing_ms=elapsed_ms,
+            provider_state_observed=ProviderState.BUSY.value,
+            metadata={
+                "model_id": model_id,
+                "region": settings.BEDROCK_REGION,
+            },
+        )
 
 def _classify_bedrock_error(
     exc: Exception,

@@ -319,6 +319,86 @@ def build_event_context(
     }
 
 
+def classify_candidate_event_risk(
+    event_context: dict[str, Any],
+    *,
+    window_end: str | None = None,
+    window_days: int | None = None,
+) -> dict[str, Any]:
+    """Classify event risk for a single candidate's time window.
+
+    Parameters
+    ----------
+    event_context : dict
+        Output of ``build_event_context()``.
+    window_end : str | None
+        ISO date (e.g. expiration) marking the end of the candidate's
+        risk window.  Used for options candidates.
+    window_days : int | None
+        Fixed look-forward in calendar days.  Used for stock candidates
+        (no expiration).
+
+    Returns
+    -------
+    dict with ``event_risk`` ("high" | "elevated" | "quiet" | "unknown")
+    and ``event_details`` (list of matching events).
+    """
+    _unknown: dict[str, Any] = {"event_risk": "unknown", "event_details": []}
+
+    if not event_context or event_context.get("status") == "no_data":
+        return _unknown
+
+    today = _dt.date.today()
+
+    # Determine the window end date
+    if window_end is not None:
+        try:
+            end_d = _dt.date.fromisoformat(str(window_end)[:10])
+        except (ValueError, TypeError):
+            return _unknown
+    elif window_days is not None:
+        end_d = today + _dt.timedelta(days=window_days)
+    else:
+        return _unknown
+
+    # Collect high/medium importance events within the window
+    all_events = (
+        (event_context.get("upcoming_macro_events") or [])
+        + (event_context.get("upcoming_company_events") or [])
+    )
+
+    events_in_window: list[dict[str, str]] = []
+    for evt in all_events:
+        if evt.get("is_elapsed"):
+            continue
+        importance = evt.get("importance", "low")
+        if importance not in ("high", "medium"):
+            continue
+        evt_time = evt.get("event_time")
+        if not evt_time:
+            continue
+        try:
+            evt_d = _dt.date.fromisoformat(str(evt_time)[:10])
+        except (ValueError, TypeError):
+            continue
+        if today <= evt_d <= end_d:
+            events_in_window.append({
+                "event": evt.get("event_name", "Unknown"),
+                "date": str(evt_time)[:10],
+                "importance": importance,
+                "category": evt.get("event_category", "other"),
+            })
+
+    if any(e["importance"] == "high" for e in events_in_window):
+        risk = "high"
+    elif events_in_window:
+        risk = "elevated"
+    else:
+        risk = "quiet"
+
+    return {"event_risk": risk, "event_details": events_in_window}
+
+
 # ── Event normalization ──────────────────────────────────────────────
 
 

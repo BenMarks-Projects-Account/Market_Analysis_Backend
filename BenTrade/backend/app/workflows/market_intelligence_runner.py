@@ -849,60 +849,51 @@ def _build_freshness_section(
 ) -> dict[str, Any]:
     """Build the freshness section from snapshot metrics.
 
-    Formula inputs: metric envelopes' fetched_at timestamps.
-    Uses policy thresholds for tier classification.
+    Uses the unified ``compute_data_currency()`` function so tier labels
+    match the confidence framework vocabulary:
+    ``live | recent | delayed | stale | very_stale | unknown``.
     """
+    from app.services.data_quality_utils import compute_data_currency
+
     metrics = market_snapshot.get("metrics", {})
     if not metrics:
         return {"overall": "unknown", "per_source": {}}
 
     per_source: dict[str, Any] = {}
-    tier_rank = {"fresh": 0, "warning": 1, "stale": 2, "unknown": 3}
-    worst_tier = "fresh"
-    now = datetime.now(timezone.utc)
+    tier_rank = {"live": 0, "recent": 1, "delayed": 2, "stale": 3, "very_stale": 4, "unknown": 5}
+    worst_tier = "live"
 
     for key, metric in metrics.items():
         if metric is None:
             per_source[key] = {
                 "tier": "unknown",
-                "age_seconds": None,
+                "penalty": 0.05,
+                "age_days": None,
                 "last_update": None,
+                "staleness_source": "none",
             }
-            if tier_rank.get("unknown", 3) > tier_rank.get(worst_tier, 0):
+            if tier_rank.get("unknown", 5) > tier_rank.get(worst_tier, 0):
                 worst_tier = "unknown"
             continue
 
-        fetched_at = (
-            metric.get("fetched_at") if isinstance(metric, dict) else None
+        obs_date = metric.get("observation_date") if isinstance(metric, dict) else None
+        source = metric.get("source", "unknown") if isinstance(metric, dict) else "unknown"
+        source_type = "tradier" if source == "tradier" else "fred"
+
+        currency = compute_data_currency(
+            observation_date=obs_date,
+            source_type=source_type,
         )
-        if fetched_at:
-            try:
-                fetched = datetime.fromisoformat(fetched_at)
-                if fetched.tzinfo is None:
-                    fetched = fetched.replace(tzinfo=timezone.utc)
-                age_seconds = (now - fetched).total_seconds()
-                if age_seconds < policy.warn_after_seconds:
-                    tier = "fresh"
-                elif age_seconds < policy.degrade_after_seconds:
-                    tier = "warning"
-                else:
-                    tier = "stale"
-            except (ValueError, TypeError):
-                age_seconds = None
-                tier = "unknown"
-        else:
-            age_seconds = None
-            tier = "unknown"
 
         per_source[key] = {
-            "tier": tier,
-            "age_seconds": (
-                round(age_seconds, 1) if age_seconds is not None else None
-            ),
-            "last_update": fetched_at,
+            "tier": currency["tier"],
+            "penalty": currency["penalty"],
+            "age_days": currency["age_days"],
+            "last_update": obs_date or (metric.get("fetched_at") if isinstance(metric, dict) else None),
+            "staleness_source": "observation_date" if obs_date else "market_status",
         }
-        if tier_rank.get(tier, 0) > tier_rank.get(worst_tier, 0):
-            worst_tier = tier
+        if tier_rank.get(currency["tier"], 0) > tier_rank.get(worst_tier, 0):
+            worst_tier = currency["tier"]
 
     return {"overall": worst_tier, "per_source": per_source}
 

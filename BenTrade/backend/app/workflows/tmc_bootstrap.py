@@ -75,5 +75,13 @@ def build_tmc_options_deps(*, base_data_service: Any) -> Any:
 
     options_scanner_service = OptionsScannerService(base_data_service=base_data_service)
     deps = OptionsOpportunityDeps(options_scanner_service=options_scanner_service)
-    _log.info("event=tmc_options_deps_built")
+
+    # Log chain source class so operators can verify live vs mock/snapshot
+    _chain_source_class = "unknown"
+    if hasattr(base_data_service, "chain_source"):
+        _chain_source_class = type(base_data_service.chain_source).__name__
+    _log.info(
+        "event=tmc_options_deps_built chain_source=%s",
+        _chain_source_class,
+    )
     return deps

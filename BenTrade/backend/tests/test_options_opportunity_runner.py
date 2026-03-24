@@ -831,14 +831,14 @@ class TestOptionsOpportunityRunner:
         assert d["error"] is None
 
     @pytest.mark.asyncio
-    async def test_all_five_stages_recorded(self, tmp_path: Path):
-        """All 5 stages should be in the result."""
+    async def test_all_seven_stages_recorded(self, tmp_path: Path):
+        """All 7 stages should be in the result."""
         _write_market_state_fixture(tmp_path)
         config = RunnerConfig(data_dir=tmp_path)
         deps = _make_deps()
 
         result = await run_options_opportunity(config, deps)
-        assert len(result.stages) == 5
+        assert len(result.stages) == 7
         recorded_keys = [s["stage_key"] for s in result.stages]
         assert recorded_keys == list(STAGE_KEYS)
 

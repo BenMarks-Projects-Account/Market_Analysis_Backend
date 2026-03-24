@@ -1395,7 +1395,10 @@ def _compute_confidence(
                 f"Cross-pillar range {score_range:.0f} (-{disagree_penalty:.1f})"
             )
 
-    # Penalty: proxy/source quality
+    # Proxy penalties: Per-pillar proxy concentration (above) + source-level
+    # proxy checks (below) already cover the proxy metrics in this engine
+    # (financial_conditions_proxy, funding_stress_proxy).
+    # SIGNAL_PROVENANCE-based penalties not needed — existing coverage is sufficient.
     if source_meta:
         proxy_count = source_meta.get("proxy_source_count", 0)
         if proxy_count >= 4:
@@ -1418,6 +1421,14 @@ def _compute_confidence(
         if not source_meta.get("has_funding_data", False):
             confidence -= 5
             penalties.append("No direct funding stress data (-5)")
+
+    # Penalty for aggregate data staleness (from data_quality tags)
+    dq_summary = (source_meta or {}).get("data_quality", {}).get("_summary", {})
+    dq_max_age = dq_summary.get("max_age_days")
+    if dq_max_age is not None and dq_max_age > 3:
+        age_penalty = min(15, round((dq_max_age - 3) * 2, 1))
+        confidence -= age_penalty
+        penalties.append(f"data_staleness: max_age={dq_max_age}d (-{age_penalty})")
 
     return _clamp(round(confidence, 1), 0, 100), penalties
 
@@ -1623,10 +1634,16 @@ def compute_liquidity_conditions_scores(
 
     composite = _weighted_avg(weighted_parts)
     if composite is None:
-        composite = 0.0
+        composite = 50.0
+        data_status = "no_data"
         logger.warning("event=liquidity_composite_failed reason=no_valid_pillars")
+    else:
+        data_status = "ok"
 
-    full_label, short_label = _label_from_score(composite)
+    if data_status == "no_data":
+        full_label, short_label = "Neutral / No Data", "Neutral"
+    else:
+        full_label, short_label = _label_from_score(composite)
     confidence, confidence_penalties = _compute_confidence(pillars, source_meta)
     sig_quality = _signal_quality(confidence)
     explanation = _build_composite_explanation(composite, full_label, pillars, confidence)
@@ -1746,6 +1763,7 @@ def compute_liquidity_conditions_scores(
         "missing_inputs": all_missing,
         "diagnostics": diagnostics,
         "raw_inputs": raw_inputs,
+        "data_status": data_status,
     }
 
     logger.info(

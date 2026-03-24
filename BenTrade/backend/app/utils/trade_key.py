@@ -26,8 +26,10 @@ _SPREAD_TYPE_ALIASES: dict[str, str] = {
     "calendar_spread": "calendar_spread",
     "calendar_call_spread": "calendar_call_spread",
     "calendar_put_spread": "calendar_put_spread",
+    "iron_condor": "iron_condor",
     "iron_butterfly": "iron_butterfly",
     "single": "single",
+    "equity": "equity",
     "long_call": "long_call",
     "long_put": "long_put",
     "income": "income",
@@ -53,6 +55,7 @@ CANONICAL_STRATEGY_IDS: set[str] = {
     "csp",
     "covered_call",
     "single",
+    "equity",
     "long_call",
     "long_put",
     # Stock strategies

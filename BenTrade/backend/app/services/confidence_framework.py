@@ -127,6 +127,7 @@ QUALITY_PENALTIES: dict[str, float] = {
 FRESHNESS_PENALTIES: dict[str, float] = {
     "live":       0.00,
     "recent":     0.00,
+    "delayed":    0.03,
     "stale":      0.10,
     "very_stale": 0.25,
     "unknown":    0.05,

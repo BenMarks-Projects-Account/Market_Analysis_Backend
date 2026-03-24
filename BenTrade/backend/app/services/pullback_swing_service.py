@@ -282,6 +282,12 @@ class PullbackSwingService:
         # -- Compute enrichment metrics --
         metrics = self._compute_metrics(closes, highs, lows, volumes, price)
 
+        # -- Apply strategy-specific filters --
+        reject = self._apply_filters(symbol, metrics)
+        if reject:
+            rejections.append(reject)
+            return None
+
         # -- Score --
         score_breakdown, composite_score = self._score(metrics)
 
@@ -426,7 +432,56 @@ class PullbackSwingService:
             m["low_52w"] = None
 
         return m
+    # ── Strategy-specific filters ─────────────────────────────────────────────
 
+    @staticmethod
+    def _apply_filters(
+        symbol: str,
+        metrics: dict[str, Any],
+    ) -> dict[str, str] | None:
+        """Apply pullback-swing filters. Returns rejection dict or None if passed.
+
+        Filter order:
+          1. Uptrend check (trend_state)
+          2. Pullback presence and depth
+          3. RSI range (not overbought, not crashed)
+          4. Price above SMA50 (trend intact)
+        """
+        # Gate 1: Must be in uptrend
+        trend_state = metrics.get("trend_state", "")
+        if trend_state not in ("uptrend", "strong_uptrend"):
+            return {"symbol": symbol, "reason_code": "NO_UPTREND",
+                    "detail": f"trend_state={trend_state}"}
+
+        # Gate 2: Must have a pullback (not at highs, not in freefall)
+        pullback_pct = metrics.get("pullback_from_20d_high")
+        if pullback_pct is None:
+            return {"symbol": symbol, "reason_code": "NO_PULLBACK_DATA",
+                    "detail": "pullback_from_20d_high unavailable"}
+        if pullback_pct > -0.01:
+            return {"symbol": symbol, "reason_code": "NO_PULLBACK",
+                    "detail": f"pullback={pullback_pct*100:.1f}% (< 1% below 20D high)"}
+        if pullback_pct < -0.15:
+            return {"symbol": symbol, "reason_code": "PULLBACK_TOO_DEEP",
+                    "detail": f"pullback={pullback_pct*100:.1f}% (> 15% below 20D high)"}
+
+        # Gate 3: RSI in reasonable range
+        rsi14 = metrics.get("rsi14")
+        if rsi14 is not None:
+            if rsi14 > 70:
+                return {"symbol": symbol, "reason_code": "RSI_OVERBOUGHT",
+                        "detail": f"RSI {rsi14:.1f} > 70"}
+            if rsi14 < 25:
+                return {"symbol": symbol, "reason_code": "RSI_CRASHED",
+                        "detail": f"RSI {rsi14:.1f} < 25"}
+
+        # Gate 4: Price above SMA50 (trend intact)
+        dist_sma50 = metrics.get("distance_to_sma50")
+        if dist_sma50 is not None and dist_sma50 < 0:
+            return {"symbol": symbol, "reason_code": "BELOW_SMA50",
+                    "detail": f"price {dist_sma50*100:.1f}% below SMA50"}
+
+        return None  # passed all filters
     # ── Scoring ─────────────────────────────────────────────────────────────
 
     @staticmethod

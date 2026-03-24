@@ -577,10 +577,11 @@ class TestAllEmptyData:
             positioning_data={},
         )
 
-    def test_score_is_zero_or_low(self, result):
-        """With no data, score should default to 0."""
+    def test_score_is_neutral_default(self, result):
+        """With no data, score should default to 50.0 (neutral)."""
         assert result["score"] is not None
-        assert result["score"] == 0.0
+        assert result["score"] == 50.0
+        assert result.get("data_status") == "no_data"
 
     def test_all_pillars_none(self, result):
         for pname in PILLAR_WEIGHTS:

@@ -2570,6 +2570,21 @@ window.BenTradePages.initHome = function initHome(rootEl){
         </div>
       `;
     }).join('');
+
+    // Update Market Structure freshness timestamp from the first available as_of
+    const asOfEl = document.getElementById('homeMarketStructureAsOf');
+    if(asOfEl){
+      const firstPayload = indexSummaries[INDEX_SYMBOLS[0]];
+      const asOf = firstPayload?.as_of;
+      if(asOf){
+        try{
+          const d = new Date(asOf);
+          asOfEl.textContent = 'as of ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }catch(_e){ asOfEl.textContent = ''; }
+      } else {
+        asOfEl.textContent = '';
+      }
+    }
   }
 
   function renderSectors(sectorSummaries, regimePayload){
@@ -4101,22 +4116,19 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
   } else {
     /* Already chose this session (SPA re-mount) — render cached data,
-       then kick off a silent background refresh if the cache is stale.
-       This ensures the dashboard is never blank after navigate-away/back. */
+       then always kick off a silent background refresh so market data stays current. */
     console.log('[HOME_REFRESH] SPA re-mount — cache rendered: ' + hadCached);
     if(!hadCached){
       bindRetry();
     }
-    // Background refresh if stale (non-blocking, preserves current UI)
-    if(cacheStore.isStale(null, cacheStore.FRESH_TTL_MS)){
-      console.log('[HOME_REFRESH] SPA re-mount — cache stale, starting silent background refresh');
-      runLoadSequence({ force: false, showOverlay: false, homeOnly: true, reason: 'remount_stale' }).then(function(){
+    // Always refresh market data on re-mount (non-blocking, preserves current UI)
+    console.log('[HOME_REFRESH] SPA re-mount — starting silent background refresh');
+    runLoadSequence({ force: true, showOverlay: false, homeOnly: true, reason: 'remount_refresh' }).then(function(){
         // Auto-trigger model analysis after fresh data loads
         return runRegimeModelAnalysis();
       }).catch(function(err){
         console.warn('[HOME_REFRESH] SPA re-mount silent refresh failed:', err?.message || err);
       });
-    }
   }
 
   refreshBtnEl.addEventListener('click', async () => {

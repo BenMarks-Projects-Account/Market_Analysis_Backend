@@ -9,6 +9,141 @@ from typing import Any
 from app.utils.trade_key import trade_key
 
 
+def build_dynamic_policy(
+    account_balance: dict[str, Any],
+    regime_label: str | None = None,
+) -> dict[str, Any]:
+    """Compute risk policy limits dynamically from account state.
+
+    Args:
+        account_balance: Tradier balance response with equity, buying_power, etc.
+        regime_label: Current market regime (RISK_ON/NEUTRAL/RISK_OFF) for adjustment.
+
+    Returns:
+        Policy dict with computed dollar limits based on percentages of equity.
+    """
+    equity = float(account_balance.get("equity") or account_balance.get("total_equity") or 0)
+    buying_power = float(
+        account_balance.get("option_buying_power")
+        or account_balance.get("buying_power")
+        or equity
+    )
+
+    if equity <= 0:
+        return RiskPolicyService.static_default_policy()
+
+    # === BASE PERCENTAGES (percentage of account equity) ===
+    base: dict[str, Any] = {
+        # Portfolio-level limits
+        "max_total_risk_pct": 0.06,           # 6% of equity at risk across all positions
+        "max_buying_power_usage_pct": 0.60,   # Use at most 60% of buying power
+        "min_cash_reserve_pct": 0.20,         # Keep 20% as cash buffer
+
+        # Per-trade limits
+        "max_trade_risk_pct": 0.01,           # 1% of equity per trade
+        "max_symbol_risk_pct": 0.02,          # 2% of equity per underlying
+        "max_position_size_pct": 0.05,        # 5% of equity per position
+
+        # Concentration limits
+        "max_same_underlying_pct": 0.30,      # No more than 30% of risk in one underlying
+        "max_same_expiration_pct": 0.25,      # No more than 25% of risk in one expiration bucket
+        "max_same_strategy_pct": 0.40,        # No more than 40% in one strategy family
+
+        # Position limits
+        "max_concurrent_trades": 10,
+        "max_dte": 45,
+        "default_contracts_cap": 3,
+
+        # Quality gates (not percentage-based)
+        "min_open_interest": 500,
+        "min_volume": 50,
+        "max_bid_ask_spread_pct": 0.015,      # 1.5%
+        "min_pop": 0.60,
+        "min_return_on_risk": 0.10,
+        "min_ev_to_risk": 0.02,
+
+        # Greek targets for portfolio balance
+        "target_portfolio_delta_range": (-1.0, 1.0),
+        "max_portfolio_delta_per_10k": 0.5,
+    }
+
+    # === REGIME ADJUSTMENT ===
+    regime_multiplier = 1.0
+    if regime_label:
+        regime_key = regime_label.upper().replace(" ", "_").replace("-", "_")
+        if regime_key in ("RISK_OFF", "RISK_OFF_CAUTION"):
+            regime_multiplier = 0.70  # 30% tighter in risk-off
+        elif regime_key == "RISK_ON":
+            regime_multiplier = 1.10  # 10% looser in risk-on
+
+    # === COMPUTE DOLLAR LIMITS ===
+    max_risk_total = round(equity * base["max_total_risk_pct"] * regime_multiplier, 2)
+    policy: dict[str, Any] = {
+        # Account state
+        "account_equity": equity,
+        "buying_power": buying_power,
+        "portfolio_size": equity,
+        "regime_label": regime_label,
+        "regime_multiplier": regime_multiplier,
+
+        # Dollar limits (computed from percentages x equity x regime)
+        "max_risk_per_trade": round(equity * base["max_trade_risk_pct"] * regime_multiplier, 2),
+        "max_risk_total": max_risk_total,
+        "max_risk_per_underlying": round(equity * base["max_symbol_risk_pct"] * regime_multiplier, 2),
+        "max_buying_power_usage": round(buying_power * base["max_buying_power_usage_pct"], 2),
+        "min_cash_reserve": round(equity * base["min_cash_reserve_pct"], 2),
+        "max_position_value": round(equity * base["max_position_size_pct"], 2),
+        "max_same_expiration_risk": round(max_risk_total * base["max_same_expiration_pct"], 2),
+
+        # Percentage limits (used by warning checks)
+        "max_total_risk_pct": base["max_total_risk_pct"],
+        "max_trade_risk_pct": base["max_trade_risk_pct"],
+        "max_symbol_risk_pct": base["max_symbol_risk_pct"],
+        "max_position_size_pct": base["max_position_size_pct"] * 100,  # stored as 5.0 for compat
+        "min_cash_reserve_pct": base["min_cash_reserve_pct"] * 100,    # stored as 20.0 for compat
+
+        # Concentration (percentages, applied to risk totals)
+        "max_same_underlying_risk_pct": base["max_same_underlying_pct"],
+        "max_same_expiration_risk_pct": base["max_same_expiration_pct"],
+        "max_same_strategy_risk_pct": base["max_same_strategy_pct"],
+
+        # Position sizing guidance
+        "suggested_max_contracts": _compute_max_contracts(
+            equity, base["max_trade_risk_pct"] * regime_multiplier
+        ),
+
+        # Pass-through (non-percentage limits)
+        "max_concurrent_trades": base["max_concurrent_trades"],
+        "max_dte": base["max_dte"],
+        "default_contracts_cap": base["default_contracts_cap"],
+        "min_open_interest": base["min_open_interest"],
+        "min_volume": base["min_volume"],
+        "max_bid_ask_spread_pct": base["max_bid_ask_spread_pct"] * 100,  # stored as 1.5 for compat
+        "min_pop": base["min_pop"],
+        "min_return_on_risk": base["min_return_on_risk"],
+        "min_ev_to_risk": base["min_ev_to_risk"],
+        "target_portfolio_delta_range": base["target_portfolio_delta_range"],
+        "max_portfolio_delta_per_10k": base["max_portfolio_delta_per_10k"],
+
+        # Source percentages (for transparency)
+        "base_percentages": base,
+        "dynamic": True,
+    }
+
+    return policy
+
+
+def _compute_max_contracts(equity: float, risk_pct: float) -> int:
+    """Suggest max contracts based on typical $5-wide spread max loss (~$500).
+
+    Input fields: equity (account equity), risk_pct (per-trade risk as decimal)
+    Formula: max(1, min(10, int(equity * risk_pct / 500)))
+    """
+    risk_budget = equity * risk_pct
+    typical_spread_risk = 500  # $5-wide spread = $500 max loss per contract
+    return max(1, min(10, int(risk_budget / typical_spread_risk)))
+
+
 class RiskPolicyService:
     def __init__(self, results_dir: Path) -> None:
         self.results_dir = results_dir
@@ -38,7 +173,9 @@ class RiskPolicyService:
         except (TypeError, ValueError):
             return None
 
-    def default_policy(self) -> dict[str, Any]:
+    @staticmethod
+    def static_default_policy() -> dict[str, Any]:
+        """Hardcoded fallback policy for when account balance is unavailable."""
         return {
             "portfolio_size": 100000.0,
             "max_total_risk_pct": 0.06,
@@ -63,7 +200,11 @@ class RiskPolicyService:
             "max_iv_rv_ratio_for_buying": 1.0,
             "min_iv_rv_ratio_for_selling": 1.1,
             "notes": "",
+            "dynamic": False,
         }
+
+    def default_policy(self) -> dict[str, Any]:
+        return self.static_default_policy()
 
     def get_policy(self) -> dict[str, Any]:
         with self._lock:
@@ -466,8 +607,21 @@ class RiskPolicyService:
             "soft_gates": soft_gates,
         }
 
-    async def build_snapshot(self, request: Any) -> dict[str, Any]:
-        policy = self.get_policy()
+    async def build_snapshot(
+        self,
+        request: Any,
+        *,
+        account_balance: dict[str, Any] | None = None,
+        regime_label: str | None = None,
+    ) -> dict[str, Any]:
+        # Use dynamic policy if account balance is available, else fall back to static
+        if account_balance and (
+            account_balance.get("equity") or account_balance.get("total_equity")
+        ):
+            policy = build_dynamic_policy(account_balance, regime_label)
+        else:
+            policy = self.get_policy()
+
         trades = await self._trades_from_active(request)
         source = "tradier"
 

@@ -38,7 +38,9 @@ from app.services.scanner_v2.diagnostics.reason_codes import (
     REJECT_INVERTED_QUOTE,
     REJECT_MISSING_OI,
     REJECT_MISSING_QUOTE,
+    REJECT_MISSING_SHORT_DELTA,
     REJECT_MISSING_VOLUME,
+    REJECT_ZERO_BID_SHORT_LEG,
     REJECT_ZERO_MID,
 )
 from app.services.scanner_v2.validation.math_checks import run_math_verification
@@ -200,6 +202,54 @@ def phase_d_quote_liquidity_sanity(
             else:
                 l_checks.append(V2CheckResult("volume_present", True, prefix))
 
+            # ── Delta: short legs (except calendars) ────────────
+            # Short legs need delta for POP computation. Calendars
+            # set POP=None by design and are exempt.
+            if (
+                leg.side == "short"
+                and leg.delta is None
+                and cand.family_key != "calendars"
+            ):
+                q_checks.append(V2CheckResult(
+                    "short_delta_present", False,
+                    f"{prefix}: delta=None",
+                ))
+                builder.add_reject(
+                    REJECT_MISSING_SHORT_DELTA,
+                    source_check="short_delta_present",
+                    message=f"{prefix}: delta=None",
+                    leg_index=leg.index,
+                )
+            elif leg.side == "short" and cand.family_key != "calendars":
+                q_checks.append(V2CheckResult(
+                    "short_delta_present", True, prefix,
+                ))
+
+        # ── Zero-bid short leg (credit strategies only) ─────
+        _CREDIT_SCANNER_KEYS = frozenset({
+            "put_credit_spread", "call_credit_spread",
+            "iron_condor", "iron_butterfly",
+        })
+        if cand.scanner_key in _CREDIT_SCANNER_KEYS:
+            for leg in cand.legs:
+                if (
+                    leg.side == "short"
+                    and leg.bid is not None
+                    and leg.bid <= 0
+                ):
+                    prefix = f"leg[{leg.index}] {leg.side} {leg.option_type} {leg.strike}"
+                    q_checks.append(V2CheckResult(
+                        "short_leg_has_bid", False,
+                        f"{prefix}: bid={leg.bid}",
+                    ))
+                    builder.add_reject(
+                        REJECT_ZERO_BID_SHORT_LEG,
+                        source_check="short_leg_has_bid",
+                        message=f"{prefix}: bid={leg.bid} (no premium)",
+                        leg_index=leg.index,
+                    )
+                    break  # One zero-bid short is enough to reject
+
         builder.set_check_results("quote", q_checks)
         builder.set_check_results("liquidity", l_checks)
         builder.apply(cand.diagnostics)
@@ -356,10 +406,17 @@ def _recompute_vertical_math(cand: V2Candidate) -> None:
         return
 
     # POP — delta approximation
-    if short.delta is not None:
+    # Credit spread: profits when short leg expires OTM → POP = 1 - |delta_short|
+    # Debit spread: profits when long leg finishes ITM  → POP = |delta_long|
+    is_credit = m.net_credit is not None and m.net_credit > 0
+    if is_credit and short.delta is not None:
         m.pop = round(1.0 - abs(short.delta), 4)
         m.pop_source = "delta_approx"
-        notes["pop"] = f"1 - |short.delta({short.delta})| = {m.pop}"
+        notes["pop"] = f"credit: 1 - |short.delta({short.delta})| = {m.pop}"
+    elif not is_credit and long.delta is not None:
+        m.pop = round(abs(long.delta), 4)
+        m.pop_source = "delta_approx"
+        notes["pop"] = f"debit: |long.delta({long.delta})| = {m.pop}"
 
     # EV
     if m.pop is not None and m.max_profit is not None and m.max_loss is not None:

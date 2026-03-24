@@ -277,67 +277,109 @@ _SQUEEZE_RISK_GATE_THRESHOLD = 35  # Pillar 3 below this blocks "Supportive" lab
 def _label_from_score_with_gates(
     score: float,
     pillars: dict[str, dict[str, Any]],
-) -> tuple[str, str, list[str]]:
+) -> tuple[str, str, float, bool, list[str], list[str]]:
     """Map composite score to label, applying safety gates.
 
     If crowding, stability, or squeeze pillars are dangerously low,
-    the label is capped at 'Mixed but Tradable' regardless of composite.
-    This prevents misleading 'Supportive' labels when underlying
-    positioning is fragile or crowded.
+    the label is capped at 'Mixed but Tradable' and the score is
+    reduced proportionally. Missing gate data applies a conservative
+    penalty instead of bypassing.
 
-    Returns (full_label, short_label, gate_warnings).
+    Returns (full_label, short_label, adjusted_score, gate_applied,
+             gate_warnings, gate_details).
     """
-    base_label, base_short = _label_from_score(score)
     gate_warnings: list[str] = []
+    gate_details: list[str] = []
+    composite = score
 
     # Only apply gates to the top two label bands
-    if score < 55:
-        return base_label, base_short, gate_warnings
+    if composite < 55:
+        base_label, base_short = _label_from_score(composite)
+        return base_label, base_short, composite, False, gate_warnings, gate_details
 
     crowding_score = pillars.get("crowding_stretch", {}).get("score")
     stability_score = pillars.get("positioning_stability", {}).get("score")
     squeeze_score = pillars.get("squeeze_unwind_risk", {}).get("score")
 
-    gated = False
-    if crowding_score is not None and crowding_score < _CROWDING_GATE_THRESHOLD:
-        gate_warnings.append(
-            f"Label capped: crowding/stretch pillar ({crowding_score:.0f}) "
-            f"below {_CROWDING_GATE_THRESHOLD} gate — positioning is too crowded "
-            f"for a 'Supportive' label."
-        )
-        gated = True
+    gate_applied = False
 
-    if stability_score is not None and stability_score < _STABILITY_GATE_THRESHOLD:
-        gate_warnings.append(
-            f"Label capped: stability pillar ({stability_score:.0f}) "
-            f"below {_STABILITY_GATE_THRESHOLD} gate — positioning is too fragile "
-            f"for a 'Supportive' label."
-        )
-        gated = True
+    # Gate 1: Crowding
+    if composite >= 55:
+        if crowding_score is not None and crowding_score < _CROWDING_GATE_THRESHOLD:
+            gate_penalty = min(15, (_CROWDING_GATE_THRESHOLD - crowding_score) * 0.5)
+            composite = max(45, composite - gate_penalty)
+            gate_warnings.append(
+                f"Label capped: crowding/stretch pillar ({crowding_score:.0f}) "
+                f"below {_CROWDING_GATE_THRESHOLD} gate — positioning is too crowded "
+                f"for a 'Supportive' label."
+            )
+            gate_details.append(
+                f"crowding={crowding_score:.1f} < {_CROWDING_GATE_THRESHOLD}"
+                f" → penalty={gate_penalty:.1f}"
+            )
+            gate_applied = True
+        elif crowding_score is None:
+            composite = max(50, composite - 5)
+            gate_details.append("crowding=None → conservative penalty=5")
+            gate_applied = True
 
-    if squeeze_score is not None and squeeze_score < _SQUEEZE_RISK_GATE_THRESHOLD:
-        gate_warnings.append(
-            f"Label capped: squeeze/unwind pillar ({squeeze_score:.0f}) "
-            f"below {_SQUEEZE_RISK_GATE_THRESHOLD} gate — squeeze risk too elevated "
-            f"for a 'Supportive' label."
-        )
-        gated = True
+    # Gate 2: Stability
+    if composite >= 55:
+        if stability_score is not None and stability_score < _STABILITY_GATE_THRESHOLD:
+            gate_penalty = min(15, (_STABILITY_GATE_THRESHOLD - stability_score) * 0.5)
+            composite = max(45, composite - gate_penalty)
+            gate_warnings.append(
+                f"Label capped: stability pillar ({stability_score:.0f}) "
+                f"below {_STABILITY_GATE_THRESHOLD} gate — positioning is too fragile "
+                f"for a 'Supportive' label."
+            )
+            gate_details.append(
+                f"stability={stability_score:.1f} < {_STABILITY_GATE_THRESHOLD}"
+                f" → penalty={gate_penalty:.1f}"
+            )
+            gate_applied = True
+        elif stability_score is None:
+            composite = max(50, composite - 5)
+            gate_details.append("stability=None → conservative penalty=5")
+            gate_applied = True
 
-    if gated and score >= 55:
-        # Cap at "Mixed but Tradable" maximum
+    # Gate 3: Squeeze risk
+    if composite >= 55:
+        if squeeze_score is not None and squeeze_score < _SQUEEZE_RISK_GATE_THRESHOLD:
+            gate_penalty = min(15, (_SQUEEZE_RISK_GATE_THRESHOLD - squeeze_score) * 0.5)
+            composite = max(45, composite - gate_penalty)
+            gate_warnings.append(
+                f"Label capped: squeeze/unwind pillar ({squeeze_score:.0f}) "
+                f"below {_SQUEEZE_RISK_GATE_THRESHOLD} gate — squeeze risk too elevated "
+                f"for a 'Supportive' label."
+            )
+            gate_details.append(
+                f"squeeze={squeeze_score:.1f} < {_SQUEEZE_RISK_GATE_THRESHOLD}"
+                f" → penalty={gate_penalty:.1f}"
+            )
+            gate_applied = True
+        elif squeeze_score is None:
+            composite = max(50, composite - 5)
+            gate_details.append("squeeze=None → conservative penalty=5")
+            gate_applied = True
+
+    if gate_applied and composite < score:
         capped_label = "Mixed but Tradable (Gated)"
         capped_short = "Mixed (Gated)"
         logger.info(
-            "event=flows_positioning_label_gated original_label=%s "
-            "capped_label=%s crowding=%.1f stability=%.1f squeeze=%.1f",
-            base_label, capped_label,
+            "event=flows_positioning_label_gated original_score=%.2f "
+            "gated_score=%.2f original_label=%s capped_label=%s "
+            "crowding=%.1f stability=%.1f squeeze=%.1f",
+            score, composite,
+            _label_from_score(score)[0], capped_label,
             crowding_score if crowding_score is not None else -1,
             stability_score if stability_score is not None else -1,
             squeeze_score if squeeze_score is not None else -1,
         )
-        return capped_label, capped_short, gate_warnings
+        return capped_label, capped_short, composite, gate_applied, gate_warnings, gate_details
 
-    return base_label, base_short, gate_warnings
+    base_label, base_short = _label_from_score(composite)
+    return base_label, base_short, composite, gate_applied, gate_warnings, gate_details
 
 
 def _signal_quality(confidence: float) -> str:
@@ -1220,6 +1262,14 @@ def _compute_confidence(
                 f"Single-source dependency: {proxy_count} signals from 1 upstream (-12)"
             )
 
+    # Penalty for aggregate data staleness (from data_quality tags)
+    dq_summary = (source_meta or {}).get("data_quality", {}).get("_summary", {})
+    dq_max_age = dq_summary.get("max_age_days")
+    if dq_max_age is not None and dq_max_age > 3:
+        age_penalty = min(15, round((dq_max_age - 3) * 2, 1))
+        confidence -= age_penalty
+        penalties.append(f"data_staleness: max_age={dq_max_age}d (-{age_penalty})")
+
     return _clamp(round(confidence, 1), 0, 100), penalties
 
 
@@ -1424,12 +1474,19 @@ def compute_flows_positioning_scores(
 
     composite = _weighted_avg(weighted_parts)
     if composite is None:
-        composite = 0.0
+        composite = 50.0
+        data_status = "no_data"
         logger.warning("event=flows_positioning_composite_failed reason=no_valid_pillars")
+    else:
+        data_status = "ok"
 
-    full_label, short_label, gate_warnings = _label_from_score_with_gates(
-        composite, pillars,
-    )
+    if data_status == "no_data":
+        full_label, short_label = "Neutral / No Data", "Neutral"
+        gate_applied, gate_warnings, gate_details = False, [], []
+    else:
+        full_label, short_label, composite, gate_applied, gate_warnings, gate_details = (
+            _label_from_score_with_gates(composite, pillars)
+        )
     confidence, confidence_penalties = _compute_confidence(pillars, source_meta)
     sig_quality = _signal_quality(confidence)
     explanation = _build_composite_explanation(composite, full_label, pillars, confidence)
@@ -1510,7 +1567,9 @@ def compute_flows_positioning_scores(
             "stability_gate_threshold": _STABILITY_GATE_THRESHOLD,
             "squeeze_risk_gate_threshold": _SQUEEZE_RISK_GATE_THRESHOLD,
             "gate_warnings": gate_warnings,
-            "label_was_gated": len(gate_warnings) > 0,
+            "gate_details": gate_details,
+            "gate_applied": gate_applied,
+            "label_was_gated": gate_applied,
         },
     }
 
@@ -1560,6 +1619,7 @@ def compute_flows_positioning_scores(
         "diagnostics": diagnostics,
         "raw_inputs": raw_inputs,
         "data_quality": data_quality,
+        "data_status": data_status,
     }
 
     logger.info(

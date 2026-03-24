@@ -123,7 +123,13 @@ def _strip_code_fences(text: str) -> str:
 
 
 def _extract_json_block(text: str) -> str | None:
-    """Find the first top-level { ... } or [ ... ] in the text."""
+    """Find the first balanced top-level { ... } or [ ... ] in the text.
+
+    Uses depth-tracking with string awareness so that braces inside
+    JSON string values are not counted.  Falls back to ``rfind`` when
+    no balanced close is found (handles truncated output).
+    """
+    # Locate the first opening brace/bracket
     start_idx = None
     for char in ("{", "["):
         idx = text.find(char)
@@ -135,12 +141,99 @@ def _extract_json_block(text: str) -> str | None:
 
     open_char = text[start_idx]
     close_char = "}" if open_char == "{" else "]"
-    end_idx = text.rfind(close_char)
 
-    if end_idx <= start_idx:
-        return None
+    # Walk forward with depth tracking, skipping string interiors
+    depth = 0
+    in_string = False
+    escape = False
+    end_idx = None
+
+    for i in range(start_idx, len(text)):
+        ch = text[i]
+
+        if escape:
+            escape = False
+            continue
+
+        if ch == "\\":
+            if in_string:
+                escape = True
+            continue
+
+        if ch == '"':
+            in_string = not in_string
+            continue
+
+        if in_string:
+            continue
+
+        if ch == open_char:
+            depth += 1
+        elif ch == close_char:
+            depth -= 1
+            if depth == 0:
+                end_idx = i
+                break
+
+    # Fallback: if brace-matching didn't find a close (truncated output),
+    # use rfind as a last resort so we still recover partial JSON.
+    if end_idx is None:
+        end_idx = text.rfind(close_char)
+        if end_idx <= start_idx:
+            return None
 
     return text[start_idx : end_idx + 1]
+
+
+def diagnose_json_failure(raw: str) -> dict[str, Any]:
+    """Inspect raw LLM output and identify why JSON parsing failed.
+
+    Returns a dict with boolean flags and a human-readable ``diagnosis``
+    string suitable for embedding in a retry prompt.
+    """
+    text = str(raw or "")
+    flags: dict[str, Any] = {
+        "has_think_tags": bool(re.search(r"</?think", text, re.IGNORECASE)),
+        "has_fences": bool(re.search(r"```", text)),
+        "starts_with_brace": text.lstrip().startswith("{") or text.lstrip().startswith("["),
+        "has_trailing_text": False,
+        "length": len(text),
+        "first_50": text[:50],
+        "last_50": text[-50:] if len(text) > 50 else text,
+    }
+
+    # Check for text after the last closing brace
+    last_close = max(text.rfind("}"), text.rfind("]"))
+    if last_close != -1:
+        after = text[last_close + 1:].strip()
+        if after:
+            flags["has_trailing_text"] = True
+
+    # Build human-readable diagnosis
+    issues: list[str] = []
+    if flags["has_think_tags"]:
+        issues.append("Response contained <think> tags — remove ALL XML-style tags")
+    if flags["has_fences"]:
+        issues.append("Response was wrapped in markdown code fences (```) — do not use fences")
+    if not flags["starts_with_brace"]:
+        issues.append("Response did not start with { — the very first character must be {")
+    if flags["has_trailing_text"]:
+        issues.append("Response had text after the closing } — nothing must follow the JSON")
+
+    flags["diagnosis"] = "; ".join(issues) if issues else "Unknown formatting issue"
+    return flags
+
+
+def build_retry_prompt(raw_response: str) -> str:
+    """Build a specific retry prompt that tells the LLM exactly what it did wrong."""
+    diag = diagnose_json_failure(raw_response)
+    return (
+        f"Your previous response could not be parsed as JSON. "
+        f"Specific problems: {diag['diagnosis']}. "
+        f"Return ONLY the corrected JSON object. "
+        f"Start with {{ and end with }}. "
+        f"No markdown fences, no <think> tags, no commentary before or after."
+    )
 
 
 def _repair_json_text(text: str) -> str:

@@ -237,6 +237,7 @@ def create_app() -> FastAPI:
         repository=trading_repository,
         paper_broker=paper_broker,
         live_broker=tradier_broker,
+        risk_policy_service=risk_policy_service,
     )
     stock_execution_service = StockExecutionService(
         settings=settings,

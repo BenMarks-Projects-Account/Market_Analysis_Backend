@@ -298,6 +298,11 @@ class V2NarrowingDiagnostics:
     contracts_missing_oi: int = 0
     contracts_missing_volume: int = 0
 
+    # ── Chain completeness ───────────────────────────────────────
+    chain_completeness_warning: bool = False
+    chain_contract_count: int = 0
+    chain_expected_min: int = 0
+
     # ── Warnings ────────────────────────────────────────────────
     warnings: list[str] = field(default_factory=list)
 

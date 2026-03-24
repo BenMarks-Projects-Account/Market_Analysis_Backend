@@ -52,6 +52,10 @@ def sanitize_model_text(text: str | None) -> str:
     return t.strip()
 
 
+# Alias used by the active trade pipeline
+strip_think_tags = sanitize_model_text
+
+
 def had_think_tags(text: str | None) -> bool:
     """Return True if the text contained <think> or similar reasoning tags."""
     if not text:

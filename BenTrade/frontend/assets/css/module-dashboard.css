@@ -2302,6 +2302,70 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
   margin-left: auto;
 }
 
+/* ── Mini-card recommendation borders ──────────────────────────────────── */
+.atp-rec-border-close  { border-left: 3px solid #ff4f66; }
+.atp-rec-border-urgent-review { border-left: 3px solid #d500f9; }
+.atp-rec-border-reduce { border-left: 3px solid #ffc107; }
+.atp-rec-border-hold   { border-left: 3px solid rgba(0,230,118,0.4); }
+
+/* Actionable indicator on mini-cards */
+.atp-mini-actionable {
+  font-size: 13px;
+  color: #ffc107;
+  margin-left: auto;
+  cursor: pointer;
+}
+
+/* ── Close/Reduce action section in detail panel ───────────────────────── */
+.atp-close-action {
+  margin-top: 14px;
+  padding: 12px;
+  background: rgba(14,20,30,0.6);
+  border: 1px solid rgba(126,170,200,0.15);
+  border-radius: 8px;
+}
+.atp-close-btn {
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s, background 0.2s;
+}
+.atp-close-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.atp-btn-close {
+  background: rgba(255,79,102,0.2);
+  color: #ff4f66;
+  border: 1px solid rgba(255,79,102,0.35);
+}
+.atp-btn-close:hover:not(:disabled) { background: rgba(255,79,102,0.3); }
+.atp-btn-reduce {
+  background: rgba(255,193,7,0.2);
+  color: #ffc107;
+  border: 1px solid rgba(255,193,7,0.35);
+}
+.atp-btn-reduce:hover:not(:disabled) { background: rgba(255,193,7,0.3); }
+.atp-btn-done {
+  background: rgba(0,230,118,0.15) !important;
+  color: #00e676 !important;
+  border-color: rgba(0,230,118,0.3) !important;
+}
+.atp-close-desc {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted, #93a7b6);
+}
+.atp-close-cost {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted, #93a7b6);
+  font-family: var(--font-mono, 'Fira Code', monospace);
+}
+
 /* ── Loading spinner ───────────────────────────────────────────────────── */
 .atp-loading-spinner {
   width: 28px;
@@ -2663,4 +2727,343 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
 .dh-exec-mode-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TMC Full Refresh & Portfolio Balance
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Primary workflow button (Full Refresh) */
+.tmc-btn-primary {
+  background: linear-gradient(135deg, rgba(0,234,255,0.22), rgba(67,233,123,0.14));
+  color: var(--cyan, #00eaff);
+  border: 1px solid rgba(0,234,255,0.35);
+  font-weight: 600;
+}
+.tmc-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(0,234,255,0.32), rgba(67,233,123,0.22));
+  border-color: rgba(0,234,255,0.5);
+}
+.tmc-btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Refresh status indicator */
+.tmc-refresh-status {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--cyan, #00eaff);
+  font-style: italic;
+  animation: tmc-pulse 1.5s ease-in-out infinite;
+}
+@keyframes tmc-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.tmc-pulse { animation: tmc-pulse 1.5s ease-in-out infinite; }
+
+/* Portfolio Balance grid */
+.tmc-portfolio-balance-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── 1. Summary bar ──────────────────────────────────────────────────────── */
+.tmc-pb-summary-bar {
+  background: linear-gradient(135deg, rgba(0,234,255,0.06) 0%, rgba(14,20,30,0.8) 60%);
+  border: 1px solid rgba(0,234,255,0.2);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+.tmc-pb-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: baseline;
+}
+.tmc-pb-summary-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.tmc-pb-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted, #93a7b6);
+}
+.tmc-pb-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #d7fbff);
+  font-family: var(--font-mono, 'Fira Code', monospace);
+}
+.tmc-pb-regime {
+  font-family: var(--font-display, 'Inter', sans-serif);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--cyan, #00eaff);
+}
+.tmc-pb-change-strip {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted, #93a7b6);
+  letter-spacing: 0.02em;
+}
+
+/* ── Shared group container (Close, Hold, Open) ──────────────────────────── */
+.tmc-pb-group {
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.tmc-pb-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(126,170,200,0.1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tmc-pb-group-count {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: rgba(126,170,200,0.12);
+  color: var(--text, #d7fbff);
+}
+
+/* ── 2. Close / Reduce group ─────────────────────────────────────────────── */
+.tmc-pb-group-close {
+  background: rgba(255,79,102,0.03);
+  border: 1px solid rgba(255,79,102,0.12);
+}
+.tmc-pb-group-close .tmc-pb-group-title { color: var(--danger, #ff4f66); }
+.tmc-pb-group-close .tmc-pb-group-count { background: rgba(255,79,102,0.15); color: #ff8a80; }
+
+/* ── 3. Hold group ───────────────────────────────────────────────────────── */
+.tmc-pb-group-hold {
+  background: rgba(67,233,123,0.03);
+  border: 1px solid rgba(67,233,123,0.12);
+}
+.tmc-pb-group-hold .tmc-pb-group-title { color: #43e97b; }
+.tmc-pb-group-hold .tmc-pb-group-count { background: rgba(67,233,123,0.15); color: #43e97b; }
+.tmc-pb-hold-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tmc-pb-hold-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(67,233,123,0.06);
+  border: 1px solid rgba(67,233,123,0.18);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+}
+.tmc-pb-hold-sym {
+  font-weight: 600;
+  color: var(--text, #d7fbff);
+}
+.tmc-pb-hold-strat {
+  font-size: 10px;
+  color: var(--muted, #93a7b6);
+  text-transform: lowercase;
+}
+.tmc-pb-hold-health {
+  font-size: 9px;
+  font-weight: 600;
+  color: #43e97b;
+  background: rgba(67,233,123,0.12);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* ── 4. Open suggestions group ───────────────────────────────────────────── */
+.tmc-pb-group-open {
+  background: rgba(0,234,255,0.03);
+  border: 1px solid rgba(0,234,255,0.12);
+}
+.tmc-pb-group-open .tmc-pb-group-title { color: var(--cyan, #00eaff); }
+.tmc-pb-group-open .tmc-pb-group-count { background: rgba(0,234,255,0.15); color: var(--cyan, #00eaff); }
+
+/* ── Action cards (shared by close/reduce/open) ──────────────────────────── */
+.tmc-balance-action-card {
+  background: rgba(18,24,38,0.9);
+  border: 1px solid rgba(126,170,200,0.15);
+  border-left: 3px solid rgba(126,170,200,0.2);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+}
+.tmc-balance-action-close  { border-left-color: var(--danger, #ff4f66); }
+.tmc-balance-action-reduce { border-left-color: var(--warn, #f4c85f); }
+.tmc-balance-action-open   { border-left-color: #43e97b; }
+
+.tmc-balance-action-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.tmc-balance-action-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(126,170,200,0.1);
+  color: var(--muted, #93a7b6);
+}
+.tmc-balance-label-close  { background: rgba(255,79,102,0.15); color: #ff8a80; }
+.tmc-balance-label-reduce { background: rgba(244,200,95,0.15); color: var(--warn, #f4c85f); }
+.tmc-balance-label-open   { background: rgba(67,233,123,0.15); color: #43e97b; }
+
+.tmc-balance-action-symbol {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #d7fbff);
+}
+.tmc-balance-action-strategy {
+  font-size: 10px;
+  color: var(--muted, #93a7b6);
+  text-transform: lowercase;
+}
+.tmc-balance-action-reason {
+  font-size: 11px;
+  color: var(--text, #d7fbff);
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+.tmc-balance-action-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--muted, #93a7b6);
+  font-family: var(--font-mono, 'Fira Code', monospace);
+  margin-bottom: 4px;
+}
+.tmc-balance-action-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--muted, #93a7b6);
+  margin-bottom: 4px;
+}
+.tmc-balance-action-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+/* Source + alignment badges in open cards */
+.tmc-pb-source-badge {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0,234,255,0.08);
+  color: var(--cyan, #00eaff);
+}
+.tmc-pb-align-badge {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.tmc-pb-align-aligned    { background: rgba(67,233,123,0.12); color: #43e97b; }
+.tmc-pb-align-neutral    { background: rgba(126,170,200,0.12); color: var(--muted, #93a7b6); }
+.tmc-pb-align-misaligned { background: rgba(255,79,102,0.10); color: #ff8a80; }
+.tmc-pb-event-risk       { color: var(--warn, #f4c85f); font-style: italic; }
+
+/* ── 5. Skipped candidates (collapsible) ─────────────────────────────────── */
+.tmc-pb-collapsible {
+  border: 1px solid rgba(126,170,200,0.1);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.tmc-pb-collapsible-summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted, #93a7b6);
+  background: rgba(14,20,30,0.5);
+  user-select: none;
+}
+.tmc-pb-collapsible-summary:hover {
+  color: var(--text, #d7fbff);
+}
+.tmc-pb-collapsible[open] > .tmc-pb-collapsible-summary {
+  border-bottom: 1px solid rgba(126,170,200,0.1);
+}
+.tmc-pb-skip-list {
+  padding: 8px 14px;
+}
+.tmc-pb-skip-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(126,170,200,0.04);
+  font-size: 11px;
+}
+.tmc-pb-skip-sym {
+  font-weight: 600;
+  color: var(--text, #d7fbff);
+  min-width: 50px;
+}
+.tmc-pb-skip-strat {
+  font-size: 10px;
+  color: var(--muted, #93a7b6);
+  text-transform: lowercase;
+  min-width: 100px;
+}
+.tmc-pb-skip-source {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: var(--muted, #93a7b6);
+  background: rgba(126,170,200,0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.tmc-pb-skip-reason {
+  flex: 1;
+  color: var(--muted, #93a7b6);
+  font-style: italic;
+}
+
+/* ── 6. Risk policy details (collapsible) ────────────────────────────────── */
+.tmc-pb-policy-grid {
+  padding: 8px 14px;
+}
+.tmc-pb-policy-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(126,170,200,0.04);
+}
+.tmc-pb-policy-row span:first-child {
+  color: var(--muted, #93a7b6);
+}
+.tmc-pb-policy-row span:last-child {
+  color: var(--text, #d7fbff);
+  font-family: var(--font-mono, 'Fira Code', monospace);
 }

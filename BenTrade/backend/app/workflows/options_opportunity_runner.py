@@ -25,8 +25,10 @@ Stage flow (matches definitions.py OPTIONS_OPPORTUNITY_STAGES)
 1. load_market_state  — Load via market_state_consumer seam
 2. scan               — Run V2 options scanner families through service seam
 3. validate_math      — Surface structural/math validation & trust hygiene
-4. enrich_evaluate    — Attach market context, rank candidates
-5. select_package     — Apply selection cap, write output + summary + manifest
+4. enrich_evaluate    — Attach market context, rank candidates (top 30)
+5. model_analysis     — LLM evaluation of top 15 via Options TMC prompt
+6. model_filter       — Keep EXECUTE, discard PASS, output top 10
+7. select_package     — Write output + summary + manifest
 
 Artifact layout per artifact_strategy.py::
 
@@ -53,6 +55,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.services.ranking import compute_rank_score
 from app.workflows.architecture import FreshnessPolicy
 from app.workflows.artifact_strategy import (
     ManifestStageEntry,
@@ -73,6 +76,11 @@ from app.workflows.market_state_consumer import (
     load_market_state_for_consumer,
 )
 from app.workflows.workflow_debug_log import WorkflowDebugLogger
+from app.services.event_calendar_context import (
+    build_event_context,
+    classify_candidate_event_risk,
+)
+from app.services.regime_alignment import classify_regime_alignment
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +99,8 @@ STAGE_KEYS: tuple[str, ...] = (
     "scan",
     "validate_math",
     "enrich_evaluate",
+    "model_analysis",
+    "model_filter",
     "select_package",
 )
 
@@ -248,6 +258,19 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _classify_dte_bucket(dte: int | None) -> str:
+    """Classify DTE into risk-profile buckets."""
+    if dte is None:
+        return "unknown"
+    if dte <= 7:
+        return "weekly"       # High gamma, needs active management
+    if dte <= 21:
+        return "short_term"   # Elevated gamma, moderate theta
+    if dte <= 45:
+        return "optimal"      # Theta sweet spot for income strategies
+    return "long_term"        # Lower theta decay rate, longer capital commitment
+
+
 def _safe_float(value: Any) -> float:
     """Coerce to float, defaulting to 0.0 for sorting safety."""
     if value is None:
@@ -258,7 +281,36 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
+def _compute_candidate_rank(cand: dict[str, Any]) -> float:
+    """Bridge candidate dict to ranking.py's compute_rank_score().
+
+    Maps the compact candidate shape (math sub-dict, legs array) to the
+    flat trade dict that compute_rank_score() expects.
+    """
+    math = cand.get("math") or {}
+    legs = cand.get("legs") or [{}]
+    short_leg = legs[0] if legs else {}
+
+    rank_dict = {
+        "expected_value": math.get("ev"),
+        "max_loss": math.get("max_loss"),
+        "return_on_risk": math.get("ror"),
+        "p_win_used": math.get("pop"),
+        "open_interest": short_leg.get("open_interest"),
+        "volume": short_leg.get("volume"),
+    }
+    return compute_rank_score(rank_dict)
+
+
 # ── Workflow-level candidate extraction ─────────────────────────────
+
+
+def _safe_model_field(cand: dict[str, Any], field: str) -> Any:
+    """Extract a field from the model_review sub-dict, or None."""
+    review = cand.get("model_review")
+    if not isinstance(review, dict):
+        return None
+    return review.get(field)
 
 
 def _extract_compact_candidate(cand: dict[str, Any]) -> dict[str, Any]:
@@ -320,6 +372,7 @@ def _extract_compact_candidate(cand: dict[str, Any]) -> dict[str, Any]:
         "expiration": cand.get("expiration"),
         "expiration_back": cand.get("expiration_back"),
         "dte": cand.get("dte"),
+        "dte_bucket": _classify_dte_bucket(cand.get("dte")),
         "dte_back": cand.get("dte_back"),
         # Structure
         "legs": compact_legs,
@@ -373,6 +426,27 @@ def _extract_compact_candidate(cand: dict[str, Any]) -> dict[str, Any]:
         "contract_version": cand.get("contract_version"),
         "scanner_version": cand.get("scanner_version"),
         "generated_at": cand.get("generated_at"),
+        # Event risk
+        "event_risk": cand.get("event_risk", "unknown"),
+        "event_details": cand.get("event_details", []),
+        # Regime alignment
+        "regime_alignment": cand.get("regime_alignment", "unknown"),
+        "regime_warning": cand.get("regime_warning"),
+        # Model analysis (populated after Stage 5 model_analysis)
+        "model_recommendation": cand.get("model_recommendation"),
+        "model_conviction": cand.get("model_conviction"),
+        "model_score": cand.get("model_score"),
+        "model_headline": cand.get("model_headline"),
+        "model_narrative": cand.get("model_narrative"),
+        "model_caution_notes": cand.get("model_caution_notes"),
+        "model_key_factors": cand.get("model_key_factors"),
+        "model_degraded": cand.get("model_degraded", False),
+        # Extended model fields from model_review dict
+        "model_structure_analysis": _safe_model_field(cand, "structure_analysis"),
+        "model_probability_assessment": _safe_model_field(cand, "probability_assessment"),
+        "model_greeks_assessment": _safe_model_field(cand, "greeks_assessment"),
+        "model_market_alignment": _safe_model_field(cand, "market_alignment"),
+        "model_suggested_adjustment": _safe_model_field(cand, "suggested_adjustment"),
     }
 
 
@@ -437,7 +511,7 @@ async def run_options_opportunity(
     config: RunnerConfig,
     deps: OptionsOpportunityDeps,
 ) -> RunResult:
-    """Execute one complete Options Opportunity workflow run (5 stages).
+    """Execute one complete Options Opportunity workflow run (7 stages).
 
     This is the primary entry point.  Returns a ``RunResult`` whether
     the run succeeds, degrades, or fails.  Never raises — all errors
@@ -569,7 +643,7 @@ async def run_options_opportunity(
         dbg.stage_start("enrich_evaluate", {
             "input_count": len(stage_data.get("validated_candidates", [])),
         })
-        outcome = _stage_enrich_evaluate(stage_data, warnings)
+        outcome = _stage_enrich_evaluate(config, stage_data, warnings)
         stages.append(outcome)
         _write_stage_artifact(config, run_id, outcome, stage_data, "enrich_evaluate")
         dbg.stage_end("enrich_evaluate", outcome.status, {
@@ -583,6 +657,95 @@ async def run_options_opportunity(
                         stage_data.get("enriched_candidates", []),
                         keys=["candidate_id", "scanner_key", "symbol",
                               "expiration", "rank", "math"])
+
+        # === TEMPORARY PIPELINE DIAGNOSTIC (remove after debugging) ===
+        import os as _pdiag_os
+        if not _pdiag_os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                import json as _pdiag_json
+                from pathlib import Path as _PdiagPath
+                _pdiag_now = datetime.now(timezone.utc)
+                _raw = stage_data.get("raw_candidates", [])
+                _rejected = stage_data.get("rejected_candidates", [])
+                _validated = stage_data.get("validated_candidates", [])
+                _enriched = stage_data.get("enriched_candidates", [])
+
+                _per_scanner: dict[str, int] = {}
+                for _c in (_raw or []):
+                    _sk = _c.get("scanner_key", "unknown") if isinstance(_c, dict) else getattr(_c, 'scanner_key', 'unknown')
+                    _per_scanner[_sk] = _per_scanner.get(_sk, 0) + 1
+
+                _reject_per_scanner: dict[str, int] = {}
+                for _c in (_rejected or []):
+                    _sk = _c.get("scanner_key", "unknown") if isinstance(_c, dict) else getattr(_c, 'scanner_key', 'unknown')
+                    _reject_per_scanner[_sk] = _reject_per_scanner.get(_sk, 0) + 1
+
+                pipeline_diag = {
+                    "timestamp": _pdiag_now.isoformat(),
+                    "run_id": run_id,
+                    "stage_2_scan": {
+                        "total_raw_candidates": len(_raw) if _raw else 0,
+                        "total_rejected": len(_rejected) if _rejected else 0,
+                        "per_scanner_key_passed": _per_scanner,
+                        "per_scanner_key_rejected": _reject_per_scanner,
+                        "scan_diagnostics_keys": list((stage_data.get("scan_diagnostics") or {}).keys()),
+                        "reject_reason_counts": (stage_data.get("scan_diagnostics") or {}).get("reject_reason_counts", {}),
+                    },
+                    "stage_3_validate": {
+                        "validated_count": len(_validated) if _validated else 0,
+                        "filtered_count": stage_data.get("validation_filtered_count", 0),
+                        "filter_reasons": stage_data.get("validation_filter_reasons", {}),
+                    },
+                    "stage_4_enrich": {
+                        "enriched_count": len(_enriched) if _enriched else 0,
+                        "credibility_filter": stage_data.get("credibility_filter"),
+                        "market_state_ref": stage_data.get("market_state_ref"),
+                    },
+                }
+
+                _pdiag_dir = _PdiagPath("results/diagnostics")
+                _pdiag_dir.mkdir(parents=True, exist_ok=True)
+                _pdiag_file = _pdiag_dir / f"options_pipeline_diag_{_pdiag_now.strftime('%Y%m%d_%H%M%S')}.json"
+                with open(_pdiag_file, "w") as _f:
+                    _pdiag_json.dump(pipeline_diag, _f, indent=2, default=str)
+                logger.info("[options_opportunity] DIAG: wrote %s", _pdiag_file)
+            except Exception as _pdiag_exc:
+                logger.warning("event=pipeline_diag_write_failed error=%s", _pdiag_exc)
+        # === END PIPELINE DIAGNOSTIC ===
+
+        if outcome.status == "failed":
+            result.status = "failed"
+            result.error = f"enrich_evaluate failed: {outcome.error}"
+            result.stages = [s.to_dict() for s in stages]
+            result.completed_at = _now_iso()
+            return result
+
+        # ── Stage 5: model_analysis ──────────────────────────────────
+        dbg.stage_start("model_analysis", {
+            "input_count": len(stage_data.get("enriched_candidates", [])),
+            "model_top_n": MODEL_ANALYSIS_TOP_N_INPUT,
+        })
+        outcome = await _stage_model_analysis(stage_data, warnings)
+        stages.append(outcome)
+        _write_stage_artifact(config, run_id, outcome, stage_data, "model_analysis")
+        dbg.stage_end("model_analysis", outcome.status, {
+            "model_analysis_counts": stage_data.get("model_analysis_counts"),
+        })
+
+        # Model analysis is enrichment — degraded is OK, only hard errors abort.
+        # (degraded = some/all model calls failed, candidates still have quant data)
+
+        # ── Stage 6: model_filter ────────────────────────────────────
+        dbg.stage_start("model_filter", {
+            "input_count": len(stage_data.get("model_candidates", [])),
+        })
+        outcome = _stage_model_filter(stage_data, warnings)
+        stages.append(outcome)
+        _write_stage_artifact(config, run_id, outcome, stage_data, "model_filter")
+        dbg.stage_end("model_filter", outcome.status, {
+            "model_filter_counts": stage_data.get("model_filter_counts"),
+            "selected_count": len(stage_data.get("selected_candidates", [])),
+        })
 
     except asyncio.CancelledError:
         # HTTP client disconnected or task was cancelled mid-pipeline.
@@ -603,10 +766,13 @@ async def run_options_opportunity(
         warnings.append(f"[pipeline] Unexpected error — packaging partial output: {exc}")
         dbg.note(f"⚠ Unexpected error: {exc} — packaging partial output")
 
-    # ── Stage 5: select_package ──────────────────────────────────
-    # Always attempt stage 5 so output.json + latest.json are written.
+    # ── Stage 7: select_package ──────────────────────────────────
+    # Always attempt so output.json + latest.json are written.
     dbg.stage_start("select_package", {
-        "candidates_to_package": len(stage_data.get("enriched_candidates", [])),
+        "candidates_to_package": len(
+            stage_data.get("selected_candidates")
+            or stage_data.get("enriched_candidates", [])
+        ),
         "top_n": config.top_n,
     })
     outcome = _stage_select_package(config, run_id, now, stage_data, stages, warnings)
@@ -916,6 +1082,7 @@ def _build_validation_summary(candidates: list[dict[str, Any]]) -> dict[str, Any
 
 
 def _stage_enrich_evaluate(
+    config: RunnerConfig,
     stage_data: dict[str, Any],
     warnings: list[str],
 ) -> StageOutcome:
@@ -951,7 +1118,37 @@ def _stage_enrich_evaluate(
             enriched_cand["market_state_ref"] = market_state_ref
             enriched_cand["market_regime"] = market_regime
             enriched_cand["risk_environment"] = risk_environment
+
+            # Regime-strategy alignment
+            ra = classify_regime_alignment(
+                market_regime=market_regime,
+                strategy_id=enriched_cand.get("strategy_id") or enriched_cand.get("scanner_key", ""),
+            )
+            enriched_cand["regime_alignment"] = ra["regime_alignment"]
+            enriched_cand["regime_warning"] = ra["regime_warning"]
+
             enriched.append(enriched_cand)
+
+        # ── Event risk classification ────────────────────────────
+        # Load event calendar context once for the run, then classify
+        # each candidate based on its expiration window.
+        try:
+            event_context = build_event_context()
+        except Exception as exc:
+            _log.warning("event=event_calendar_unavailable error=%s", exc)
+            event_context = None
+
+        for cand in enriched:
+            if event_context is not None:
+                er = classify_candidate_event_risk(
+                    event_context,
+                    window_end=cand.get("expiration"),
+                )
+                cand["event_risk"] = er["event_risk"]
+                cand["event_details"] = er["event_details"]
+            else:
+                cand["event_risk"] = "unknown"
+                cand["event_details"] = []
 
         # ── Credibility gate ─────────────────────────────────────
         # Filter out trades that are technically valid but represent
@@ -1009,20 +1206,132 @@ def _stage_enrich_evaluate(
             "rejection_reasons": credibility_reasons,
         }
 
-        # Sort by EV descending (None → bottom), then RoR descending for ties.
-        credible.sort(
+        logger.info(
+            "event=enrich_post_credibility credible=%d consumer_summary_available=%s "
+            "market_regime=%s top_n=%d",
+            len(credible), bool(consumer_summary),
+            market_regime, config.top_n,
+        )
+
+        # Preserve full credible count for downstream quality reporting.
+        stage_data["credible_count"] = len(credible)
+
+        # ── Strategy-diverse ranking ─────────────────────────────
+        # Without per-key budgets, raw EV ranking lets deep-ITM debit
+        # spreads (EV in thousands) crowd out credit spreads (EV in
+        # tens) despite credit spreads being BenTrade's core income
+        # strategy.  We allocate slots per scanner_key so every active
+        # strategy type gets representation in the top-N.
+        #
+        # Calendar/diagonal candidates have EV=None, so they use a
+        # separate capital-efficiency ranking.
+        _CALENDAR_SLOTS = min(5, config.top_n // 6)  # ~17% of slots, 5 for top_n=30
+        _EV_TOTAL_SLOTS = config.top_n - _CALENDAR_SLOTS
+
+        # Partition into EV-trackable vs calendar buckets.
+        ev_by_key: dict[str, list[dict[str, Any]]] = {}
+        calendar_candidates: list[dict[str, Any]] = []
+
+        for c in credible:
+            math = c.get("math") or {}
+            family = c.get("family_key", "")
+            key = c.get("scanner_key", "unknown")
+
+            if math.get("ev") is not None:
+                ev_by_key.setdefault(key, []).append(c)
+            elif family == "calendars":
+                calendar_candidates.append(c)
+            else:
+                ev_by_key.setdefault(key, []).append(c)
+
+        # Sort each scanner_key bucket by composite rank score.
+        for bucket in ev_by_key.values():
+            for c in bucket:
+                c["rank_score"] = round(_compute_candidate_rank(c), 4)
+            bucket.sort(
+                key=lambda c: (-c.get("rank_score", 0), c.get("symbol", "")),
+            )
+
+        # Allocate EV slots: floor(total / num_keys) per key, minimum 2.
+        # Remainder goes to keys with the most credible candidates.
+        active_keys = [k for k in ev_by_key if ev_by_key[k]]
+        num_keys = len(active_keys)
+
+        if num_keys > 0:
+            base_per_key = max(_EV_TOTAL_SLOTS // num_keys, 2)
+            # Cap per-key so we don't exceed total when few keys exist
+            if base_per_key * num_keys > _EV_TOTAL_SLOTS:
+                base_per_key = _EV_TOTAL_SLOTS // num_keys
+
+            key_quotas = {k: base_per_key for k in active_keys}
+            remainder = _EV_TOTAL_SLOTS - sum(key_quotas.values())
+
+            # Distribute remainder to keys with most candidates
+            keys_by_depth = sorted(
+                active_keys, key=lambda k: len(ev_by_key[k]), reverse=True,
+            )
+            for k in keys_by_depth:
+                if remainder <= 0:
+                    break
+                key_quotas[k] += 1
+                remainder -= 1
+        else:
+            key_quotas = {}
+
+        # Select top candidates per key within quota.
+        ev_selected: list[dict[str, Any]] = []
+        overflow: list[dict[str, Any]] = []
+        for key in active_keys:
+            quota = key_quotas.get(key, 0)
+            bucket = ev_by_key[key]
+            ev_selected.extend(bucket[:quota])
+            overflow.extend(bucket[quota:])
+
+        # Fill any remaining slots from overflow (best cross-key rank).
+        remaining_slots = _EV_TOTAL_SLOTS - len(ev_selected)
+        if remaining_slots > 0:
+            overflow.sort(
+                key=lambda c: (-c.get("rank_score", 0), c.get("symbol", "")),
+            )
+            ev_selected.extend(overflow[:remaining_slots])
+
+        # Re-sort selected EV candidates by composite rank for final ordering.
+        ev_selected.sort(
+            key=lambda c: (-c.get("rank_score", 0), c.get("symbol", "")),
+        )
+
+        # Rank calendar candidates by capital efficiency (net_debit / max_loss).
+        calendar_candidates.sort(
             key=lambda c: (
-                -_safe_float((c.get("math") or {}).get("ev")),
-                -_safe_float((c.get("math") or {}).get("ror")),
+                _safe_float((c.get("math") or {}).get("net_debit", 0))
+                / max(_safe_float((c.get("math") or {}).get("max_loss", 1)), 0.01),
                 c.get("symbol", ""),
             ),
         )
 
-        # Assign rank.
-        for i, cand in enumerate(credible, start=1):
-            cand["rank"] = i
+        cal_selected = calendar_candidates[:_CALENDAR_SLOTS]
+        selected_credible = ev_selected + cal_selected
 
-        stage_data["enriched_candidates"] = credible
+        # Assign rank and track label.
+        cal_set = set(id(c) for c in cal_selected)
+        for i, cand in enumerate(selected_credible, start=1):
+            cand["rank"] = i
+            cand["ranking_track"] = "calendar" if id(cand) in cal_set else "ev"
+
+        stage_data["enriched_candidates"] = selected_credible
+
+        # Log per-key allocation for traceability.
+        key_selected_counts = {}
+        for c in ev_selected:
+            k = c.get("scanner_key", "unknown")
+            key_selected_counts[k] = key_selected_counts.get(k, 0) + 1
+
+        logger.info(
+            "event=enrich_complete ev_selected=%d cal_selected=%d "
+            "total_enriched=%d key_quotas=%s key_selected=%s",
+            len(ev_selected), len(cal_selected), len(selected_credible),
+            key_quotas, key_selected_counts,
+        )
 
         return StageOutcome(
             stage_key="enrich_evaluate",
@@ -1039,6 +1348,360 @@ def _stage_enrich_evaluate(
             completed_at=_now_iso(),
             error=str(exc),
         )
+
+
+# ── Options model analysis constants ────────────────────────────────
+MODEL_ANALYSIS_TOP_N_INPUT = 15   # Send top 15 to model analysis
+MODEL_ANALYSIS_TOP_N_OUTPUT = 10  # Keep top 10 after model filter
+
+
+async def _stage_model_analysis(
+    stage_data: dict[str, Any],
+    warnings: list[str],
+) -> StageOutcome:
+    """Stage 5: LLM model analysis for top options candidates.
+
+    Takes the top MODEL_ANALYSIS_TOP_N_INPUT (15) enriched candidates
+    and sends each through the Options TMC Final Decision prompt via
+    routed model infrastructure.
+
+    Uses asyncio + ThreadPoolExecutor for concurrent dispatch
+    (matching stock runner pattern).  Includes retry-with-fix for
+    transient failures.
+
+    Model review fields attached to each candidate:
+    - model_recommendation: "EXECUTE" | "PASS"
+    - model_conviction: 0-100
+    - model_score: 0-100
+    - model_headline: str
+    - model_narrative: str
+    - model_review: full model analysis dict (for debug/stage artifact)
+    - model_caution_notes: list[str]
+    - model_key_factors: list[dict]
+    """
+    import asyncio
+    import functools
+    from concurrent.futures import ThreadPoolExecutor
+
+    started = _now_iso()
+    enriched: list[dict[str, Any]] = stage_data.get("enriched_candidates", [])
+
+    # Take the top N for model analysis; preserve the rest as overflow
+    # in case model analysis fully degrades.
+    model_input = enriched[:MODEL_ANALYSIS_TOP_N_INPUT]
+    stage_data["model_overflow"] = enriched[MODEL_ANALYSIS_TOP_N_INPUT:]
+
+    if not model_input:
+        stage_data["model_candidates"] = []
+        stage_data["model_analysis_counts"] = {
+            "attempted": 0, "succeeded": 0, "failed": 0,
+            "skipped_reason": "no enriched candidates",
+        }
+        return StageOutcome(
+            stage_key="model_analysis",
+            status="completed",
+            started_at=started,
+            completed_at=_now_iso(),
+        )
+
+    try:
+        from app.services.model_routing_integration import (
+            routed_options_tmc_final_decision,
+        )
+    except ImportError as exc:
+        logger.warning("[model_analysis] routing unavailable: %s", exc)
+        for cand in model_input:
+            cand["model_review"] = None
+        stage_data["model_candidates"] = model_input
+        stage_data["model_analysis_counts"] = {
+            "attempted": 0, "succeeded": 0, "failed": 0,
+            "skipped_reason": str(exc),
+        }
+        warnings.append(f"[model_analysis] Routing unavailable: {exc}")
+        return StageOutcome(
+            stage_key="model_analysis",
+            status="degraded",
+            started_at=started,
+            completed_at=_now_iso(),
+            error=str(exc),
+        )
+
+    try:
+        loop = asyncio.get_running_loop()
+        consumer_summary = stage_data.get("consumer_summary") or {}
+        attempted = len(model_input)
+        succeeded = 0
+        failed = 0
+        failed_candidates: list[dict[str, str]] = []
+
+        total = len(model_input)
+        _max_concurrent = min(total, 4)
+        _model_pool = ThreadPoolExecutor(
+            max_workers=_max_concurrent,
+            thread_name_prefix="options_model",
+        )
+
+        async def _analyze_one(cand: dict[str, Any]) -> bool:
+            """Run options TMC model analysis for a single candidate."""
+            symbol = cand.get("symbol", "?")
+            strategy_id = cand.get("strategy_id") or cand.get("scanner_key", "")
+
+            try:
+                model_result = await loop.run_in_executor(
+                    _model_pool,
+                    functools.partial(
+                        routed_options_tmc_final_decision,
+                        candidate=cand,
+                        market_context=consumer_summary,
+                        retries=2,
+                    ),
+                )
+                cand["model_review"] = model_result
+
+                rec = model_result.get("recommendation", "PASS")
+                cand["model_recommendation"] = rec
+                cand["model_conviction"] = model_result.get("conviction")
+                cand["model_score"] = model_result.get("score")
+                cand["model_headline"] = model_result.get("headline")
+                cand["model_narrative"] = model_result.get("narrative")
+                cand["model_caution_notes"] = model_result.get("caution_points", [])
+                cand["model_key_factors"] = model_result.get("key_factors", [])
+
+                return True
+            except Exception as exc:
+                logger.warning(
+                    "Model analysis failed for %s/%s: %s",
+                    symbol, strategy_id, exc,
+                )
+                return False
+
+        # ── First pass: concurrent dispatch ──────────────────────
+        _sem = asyncio.Semaphore(_max_concurrent)
+        first_pass_failures: list[dict[str, Any]] = []
+
+        async def _guarded(idx: int, cand: dict[str, Any]) -> bool:
+            async with _sem:
+                logger.info(
+                    "[options_model] Dispatching %d/%d: %s/%s",
+                    idx, total,
+                    cand.get("symbol", "?"),
+                    cand.get("scanner_key", ""),
+                )
+                return await _analyze_one(cand)
+
+        results = await asyncio.gather(
+            *[_guarded(i + 1, c) for i, c in enumerate(model_input)],
+            return_exceptions=True,
+        )
+
+        for cand, result in zip(model_input, results):
+            if isinstance(result, Exception):
+                logger.warning(
+                    "[options_model] Error for %s: %s",
+                    cand.get("symbol", "?"), result,
+                )
+                first_pass_failures.append(cand)
+            elif result:
+                succeeded += 1
+            else:
+                first_pass_failures.append(cand)
+
+        # ── Second pass: retry failures ──────────────────────────
+        if first_pass_failures:
+            logger.info(
+                "[options_model] %d/%d failed, retrying after 3s...",
+                len(first_pass_failures), attempted,
+            )
+            await asyncio.sleep(3)
+            for cand in first_pass_failures:
+                ok = await _analyze_one(cand)
+                if ok:
+                    succeeded += 1
+                else:
+                    cand["model_review"] = None
+                    failed += 1
+                    failed_candidates.append({
+                        "symbol": cand.get("symbol", "?"),
+                        "scanner_key": cand.get("scanner_key", ""),
+                    })
+
+        _model_pool.shutdown(wait=False)
+
+        stage_data["model_candidates"] = model_input
+        stage_data["model_analysis_counts"] = {
+            "attempted": attempted,
+            "succeeded": succeeded,
+            "failed": failed,
+            "failed_candidates": failed_candidates,
+        }
+
+        logger.info(
+            "[options_model] Complete: %d attempted, %d succeeded, %d failed",
+            attempted, succeeded, failed,
+        )
+
+        status = "completed" if failed == 0 else "degraded"
+        if succeeded == 0 and attempted > 0:
+            warnings.append("[options_model] All model analysis calls failed")
+
+        return StageOutcome(
+            stage_key="model_analysis",
+            status=status,
+            started_at=started,
+            completed_at=_now_iso(),
+        )
+    except Exception as exc:
+        logger.error("model_analysis failed: %s", exc, exc_info=True)
+        try:
+            _model_pool.shutdown(wait=False)
+        except (NameError, UnboundLocalError):
+            pass
+        for cand in model_input:
+            cand["model_review"] = None
+        stage_data["model_candidates"] = model_input
+        stage_data["model_analysis_counts"] = {
+            "attempted": 0, "succeeded": 0, "failed": 0,
+            "skipped_reason": str(exc),
+        }
+        warnings.append(f"[options_model] Stage failed: {exc}")
+        return StageOutcome(
+            stage_key="model_analysis",
+            status="degraded",
+            started_at=started,
+            completed_at=_now_iso(),
+            error=str(exc),
+        )
+
+
+def _stage_model_filter(
+    stage_data: dict[str, Any],
+    warnings: list[str],
+) -> StageOutcome:
+    """Stage 6: Filter and rank candidates by model analysis results.
+
+    Rules:
+      1. Discard candidates where model_recommendation == "PASS".
+      2. Discard candidates with no model analysis (model_review is None).
+      3. Rank remaining by model_score descending (None scores sort last).
+      4. Keep top MODEL_ANALYSIS_TOP_N_OUTPUT (10).
+
+    On full model degradation (no candidate has model_review), falls back
+    to the enriched ranking (EV-based) and keeps top 10, so the pipeline
+    always produces output even when model infra is unavailable.
+
+    Updates stage_data["selected_candidates"] for downstream packaging.
+    """
+    started = _now_iso()
+    model_cands: list[dict[str, Any]] = stage_data.get("model_candidates", [])
+    model_overflow: list[dict[str, Any]] = stage_data.get("model_overflow", [])
+    before_count = len(model_cands)
+
+    # Detect full degradation: no model_review at all, OR all model
+    # reviews are fallback/error responses (every review has _fallback=True).
+    model_available = any(c.get("model_review") is not None for c in model_cands)
+    all_fallback = model_available and all(
+        (c.get("model_review") or {}).get("_fallback", False)
+        for c in model_cands
+        if c.get("model_review") is not None
+    )
+
+    if (not model_available or all_fallback) and before_count > 0:
+        # ── FULL DEGRADATION: fall back to enriched ranking ──
+        logger.warning(
+            "event=options_model_fully_degraded action=fallback_enriched count=%d",
+            before_count,
+        )
+        warnings.append(
+            "Options model analysis unavailable — candidates ranked by scanner EV only"
+        )
+        for cand in model_cands:
+            cand["model_degraded"] = True
+            cand["model_recommendation"] = None
+            cand["model_score"] = None
+
+        # Use original enriched rank order (already EV-sorted)
+        fallback = model_cands[:MODEL_ANALYSIS_TOP_N_OUTPUT]
+        for i, c in enumerate(fallback, start=1):
+            c["rank"] = i
+
+        stage_data["selected_candidates"] = fallback
+        stage_data["model_filter_counts"] = {
+            "before": before_count,
+            "passed_removed": 0,
+            "no_analysis_removed": 0,
+            "execute_candidates": 0,
+            "dropped_by_rank": max(0, before_count - len(fallback)),
+            "after": len(fallback),
+            "model_degraded": True,
+            "ranking_fallback": "enriched_ev",
+            "cap_used": MODEL_ANALYSIS_TOP_N_OUTPUT,
+        }
+        return StageOutcome(
+            stage_key="model_filter",
+            status="completed",
+            started_at=started,
+            completed_at=_now_iso(),
+        )
+
+    # ── NORMAL: filter by model recommendation ──
+    passed_syms: list[str] = []
+    no_analysis_syms: list[str] = []
+    execute_candidates: list[dict[str, Any]] = []
+
+    for cand in model_cands:
+        rec = cand.get("model_recommendation")
+        if cand.get("model_review") is None:
+            no_analysis_syms.append(
+                f"{cand.get('symbol', '?')}/{cand.get('scanner_key', '')}",
+            )
+        elif rec == "PASS":
+            passed_syms.append(
+                f"{cand.get('symbol', '?')}/{cand.get('scanner_key', '')}",
+            )
+        else:
+            execute_candidates.append(cand)
+
+    # Sort by model_score descending
+    execute_candidates.sort(
+        key=lambda c: c.get("model_score") if c.get("model_score") is not None else -1,
+        reverse=True,
+    )
+
+    trimmed = execute_candidates[:MODEL_ANALYSIS_TOP_N_OUTPUT]
+    dropped = execute_candidates[MODEL_ANALYSIS_TOP_N_OUTPUT:]
+
+    # Re-assign rank
+    for i, c in enumerate(trimmed, start=1):
+        c["rank"] = i
+
+    stage_data["selected_candidates"] = trimmed
+    stage_data["model_filter_counts"] = {
+        "before": before_count,
+        "passed_removed": len(passed_syms),
+        "passed_symbols": passed_syms,
+        "no_analysis_removed": len(no_analysis_syms),
+        "no_analysis_symbols": no_analysis_syms,
+        "execute_candidates": len(execute_candidates),
+        "dropped_by_rank": len(dropped),
+        "dropped_symbols": [
+            f"{c.get('symbol', '?')}/{c.get('scanner_key', '')}" for c in dropped
+        ],
+        "after": len(trimmed),
+    }
+
+    logger.info(
+        "[options_model_filter] before=%d passed_removed=%d no_analysis=%d "
+        "execute=%d trimmed=%d",
+        before_count, len(passed_syms), len(no_analysis_syms),
+        len(execute_candidates), len(trimmed),
+    )
+
+    return StageOutcome(
+        stage_key="model_filter",
+        status="completed",
+        started_at=started,
+        completed_at=_now_iso(),
+    )
 
 
 def _stage_select_package(
@@ -1060,9 +1723,14 @@ def _stage_select_package(
     """
     started = _now_iso()
     try:
-        enriched: list[dict[str, Any]] = stage_data.get("enriched_candidates", [])
+        # Prefer model-filtered candidates; fall back to enriched if
+        # model stages were skipped (CancelledError / partial output).
+        selected: list[dict[str, Any]] = (
+            stage_data.get("selected_candidates")
+            or stage_data.get("enriched_candidates", [])
+        )
         top_n = config.top_n
-        selected = enriched[:top_n]
+        selected = selected[:top_n]
 
         market_state_ref = stage_data.get("market_state_ref")
         consumer_result: MarketStateConsumerResult | None = stage_data.get("market_state_consumer")
@@ -1073,7 +1741,7 @@ def _stage_select_package(
         )
 
         # ── Determine quality ────────────────────────────────────
-        total_candidates = len(enriched)
+        total_candidates = stage_data.get("credible_count", len(selected))
         selected_count = len(selected)
         scanners_ok = stage_data.get("scanners_ok", 0)
         scanners_total = stage_data.get("scanners_total", 0)
@@ -1157,6 +1825,14 @@ def _stage_select_package(
                 "scanners_ok": scanners_ok,
                 "scanners_total": scanners_total,
                 "credibility_filter": stage_data.get("credibility_filter"),
+                "family_distribution": {
+                    fk: sum(1 for c in selected if c.get("family_key", "unknown") == fk)
+                    for fk in {c.get("family_key", "unknown") for c in selected}
+                },
+                "dte_distribution": {
+                    b: sum(1 for c in compact_candidates if c.get("dte_bucket", "unknown") == b)
+                    for b in {c.get("dte_bucket", "unknown") for c in compact_candidates}
+                },
             },
             "scan_diagnostics": {
                 "total_constructed": scan_diag.get("total_constructed", 0),
@@ -1165,6 +1841,8 @@ def _stage_select_package(
                 "reject_reason_counts": scan_diag.get("reject_reason_counts", {}),
             },
             "validation_summary": validation_summary,
+            "model_analysis_counts": stage_data.get("model_analysis_counts"),
+            "model_filter_counts": stage_data.get("model_filter_counts"),
         }
 
         # ── Build summary.json ───────────────────────────────────
@@ -1308,7 +1986,7 @@ def _stage_select_package(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# STAGE ARTIFACT WRITER (for stages 1-4)
+# STAGE ARTIFACT WRITER (for stages 1-6)
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -1367,6 +2045,38 @@ def _write_stage_artifact(
         base["enriched_count"] = len(enriched)
         # Include full enriched list for debug/replay.
         base["candidates"] = enriched
+
+    elif stage_key == "model_analysis":
+        base["model_analysis_counts"] = stage_data.get("model_analysis_counts", {})
+        model_cands = stage_data.get("model_candidates", [])
+        base["model_candidates_count"] = len(model_cands)
+        # Include summary per candidate (not full model_review blobs).
+        base["candidate_summaries"] = [
+            {
+                "symbol": c.get("symbol"),
+                "scanner_key": c.get("scanner_key"),
+                "model_recommendation": c.get("model_recommendation"),
+                "model_conviction": c.get("model_conviction"),
+                "model_score": c.get("model_score"),
+                "has_review": c.get("model_review") is not None,
+            }
+            for c in model_cands
+        ]
+
+    elif stage_key == "model_filter":
+        base["model_filter_counts"] = stage_data.get("model_filter_counts", {})
+        selected = stage_data.get("selected_candidates", [])
+        base["selected_count"] = len(selected)
+        base["selected_summaries"] = [
+            {
+                "symbol": c.get("symbol"),
+                "scanner_key": c.get("scanner_key"),
+                "model_recommendation": c.get("model_recommendation"),
+                "model_score": c.get("model_score"),
+                "rank": c.get("rank"),
+            }
+            for c in selected
+        ]
 
     try:
         path = get_stage_artifact_path(data_dir, WORKFLOW_ID, run_id, stage_key)

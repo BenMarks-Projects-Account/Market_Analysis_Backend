@@ -24,6 +24,8 @@ from common.model_sanitize import (
 from app.api.routes_active_trades import (
     _coerce_narrative_memo,
     _build_fallback_narrative,
+    _sanitize_model_analysis,
+    _build_fallback_analysis,
 )
 
 
@@ -254,15 +256,15 @@ class TestCoerceNarrativeMemo:
         assert _coerce_narrative_memo(None) is None
         assert _coerce_narrative_memo([1, 2]) is None
 
-    def test_unknown_label_defaults_to_watch(self):
+    def test_unknown_label_defaults_to_hold(self):
         parsed = {"label": "YOLO", "summary": "something"}
         result = _coerce_narrative_memo(parsed)
-        assert result["label"] == "WATCH"
+        assert result["label"] == "HOLD"
 
-    def test_missing_label_defaults_to_watch(self):
+    def test_missing_label_defaults_to_hold(self):
         parsed = {"summary": "some text"}
         result = _coerce_narrative_memo(parsed)
-        assert result["label"] == "WATCH"
+        assert result["label"] == "HOLD"
 
     def test_label_normalised_uppercase(self):
         parsed = {"label": "hold", "summary": "ok"}
@@ -317,7 +319,7 @@ class TestCoerceNarrativeMemo:
 class TestBuildFallbackNarrative:
     def test_structure_complete(self):
         result = _build_fallback_narrative("WINNING", 85)
-        assert result["label"] == "WATCH"
+        assert result["label"] == "HOLD"
         assert "WINNING" in result["summary"]
         assert "85" in result["summary"]
         assert result["confidence"] == 0
@@ -365,7 +367,7 @@ class TestSanitizeAndCoercePipeline:
         parsed = json.loads(cleaned)
         memo = _coerce_narrative_memo(parsed)
         assert memo is not None
-        assert memo["label"] == "EXIT"
+        assert memo["label"] == "CLOSE"  # EXIT → CLOSE via legacy mapping
 
     def test_malformed_triggers_fallback(self):
         raw = "<think>lots of thinking</think>not valid json at all"
@@ -378,5 +380,121 @@ class TestSanitizeAndCoercePipeline:
             parsed = False
         assert parsed is False  # Can't parse → fallback should be used
         fallback = _build_fallback_narrative("WINNING", 70)
-        assert fallback["label"] == "WATCH"
+        assert fallback["label"] == "HOLD"
         assert fallback["confidence"] == 0
+
+
+# ═══════════════════════════════════════════════════════════════
+# _sanitize_model_analysis — unified recommendation schema
+# ═══════════════════════════════════════════════════════════════
+
+class TestSanitizeModelAnalysis:
+    """Verify _sanitize_model_analysis uses the unified HOLD/REDUCE/CLOSE/URGENT_REVIEW enum."""
+
+    def _base_raw(self, **overrides):
+        raw = {
+            "headline": "Test headline",
+            "recommendation": "HOLD",
+            "confidence": 75,
+            "thesis_status": "INTACT",
+            "summary": "Position looks fine.",
+            "key_risks": ["Risk A"],
+            "key_supports": ["Support A"],
+            "technical_state": {},
+            "action_plan": {"urgency": "LOW"},
+            "memo": {},
+        }
+        raw.update(overrides)
+        return raw
+
+    def test_outputs_recommendation_field(self):
+        """Output dict should use 'recommendation' not 'stance'."""
+        result = _sanitize_model_analysis(self._base_raw())
+        assert "recommendation" in result
+        assert "stance" not in result
+        assert result["recommendation"] == "HOLD"
+
+    def test_valid_recommendations_pass_through(self):
+        for rec in ("HOLD", "REDUCE", "CLOSE", "URGENT_REVIEW"):
+            result = _sanitize_model_analysis(self._base_raw(recommendation=rec))
+            assert result["recommendation"] == rec
+
+    def test_legacy_exit_maps_to_close(self):
+        result = _sanitize_model_analysis(self._base_raw(recommendation="EXIT"))
+        assert result["recommendation"] == "CLOSE"
+
+    def test_legacy_add_maps_to_hold(self):
+        result = _sanitize_model_analysis(self._base_raw(recommendation="ADD"))
+        assert result["recommendation"] == "HOLD"
+
+    def test_legacy_watch_maps_to_hold(self):
+        result = _sanitize_model_analysis(self._base_raw(recommendation="WATCH"))
+        assert result["recommendation"] == "HOLD"
+
+    def test_legacy_stance_field_fallback(self):
+        """If response uses old 'stance' field instead of 'recommendation', still works."""
+        raw = self._base_raw()
+        del raw["recommendation"]
+        raw["stance"] = "REDUCE"
+        result = _sanitize_model_analysis(raw)
+        assert result["recommendation"] == "REDUCE"
+
+    def test_legacy_stance_exit_maps_to_close(self):
+        raw = self._base_raw()
+        del raw["recommendation"]
+        raw["stance"] = "EXIT"
+        result = _sanitize_model_analysis(raw)
+        assert result["recommendation"] == "CLOSE"
+
+    def test_invalid_recommendation_defaults_hold(self):
+        result = _sanitize_model_analysis(self._base_raw(recommendation="YOLO"))
+        assert result["recommendation"] == "HOLD"
+
+    def test_missing_recommendation_defaults_hold(self):
+        raw = self._base_raw()
+        del raw["recommendation"]
+        result = _sanitize_model_analysis(raw)
+        assert result["recommendation"] == "HOLD"
+
+
+class TestBuildFallbackAnalysis:
+    """Verify _build_fallback_analysis uses the unified enum."""
+
+    def test_fallback_uses_hold(self):
+        result = _build_fallback_analysis("Some error reason")
+        assert result["recommendation"] == "HOLD"
+        assert "stance" not in result
+
+    def test_fallback_has_required_fields(self):
+        result = _build_fallback_analysis("timeout")
+        assert result["confidence"] == 0
+        assert result["thesis_status"] == "INTACT"
+        assert isinstance(result["key_risks"], list)
+
+
+# ═══════════════════════════════════════════════════════════════
+# _coerce_narrative_memo — legacy mapping
+# ═══════════════════════════════════════════════════════════════
+
+class TestNarrativeMemoLegacyMapping:
+    """Verify _coerce_narrative_memo maps legacy enum values correctly."""
+
+    def test_exit_maps_to_close(self):
+        result = _coerce_narrative_memo({"label": "EXIT", "summary": "Close out"})
+        assert result["label"] == "CLOSE"
+
+    def test_add_maps_to_hold(self):
+        result = _coerce_narrative_memo({"label": "ADD", "summary": "Add more"})
+        assert result["label"] == "HOLD"
+
+    def test_watch_maps_to_hold(self):
+        result = _coerce_narrative_memo({"label": "WATCH", "summary": "Keep watching"})
+        assert result["label"] == "HOLD"
+
+    def test_close_passes_through(self):
+        result = _coerce_narrative_memo({"label": "CLOSE", "summary": "Close it"})
+        assert result["label"] == "CLOSE"
+
+    def test_urgent_review_passes_through(self):
+        result = _coerce_narrative_memo({"label": "URGENT_REVIEW", "summary": "Review now"})
+        assert result["label"] == "URGENT_REVIEW"

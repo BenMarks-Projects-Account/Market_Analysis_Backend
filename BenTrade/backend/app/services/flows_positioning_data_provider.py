@@ -25,16 +25,15 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from app.services.data_quality_utils import (
+    build_data_quality_summary,
+    extract_value as _extract_value,
+)
 from app.services.market_context_service import MarketContextService
 
 logger = logging.getLogger(__name__)
 
-
-def _extract_value(metric: dict[str, Any] | None) -> float | None:
-    """Extract the numeric value from a MarketContextService metric envelope."""
-    if metric is None:
-        return None
-    return metric.get("value")
+# _extract_value imported from data_quality_utils
 
 
 class FlowsPositioningDataProvider:
@@ -225,7 +224,15 @@ class FlowsPositioningDataProvider:
                 source_errors,
             )
 
+        # Build per-metric data quality tags from market context envelopes
+        _quality_metrics = {
+            k: market_ctx.get(k)
+            for k in ("vix", "vix3m")
+        }
+        data_quality = build_data_quality_summary(_quality_metrics)
+
         source_meta = {
+            "data_quality": data_quality,
             "market_context_generated_at": market_ctx.get("context_generated_at"),
             "vix_source": market_ctx.get("vix", {}).get("source"),
             "vix_freshness": market_ctx.get("vix", {}).get("freshness"),

@@ -57,6 +57,16 @@ _DEFAULT_GENERATION_CAP = 50_000
 # Filters out impractically wide spreads at construction time.
 _DEFAULT_MAX_WIDTH = 50.0
 
+# Minimum spread width in dollars.
+# Skips narrow spreads (e.g. $1-wide SPY) that yield marginal credit.
+_DEFAULT_MIN_WIDTH = 2.0
+
+# Short-leg delta range — only generate candidates whose short strike
+# has abs(delta) within this band.  Eliminates penny-delta far-OTM and
+# near-ATM strikes that income traders wouldn't use.
+_DEFAULT_SHORT_DELTA_MIN = 0.05
+_DEFAULT_SHORT_DELTA_MAX = 0.40
+
 
 # ═══════════════════════════════════════════════════════════════════
 #  Variant configuration
@@ -125,6 +135,29 @@ class VerticalSpreadsV2Scanner(BaseV2Scanner):
 
         Uses ``_VARIANT_CONFIG`` to determine short/long assignment.
         """
+        # === TEMPORARY DIAGNOSTIC LOGGING (remove after debugging) ===
+        import json as _diag_json
+        from pathlib import Path as _DiagPath
+        from datetime import datetime as _DiagDT
+        _diag = {
+            "timestamp": _DiagDT.now().isoformat(),
+            "scanner_key": scanner_key,
+            "strategy_id": strategy_id,
+            "symbol": symbol,
+            "phase_a": {},
+            "phase_b": {
+                "per_expiry": [],
+                "total_constructed": 0,
+                "delta_filter_skipped": 0,
+                "delta_none_skipped": 0,
+                "width_too_narrow_skipped": 0,
+                "width_too_wide_skipped": 0,
+                "cap_hit": False,
+            },
+            "config": {},
+        }
+        # === END DIAG INIT ===
+
         config = _VARIANT_CONFIG.get(strategy_id)
         if config is None:
             _log.warning(
@@ -140,21 +173,84 @@ class VerticalSpreadsV2Scanner(BaseV2Scanner):
 
         generation_cap = int(context.get("generation_cap", _DEFAULT_GENERATION_CAP))
         max_width = float(context.get("max_width", _DEFAULT_MAX_WIDTH))
+        min_width = float(context.get("min_width", _DEFAULT_MIN_WIDTH))
+        short_delta_min = float(context.get("short_delta_min", _DEFAULT_SHORT_DELTA_MIN))
+        short_delta_max = float(context.get("short_delta_max", _DEFAULT_SHORT_DELTA_MAX))
+
+        # === DIAG: capture resolved config ===
+        _diag["config"] = {
+            "target_type": target_type,
+            "short_is_higher": short_is_higher,
+            "generation_cap": generation_cap,
+            "max_width": max_width,
+            "min_width": min_width,
+            "short_delta_min": short_delta_min,
+            "short_delta_max": short_delta_max,
+        }
 
         candidates: list[V2Candidate] = []
-        seq = 0
+        total_seq = 0
         capped = False
 
-        for exp, bucket in narrowed_universe.expiry_buckets.items():
+        # Per-expiration budget — ensures all expirations get fair representation
+        num_expirations = len(narrowed_universe.expiry_buckets)
+        per_exp_cap = max(200, generation_cap // max(num_expirations, 1))
+
+        # === DIAG: Phase A summary ===
+        _diag["phase_a"] = {
+            "total_expirations": num_expirations,
+            "expiration_dates": sorted(narrowed_universe.expiry_buckets.keys()),
+            "contracts_per_expiry": {
+                exp: len(bucket.strikes)
+                for exp, bucket in narrowed_universe.expiry_buckets.items()
+            },
+            "total_contracts": sum(
+                len(bucket.strikes)
+                for bucket in narrowed_universe.expiry_buckets.values()
+            ),
+            "underlying_price": underlying_price,
+            "per_exp_cap": per_exp_cap,
+        }
+
+        for exp in sorted(narrowed_universe.expiry_buckets.keys()):
+            bucket = narrowed_universe.expiry_buckets[exp]
             if capped:
                 break
+            exp_seq = 0
             # Filter strikes to target option type
             typed_contracts: list[tuple[float, Any]] = []
             for entry in bucket.strikes:
                 if entry.contract.option_type == target_type:
                     typed_contracts.append((entry.strike, entry.contract))
 
+            # === DIAG: per-expiry entry ===
+            _diag_exp: dict[str, Any] = {
+                "expiry": exp,
+                "dte": getattr(bucket, 'dte', None),
+                "all_strikes_count": len(bucket.strikes),
+                "typed_contract_count": len(typed_contracts),
+                "delta_values": [],
+                "delta_none_skipped": 0,
+                "delta_filter_skipped": 0,
+                "width_too_narrow_skipped": 0,
+                "width_too_wide_skipped": 0,
+                "candidates_constructed": 0,
+            }
+            # Sample first 10 contracts' delta/quote data
+            for _idx, (_s, _c) in enumerate(typed_contracts[:10]):
+                _dv = getattr(_c, 'delta', None)
+                if _dv is None and hasattr(_c, 'greeks'):
+                    _dv = (_c.greeks or {}).get('delta') if isinstance(getattr(_c, 'greeks', None), dict) else None
+                _diag_exp["delta_values"].append({
+                    "strike": _s,
+                    "delta": _dv,
+                    "bid": getattr(_c, 'bid', None),
+                    "ask": getattr(_c, 'ask', None),
+                    "oi": getattr(_c, 'open_interest', None),
+                })
+
             if len(typed_contracts) < 2:
+                _diag["phase_b"]["per_expiry"].append(_diag_exp)
                 continue
 
             # Sort ascending by strike
@@ -162,15 +258,45 @@ class VerticalSpreadsV2Scanner(BaseV2Scanner):
 
             # Generate all valid (S_low, S_high) pairs
             for i in range(len(typed_contracts)):
-                if capped:
+                if capped or exp_seq >= per_exp_cap:
                     break
+                s_low, c_low = typed_contracts[i]
+
+                # When short leg is the LOW strike, filter on outer loop
+                if not short_is_higher:
+                    if c_low.delta is None:
+                        _diag_exp["delta_none_skipped"] += 1
+                        _diag["phase_b"]["delta_none_skipped"] += 1
+                        continue
+                    if not (short_delta_min <= abs(c_low.delta) <= short_delta_max):
+                        _diag_exp["delta_filter_skipped"] += 1
+                        _diag["phase_b"]["delta_filter_skipped"] += 1
+                        continue
+
                 for j in range(i + 1, len(typed_contracts)):
-                    s_low, c_low = typed_contracts[i]
                     s_high, c_high = typed_contracts[j]
 
+                    # Skip narrow spreads (e.g. $1-wide SPY)
+                    if s_high - s_low < min_width:
+                        _diag_exp["width_too_narrow_skipped"] += 1
+                        _diag["phase_b"]["width_too_narrow_skipped"] += 1
+                        continue  # try wider pairs
                     # Skip impossibly wide spreads
                     if s_high - s_low > max_width:
+                        _diag_exp["width_too_wide_skipped"] += 1
+                        _diag["phase_b"]["width_too_wide_skipped"] += 1
                         break  # remaining j values only wider
+
+                    # When short leg is the HIGH strike, filter on inner loop
+                    if short_is_higher:
+                        if c_high.delta is None:
+                            _diag_exp["delta_none_skipped"] += 1
+                            _diag["phase_b"]["delta_none_skipped"] += 1
+                            continue
+                        if not (short_delta_min <= abs(c_high.delta) <= short_delta_max):
+                            _diag_exp["delta_filter_skipped"] += 1
+                            _diag["phase_b"]["delta_filter_skipped"] += 1
+                            continue
 
                     if short_is_higher:
                         short_strike, short_c = s_high, c_high
@@ -192,18 +318,26 @@ class VerticalSpreadsV2Scanner(BaseV2Scanner):
                         long_strike=long_strike,
                         long_contract=long_c,
                         option_type=target_type,
-                        seq=seq,
+                        seq=total_seq,
                     )
                     candidates.append(cand)
-                    seq += 1
+                    exp_seq += 1
+                    total_seq += 1
+                    _diag_exp["candidates_constructed"] += 1
+                    _diag["phase_b"]["total_constructed"] += 1
 
-                    if seq >= generation_cap:
+                    if exp_seq >= per_exp_cap:
+                        break
+                    if total_seq >= generation_cap:
                         capped = True
+                        _diag["phase_b"]["cap_hit"] = True
                         _log.warning(
                             "Vertical %s %s: hit generation cap (%d)",
                             strategy_id, symbol, generation_cap,
                         )
                         break
+
+            _diag["phase_b"]["per_expiry"].append(_diag_exp)
 
         _log.info(
             "Vertical %s %s: constructed %d candidates from %d expirations%s",
@@ -211,6 +345,21 @@ class VerticalSpreadsV2Scanner(BaseV2Scanner):
             len(narrowed_universe.expiry_buckets),
             " (CAPPED)" if capped else "",
         )
+
+        # === WRITE DIAGNOSTIC REPORT (TEMPORARY — remove after debugging) ===
+        import os as _diag_os
+        if not _diag_os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                _diag_dir = _DiagPath("results/diagnostics")
+                _diag_dir.mkdir(parents=True, exist_ok=True)
+                _diag_file = _diag_dir / f"options_diag_{scanner_key}_{_DiagDT.now().strftime('%Y%m%d_%H%M%S')}.json"
+                with open(_diag_file, "w") as _f:
+                    _diag_json.dump(_diag, _f, indent=2, default=str)
+                _log.info("DIAG: wrote %s", _diag_file)
+            except Exception as _diag_exc:
+                _log.warning("event=diag_write_failed error=%s", _diag_exc)
+        # === END DIAGNOSTIC LOGGING ===
+
         return candidates
 
     # ── Phase C hook: family structural checks ──────────────────

@@ -135,24 +135,48 @@ def compute_engine_scores(
             total_weight += weight
 
     composite = _bounded(weighted_sum / total_weight, 0.0, 100.0) if total_weight > 0 else 50.0
+    data_status = "ok" if total_weight > 0 else "no_data"
 
     # ── Regime label ────────────────────────────────────────────
     stress_level = (macro_context.get("stress_level") or "unknown").lower()
-    regime_label = _regime_from_score(composite, stress_level)
+    if data_status == "no_data":
+        regime_label = "Neutral / No Data"
+    else:
+        regime_label = _regime_from_score(composite, stress_level)
+
+    # ── Confidence ──────────────────────────────────────────────
+    headline_count = len(items) if items else 0
+    source_count = len({h.get("source", "unknown") for h in items}) if items else 0
+    defaulted_count = sum(
+        1 for c in components.values()
+        if c and c.get("score") == 50.0
+    )
+    confidence, confidence_penalties = _compute_confidence(
+        headline_count=headline_count,
+        source_count=source_count,
+        defaulted_component_count=defaulted_count,
+        total_components=len(_WEIGHTS),
+        macro_context_available=bool(macro_context),
+    )
 
     result = {
         "score": round(composite, 2),
         "regime_label": regime_label,
         "components": components,
         "weights": _WEIGHTS,
+        "confidence": round(confidence, 1),
+        "confidence_score": round(confidence, 1),
+        "confidence_penalties": confidence_penalties,
         "explanation": build_engine_explanation(composite, regime_label, components, _WEIGHTS),
         "as_of": datetime.now(timezone.utc).isoformat(),
+        "data_status": data_status,
     }
 
     logger.info(
-        "event=news_engine_computed score=%.2f regime=%s components=%s",
+        "event=news_engine_computed score=%.2f regime=%s confidence=%.1f components=%s",
         composite,
         regime_label,
+        confidence,
         {k: round(v.get("score", 0), 1) for k, v in components.items()},
     )
 
@@ -443,6 +467,77 @@ def _compute_recency_pressure(items: list[dict[str, Any]]) -> dict[str, Any]:
         "signals": signals,
         "inputs": {"decayed_avg": round(decayed_avg, 4), "item_count": len(items)},
     }
+
+
+# ── Confidence computation ─────────────────────────────────────────
+
+def _compute_confidence(
+    *,
+    headline_count: int,
+    source_count: int,
+    defaulted_component_count: int,
+    total_components: int,
+    macro_context_available: bool,
+) -> tuple[float, list[str]]:
+    """Compute confidence score for news sentiment analysis.
+
+    Penalizes for:
+    - Low headline count (limited data)
+    - Low source diversity (echo chamber risk)
+    - High proportion of defaulted components (no real data)
+    - Keyword-based proxy nature of headline sentiment
+    - Missing macro context
+
+    Returns:
+        (confidence 0-100, penalty descriptions)
+    """
+    confidence = 100.0
+    penalties: list[str] = []
+
+    # --- Penalty: Low headline count ---
+    if headline_count == 0:
+        confidence -= 30
+        penalties.append("no_headlines: -30")
+    elif headline_count < 3:
+        confidence -= 20
+        penalties.append(f"very_few_headlines ({headline_count}): -20")
+    elif headline_count < 5:
+        confidence -= 10
+        penalties.append(f"few_headlines ({headline_count}): -10")
+    elif headline_count < 10:
+        confidence -= 5
+        penalties.append(f"moderate_headlines ({headline_count}): -5")
+
+    # --- Penalty: Low source diversity ---
+    if source_count <= 1:
+        confidence -= 15
+        penalties.append(f"single_source ({source_count}): -15")
+    elif source_count < 3:
+        confidence -= 8
+        penalties.append(f"low_source_diversity ({source_count}): -8")
+
+    # --- Penalty: Defaulted components (no real data) ---
+    if defaulted_component_count >= total_components:
+        confidence -= 40
+        penalties.append(f"all_components_defaulted ({defaulted_component_count}/{total_components}): -40")
+    elif defaulted_component_count >= 4:
+        confidence -= 20
+        penalties.append(f"most_components_defaulted ({defaulted_component_count}/{total_components}): -20")
+    elif defaulted_component_count >= 2:
+        confidence -= 10
+        penalties.append(f"some_components_defaulted ({defaulted_component_count}/{total_components}): -10")
+
+    # --- Penalty: Proxy nature of keyword sentiment ---
+    confidence -= 8
+    penalties.append("keyword_sentiment_proxy: -8")
+
+    # --- Penalty: No macro context ---
+    if not macro_context_available:
+        confidence -= 5
+        penalties.append("no_macro_context: -5")
+
+    confidence = max(0.0, min(100.0, confidence))
+    return confidence, penalties
 
 
 # ── Display name and tooltip mappings ──────────────────────────────

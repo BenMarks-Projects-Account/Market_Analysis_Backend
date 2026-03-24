@@ -458,3 +458,69 @@ async def tmc_final_decision(
     )
 
     return {"ok": True, "analysis": result}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# PORTFOLIO BALANCE
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TMCPortfolioBalanceRequest(BaseModel):
+    """Request body for portfolio balance workflow."""
+
+    account_mode: str = Field(default="paper", pattern="^(live|paper)$")
+    skip_model: bool = Field(default=False)
+    stock_results: dict[str, Any] | None = Field(
+        default=None,
+        description="Pre-computed stock workflow output (from prior run)",
+    )
+    options_results: dict[str, Any] | None = Field(
+        default=None,
+        description="Pre-computed options workflow output (from prior run)",
+    )
+    active_trade_results: dict[str, Any] | None = Field(
+        default=None,
+        description="Pre-computed active trade pipeline output (from prior run)",
+    )
+
+
+@router.post("/portfolio-balance/run")
+async def run_portfolio_balance(
+    request: Request,
+    body: TMCPortfolioBalanceRequest | None = None,
+) -> dict[str, Any]:
+    """Run the portfolio balancing workflow.
+
+    Chains: account state → regime → risk policy → active trades → balancer.
+    Returns a rebalance plan with close/open/hold actions and net impact.
+
+    Accepts optional pre-computed results from prior workflow runs to avoid
+    re-running expensive pipelines.
+    """
+    from app.workflows.portfolio_balancing_runner import run_portfolio_balance_workflow
+
+    params = body or TMCPortfolioBalanceRequest()
+
+    logger.info(
+        "[TMC_PORTFOLIO_BALANCE] endpoint hit — account_mode=%s skip_model=%s",
+        params.account_mode,
+        params.skip_model,
+    )
+
+    result = await run_portfolio_balance_workflow(
+        request=request,
+        account_mode=params.account_mode,
+        stock_results=params.stock_results,
+        options_results=params.options_results,
+        active_trade_results=params.active_trade_results,
+        skip_model=params.skip_model,
+    )
+
+    logger.info(
+        "[TMC_PORTFOLIO_BALANCE] OK — run_id=%s ok=%s duration_ms=%s",
+        result.get("run_id"),
+        result.get("ok"),
+        result.get("duration_ms"),
+    )
+
+    return result

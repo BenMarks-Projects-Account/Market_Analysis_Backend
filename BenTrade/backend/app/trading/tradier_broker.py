@@ -208,6 +208,89 @@ class TradierBroker(BrokerBase):
         finally:
             self._runtime_creds = None
 
+    async def submit_raw_payload(
+        self,
+        payload: dict[str, str],
+        *,
+        creds: TradierCredentials | None = None,
+        trace_id: str | None = None,
+        dry_run: bool | None = None,
+    ) -> BrokerResult:
+        """Submit a pre-built Tradier payload for order execution.
+
+        Mirror of preview_raw_payload but actually places the order.
+        Used by the close-order flow where we bypass OrderTicket.
+        """
+        self._runtime_creds = creds
+        try:
+            # Remove preview flag if present
+            payload.pop("preview", None)
+
+            effective_dry_run = dry_run if dry_run is not None else self.dry_run
+            tid = trace_id or f"raw-submit-{uuid.uuid4().hex[:8]}"
+
+            acct_id = self._account_id()
+            if not acct_id:
+                raise ValueError("Cannot submit order: account_id is not configured")
+
+            if effective_dry_run:
+                logger.warning(
+                    "event=tradier_raw_dry_run trace_id=%s payload=%s",
+                    tid, payload,
+                )
+                return BrokerResult(
+                    broker="tradier",
+                    status="DRY_RUN",
+                    broker_order_id=f"dryrun-{uuid.uuid4().hex[:10]}",
+                    message="DRY RUN — payload logged, no broker order placed",
+                    raw={"payload": payload, "trace_id": tid, "dry_run": True},
+                )
+
+            url = f"{self._base_url()}/accounts/{acct_id}/orders"
+            logger.info(
+                "event=tradier_raw_submit trace_id=%s url=%s payload_keys=%s",
+                tid, url, list(payload.keys()),
+            )
+
+            result = await request_json(
+                self.http_client,
+                "POST",
+                url,
+                data=payload,
+                headers=self._headers,
+            )
+
+            order_obj = result.get("order") or {}
+            broker_order_id = str(
+                order_obj.get("id") or order_obj.get("order_id") or uuid.uuid4().hex
+            )
+            status = str(order_obj.get("status") or "ACCEPTED").upper()
+
+            _STATUS_MAP = {
+                "OK": "ACCEPTED", "PENDING": "ACCEPTED",
+                "OPEN": "WORKING", "PARTIALLY_FILLED": "WORKING",
+                "FILLED": "FILLED", "EXPIRED": "REJECTED",
+                "CANCELED": "REJECTED", "REJECTED": "REJECTED",
+                "ACCEPTED": "ACCEPTED", "WORKING": "WORKING",
+            }
+            normalized = _STATUS_MAP.get(status, "ACCEPTED")
+
+            logger.info(
+                "event=tradier_raw_submit_result trace_id=%s broker_order_id=%s "
+                "tradier_status=%s normalized=%s",
+                tid, broker_order_id, status, normalized,
+            )
+
+            return BrokerResult(
+                broker="tradier",
+                status=normalized,
+                broker_order_id=broker_order_id,
+                message=f"Tradier order {normalized} (raw: {status})",
+                raw={**result, "trace_id": tid},
+            )
+        finally:
+            self._runtime_creds = None
+
     async def place_multileg_order(
         self,
         ticket: OrderTicket,

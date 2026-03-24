@@ -37,6 +37,8 @@ from typing import Any
 from app.clients.finnhub_client import FinnhubClient
 from app.clients.fred_client import FredClient
 from app.utils.cache import TTLCache
+from app.utils.market_hours import market_status as _market_status
+from app.services.data_quality_utils import compute_data_currency
 
 logger = logging.getLogger(__name__)
 
@@ -62,20 +64,74 @@ def _metric(
 ) -> dict[str, Any]:
     """Build a single normalized metric envelope."""
     if is_intraday:
-        freshness = "intraday"
+        # For live-quote sources, label freshness by current market status
+        status = _market_status()
+        if status == "open":
+            freshness = "intraday"
+        elif status == "extended":
+            freshness = "extended"
+        else:
+            freshness = "prior_close"
     elif observation_date:
         freshness = "eod"
     else:
         freshness = "delayed"
+    # Compute unified freshness tier (confidence framework vocabulary)
+    source_type = "tradier" if source == "tradier" else "fred"
+    currency = compute_data_currency(
+        observation_date=observation_date,
+        source_type=source_type,
+    )
     return {
         "value": value,
         "previous_close": previous_close,
         "source": source,
         "freshness": freshness,
+        "freshness_tier": currency["tier"],
+        "freshness_penalty": currency["penalty"],
         "is_intraday": is_intraday,
         "observation_date": observation_date,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "source_timestamp": source_timestamp,
+    }
+
+
+def _check_date_alignment(
+    metrics: dict[str, dict[str, Any]],
+    series_names: list[str],
+) -> dict[str, Any]:
+    """Check if multiple FRED series share the same observation date.
+
+    Args:
+        metrics: metric envelopes keyed by series name.
+        series_names: series names to compare.
+
+    Returns:
+        {"aligned": bool, "dates": {series: date},
+         "oldest_date": str|None, "detail": str|None}
+    """
+    dates: dict[str, str] = {}
+    for name in series_names:
+        m = metrics.get(name)
+        if isinstance(m, dict) and m.get("observation_date"):
+            dates[name] = m["observation_date"]
+
+    unique_dates = set(dates.values())
+    aligned = len(unique_dates) <= 1
+
+    detail: str | None = None
+    if not aligned:
+        detail = ", ".join(f"{k}={v}" for k, v in sorted(dates.items()))
+        logger.warning(
+            "event=cross_series_date_mismatch series=%s %s",
+            series_names, detail,
+        )
+
+    return {
+        "aligned": aligned,
+        "dates": dates,
+        "oldest_date": min(dates.values()) if dates else None,
+        "detail": detail,
     }
 
 
@@ -223,6 +279,12 @@ class MarketContextService:
             if ten_year["value"] is not None and two_year["value"] is not None:
                 yield_spread_val = round(ten_year["value"] - two_year["value"], 3)
 
+            # Cross-series date alignment check
+            _alignment = _check_date_alignment(
+                {"DGS10": ten_year, "DGS2": two_year},
+                ["DGS10", "DGS2"],
+            )
+
             # Wrap in metric envelope for consistent downstream handling.
             # Source = "derived" since it's computed from 10Y - 2Y.
             # Freshness inherits from the stalest input.
@@ -237,8 +299,11 @@ class MarketContextService:
                 yield_spread_val,
                 source="derived (10Y-2Y)",
                 is_intraday=(_spread_freshness == "intraday"),
-                observation_date=ten_year.get("observation_date"),
+                observation_date=_alignment["oldest_date"],
             )
+            if not _alignment["aligned"]:
+                yield_spread["cross_series_date_mismatch"] = True
+                yield_spread["date_mismatch_detail"] = _alignment["detail"]
 
             # CPI is monthly and slow-changing — fetch via FRED raw
             cpi_yoy = await self._compute_cpi_yoy()

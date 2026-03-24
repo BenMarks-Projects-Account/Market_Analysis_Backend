@@ -87,6 +87,9 @@ class OrderPreviewResponse(BaseModel):
     tradier_preview: dict[str, Any] | None = None
     tradier_preview_error: str | None = None
     payload_sent: dict[str, Any] | None = None
+    # Risk policy check (Phase 1 — warnings only)
+    policy_warnings: list[dict[str, str]] = []
+    policy_status: str = "clear"
 
 
 class TradingSubmitRequest(BaseModel):
@@ -119,3 +122,68 @@ class BrokerResult(BaseModel):
     broker_order_id: str
     message: str
     raw: dict[str, Any] | None = None
+
+
+# ── Close-order models ───────────────────────────────────────────────
+
+class CloseOrderLeg(BaseModel):
+    """Leg from the close_order_builder output."""
+    option_symbol: str
+    side: Literal[
+        "buy_to_close", "sell_to_close",
+        "BUY_TO_CLOSE", "SELL_TO_CLOSE",
+    ]
+    quantity: int = Field(ge=1)
+    strike: float | None = None
+    option_type: Literal["put", "call"] | None = None
+
+
+class CloseOrderPreviewRequest(BaseModel):
+    """Preview a close order built by the active trade pipeline."""
+    order_type: Literal["multileg", "equity"]
+    symbol: str
+    legs: list[CloseOrderLeg] | None = None
+    limit_price: float | None = None
+    price_effect: Literal["credit", "debit", "CREDIT", "DEBIT"] | None = None
+    time_in_force: Literal["DAY", "GTC", "day", "gtc"] = "DAY"
+    # Equity-only fields
+    side: Literal["sell"] | None = None
+    quantity: int | None = None
+    # Context
+    mode: Literal["paper", "live"] = "paper"
+    trace_id: str | None = None
+
+
+class CloseOrderPreviewResponse(BaseModel):
+    """Preview result for a close order."""
+    ok: bool
+    payload_sent: dict[str, Any] | None = None
+    tradier_preview: dict[str, Any] | None = None
+    tradier_preview_error: str | None = None
+    description: str | None = None
+    trace_id: str | None = None
+
+
+class CloseOrderSubmitRequest(BaseModel):
+    """Submit a close order (the same payload that was previewed)."""
+    order_type: Literal["multileg", "equity"]
+    symbol: str
+    legs: list[CloseOrderLeg] | None = None
+    limit_price: float | None = None
+    price_effect: Literal["credit", "debit", "CREDIT", "DEBIT"] | None = None
+    time_in_force: Literal["DAY", "GTC", "day", "gtc"] = "DAY"
+    side: Literal["sell"] | None = None
+    quantity: int | None = None
+    mode: Literal["paper", "live"] = "paper"
+    trace_id: str | None = None
+
+
+class CloseOrderSubmitResponse(BaseModel):
+    """Execution result for a close order."""
+    ok: bool
+    broker: str | None = None
+    status: str | None = None
+    broker_order_id: str | None = None
+    message: str | None = None
+    dry_run: bool = False
+    trace_id: str | None = None

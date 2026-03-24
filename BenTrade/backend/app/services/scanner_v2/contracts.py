@@ -108,15 +108,24 @@ class V2RecomputedMath:
     ``notes`` is a dict of ``{field_name: str}`` explaining how each
     value was derived or why it is None.
 
-    Formula reference (credit spread example)
+    Formula reference (vertical spread)
     ------------------------------------------
-    net_credit  = short_leg.bid − long_leg.ask
-    width       = abs(short_leg.strike − long_leg.strike)
-    max_profit  = net_credit × 100
-    max_loss    = (width − net_credit) × 100
-    pop         = 1 − abs(short_leg.delta)   [delta approximation]
-    ev          = (pop × max_profit) − ((1 − pop) × max_loss)
-    ror         = max_profit / max_loss       [if max_loss > 0]
+    Credit spread:
+      net_credit  = short_leg.bid − long_leg.ask
+      max_profit  = net_credit × 100
+      max_loss    = (width − net_credit) × 100
+      pop         = 1 − abs(short_leg.delta)   [P(short expires OTM)]
+
+    Debit spread:
+      net_debit   = long_leg.ask − short_leg.bid
+      max_profit  = (width − net_debit) × 100
+      max_loss    = net_debit × 100
+      pop         = abs(long_leg.delta)         [P(long finishes ITM)]
+
+    Common:
+      width       = abs(short_leg.strike − long_leg.strike)
+      ev          = (pop × max_profit) − ((1 − pop) × max_loss)
+      ror         = max_profit / max_loss       [if max_loss > 0]
     """
 
     net_credit: float | None = None      # per-share

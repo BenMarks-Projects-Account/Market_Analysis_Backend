@@ -257,6 +257,8 @@ class TestProviderHealthSummaryShape:
             # Step 16 additions
             "probe_type", "degraded_threshold_ms", "state_display_label",
             "status_detail_text", "last_checked_at",
+            # Circuit breaker
+            "circuit_breaker",
         }
         assert set(d.keys()) == expected
 

@@ -1,13 +1,15 @@
 from typing import Any
+import asyncio
 import logging
 import re
+import time
 from datetime import datetime, timezone
 
 import httpx
 
 from app.config import Settings
 from app.utils.cache import TTLCache
-from app.utils.http import request_json
+from app.utils.http import request_json, UpstreamError
 
 
 logger = logging.getLogger(__name__)
@@ -15,12 +17,67 @@ _SYMBOL_PATTERN = re.compile(r"^[A-Z0-9.\-]{1,10}$")
 # OCC option symbol: root(1-6 upper) + date(6 digits) + P/C + strike(8 digits)
 _OCC_SYMBOL_PATTERN = re.compile(r"^[A-Z]{1,6}\d{6}[PC]\d{8}$")
 
+# Default: 2 req/sec = 120/minute (conservative for Tradier's limit)
+_DEFAULT_MAX_PER_SECOND = 2.0
+_MAX_429_RETRIES = 3
+
+
+class _AsyncRateLimiter:
+    """Leaky-bucket rate limiter with async support.
+
+    Ensures requests are spaced at least ``1 / max_per_second`` seconds apart.
+    Thread-safe via asyncio.Lock.
+    """
+
+    def __init__(self, max_per_second: float = _DEFAULT_MAX_PER_SECOND) -> None:
+        self._min_interval = 1.0 / max_per_second
+        self._lock = asyncio.Lock()
+        self._last_request = 0.0
+
+    async def acquire(self) -> None:
+        """Wait until a request slot is available."""
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last_request
+            if elapsed < self._min_interval:
+                delay = self._min_interval - elapsed
+                logger.debug("event=tradier_rate_limiter_wait delay=%.3fs", delay)
+                await asyncio.sleep(delay)
+            self._last_request = time.monotonic()
+
 
 class TradierClient:
     def __init__(self, settings: Settings, http_client: httpx.AsyncClient, cache: TTLCache) -> None:
         self.settings = settings
         self.http_client = http_client
         self.cache = cache
+        self._rate_limiter = _AsyncRateLimiter(max_per_second=_DEFAULT_MAX_PER_SECOND)
+
+    async def _rate_limited_request(self, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        """Wrap ``request_json`` with rate limiting and 429 retry.
+
+        Acquires a rate-limiter slot before each attempt.  On HTTP 429,
+        retries up to ``_MAX_429_RETRIES`` times with exponential backoff
+        (respecting the ``Retry-After`` header when present).
+        """
+        for attempt in range(_MAX_429_RETRIES + 1):
+            await self._rate_limiter.acquire()
+            try:
+                return await request_json(self.http_client, method, url, **kwargs)
+            except UpstreamError as exc:
+                status = (exc.details or {}).get("status_code")
+                if status == 429 and attempt < _MAX_429_RETRIES:
+                    body = (exc.details or {}).get("body", "")
+                    # Respect Retry-After header if the upstream error preserved it
+                    retry_after = 2 ** (attempt + 1)
+                    delay = min(retry_after, 30)
+                    logger.warning(
+                        "event=tradier_rate_limited url=%s attempt=%d/%d delay=%ds body=%s",
+                        url, attempt + 1, _MAX_429_RETRIES, delay, (body or "")[:200],
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -87,8 +144,7 @@ class TradierClient:
         url = f"{self.settings.TRADIER_BASE_URL}/markets/quotes"
 
         async def _load() -> dict[str, Any]:
-            payload = await request_json(
-                self.http_client,
+            payload = await self._rate_limited_request(
                 "GET",
                 url,
                 params={"symbols": normalized_symbol},
@@ -111,8 +167,7 @@ class TradierClient:
         url = f"{self.settings.TRADIER_BASE_URL}/markets/options/expirations"
 
         async def _load() -> list[str]:
-            payload = await request_json(
-                self.http_client,
+            payload = await self._rate_limited_request(
                 "GET",
                 url,
                 params={"symbol": normalized_symbol, "includeAllRoots": "true"},
@@ -151,8 +206,7 @@ class TradierClient:
         url = f"{self.settings.TRADIER_BASE_URL}/markets/options/chains"
 
         async def _load() -> list[dict[str, Any]]:
-            payload = await request_json(
-                self.http_client,
+            payload = await self._rate_limited_request(
                 "GET",
                 url,
                 params={
@@ -181,8 +235,7 @@ class TradierClient:
         if not normalized_symbol:
             return {}
         url = f"{self.settings.TRADIER_BASE_URL}/markets/options/chains"
-        return await request_json(
-            self.http_client,
+        return await self._rate_limited_request(
             "GET",
             url,
             params={
@@ -203,8 +256,7 @@ class TradierClient:
         url = f"{self.settings.TRADIER_BASE_URL}/markets/history"
 
         async def _load() -> list[float]:
-            payload = await request_json(
-                self.http_client,
+            payload = await self._rate_limited_request(
                 "GET",
                 url,
                 params={
@@ -246,8 +298,7 @@ class TradierClient:
         url = f"{self.settings.TRADIER_BASE_URL}/markets/history"
 
         async def _load() -> list[dict[str, Any]]:
-            payload = await request_json(
-                self.http_client,
+            payload = await self._rate_limited_request(
                 "GET",
                 url,
                 params={
@@ -289,8 +340,7 @@ class TradierClient:
         url = f"{self.settings.TRADIER_BASE_URL}/markets/history"
 
         async def _load() -> list[dict[str, Any]]:
-            payload = await request_json(
-                self.http_client,
+            payload = await self._rate_limited_request(
                 "GET",
                 url,
                 params={
@@ -348,8 +398,7 @@ class TradierClient:
         url = f"{self.settings.TRADIER_BASE_URL}/markets/history"
 
         async def _load() -> list[dict[str, Any]]:
-            payload = await request_json(
-                self.http_client,
+            payload = await self._rate_limited_request(
                 "GET",
                 url,
                 params={
@@ -395,18 +444,18 @@ class TradierClient:
 
     async def get_balances(self) -> dict[str, Any]:
         url = self.account_endpoint("balances")
-        return await request_json(self.http_client, "GET", url, headers=self._headers)
+        return await self._rate_limited_request("GET", url, headers=self._headers)
 
     async def get_positions(self) -> dict[str, Any]:
         url = self.account_endpoint("positions")
-        return await request_json(self.http_client, "GET", url, headers=self._headers)
+        return await self._rate_limited_request("GET", url, headers=self._headers)
 
     async def get_orders(self, status: str | None = None) -> dict[str, Any]:
         url = self.account_endpoint("orders")
         params: dict[str, Any] = {}
         if status:
             params["status"] = status
-        return await request_json(self.http_client, "GET", url, headers=self._headers, params=params or None)
+        return await self._rate_limited_request("GET", url, headers=self._headers, params=params or None)
 
     async def get_quotes(self, symbols: list[str]) -> dict[str, Any]:
         normalized = [self._normalize_symbol(symbol) for symbol in (symbols or [])]
@@ -418,8 +467,7 @@ class TradierClient:
         url = f"{self.settings.TRADIER_BASE_URL}/markets/quotes"
 
         async def _load() -> dict[str, Any]:
-            payload = await request_json(
-                self.http_client,
+            payload = await self._rate_limited_request(
                 "GET",
                 url,
                 params={"symbols": ",".join(sorted(set(normalized)))},
@@ -479,8 +527,7 @@ class TradierClient:
         url = f"{self.settings.TRADIER_BASE_URL}/markets/quotes"
 
         async def _load() -> dict[str, dict[str, Any]]:
-            payload = await request_json(
-                self.http_client,
+            payload = await self._rate_limited_request(
                 "GET",
                 url,
                 params={"symbols": ",".join(sorted(set(validated)))},

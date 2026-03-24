@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.utils.market_hours import market_status
 from app.workflows.market_intelligence_runner import (
     MarketIntelligenceDeps,
     run_scheduled_market_intelligence,
@@ -25,7 +26,9 @@ from app.workflows.market_intelligence_runner import (
 
 logger = logging.getLogger(__name__)
 
-INTERVAL_SECONDS = 300  # 5 minutes
+INTERVAL_SECONDS = 300  # 5 minutes — regular session
+_INTERVAL_EXTENDED = 600  # 10 minutes — pre/post-market
+_INTERVAL_CLOSED = 1800  # 30 minutes — weekends, holidays, overnight
 
 # Each entry: (attr on MarketIntelligenceDeps, label used for model-score persistence)
 # Labels MUST match the canonical engine keys in market_state_contract.ENGINE_KEYS.
@@ -114,21 +117,33 @@ class DataPopulationService:
         asyncio.create_task(self._run_once())
         return self._status
 
+    @staticmethod
+    def _cycle_interval() -> int:
+        """Pick sleep duration based on current market status."""
+        status = market_status()
+        if status == "open":
+            return INTERVAL_SECONDS
+        if status == "extended":
+            return _INTERVAL_EXTENDED
+        return _INTERVAL_CLOSED
+
     async def _run_loop(self) -> None:
-        """Background loop: run immediately, then every INTERVAL_SECONDS."""
+        """Background loop: run immediately, then at adaptive intervals."""
         # First run on startup
         await self._run_once()
         while not self._stopped:
             try:
-                await asyncio.sleep(INTERVAL_SECONDS)
+                interval = self._cycle_interval()
+                logger.debug("event=data_population_sleep interval_s=%d", interval)
+                await asyncio.sleep(interval)
                 if not self._stopped:
                     await self._run_once()
             except asyncio.CancelledError:
                 break
             except Exception as exc:
                 logger.error("event=data_population_loop_error error=%s", exc, exc_info=True)
-                # Don't crash the loop — wait and retry next cycle
-                await asyncio.sleep(INTERVAL_SECONDS)
+                interval = self._cycle_interval()
+                await asyncio.sleep(interval)
 
     async def _run_once(self) -> None:
         """Execute one full data-population cycle.

@@ -433,6 +433,22 @@ window.BenTradeApi = (function(){
     });
   }
 
+  function tradingClosePreview(payload){
+    return jsonFetch('/api/trading/close-preview', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  function tradingCloseSubmit(payload){
+    return jsonFetch('/api/trading/close-submit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
   function tradingKillSwitchOn(){
     return jsonFetch('/api/trading/runtime-config', {
       method: 'PATCH',
@@ -521,6 +537,13 @@ window.BenTradeApi = (function(){
   function tmcGetOptionsSummary(){
     return jsonFetch('/api/tmc/workflows/options/summary');
   }
+  function tmcRunPortfolioBalance(payload){
+    return modelFetch('/api/tmc/workflows/portfolio-balance/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  }
 
   /* ── Data Population ── */
   function getDataPopulationStatus(){
@@ -593,6 +616,8 @@ window.BenTradeApi = (function(){
     tradingTestConnection,
     tradingPreview,
     tradingSubmit,
+    tradingClosePreview,
+    tradingCloseSubmit,
     tradingKillSwitchOn,
     tradingKillSwitchOff,
     getTradierOrderStatus,
@@ -612,6 +637,7 @@ window.BenTradeApi = (function(){
     tmcGetLatestOptions,
     tmcGetStockSummary,
     tmcGetOptionsSummary,
+    tmcRunPortfolioBalance,
     tmcFinalDecision,
     getDataPopulationStatus,
     triggerDataPopulation,

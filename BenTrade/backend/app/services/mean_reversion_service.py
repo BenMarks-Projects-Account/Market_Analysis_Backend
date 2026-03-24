@@ -656,12 +656,13 @@ class MeanReversionService:
         zscore = metrics.get("zscore_20")
 
         if rsi14 is not None:
-            if 25 <= rsi14 <= 35:
-                oversold += 22  # sweet spot
+            if 25 <= rsi14 <= 30:
+                oversold += 22  # core sweet spot — full points
             elif 20 <= rsi14 < 25:
                 oversold += 18  # very oversold, but approaching panic
-            elif 35 < rsi14 <= 40:
-                oversold += 10  # mildly oversold
+            elif 30 < rsi14 <= 40:
+                # Smooth transition from sweet spot (22) to mildly oversold (6)
+                oversold += round(22 - (rsi14 - 30) * (22 - 6) / (40 - 30))
             elif 15 <= rsi14 < 20:
                 oversold += 12  # deep oversold — knife risk but still scored
             elif rsi14 < 15:

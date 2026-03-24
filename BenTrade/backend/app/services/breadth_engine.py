@@ -1240,11 +1240,46 @@ def compute_breadth_scores(
 
     composite = _weighted_avg(weighted_parts)
     if composite is None:
-        composite = 0.0
+        composite = 50.0
+        data_status = "no_data"
         logger.warning("event=breadth_composite_failed reason=no_valid_pillars")
+    else:
+        data_status = "ok"
+
+    # ── Safety gate: Trend breadth collapse ────────────────────
+    _TREND_BREADTH_GATE_THRESHOLD = 35
+    gate_applied = False
+    gate_details: list[str] = []
+
+    if data_status != "no_data" and composite >= 55:
+        trend_score = pillars.get("trend_breadth", {}).get("score")
+        if trend_score is not None and trend_score < _TREND_BREADTH_GATE_THRESHOLD:
+            gate_penalty = min(15, (_TREND_BREADTH_GATE_THRESHOLD - trend_score) * 0.5)
+            composite = max(45, composite - gate_penalty)
+            gate_applied = True
+            gate_details.append(
+                f"trend_breadth={trend_score:.1f} < {_TREND_BREADTH_GATE_THRESHOLD}"
+                f" \u2192 penalty={gate_penalty:.1f}"
+            )
+            logger.info(
+                "event=breadth_gate_fired pillar=trend_breadth "
+                "score=%.1f threshold=%d penalty=%.1f gated_composite=%.2f",
+                trend_score, _TREND_BREADTH_GATE_THRESHOLD,
+                gate_penalty, composite,
+            )
+        elif trend_score is None:
+            composite = max(50, composite - 5)
+            gate_applied = True
+            gate_details.append("trend_breadth=None \u2192 conservative penalty=5")
 
     # ── Label mapping ────────────────────────────────────────────
-    full_label, short_label = _label_from_score(composite)
+    if data_status == "no_data":
+        full_label, short_label = "Neutral / No Data", "Neutral"
+    else:
+        full_label, short_label = _label_from_score(composite)
+        if gate_applied and gate_details:
+            full_label = full_label + " (Gated: weak trend breadth)"
+            short_label = short_label + " (Gated)"
 
     # ── Confidence score ─────────────────────────────────────────
     confidence, confidence_penalties = _compute_confidence(pillars, universe_meta)
@@ -1366,14 +1401,17 @@ def compute_breadth_scores(
         "missing_inputs": all_missing,
         "diagnostics": diagnostics,
         "raw_inputs": raw_inputs,
+        "data_status": data_status,
+        "gate_applied": gate_applied,
+        "gate_details": gate_details,
     }
 
     logger.info(
         "event=breadth_engine_computed score=%.2f label=%s confidence=%.1f "
-        "signal_quality=%s pillars=%s warnings=%d missing=%d",
+        "signal_quality=%s pillars=%s warnings=%d missing=%d gate=%s",
         composite, full_label, confidence, sig_quality,
         {k: round(v, 1) if v is not None else None for k, v in pillar_scores.items()},
-        len(all_warnings), len(all_missing),
+        len(all_warnings), len(all_missing), gate_applied,
     )
 
     return result

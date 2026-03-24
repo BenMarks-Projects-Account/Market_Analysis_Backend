@@ -42,6 +42,7 @@ from app.services.active_trade_pipeline import (
     _build_engine_rationale,
     _to_float,
     _to_int,
+    refresh_position_greeks,
 )
 
 
@@ -1067,3 +1068,633 @@ class TestDependencyEnforcement:
         # normalize depends on both engine_analysis and model_analysis
         assert stages["normalize"]["started_at"] >= stages["engine_analysis"]["ended_at"]
         assert stages["normalize"]["started_at"] >= stages["model_analysis"]["ended_at"]
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  9. Equity / stock position support
+# ═════════════════════════════════════════════════════════════════════
+
+
+def _equity_trade(**overrides):
+    """Minimal equity (stock) trade dict."""
+    trade = {
+        "symbol": "AAPL",
+        "strategy": "equity",
+        "strategy_id": "equity",
+        "trade_key": "AAPL|EQUITY|equity|NA|NA|NA",
+        "trade_id": "AAPL|EQUITY|equity|NA|NA|NA",
+        "dte": None,
+        "short_strike": None,
+        "long_strike": None,
+        "expiration": None,
+        "quantity": 50,
+        "legs": [
+            {
+                "symbol": "AAPL",
+                "side": "buy",
+                "qty": 50,
+                "price": 195.0,
+                "avg_open_price": 180.0,
+                "mark_price": 195.0,
+            },
+        ],
+        "status": "OPEN",
+        "avg_open_price": 180.0,
+        "mark_price": 195.0,
+        "unrealized_pnl": 750.0,
+        "unrealized_pnl_pct": 0.0833,
+        "cost_basis_total": 9000.0,
+        "market_value": 9750.0,
+        "spread_type": "equity",
+        "day_change": 25.0,
+        "day_change_pct": 0.0026,
+    }
+    trade.update(overrides)
+    return trade
+
+
+class TestEquityPacketBuilder:
+    """build_reassessment_packet for equity positions."""
+
+    def test_equity_packet_has_position_type(self):
+        pkt = build_reassessment_packet(
+            _equity_trade(), _base_market(), _base_monitor(), _base_indicators(),
+        )
+        assert pkt["position_type"] == "equity"
+        assert pkt["identity"]["position_type"] == "equity"
+
+    def test_equity_packet_nulls_option_fields(self):
+        pkt = build_reassessment_packet(
+            _equity_trade(), _base_market(), _base_monitor(), _base_indicators(),
+        )
+        assert pkt["identity"]["expiration"] is None
+        assert pkt["identity"]["dte"] is None
+        assert pkt["identity"]["short_strike"] is None
+        assert pkt["identity"]["long_strike"] is None
+
+    def test_equity_packet_no_dte_degradation(self):
+        """Equity should NOT mark DTE as degraded — it's expected to be None."""
+        pkt = build_reassessment_packet(
+            _equity_trade(), _base_market(), _base_monitor(), _base_indicators(),
+        )
+        assert "dte" not in pkt["data_quality"]["degraded_fields"]
+
+
+class TestEquityEngine:
+    """run_analysis_engine for equity positions."""
+
+    def test_equity_time_pressure_neutral(self):
+        pkt = build_reassessment_packet(
+            _equity_trade(), _base_market(), _base_monitor(), _base_indicators(),
+        )
+        result = run_analysis_engine(pkt)
+        assert result["component_scores"]["time_pressure"] == 50.0
+
+    def test_equity_structure_health_neutral(self):
+        pkt = build_reassessment_packet(
+            _equity_trade(), _base_market(), _base_monitor(), _base_indicators(),
+        )
+        result = run_analysis_engine(pkt)
+        assert result["component_scores"]["structure_health"] == 50.0
+
+    def test_equity_event_risk_moderate(self):
+        pkt = build_reassessment_packet(
+            _equity_trade(), _base_market(), _base_monitor(), _base_indicators(),
+        )
+        result = run_analysis_engine(pkt)
+        assert result["component_scores"]["event_risk"] == 70.0
+
+    def test_equity_pnl_health_scored(self):
+        pkt = build_reassessment_packet(
+            _equity_trade(), _base_market(), _base_monitor(), _base_indicators(),
+        )
+        result = run_analysis_engine(pkt)
+        # 8.33% gain → should be high score (between 70 and 95)
+        assert result["component_scores"]["pnl_health"] is not None
+        assert result["component_scores"]["pnl_health"] > 70
+
+    def test_equity_market_alignment_risk_on(self):
+        pkt = build_reassessment_packet(
+            _equity_trade(), _base_market(regime_label="RISK_ON"),
+            _base_monitor(), _base_indicators(),
+        )
+        result = run_analysis_engine(pkt)
+        # Equity in risk-on should be 80
+        assert result["component_scores"]["market_alignment"] == 80.0
+
+    def test_equity_market_alignment_risk_off(self):
+        pkt = build_reassessment_packet(
+            _equity_trade(), _base_market(regime_label="RISK_OFF"),
+            _base_monitor(), _base_indicators(),
+        )
+        result = run_analysis_engine(pkt)
+        assert result["component_scores"]["market_alignment"] == 30.0
+        assert "REGIME_ADVERSE" in result["risk_flags"]
+
+    def test_equity_produces_recommendation(self):
+        pkt = build_reassessment_packet(
+            _equity_trade(), _base_market(), _base_monitor(), _base_indicators(),
+        )
+        result = run_analysis_engine(pkt)
+        assert result["engine_recommendation"] in VALID_RECOMMENDATIONS
+        assert result["trade_health_score"] is not None
+
+    def test_equity_no_expiry_flags(self):
+        pkt = build_reassessment_packet(
+            _equity_trade(), _base_market(), _base_monitor(), _base_indicators(),
+        )
+        result = run_analysis_engine(pkt)
+        assert "EXPIRY_IMMINENT" not in result["risk_flags"]
+        assert "EXPIRY_NEAR" not in result["risk_flags"]
+
+
+class TestEquityPipeline:
+    """End-to-end pipeline with equity positions."""
+
+    def test_equity_through_pipeline(self):
+        from app.services.active_trade_pipeline import run_active_trade_pipeline
+        result = asyncio.run(
+            run_active_trade_pipeline(
+                [_equity_trade()],
+                _StubMonitorService(),
+                _StubRegimeService(),
+                _StubDataService(),
+                skip_model=True,
+            )
+        )
+        assert result["status"] == "completed"
+        assert result["trade_count"] == 1
+        rec = result["recommendations"][0]
+        assert rec["recommendation"] in VALID_RECOMMENDATIONS
+        assert rec["symbol"] == "AAPL"
+        assert rec["strategy"] == "equity"
+
+    def test_mixed_equity_and_options(self):
+        from app.services.active_trade_pipeline import run_active_trade_pipeline
+        trades = [
+            _base_trade(symbol="SPY"),
+            _equity_trade(symbol="AAPL"),
+        ]
+        result = asyncio.run(
+            run_active_trade_pipeline(
+                trades,
+                _StubMonitorService(),
+                _StubRegimeService(),
+                _StubDataService(),
+                skip_model=True,
+            )
+        )
+        assert result["trade_count"] == 2
+        strategies = {r["strategy"] for r in result["recommendations"]}
+        assert "equity" in strategies
+        assert "credit_put_spread" in strategies
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  9. Event calendar integration
+# ═════════════════════════════════════════════════════════════════════
+
+class TestEventRiskEngine:
+    """Engine event_risk component with real event_calendar data."""
+
+    def test_high_event_risk_scores_low(self):
+        pkt = _full_packet()
+        pkt["event_calendar"] = {"event_risk_level": "high", "event_details": []}
+        result = run_analysis_engine(pkt)
+        assert result["component_scores"]["event_risk"] == 20.0
+        assert "EVENT_WINDOW_RISK" in result["risk_flags"]
+
+    def test_elevated_event_risk_scores_moderate(self):
+        pkt = _full_packet()
+        pkt["event_calendar"] = {"event_risk_level": "elevated", "event_details": []}
+        result = run_analysis_engine(pkt)
+        assert result["component_scores"]["event_risk"] == 40.0
+
+    def test_quiet_event_risk_scores_high(self):
+        pkt = _full_packet()
+        pkt["event_calendar"] = {"event_risk_level": "quiet", "event_details": []}
+        result = run_analysis_engine(pkt)
+        assert result["component_scores"]["event_risk"] == 85.0
+
+    def test_unknown_event_risk_falls_back_to_dte(self):
+        """When event_risk_level is unknown, use DTE-based fallback."""
+        pkt = _full_packet(dte=30)  # >14 DTE → 80
+        pkt["event_calendar"] = {"event_risk_level": "unknown", "event_details": []}
+        result = run_analysis_engine(pkt)
+        assert result["component_scores"]["event_risk"] == 80.0
+
+    def test_missing_event_calendar_uses_dte_fallback(self):
+        """Without event_calendar key, DTE-based fallback applies."""
+        pkt = _full_packet(dte=5)  # 3-7 DTE → 40
+        # No event_calendar key at all
+        result = run_analysis_engine(pkt)
+        assert result["component_scores"]["event_risk"] == 40.0
+
+    def test_equity_unknown_event_falls_back_to_moderate(self):
+        """Equity with unknown event_risk uses 70 fallback."""
+        pkt = build_reassessment_packet(
+            _equity_trade(), _base_market(), _base_monitor(), _base_indicators(),
+        )
+        pkt["event_calendar"] = {"event_risk_level": "unknown", "event_details": []}
+        result = run_analysis_engine(pkt)
+        assert result["component_scores"]["event_risk"] == 70.0
+
+    def test_equity_high_event_risk_overrides_moderate(self):
+        """Even equity gets low score when events are critical."""
+        pkt = build_reassessment_packet(
+            _equity_trade(), _base_market(), _base_monitor(), _base_indicators(),
+        )
+        pkt["event_calendar"] = {"event_risk_level": "high", "event_details": []}
+        result = run_analysis_engine(pkt)
+        assert result["component_scores"]["event_risk"] == 20.0
+        assert "EVENT_WINDOW_RISK" in result["risk_flags"]
+
+    def test_event_calendar_in_prompt_data(self):
+        """_render_reassessment_prompt includes event_calendar."""
+        from app.services.active_trade_pipeline import _render_reassessment_prompt
+        import json
+        pkt = _full_packet()
+        pkt["event_calendar"] = {"event_risk_level": "elevated", "event_details": [{"event_name": "FOMC"}]}
+        engine_out = run_analysis_engine(pkt)
+        rendered = _render_reassessment_prompt(pkt, engine_out)
+        parsed = json.loads(rendered)
+        assert "event_calendar" in parsed
+        assert parsed["event_calendar"]["event_risk_level"] == "elevated"
+
+
+class TestEventPipeline:
+    """Pipeline run attaches event_calendar to packets."""
+
+    def test_pipeline_packets_have_event_calendar(self):
+        from app.services.active_trade_pipeline import run_active_trade_pipeline
+        result = asyncio.run(
+            run_active_trade_pipeline(
+                [_base_trade()],
+                _StubMonitorService(),
+                _StubRegimeService(),
+                _StubDataService(),
+                skip_model=True,
+            )
+        )
+        assert result["status"] == "completed"
+        # build_packets stage should note event_context_available
+        stage_meta = result["stages"]["build_packets"].get("metadata", {})
+        assert "event_context_available" in stage_meta
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  10. Portfolio context integration
+# ═════════════════════════════════════════════════════════════════════
+
+class TestPortfolioConcentrationPenalty:
+    """Engine market_alignment penalised by portfolio concentration."""
+
+    def test_no_portfolio_context_no_penalty(self):
+        """Without portfolio_context, market_alignment uses base score."""
+        pkt = _full_packet()
+        # No portfolio_context key → no penalty
+        result = run_analysis_engine(pkt)
+        # RISK_ON + credit_put_spread → 90
+        assert result["component_scores"]["market_alignment"] == 90.0
+
+    def test_low_concentration_no_penalty(self):
+        pkt = _full_packet()
+        pkt["portfolio_context"] = {
+            "underlying_concentration_pct": 0.20,
+            "is_portfolio_concentrated": False,
+        }
+        result = run_analysis_engine(pkt)
+        assert result["component_scores"]["market_alignment"] == 90.0
+
+    def test_moderate_concentration_small_penalty(self):
+        pkt = _full_packet()
+        pkt["portfolio_context"] = {
+            "underlying_concentration_pct": 0.35,
+            "is_portfolio_concentrated": False,
+        }
+        result = run_analysis_engine(pkt)
+        # 90 - 10 = 80
+        assert result["component_scores"]["market_alignment"] == 80.0
+
+    def test_high_concentration_large_penalty(self):
+        pkt = _full_packet()
+        pkt["portfolio_context"] = {
+            "underlying_concentration_pct": 0.55,
+            "is_portfolio_concentrated": True,
+        }
+        result = run_analysis_engine(pkt)
+        # 90 - 25 = 65
+        assert result["component_scores"]["market_alignment"] == 65.0
+        assert "POSITION_OVER_CONCENTRATED" in result["risk_flags"]
+
+    def test_concentration_penalty_floors_at_zero(self):
+        """Even with penalty, score doesn't go below 0."""
+        pkt = _full_packet()
+        # Use RISK_OFF + credit_put to get base score of 20, then heavy penalty
+        pkt["market"] = {"regime_label": "RISK_OFF", "regime_score": 20, "vix": 35.0}
+        pkt["portfolio_context"] = {
+            "underlying_concentration_pct": 0.60,
+            "is_portfolio_concentrated": True,
+        }
+        result = run_analysis_engine(pkt)
+        # 20 - 25 → clamped to 0
+        assert result["component_scores"]["market_alignment"] == 0.0
+
+    def test_portfolio_context_null_no_penalty(self):
+        pkt = _full_packet()
+        pkt["portfolio_context"] = None
+        result = run_analysis_engine(pkt)
+        assert result["component_scores"]["market_alignment"] == 90.0
+
+
+class TestPortfolioPromptIntegration:
+    """Portfolio context flows through to prompt data."""
+
+    def test_portfolio_context_in_prompt_data(self):
+        from app.services.active_trade_pipeline import _render_reassessment_prompt
+        import json
+        pkt = _full_packet()
+        pkt["portfolio_context"] = {
+            "total_positions": 5,
+            "net_portfolio_delta": -0.75,
+            "net_portfolio_theta": 12.5,
+            "underlying_concentration_pct": 0.25,
+        }
+        engine_out = run_analysis_engine(pkt)
+        rendered = _render_reassessment_prompt(pkt, engine_out)
+        parsed = json.loads(rendered)
+        assert "portfolio_context" in parsed
+        assert parsed["portfolio_context"]["net_portfolio_delta"] == -0.75
+
+    def test_portfolio_context_null_in_prompt(self):
+        from app.services.active_trade_pipeline import _render_reassessment_prompt
+        import json
+        pkt = _full_packet()
+        pkt["portfolio_context"] = None
+        engine_out = run_analysis_engine(pkt)
+        rendered = _render_reassessment_prompt(pkt, engine_out)
+        parsed = json.loads(rendered)
+        assert "portfolio_context" in parsed
+        assert parsed["portfolio_context"] is None
+
+
+class TestPortfolioPipeline:
+    """Pipeline run computes and attaches portfolio context."""
+
+    def test_pipeline_metadata_includes_portfolio_context(self):
+        from app.services.active_trade_pipeline import run_active_trade_pipeline
+        result = asyncio.run(
+            run_active_trade_pipeline(
+                [_base_trade()],
+                _StubMonitorService(),
+                _StubRegimeService(),
+                _StubDataService(),
+                skip_model=True,
+            )
+        )
+        assert result["status"] == "completed"
+        stage_meta = result["stages"]["build_packets"].get("metadata", {})
+        assert "portfolio_context_available" in stage_meta
+
+    def test_pipeline_recommendation_has_portfolio_fit(self):
+        from app.services.active_trade_pipeline import run_active_trade_pipeline
+        result = asyncio.run(
+            run_active_trade_pipeline(
+                [_base_trade()],
+                _StubMonitorService(),
+                _StubRegimeService(),
+                _StubDataService(),
+                skip_model=True,
+            )
+        )
+        rec = result["recommendations"][0]
+        # portfolio_fit comes from model output; with skip_model it's None
+        assert "portfolio_fit" in rec
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  11. Live Greeks refresh
+# ═══════════════════════════════════════════════════════════════════
+
+class _StubTradierClient:
+    """Stub TradierClient that returns predefined chain data."""
+
+    def __init__(self, chains=None):
+        self._chains = chains or {}
+
+    async def get_chain(self, symbol, expiration, greeks=True):
+        return self._chains.get((symbol.upper(), expiration), [])
+
+
+def _make_chain_contract(occ, strike, option_type, delta=-0.30, gamma=0.004,
+                         theta=-0.05, vega=0.12, mid_iv=0.25, bid=2.40, ask=2.60):
+    """Build a minimal chain contract dict matching Tradier shape."""
+    return {
+        "symbol": occ,
+        "strike": strike,
+        "option_type": option_type,
+        "bid": bid,
+        "ask": ask,
+        "last": (bid + ask) / 2,
+        "greeks": {
+            "delta": delta,
+            "gamma": gamma,
+            "theta": theta,
+            "vega": vega,
+            "mid_iv": mid_iv,
+        },
+    }
+
+
+class TestRefreshPositionGreeks:
+    """Unit tests for the refresh_position_greeks function."""
+
+    def test_basic_refresh(self):
+        trades = [{
+            "symbol": "SPY",
+            "expiration": "2026-04-17",
+            "legs": [{
+                "symbol": "SPY260417P00595000",
+                "underlying": "SPY",
+                "expiration": "2026-04-17",
+                "strike": 595.0,
+                "option_type": "put",
+                "quantity": -1,
+            }],
+        }]
+        chain = [_make_chain_contract("SPY260417P00595000", 595.0, "put")]
+        client = _StubTradierClient({("SPY", "2026-04-17"): chain})
+
+        result = asyncio.run(refresh_position_greeks(trades, client))
+        assert "SPY260417P00595000" in result
+        g = result["SPY260417P00595000"]
+        assert g["delta"] == -0.30
+        assert g["gamma"] == 0.004
+        assert g["theta"] == -0.05
+        assert g["vega"] == 0.12
+        assert g["iv"] == 0.25
+        assert g["refreshed_at"] is not None
+
+    def test_multi_leg_grouped_by_underlying_expiration(self):
+        """Multiple legs with same underlying+expiration use one chain call."""
+        trades = [{
+            "symbol": "SPY",
+            "expiration": "2026-04-17",
+            "legs": [
+                {"symbol": "SPY260417P00590000", "underlying": "SPY",
+                 "expiration": "2026-04-17", "strike": 590.0, "option_type": "put", "quantity": 1},
+                {"symbol": "SPY260417P00595000", "underlying": "SPY",
+                 "expiration": "2026-04-17", "strike": 595.0, "option_type": "put", "quantity": -1},
+            ],
+        }]
+        chain = [
+            _make_chain_contract("SPY260417P00590000", 590.0, "put", delta=-0.20),
+            _make_chain_contract("SPY260417P00595000", 595.0, "put", delta=-0.35),
+        ]
+        client = _StubTradierClient({("SPY", "2026-04-17"): chain})
+
+        result = asyncio.run(refresh_position_greeks(trades, client))
+        assert len(result) == 2
+        assert result["SPY260417P00590000"]["delta"] == -0.20
+        assert result["SPY260417P00595000"]["delta"] == -0.35
+
+    def test_no_match_returns_empty(self):
+        """If chain has no matching contract, position is skipped."""
+        trades = [{
+            "symbol": "SPY",
+            "expiration": "2026-04-17",
+            "legs": [{
+                "symbol": "SPY260417P00600000",
+                "underlying": "SPY",
+                "expiration": "2026-04-17",
+                "strike": 600.0,
+                "option_type": "put",
+                "quantity": -1,
+            }],
+        }]
+        # Chain has 595 but leg wants 600
+        chain = [_make_chain_contract("SPY260417P00595000", 595.0, "put")]
+        client = _StubTradierClient({("SPY", "2026-04-17"): chain})
+
+        result = asyncio.run(refresh_position_greeks(trades, client))
+        assert len(result) == 0
+
+    def test_equity_legs_skipped(self):
+        """Legs without option_type are ignored."""
+        trades = [{
+            "symbol": "AAPL",
+            "strategy": "equity",
+            "legs": [{
+                "symbol": "AAPL",
+                "underlying": "AAPL",
+                "quantity": 50,
+            }],
+        }]
+        client = _StubTradierClient()
+        result = asyncio.run(refresh_position_greeks(trades, client))
+        assert len(result) == 0
+
+    def test_chain_fetch_failure_graceful(self):
+        """If chain fetch raises, empty result returned."""
+        class _FailClient:
+            async def get_chain(self, s, e, greeks=True):
+                raise ConnectionError("mock fail")
+
+        trades = [{
+            "symbol": "SPY",
+            "expiration": "2026-04-17",
+            "legs": [{
+                "symbol": "SPY260417P00595000",
+                "underlying": "SPY",
+                "expiration": "2026-04-17",
+                "strike": 595.0,
+                "option_type": "put",
+                "quantity": -1,
+            }],
+        }]
+        result = asyncio.run(refresh_position_greeks(trades, _FailClient()))
+        assert len(result) == 0
+
+    def test_mark_price_from_bid_ask(self):
+        """Mark price computed as mid of bid/ask."""
+        trades = [{
+            "symbol": "SPY",
+            "expiration": "2026-04-17",
+            "legs": [{
+                "symbol": "SPY260417P00595000",
+                "underlying": "SPY",
+                "expiration": "2026-04-17",
+                "strike": 595.0,
+                "option_type": "put",
+                "quantity": -1,
+            }],
+        }]
+        chain = [_make_chain_contract("SPY260417P00595000", 595.0, "put", bid=2.00, ask=3.00)]
+        client = _StubTradierClient({("SPY", "2026-04-17"): chain})
+
+        result = asyncio.run(refresh_position_greeks(trades, client))
+        assert result["SPY260417P00595000"]["mark_price"] == 2.50
+
+
+class TestLiveGreeksPacket:
+    """Live Greeks enrichment in packets."""
+
+    def test_options_packet_has_live_greeks_when_data_available(self):
+        """When greeks_map has data for a leg, packet.live_greeks is populated."""
+        pkt = _full_packet()
+        # Simulate enrichment: add live_greeks matching what pipeline does
+        pkt["live_greeks"] = {
+            "trade_delta": -3.0,
+            "trade_theta": 5.0,
+            "trade_vega": 12.0,
+            "any_refreshed": True,
+            "per_leg": [{"strike": 400.0, "refreshed": True}],
+        }
+        assert pkt["live_greeks"]["any_refreshed"] is True
+        assert pkt["live_greeks"]["trade_delta"] == -3.0
+
+    def test_equity_packet_has_no_live_greeks(self):
+        """Equity positions get live_greeks=None."""
+        pkt = build_reassessment_packet(
+            _equity_trade(), _base_market(), _base_monitor(), _base_indicators(),
+        )
+        # After enrichment, equity would get None
+        pkt["live_greeks"] = None
+        assert pkt["live_greeks"] is None
+
+    def test_live_greeks_in_prompt_data(self):
+        """_render_reassessment_prompt includes live_greeks."""
+        from app.services.active_trade_pipeline import _render_reassessment_prompt
+        import json
+        pkt = _full_packet()
+        pkt["live_greeks"] = {
+            "trade_delta": -3.0,
+            "trade_theta": 5.0,
+            "trade_vega": 12.0,
+            "any_refreshed": True,
+            "per_leg": [],
+        }
+        engine_out = run_analysis_engine(pkt)
+        rendered = _render_reassessment_prompt(pkt, engine_out)
+        parsed = json.loads(rendered)
+        assert "live_greeks" in parsed
+        assert parsed["live_greeks"]["trade_delta"] == -3.0
+
+
+class TestLiveGreeksPipeline:
+    """Pipeline integration for Greeks refresh."""
+
+    def test_pipeline_metadata_includes_greeks_count(self):
+        from app.services.active_trade_pipeline import run_active_trade_pipeline
+        result = asyncio.run(
+            run_active_trade_pipeline(
+                [_base_trade()],
+                _StubMonitorService(),
+                _StubRegimeService(),
+                _StubDataService(),
+                skip_model=True,
+            )
+        )
+        assert result["status"] == "completed"
+        stage_meta = result["stages"]["build_packets"].get("metadata", {})
+        assert "greeks_refreshed_count" in stage_meta

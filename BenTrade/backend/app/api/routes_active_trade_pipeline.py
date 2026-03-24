@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 router = APIRouter(
     prefix="/api/active-trade-pipeline",
@@ -73,6 +73,29 @@ async def run_pipeline(
     """
     from app.api.routes_active_trades import _build_active_payload
     from app.services.active_trade_pipeline import run_active_trade_pipeline
+    from app.trading.tradier_credentials import get_tradier_context
+
+    # ── 0. Pre-check: credentials available for requested mode ──
+    settings = request.app.state.trading_service.settings
+    try:
+        creds = get_tradier_context(settings, account_type=account_mode)
+    except (ValueError, AttributeError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{account_mode.upper()} trading credentials not configured. "
+                f"Set TRADIER_API_KEY_{account_mode.upper()} and "
+                f"TRADIER_ACCOUNT_ID_{account_mode.upper()} in .env."
+            ),
+        ) from exc
+
+    logger.info(
+        "event=pipeline_run account_mode=%s account_id=%s base_url=%s skip_model=%s",
+        account_mode,
+        creds.account_id[-4:] if creds.account_id else "none",
+        creds.base_url,
+        skip_model,
+    )
 
     # ── 1. Fetch active trades ──────────────────────────────────
     try:

@@ -85,6 +85,12 @@ REJECT_ZERO_MID = "v2_zero_mid"
 REJECT_MISSING_OI = "v2_missing_oi"
 REJECT_MISSING_VOLUME = "v2_missing_volume"
 
+# Phase D — delta (short legs)
+REJECT_MISSING_SHORT_DELTA = "v2_missing_short_delta"
+
+# Phase D — zero-bid short leg (credit strategies)
+REJECT_ZERO_BID_SHORT_LEG = "v2_zero_bid_short_leg"
+
 # Phase D2 — quote sanity (hygiene layer)
 REJECT_NEGATIVE_BID = "v2_negative_bid"
 REJECT_NEGATIVE_ASK = "v2_negative_ask"
@@ -178,6 +184,10 @@ _REJECT_REGISTRY: dict[str, CodeInfo] = {
     # Liquidity
     REJECT_MISSING_OI:          CodeInfo(REJECT_MISSING_OI, CAT_LIQUIDITY, SEV_ERROR, "Missing open interest"),
     REJECT_MISSING_VOLUME:      CodeInfo(REJECT_MISSING_VOLUME, CAT_LIQUIDITY, SEV_ERROR, "Missing volume"),
+    # Delta (short legs)
+    REJECT_MISSING_SHORT_DELTA: CodeInfo(REJECT_MISSING_SHORT_DELTA, CAT_QUOTE, SEV_ERROR, "Missing delta on short leg"),
+    # Zero-bid short leg (credit strategies)
+    REJECT_ZERO_BID_SHORT_LEG: CodeInfo(REJECT_ZERO_BID_SHORT_LEG, CAT_QUOTE, SEV_ERROR, "Zero-bid short leg (no premium)"),
     # Quote sanity (hygiene)
     REJECT_NEGATIVE_BID:        CodeInfo(REJECT_NEGATIVE_BID, CAT_QUOTE, SEV_ERROR, "Negative bid"),
     REJECT_NEGATIVE_ASK:        CodeInfo(REJECT_NEGATIVE_ASK, CAT_QUOTE, SEV_ERROR, "Negative ask"),

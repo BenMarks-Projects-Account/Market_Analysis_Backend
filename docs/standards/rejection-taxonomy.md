@@ -62,6 +62,7 @@ In the scanner's `rejection_reason_counts`, data-quality rejections for OI/volum
 | `stale_quote` | Quote timestamp is older than the staleness threshold for the scan. |
 | `missing_iv` | Implied volatility is null/absent when required. |
 | `missing_delta` | Delta is null/absent when required for POP estimation. |
+| `zero_bid_short_leg` | Short leg has bid=0 on a credit strategy — no premium collectible. |
 
 ---
 

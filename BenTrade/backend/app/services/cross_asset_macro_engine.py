@@ -999,6 +999,14 @@ def _compute_confidence(
                 "Copper source is monthly FRED series (-1)"
             )
 
+    # Penalty for aggregate data staleness (from data_quality tags)
+    dq_summary = (source_meta or {}).get("data_quality", {}).get("_summary", {})
+    dq_max_age = dq_summary.get("max_age_days")
+    if dq_max_age is not None and dq_max_age > 3:
+        age_penalty = min(15, round((dq_max_age - 3) * 2, 1))
+        confidence -= age_penalty
+        penalties.append(f"data_staleness: max_age={dq_max_age}d (-{age_penalty})")
+
     return _clamp(round(confidence, 1), 0, 100), penalties
 
 
@@ -1133,10 +1141,45 @@ def compute_cross_asset_scores(
 
     composite = _weighted_avg(weighted_parts)
     if composite is None:
-        composite = 0.0
+        composite = 50.0
+        data_status = "no_data"
         logger.warning("event=cross_asset_composite_failed reason=no_valid_pillars")
+    else:
+        data_status = "ok"
 
-    full_label, short_label = _label_from_score(composite)
+    # ── Safety gate: Credit stress ────────────────────────────
+    _CREDIT_GATE_THRESHOLD = 35
+    gate_applied = False
+    gate_details: list[str] = []
+
+    if data_status != "no_data" and composite >= 55:
+        credit_score = pillars.get("credit_risk_appetite", {}).get("score")
+        if credit_score is not None and credit_score < _CREDIT_GATE_THRESHOLD:
+            gate_penalty = min(15, (_CREDIT_GATE_THRESHOLD - credit_score) * 0.5)
+            composite = max(45, composite - gate_penalty)
+            gate_applied = True
+            gate_details.append(
+                f"credit={credit_score:.1f} < {_CREDIT_GATE_THRESHOLD}"
+                f" \u2192 penalty={gate_penalty:.1f}"
+            )
+            logger.info(
+                "event=cross_asset_gate_fired pillar=credit_risk_appetite "
+                "score=%.1f threshold=%d penalty=%.1f gated_composite=%.2f",
+                credit_score, _CREDIT_GATE_THRESHOLD,
+                gate_penalty, composite,
+            )
+        elif credit_score is None:
+            composite = max(50, composite - 5)
+            gate_applied = True
+            gate_details.append("credit=None \u2192 conservative penalty=5")
+
+    if data_status == "no_data":
+        full_label, short_label = "Neutral / No Data", "Neutral"
+    else:
+        full_label, short_label = _label_from_score(composite)
+        if gate_applied and gate_details:
+            full_label = full_label + " (Gated: credit stress)"
+            short_label = short_label + " (Gated)"
     confidence, confidence_penalties = _compute_confidence(pillars, source_meta)
     sig_quality = _signal_quality(confidence)
     explanation = _build_composite_explanation(composite, full_label, pillars, confidence)
@@ -1233,14 +1276,17 @@ def compute_cross_asset_scores(
         "missing_inputs": all_missing,
         "diagnostics": diagnostics,
         "raw_inputs": raw_inputs,
+        "data_status": data_status,
+        "gate_applied": gate_applied,
+        "gate_details": gate_details,
     }
 
     logger.info(
         "event=cross_asset_engine_computed score=%.2f label=%s confidence=%.1f "
-        "signal_quality=%s pillars=%s warnings=%d missing=%d",
+        "signal_quality=%s pillars=%s warnings=%d missing=%d gate=%s",
         composite, full_label, confidence, sig_quality,
         {k: round(v, 1) if v is not None else None for k, v in pillar_scores.items()},
-        len(all_warnings), len(all_missing),
+        len(all_warnings), len(all_missing), gate_applied,
     )
 
     return result

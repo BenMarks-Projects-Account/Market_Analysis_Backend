@@ -47,7 +47,10 @@ Output contract::
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 _log = logging.getLogger("bentrade.options_scanner_service")
@@ -163,6 +166,20 @@ class OptionsScannerService:
         # Get underlying price
         underlying_price = await self._bds.get_underlying_price(symbol)
 
+        # ── DIAGNOSTIC: chain fetch tracing (TEMPORARY — remove after debugging) ──
+        _chain_diag: dict[str, Any] = {
+            "timestamp": datetime.now().isoformat(),
+            "symbol": symbol,
+            "scanner_key": scanner_key,
+            "expirations_returned": len(expirations),
+            "expiration_list": list(expirations)[:20],
+            "underlying_price": underlying_price,
+            "data_source_class": type(self._bds.chain_source).__name__
+            if hasattr(self._bds, "chain_source") else "unknown",
+        }
+        _per_exp_counts: dict[str, Any] = {}
+        # ── END DIAGNOSTIC HEADER ──
+
         # Fetch chains for available expirations and merge into one chain dict.
         # base_data_service.get_analysis_inputs returns OptionContract (Pydantic)
         # objects via normalize_chain, but V2 scanners expect raw dicts.
@@ -172,16 +189,40 @@ class OptionsScannerService:
             try:
                 inputs = await self._bds.get_analysis_inputs(symbol, exp, include_prices_history=False)
                 contracts = inputs.get("contracts") or []
+                _exp_count = len(contracts) if hasattr(contracts, "__len__") else 0
+                _per_exp_counts[str(exp)] = _exp_count  # DIAGNOSTIC
                 for c in contracts:
                     merged_options.append(
                         c.model_dump() if hasattr(c, "model_dump") else c
                     )
             except Exception as exc:
+                _per_exp_counts[str(exp)] = f"ERROR: {exc}"  # DIAGNOSTIC
                 _log.debug(
                     "event=chain_fetch_skip scanner_key=%s symbol=%s exp=%s error=%s",
                     scanner_key, symbol, exp, exc,
                 )
                 continue
+
+        # ── DIAGNOSTIC: finalize chain fetch trace ──
+        _chain_diag["per_expiration_contract_counts"] = _per_exp_counts
+        _chain_diag["total_contracts_fetched"] = len(merged_options)
+        _chain_diag["expirations_with_contracts"] = sum(
+            1 for v in _per_exp_counts.values() if isinstance(v, int) and v > 0
+        )
+        if merged_options:
+            _chain_diag["sample_contracts"] = merged_options[:3]
+        # Skip file write during test runs (MagicMock data source)
+        _ds_class = _chain_diag.get("data_source_class", "")
+        if _ds_class not in ("MagicMock", "Mock", "unknown"):
+            try:
+                _diag_dir = Path("results/diagnostics")
+                _diag_dir.mkdir(parents=True, exist_ok=True)
+                _diag_file = _diag_dir / f"chain_diag_{symbol}_{scanner_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                with open(_diag_file, "w") as _f:
+                    json.dump(_chain_diag, _f, indent=2, default=str)
+            except Exception:
+                pass
+        # ── END DIAGNOSTIC ──
 
         if not merged_options:
             _log.info(
@@ -190,8 +231,9 @@ class OptionsScannerService:
             return self._empty_result(scanner_key, strategy_id, family_key, symbol)
 
         _log.info(
-            "event=chain_merged scanner_key=%s symbol=%s expirations=%d contracts=%d",
+            "event=chain_merged scanner_key=%s symbol=%s expirations=%d contracts=%d chain_source=%s",
             scanner_key, symbol, len(expirations), len(merged_options),
+            _chain_diag.get("data_source_class", "unknown"),
         )
 
         # Build chain dict in the shape V2 scanners expect

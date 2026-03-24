@@ -100,6 +100,112 @@ _rotation_lock = _threading.Lock()
 _rotation_counter: int = 0
 
 
+# ---------------------------------------------------------------------------
+# 0b. Circuit breaker — skip providers after repeated failures
+# ---------------------------------------------------------------------------
+
+import time as _time
+
+
+class ProviderCircuitBreaker:
+    """Skip providers after repeated failures — exponential cooldown.
+
+    States:
+        CLOSED  – normal operation, provider is attempted.
+        OPEN    – provider is skipped (cooldown active).
+        HALF-OPEN – cooldown expired, one probe attempt allowed.
+                    Success → CLOSED; failure → OPEN with longer cooldown.
+
+    Cooldown progression: base × 2^(failures - threshold), capped at max.
+    Default: 30s → 60s → 120s → 240s → 300s cap.
+    """
+
+    def __init__(
+        self,
+        failure_threshold: int = 3,
+        base_cooldown: float = 30.0,
+        max_cooldown: float = 300.0,
+    ) -> None:
+        self._lock = _threading.Lock()
+        self._failures: dict[str, int] = {}
+        self._open_until: dict[str, float] = {}
+        self._threshold = failure_threshold
+        self._base = base_cooldown
+        self._max = max_cooldown
+
+    def record_success(self, provider_id: str) -> None:
+        """Reset failure count and close the circuit."""
+        with self._lock:
+            self._failures.pop(provider_id, None)
+            self._open_until.pop(provider_id, None)
+
+    def record_failure(self, provider_id: str) -> float | None:
+        """Increment failure count; open circuit if threshold exceeded.
+
+        Returns the cooldown duration in seconds if the circuit just
+        opened, or ``None`` if the circuit is still closed.
+        """
+        with self._lock:
+            count = self._failures.get(provider_id, 0) + 1
+            self._failures[provider_id] = count
+            if count >= self._threshold:
+                exp = min(count - self._threshold, 5)
+                cooldown = min(self._base * (2 ** exp), self._max)
+                self._open_until[provider_id] = _time.time() + cooldown
+                return cooldown
+            return None
+
+    def is_open(self, provider_id: str) -> bool:
+        """Return True if the circuit is open (provider should be skipped).
+
+        When the cooldown expires the circuit transitions to half-open:
+        the deadline is cleared so the next call is allowed through as a
+        probe.  If that probe fails, ``record_failure`` re-opens the
+        circuit with a longer cooldown.
+        """
+        with self._lock:
+            deadline = self._open_until.get(provider_id)
+            if deadline is None:
+                return False
+            if _time.time() >= deadline:
+                # Half-open: clear deadline so one probe attempt is allowed
+                self._open_until.pop(provider_id, None)
+                return False
+            return True
+
+    def status(self, provider_id: str) -> dict:
+        """Return circuit breaker status for a provider (admin API)."""
+        with self._lock:
+            failures = self._failures.get(provider_id, 0)
+            deadline = self._open_until.get(provider_id)
+            now = _time.time()
+            is_open = deadline is not None and now < deadline
+            return {
+                "consecutive_failures": failures,
+                "circuit_open": is_open,
+                "cooldown_remaining_s": round(max(0, (deadline or 0) - now), 1) if is_open else 0,
+            }
+
+    def reset(self, provider_id: str | None = None) -> None:
+        """Reset circuit state.  If *provider_id* is None, reset all."""
+        with self._lock:
+            if provider_id is None:
+                self._failures.clear()
+                self._open_until.clear()
+            else:
+                self._failures.pop(provider_id, None)
+                self._open_until.pop(provider_id, None)
+
+
+# Module-level singleton — lives for the process lifetime.
+_circuit_breaker = ProviderCircuitBreaker()
+
+
+def get_circuit_breaker() -> ProviderCircuitBreaker:
+    """Return the module-level circuit breaker singleton."""
+    return _circuit_breaker
+
+
 def _rotate_candidates(candidates: list[str]) -> list[str]:
     """Rotate *candidates* list by the current round-robin counter.
 
@@ -139,6 +245,7 @@ class SkipReason:
     BUSY = "provider_busy"
     AT_CAPACITY = "at_max_concurrency"
     SLOT_DENIED = "slot_acquisition_failed"
+    CIRCUIT_OPEN = "circuit_open"
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +326,7 @@ def classify_fallback_reason(skip_reason: str) -> str:
         SkipReason.BUSY: FallbackReason.PROVIDER_BUSY.value,
         SkipReason.AT_CAPACITY: FallbackReason.PROVIDER_BUSY.value,
         SkipReason.SLOT_DENIED: FallbackReason.PROVIDER_BUSY.value,
+        SkipReason.CIRCUIT_OPEN: FallbackReason.PROVIDER_FAILED.value,
     }
     return _MAP.get(skip_reason, FallbackReason.PROVIDER_ERROR.value)
 
@@ -438,6 +546,13 @@ def route_and_execute(
     if not resolution.is_strict and len(candidate_order) > 1:
         candidate_order = _rotate_candidates(candidate_order)
 
+    # -- TEMPORARY DIAGNOSTIC: verify round-robin + concurrency behavior -----
+    logger.info(
+        "DIAG_ROUTE: request_arriving candidates=%s gate_state=%s",
+        candidate_order,
+        {p: gate.in_flight_count(p) for p in candidate_order},
+    )
+
     # -- Capture override inputs for trace -----------------------------------
     override_inputs = build_override_inputs(request)
 
@@ -508,8 +623,14 @@ def route_and_execute(
         return None, trace
 
     # -- Probe all candidates once -------------------------------------------
+    # Skip probing circuit-open providers — this avoids the 3s probe timeout
+    # for providers with repeated recent failures.
+    cb = _circuit_breaker
+    probe_candidates = [
+        pid for pid in candidate_order if not cb.is_open(pid)
+    ]
     probe_cache = _RoutingCycleProbeCache(registry)
-    probes = probe_cache.probe_all(candidate_order)
+    probes = probe_cache.probe_all(probe_candidates)
 
     # -- Build provider state snapshot for trace -----------------------------
     provider_states: dict[str, str] = {
@@ -529,13 +650,27 @@ def route_and_execute(
     # If all providers are at capacity (concurrent dispatches from other
     # threads), wait for a slot to free up and retry.  This enables true
     # concurrent dispatch: multiple requests in-flight across providers.
-    _max_wait_attempts = 3
+    # Wait up to 6 × 30s = 180s total — long enough for any in-flight
+    # model call to complete and release its gate slot.
+    _max_wait_attempts = 6
     _wait_attempt = 0
 
     while True:
         _dispatched = False
 
         for idx, pid in enumerate(candidate_order):
+            # -- Circuit breaker: skip providers in cooldown ----------------
+            if cb.is_open(pid):
+                decision_log.append({
+                    "provider": pid,
+                    "action": "skipped",
+                    "reason": SkipReason.CIRCUIT_OPEN,
+                    "cooldown_remaining_s": str(cb.status(pid).get("cooldown_remaining_s", 0)),
+                })
+                emit_provider_skipped(request_id, pid, SkipReason.CIRCUIT_OPEN)
+                last_fallback_reason = classify_fallback_reason(SkipReason.CIRCUIT_OPEN)
+                continue
+
             probe = probes.get(pid)
             if probe is None:
                 decision_log.append({
@@ -600,6 +735,12 @@ def route_and_execute(
             # Slot acquired — dispatch.
             _dispatched = True
             emit_gate_acquired(request_id, pid)
+            logger.info(
+                "DIAG_ROUTE: dispatching_to=%s gate_after_acquire=%d/%d",
+                pid,
+                gate.in_flight_count(pid),
+                gate.get_max_concurrency(pid),
+            )
             attempted_providers.append(pid)
             if pid != first_candidate:
                 fallback_used = True
@@ -621,6 +762,11 @@ def route_and_execute(
                 selected_probe_type = probe.metadata.get("probe_type")
 
                 if result.success:
+                    logger.info(
+                        "DIAG_ROUTE: response_received provider=%s duration_ms=%d",
+                        pid, int(result.timing_ms or 0),
+                    )
+                    cb.record_success(pid)
                     decision_log.append({
                         "provider": pid,
                         "action": "success",
@@ -639,6 +785,12 @@ def route_and_execute(
                 })
 
                 retryable = should_attempt_next_provider(result)
+                cooldown = cb.record_failure(pid)
+                if cooldown:
+                    logger.warning(
+                        "event=circuit_opened provider=%s cooldown_s=%.0f failures=%d",
+                        pid, cooldown, cb._failures.get(pid, 0),
+                    )
                 emit_provider_failed(
                     request_id, pid, result.error_code, retryable=retryable,
                 )
@@ -695,7 +847,7 @@ def route_and_execute(
 
         waited = gate.wait_for_any_capacity(
             eligible_providers,
-            timeout=getattr(request, "timeout", None) or 120.0,
+            timeout=min(getattr(request, "timeout", None) or 30.0, 30.0),
         )
         if not waited:
             decision_log.append({

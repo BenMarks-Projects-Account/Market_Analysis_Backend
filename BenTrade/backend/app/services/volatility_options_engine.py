@@ -35,6 +35,119 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════════════════
+# SIGNAL PROVENANCE — documents source, delay, and proxy status
+# ═══════════════════════════════════════════════════════════════════════
+
+SIGNAL_PROVENANCE: dict[str, dict[str, str]] = {
+    "vix_spot": {
+        "type": "direct",
+        "upstream": "Tradier",
+        "frequency": "intraday",
+        "delay": "real-time during market hours",
+        "notes": "CBOE VIX index quote via Tradier.",
+    },
+    "vvix": {
+        "type": "direct",
+        "upstream": "Tradier",
+        "frequency": "intraday",
+        "delay": "real-time during market hours",
+        "notes": "CBOE VVIX (VIX of VIX) quote via Tradier.",
+    },
+    "iv_30d": {
+        "type": "direct",
+        "upstream": "Tradier options chain",
+        "frequency": "intraday",
+        "delay": "real-time during market hours",
+        "notes": "SPY 30-day implied volatility from options chain.",
+    },
+    "rv_30d": {
+        "type": "derived",
+        "upstream": "Tradier daily closes",
+        "formula": "std(ln(close[t]/close[t-1])) × √252 over 30-day window",
+        "frequency": "daily",
+        "delay": "end of day",
+        "notes": "Standard 30-day realized volatility from daily closes.",
+    },
+    "cboe_skew": {
+        "type": "direct",
+        "upstream": "FRED (CBOE SKEW Index)",
+        "frequency": "daily",
+        "delay": "1-2 business days (FRED publication lag)",
+        "notes": "CBOE SKEW index. Direct observation but with FRED publication delay.",
+    },
+    "put_skew_25d": {
+        "type": "direct",
+        "upstream": "Tradier options chain",
+        "frequency": "intraday",
+        "delay": "real-time during market hours",
+        "notes": "25-delta put IV minus ATM IV from SPY options.",
+    },
+    "equity_pc_ratio": {
+        "type": "proxy",
+        "upstream": "Tradier SPY options",
+        "frequency": "intraday",
+        "delay": "real-time during market hours",
+        "notes": "SPY put/call volume ratio used as proxy for broader equity put/call ratio. True CBOE equity P/C ratio not available.",
+    },
+    "vix_rank_30d": {
+        "type": "proxy",
+        "upstream": "VIX spot + 30-day VIX history",
+        "formula": "percentile_rank(current_vix, vix_30d_window)",
+        "frequency": "intraday (inherits VIX)",
+        "delay": "none beyond VIX",
+        "notes": "VIX index rank used as proxy for IV rank. VIX is a single index; true IV rank would use per-stock/ETF option IV history.",
+    },
+    "vix_percentile_1y": {
+        "type": "proxy",
+        "upstream": "VIX spot + 1-year VIX history",
+        "formula": "percentile(current_vix, vix_1y_window)",
+        "frequency": "intraday (inherits VIX)",
+        "delay": "none beyond VIX",
+        "notes": "VIX index percentile used as proxy for IV percentile. Same limitation as vix_rank_30d.",
+    },
+    "vix_2nd_month": {
+        "type": "proxy",
+        "upstream": "VIX spot + VIX 20-day average",
+        "formula": "heuristic from VIX spot vs 20-day moving average ratio",
+        "frequency": "intraday (inherits VIX)",
+        "delay": "none beyond VIX",
+        "notes": "FABRICATED HEURISTIC — no VIX futures data available. Term structure direction inferred from spot/average ratio. Direction hint only, not magnitude. Not real market data.",
+    },
+    "vix_3rd_month": {
+        "type": "proxy",
+        "upstream": "VIX spot + VIX 20-day average",
+        "formula": "heuristic extrapolation from vix_2nd_month estimate",
+        "frequency": "intraday (inherits VIX)",
+        "delay": "none beyond VIX",
+        "notes": "FABRICATED HEURISTIC — extrapolated from vix_2nd_month which is itself a proxy. Two layers of estimation from actual VIX futures curve. Not real market data.",
+    },
+    "option_richness": {
+        "type": "proxy_of_proxy",
+        "upstream": "vix_rank_30d (proxy) + iv_30d + rv_30d",
+        "formula": "composite of IV rank, IV/RV ratio, and VRP",
+        "frequency": "intraday",
+        "delay": "inherits upstream delays",
+        "notes": "Depends on vix_rank_30d which is itself a proxy. Output is a 0-100 composite score computed in the data provider, not raw market data.",
+    },
+    "premium_bias": {
+        "type": "proxy_of_proxy",
+        "upstream": "vix_rank_30d (proxy) + VRP + equity_pc_ratio (proxy)",
+        "formula": "weighted blend of vol premium, rank, and put/call sentiment",
+        "frequency": "intraday",
+        "delay": "inherits upstream delays",
+        "notes": "Depends on two proxy inputs. Output is a -100 to +100 score computed in the data provider, not raw market data.",
+    },
+    "tail_risk_numeric": {
+        "type": "derived",
+        "upstream": "put_skew_25d (direct) + cboe_skew (direct)",
+        "formula": "interpolation from skew metrics",
+        "frequency": "mixed (intraday skew + daily CBOE SKEW)",
+        "delay": "inherits CBOE SKEW 1-2 day lag",
+        "notes": "Derived from direct observations but with mixed freshness. CBOE SKEW has FRED publication delay.",
+    },
+}
+
+# ═══════════════════════════════════════════════════════════════════════
 # CONFIGURATION — weights, thresholds, scoring bands
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -311,13 +424,13 @@ def _compute_volatility_regime(data: dict[str, Any]) -> dict[str, Any]:
     # Very high rank = contract expensive relative to history but may be risky
     # Very low rank = options cheap, limited premium available
     if vix_rank is not None:
-        # Sweet spot: 20-50 → 75-95, low <20 → 50-75, high >50 → 40-75
+        # Sweet spot: 20-50 → 75-88, low <20 → 50-75, high >50 → 88-30
         if vix_rank <= 20:
             vixr_score = _interpolate(vix_rank, 0, 20, 50, 75)
         elif vix_rank <= 50:
-            vixr_score = _interpolate(vix_rank, 20, 50, 75, 95)
+            vixr_score = _interpolate(vix_rank, 20, 50, 75, 88)
         elif vix_rank <= 70:
-            vixr_score = _interpolate(vix_rank, 50, 70, 75, 55)
+            vixr_score = _interpolate(vix_rank, 50, 70, 88, 55)
         else:
             vixr_score = _interpolate(vix_rank, 70, 100, 55, 30)
         submetrics.append(_build_submetric("vix_rank_30d", vix_rank, vixr_score))
@@ -333,9 +446,9 @@ def _compute_volatility_regime(data: dict[str, Any]) -> dict[str, Any]:
         if vix_pctl <= 25:
             vixp_score = _interpolate(vix_pctl, 0, 25, 55, 80)
         elif vix_pctl <= 50:
-            vixp_score = _interpolate(vix_pctl, 25, 50, 80, 90)
+            vixp_score = _interpolate(vix_pctl, 25, 50, 80, 82)
         elif vix_pctl <= 75:
-            vixp_score = _interpolate(vix_pctl, 50, 75, 70, 50)
+            vixp_score = _interpolate(vix_pctl, 50, 75, 82, 50)
         else:
             vixp_score = _interpolate(vix_pctl, 75, 100, 50, 25)
         submetrics.append(_build_submetric("vix_percentile_1y", vix_pctl, vixp_score))
@@ -475,15 +588,15 @@ def _compute_volatility_structure(data: dict[str, Any]) -> dict[str, Any]:
     # Formula: iv_30d / rv_30d — >1.0 = options richer than realized
     if iv_30d is not None and rv_30d is not None and rv_30d > 0:
         vrp = iv_30d / rv_30d
-        # Ratio 1.0-1.5 → 65-95 (healthy premium)
+        # Ratio 1.0-1.5 → 65-88 (healthy premium)
         # Ratio <1.0 → 20-65 (options cheap)
-        # Ratio >1.5 → 80-60 (excessively expensive, may revert)
+        # Ratio >1.5 → 88-40 (excessively expensive, may revert)
         if vrp >= 1.0 and vrp <= 1.5:
-            vrp_score = _interpolate(vrp, 1.0, 1.5, 65, 95)
+            vrp_score = _interpolate(vrp, 1.0, 1.5, 65, 88)
         elif vrp < 1.0:
             vrp_score = _interpolate(vrp, 0.5, 1.0, 20, 65)
         else:
-            vrp_score = _interpolate(vrp, 1.5, 2.5, 80, 40)
+            vrp_score = _interpolate(vrp, 1.5, 2.5, 88, 40)
         submetrics.append(_build_submetric(
             "vol_risk_premium", vrp, vrp_score,
             details={"label": "positive" if vrp > 1.0 else "negative"},
@@ -1011,6 +1124,28 @@ def _compute_confidence(
         base -= penalty
         penalties.append(f"few_active_pillars: only {active_pillars} (-{penalty:.1f})")
 
+    # Proxy reliance penalty (from SIGNAL_PROVENANCE)
+    proxy_count = sum(
+        1 for info in SIGNAL_PROVENANCE.values()
+        if isinstance(info, dict) and info.get("type") in ("proxy", "proxy_of_proxy")
+    )
+    if proxy_count >= 5:
+        base -= 10
+        penalties.append(f"proxy_heavy: {proxy_count} proxy/proxy-of-proxy metrics (-10.0)")
+    elif proxy_count >= 3:
+        base -= 5
+        penalties.append(f"proxy_moderate: {proxy_count} proxy metrics (-5.0)")
+
+    # Proxy-of-proxy additional penalty
+    pofp_count = sum(
+        1 for info in SIGNAL_PROVENANCE.values()
+        if isinstance(info, dict) and info.get("type") == "proxy_of_proxy"
+    )
+    if pofp_count > 0:
+        pofp_penalty = min(9, pofp_count * 3)
+        base -= pofp_penalty
+        penalties.append(f"proxy_of_proxy: {pofp_count} metrics (-{pofp_penalty:.1f})")
+
     return round(_clamp(base), 2), penalties
 
 
@@ -1191,11 +1326,49 @@ def compute_volatility_scores(
 
     composite = _weighted_avg(weighted_parts)
     if composite is None:
-        composite = 0.0
+        composite = 50.0
+        data_status = "no_data"
         logger.warning("event=vol_composite_failed reason=no_valid_pillars")
+    else:
+        data_status = "ok"
+
+    # ── Safety gate: VIX regime stress ────────────────────────
+    # High VIX → LOW pillar score (inverted-U scoring curve).
+    # Gate fires when volatility_regime score is critically low,
+    # meaning VIX is extreme / untradable.
+    _VIX_REGIME_GATE_THRESHOLD = 30
+    gate_applied = False
+    gate_details: list[str] = []
+
+    if data_status != "no_data" and composite >= 55:
+        vix_regime_score = pillars.get("volatility_regime", {}).get("score")
+        if vix_regime_score is not None and vix_regime_score < _VIX_REGIME_GATE_THRESHOLD:
+            gate_penalty = min(12, (_VIX_REGIME_GATE_THRESHOLD - vix_regime_score) * 0.4)
+            composite = max(45, composite - gate_penalty)
+            gate_applied = True
+            gate_details.append(
+                f"volatility_regime={vix_regime_score:.1f} < {_VIX_REGIME_GATE_THRESHOLD}"
+                f" \u2192 penalty={gate_penalty:.1f}"
+            )
+            logger.info(
+                "event=vol_gate_fired pillar=volatility_regime "
+                "score=%.1f threshold=%d penalty=%.1f gated_composite=%.2f",
+                vix_regime_score, _VIX_REGIME_GATE_THRESHOLD,
+                gate_penalty, composite,
+            )
+        elif vix_regime_score is None:
+            composite = max(50, composite - 5)
+            gate_applied = True
+            gate_details.append("volatility_regime=None \u2192 conservative penalty=5")
 
     # ── Label mapping ────────────────────────────────────────────
-    full_label, short_label = _label_from_score(composite)
+    if data_status == "no_data":
+        full_label, short_label = "Neutral / No Data", "Neutral"
+    else:
+        full_label, short_label = _label_from_score(composite)
+        if gate_applied and gate_details:
+            full_label = full_label + " (Gated: elevated vol stress)"
+            short_label = short_label + " (Gated)"
 
     # ── Confidence ───────────────────────────────────────────────
     confidence, confidence_penalties = _compute_confidence(pillars)
@@ -1274,6 +1447,7 @@ def compute_volatility_scores(
                 if pdata.get("score") is None
             ],
         },
+        "signal_provenance": SIGNAL_PROVENANCE,
     }
 
     # ── Raw inputs ───────────────────────────────────────────────
@@ -1306,14 +1480,17 @@ def compute_volatility_scores(
         "missing_inputs": all_missing,
         "diagnostics": diagnostics,
         "raw_inputs": raw_inputs,
+        "data_status": data_status,
+        "gate_applied": gate_applied,
+        "gate_details": gate_details,
     }
 
     logger.info(
         "event=vol_engine_computed score=%.2f label=%s confidence=%.1f "
-        "signal_quality=%s pillars=%s warnings=%d missing=%d",
+        "signal_quality=%s pillars=%s warnings=%d missing=%d gate=%s",
         composite, full_label, confidence, sig_quality,
         {k: round(v, 1) if v is not None else None for k, v in pillar_scores.items()},
-        len(all_warnings), len(all_missing),
+        len(all_warnings), len(all_missing), gate_applied,
     )
 
     return result

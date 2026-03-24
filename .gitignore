@@ -60,9 +60,17 @@ BenTrade/backend/app/results/*.jsonl
 BenTrade/backend/results/*.json
 BenTrade/backend/results/*.jsonl
 
+BenTrade/backend/results/diagnostics/*.json
+BenTrade/backend/results/diagnostics/*.jsonl
+
 #docs
 /docs/*.md
 /docs/scanners/*.md
+/docs/audit/pass1/*.md
+/docs/audit/pass2/*.md
+/docs/audit/pass3/*.md
+/docs/audit/pass4/*.md
+/docs/audit/pass5/*.md
 
 BenTrade/backend/tests/_test_results_smoke/*.json
 BenTrade/backend/data/*

@@ -363,9 +363,13 @@ class RegimeService:
         if conf is None:
             return None
         try:
-            return max(0.0, min(1.0, float(conf)))
+            conf = float(conf)
         except (TypeError, ValueError):
             return None
+        # Engine confidence is on 0-100 scale; normalize to 0-1
+        if conf > 1.0:
+            conf = conf / 100.0
+        return max(0.0, min(1.0, conf))
 
     @staticmethod
     def _extract_key_signals(mi_results: dict, key: str, limit: int = 3) -> list[str]:
@@ -663,14 +667,31 @@ class RegimeService:
         vol_struct_score = self._score_volatility_structure(vix_now, vix_5d_change)
         pillar_scores["vol_structure"] = vol_struct_score
 
-        # Weighted synthesis (renormalize for available pillars)
+        # Confidence from source engines + raw data coverage
+        liq_conf = self._extract_engine_confidence(mi_results, "liquidity_financial_conditions")
+        macro_conf = self._extract_engine_confidence(mi_results, "cross_asset_macro")
+
+        # Map pillar keys → confidence (engine or fixed for direct data)
+        pillar_confidences: dict[str, float] = {}
+        if liq_conf is not None:
+            pillar_confidences["liquidity"] = liq_conf
+        if macro_conf is not None:
+            pillar_confidences["macro"] = macro_conf
+        if rates_score is not None:
+            pillar_confidences["rates"] = 0.9   # Direct FRED data
+        if vol_struct_score is not None:
+            pillar_confidences["vol_structure"] = 0.9
+
+        # Confidence-adjusted weighted synthesis
         weighted_sum = 0.0
         weight_total = 0.0
         for key, w in _STRUCTURAL_WEIGHTS.items():
             s = pillar_scores.get(key)
             if s is not None:
-                weighted_sum += s * w
-                weight_total += w
+                conf = pillar_confidences.get(key, 0.85)
+                adj_w = w * conf
+                weighted_sum += s * adj_w
+                weight_total += adj_w
 
         if weight_total > 0:
             block_score = weighted_sum / weight_total
@@ -678,18 +699,7 @@ class RegimeService:
             block_score = 50.0
             notes.append("Structural: no data available; defaulting to neutral")
 
-        # Confidence from source engines + raw data coverage
-        confs: list[float] = []
-        liq_conf = self._extract_engine_confidence(mi_results, "liquidity_financial_conditions")
-        macro_conf = self._extract_engine_confidence(mi_results, "cross_asset_macro")
-        if liq_conf is not None:
-            confs.append(liq_conf)
-        if macro_conf is not None:
-            confs.append(macro_conf)
-        if rates_score is not None:
-            confs.append(0.9)  # Direct FRED data → high confidence
-        if vol_struct_score is not None:
-            confs.append(0.9)
+        confs: list[float] = list(pillar_confidences.values())
         block_confidence = sum(confs) / len(confs) if confs else 0.5
 
         # Label
@@ -796,14 +806,30 @@ class RegimeService:
         smallcap_score = index_metrics.get("smallcap_score")
         pillar_scores["smallcap"] = smallcap_score
 
-        # Weighted synthesis (renormalize for available pillars)
+        # Confidence from breadth engine + direct computation coverage
+        breadth_conf = self._extract_engine_confidence(mi_results, "breadth_participation")
+
+        # Map pillar keys → confidence (engine or fixed for direct data)
+        pillar_confidences: dict[str, float] = {}
+        if breadth_conf is not None:
+            pillar_confidences["breadth"] = breadth_conf
+        if trend_score is not None:
+            pillar_confidences["trend"] = 0.9     # Direct computation
+        if momentum_score is not None:
+            pillar_confidences["momentum"] = 0.9  # Direct computation
+        if smallcap_score is not None:
+            pillar_confidences["smallcap"] = 0.85
+
+        # Confidence-adjusted weighted synthesis
         weighted_sum = 0.0
         weight_total = 0.0
         for key, w in _TAPE_WEIGHTS.items():
             s = pillar_scores.get(key)
             if s is not None:
-                weighted_sum += s * w
-                weight_total += w
+                conf = pillar_confidences.get(key, 0.85)
+                adj_w = w * conf
+                weighted_sum += s * adj_w
+                weight_total += adj_w
 
         if weight_total > 0:
             block_score = weighted_sum / weight_total
@@ -811,15 +837,7 @@ class RegimeService:
             block_score = 50.0
             notes.append("Tape: no tape data available; defaulting to neutral")
 
-        # Confidence from breadth engine + direct computation coverage
-        confs: list[float] = []
-        breadth_conf = self._extract_engine_confidence(mi_results, "breadth_participation")
-        if breadth_conf is not None:
-            confs.append(breadth_conf)
-        if trend_score is not None:
-            confs.append(0.9)  # Direct computation → high confidence
-        if smallcap_score is not None:
-            confs.append(0.85)
+        confs: list[float] = list(pillar_confidences.values())
         block_confidence = sum(confs) / len(confs) if confs else 0.5
 
         # Label
@@ -915,14 +933,32 @@ class RegimeService:
         rate_pressure_score = self._score_rate_pressure(ten_year_delta_bps)
         pillar_scores["rate_pressure"] = rate_pressure_score
 
-        # Weighted synthesis (renormalize for available pillars)
+        # Confidence from source engines + raw data coverage
+        vol_conf = self._extract_engine_confidence(mi_results, "volatility_options")
+        flows_conf = self._extract_engine_confidence(mi_results, "flows_positioning")
+        sent_conf = self._extract_engine_confidence(mi_results, "news_sentiment")
+
+        # Map pillar keys → confidence (engine or fixed for direct data)
+        pillar_confidences: dict[str, float] = {}
+        if vol_conf is not None:
+            pillar_confidences["volatility"] = vol_conf
+        if flows_conf is not None:
+            pillar_confidences["flows"] = flows_conf
+        if sent_conf is not None:
+            pillar_confidences["sentiment"] = sent_conf
+        if rate_pressure_score is not None:
+            pillar_confidences["rate_pressure"] = 0.85  # Direct FRED data
+
+        # Confidence-adjusted weighted synthesis
         weighted_sum = 0.0
         weight_total = 0.0
         for key, w in _TACTICAL_WEIGHTS.items():
             s = pillar_scores.get(key)
             if s is not None:
-                weighted_sum += s * w
-                weight_total += w
+                conf = pillar_confidences.get(key, 0.85)
+                adj_w = w * conf
+                weighted_sum += s * adj_w
+                weight_total += adj_w
 
         if weight_total > 0:
             block_score = weighted_sum / weight_total
@@ -930,14 +966,7 @@ class RegimeService:
             block_score = 50.0
             notes.append("Tactical: no MI engine data; defaulting to neutral")
 
-        # Confidence from source engines + raw data coverage
-        confs = [
-            self._extract_engine_confidence(mi_results, k)
-            for k in ("volatility_options", "flows_positioning", "news_sentiment")
-        ]
-        valid_confs = [c for c in confs if c is not None]
-        if rate_pressure_score is not None:
-            valid_confs.append(0.85)  # Direct FRED data → high confidence
+        valid_confs = list(pillar_confidences.values())
         block_confidence = sum(valid_confs) / len(valid_confs) if valid_confs else 0.5
 
         # Label

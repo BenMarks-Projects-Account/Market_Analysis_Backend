@@ -96,11 +96,13 @@ def build_provider_health_summaries(
     """
     from app.services.model_execution_gate import get_execution_gate
     from app.services.model_provider_registry import get_registry
+    from app.services.model_router_policy import get_circuit_breaker
     from app.services.model_routing_config import get_routing_config
 
     registry = get_registry()
     gate = get_execution_gate()
     config = get_routing_config()
+    cb = get_circuit_breaker()
 
     statuses = registry.all_statuses(refresh=refresh)
     gate_snapshots = gate.all_snapshots()
@@ -142,6 +144,7 @@ def build_provider_health_summaries(
             state_display_label=state_display_label(status.state),
             status_detail_text=detail_text,
             last_checked_at=status.checked_at,
+            circuit_breaker=cb.status(pid),
         ))
 
     return summaries

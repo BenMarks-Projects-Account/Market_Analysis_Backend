@@ -1019,7 +1019,7 @@ class TestReasonCodes:
 
     def test_all_reject_codes_count(self):
         """Total reject codes: 28 (27 prior + 1 CAL geometry)."""
-        assert len(all_reject_codes()) == 28
+        assert len(all_reject_codes()) == 30
 
 
 # =====================================================================

@@ -10,8 +10,10 @@
   <!-- ── Workflow trigger bar ────────────────────────────────── -->
   <div class="tmc-control-bar">
     <div class="tmc-control-left">
-      <button id="tmcRunStock" class="btn tmc-btn" title="Run stock opportunity workflow">▶ Run Stock</button>
-      <button id="tmcRefreshBtn" class="btn tmc-btn" title="Load latest results">↻ Refresh</button>
+      <button id="tmcFullRefreshBtn" class="btn tmc-btn tmc-btn-primary tmc-workflow-btn" title="Run all workflows: Stock → Options → Active Trades → Portfolio Balance">⟳ Full Refresh</button>
+      <button id="tmcRunStock" class="btn tmc-btn tmc-workflow-btn" title="Run stock opportunity workflow">▶ Run Stock</button>
+      <button id="tmcRefreshBtn" class="btn tmc-btn tmc-workflow-btn" title="Load latest results">↻ Refresh</button>
+      <span id="tmcRefreshStatus" class="tmc-refresh-status" style="display:none;"></span>
     </div>
     <div class="tmc-control-right">
       <span id="tmcStockStatus" class="tmc-run-status"></span>
@@ -70,6 +72,10 @@
       <h3 class="tmc-section-title">Active Trade Candidates</h3>
       <span id="tmcActiveCount" class="tmc-count-badge tmc-count-muted">—</span>
       <div class="tmc-active-controls">
+        <div class="active-account-toggle" id="tmcAccountToggle">
+          <button class="active-account-btn is-active" data-mode="paper">PAPER</button>
+          <button class="active-account-btn" data-mode="live">LIVE</button>
+        </div>
         <button id="tmcRunActiveBtn" class="btn tmc-btn" title="Run Active Trade Pipeline">▶ Analyse Positions</button>
         <button id="tmcRefreshActiveBtn" class="btn tmc-btn" title="Load latest results">↻ Latest</button>
         <label class="tmc-label tmc-skip-model-label">
@@ -81,6 +87,20 @@
       <div class="tmc-empty-state" id="tmcActiveEmptyState">
         <div class="tmc-empty-icon">◉</div>
         <div class="tmc-empty-text">Click "Analyse Positions" to run the Active Trade Pipeline</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ SECTION 4 — Suggested Portfolio Rebalance ═══ -->
+  <section class="tmc-section" id="tmcPortfolioBalanceSection" style="display:none;">
+    <div class="tmc-section-header">
+      <h3 class="tmc-section-title">Suggested Portfolio Rebalance</h3>
+      <span id="tmcBalanceStatus" class="tmc-count-badge tmc-count-muted">—</span>
+    </div>
+    <div id="tmcPortfolioBalanceGrid" class="tmc-portfolio-balance-grid">
+      <div class="tmc-empty-state">
+        <div class="tmc-empty-icon">⚖</div>
+        <div class="tmc-empty-text">Run Full Refresh to generate portfolio rebalance suggestions</div>
       </div>
     </div>
   </section>

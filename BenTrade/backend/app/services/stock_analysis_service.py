@@ -769,6 +769,46 @@ class StockAnalysisService:
         high_52w = max(history_all) if history_all else None
         low_52w = min(history_all) if history_all else None
 
+        # Overlay real-time quote for current price, change, change_pct.
+        # Inputs: Tradier get_quote() fields "last", "prevclose", "change", "change_percentage"
+        # Formula: if quote.last exists, use it; derive change = quote.change, change_pct = quote.change_percentage / 100
+        quote_source = "daily_close"
+        try:
+            rt_quote = await self.base_data_service.tradier_client.get_quote(ticker)
+            rt_last = self._safe_float(rt_quote.get("last"))
+            if rt_last is not None:
+                last = rt_last
+                rt_prev = self._safe_float(rt_quote.get("prevclose"))
+                if rt_prev is not None:
+                    prev_close = rt_prev
+                rt_change = self._safe_float(rt_quote.get("change"))
+                if rt_change is not None:
+                    change = rt_change
+                rt_change_pct = self._safe_float(rt_quote.get("change_percentage"))
+                if rt_change_pct is not None:
+                    change_pct = rt_change_pct / 100.0
+                quote_source = "realtime"
+
+                # Inject real-time price into dated_history so charts reflect current data.
+                # Uses trade_date from Tradier quote to determine the correct bar date.
+                # If trade_date is after the last historical bar, append a new bar.
+                # If trade_date matches the last bar, update its close for intraday freshness.
+                rt_trade_date = str(rt_quote.get("trade_date") or "").strip()[:10]
+                if not rt_trade_date:
+                    # Fallback: use today's date (UTC) if trade_date is missing
+                    rt_trade_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+                if dated_history:
+                    last_bar_date = dated_history[-1].get("date", "")
+                    if rt_trade_date > last_bar_date:
+                        dated_history.append({"date": rt_trade_date, "close": rt_last})
+                    elif rt_trade_date == last_bar_date:
+                        dated_history[-1] = {"date": rt_trade_date, "close": rt_last}
+                else:
+                    dated_history.append({"date": rt_trade_date, "close": rt_last})
+        except Exception as exc:
+            notes.append(f"Real-time quote unavailable, using daily close: {exc}")
+
         return {
             "symbol": ticker,
             "as_of": self._utc_now_iso(),
@@ -781,6 +821,7 @@ class StockAnalysisService:
                 "range_low": min(history) if history else None,
                 "high_52w": high_52w,
                 "low_52w": low_52w,
+                "quote_source": quote_source,
             },
             "history": [{"date": bar.get("date"), "close": bar["close"]} for bar in dated_history],
             "indicators": {

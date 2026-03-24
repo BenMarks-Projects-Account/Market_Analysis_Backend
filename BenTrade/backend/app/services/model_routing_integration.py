@@ -644,3 +644,337 @@ async def adaptive_routed_model_interpretation(
     # Legacy fallback — import here to avoid circular deps.
     from app.services.model_router import async_model_request
     return await async_model_request(_http_client, payload)
+
+
+# ---------------------------------------------------------------------------
+# 7. Options TMC routed wrapper
+# ---------------------------------------------------------------------------
+
+def routed_options_tmc_final_decision(
+    *,
+    candidate: dict[str, Any],
+    market_context: dict[str, Any] | None = None,
+    retries: int = 0,
+    timeout: int = 180,
+    premium: bool = False,
+) -> dict[str, Any]:
+    """Run Options TMC final decision via distributed routing.
+
+    Options-specific counterpart of ``routed_tmc_final_decision()``.
+    Uses the options-specific system prompt and user prompt builder
+    from ``common.options_tmc_prompts``.
+
+    Returns a normalized dict with:
+      recommendation, conviction, score, headline, narrative,
+      structure_analysis, probability_assessment, greeks_assessment,
+      market_alignment, caution_points, key_factors, suggested_adjustment
+
+    On total parse failure returns a PASS fallback with conviction=10.
+    """
+    import logging as _logging
+    _log = _logging.getLogger("bentrade.options_model_analysis")
+
+    symbol = candidate.get("symbol", "???")
+    strategy_id = candidate.get("strategy_id") or candidate.get("scanner_key", "")
+
+    try:
+        from common.options_tmc_prompts import (
+            OPTIONS_TMC_FINAL_DECISION_SYSTEM_PROMPT,
+            OPTIONS_TMC_TEMPERATURE,
+            build_options_tmc_user_prompt,
+        )
+    except ImportError:
+        _log.warning("[OPTIONS_TMC_ROUTED] prompt module unavailable")
+        return _build_options_fallback(
+            candidate, reason="options_tmc_prompts module not importable",
+        )
+
+    user_prompt = build_options_tmc_user_prompt(
+        candidate=candidate,
+        market_context=market_context,
+    )
+
+    messages = [{"role": "user", "content": user_prompt}]
+
+    try:
+        legacy_result, trace = execute_routed_model(
+            task_type="options_tmc_final_decision",
+            messages=messages,
+            system_prompt=OPTIONS_TMC_FINAL_DECISION_SYSTEM_PROMPT,
+            timeout=float(timeout),
+            premium=premium,
+            execution_mode=ExecutionMode.ONLINE_DISTRIBUTED.value,
+            max_tokens=3000,
+            temperature=OPTIONS_TMC_TEMPERATURE,
+            metadata={"symbol": symbol, "strategy_id": strategy_id},
+        )
+    except Exception as exc:
+        _log.warning(
+            "[OPTIONS_TMC_ROUTED] routing failed for %s: %s", symbol, exc,
+        )
+        return _build_options_fallback(
+            candidate, reason=f"Routing infrastructure error: {exc}",
+        )
+
+    if legacy_result["status"] != "success":
+        _log.warning(
+            "[OPTIONS_TMC_ROUTED] call failed for %s: %s",
+            symbol, legacy_result.get("error"),
+        )
+        return _build_options_fallback(
+            candidate, reason=f"Model call failed: {legacy_result.get('error')}",
+        )
+
+    # ── Parse response ───────────────────────────────────────────
+    from common.json_repair import extract_and_repair_json
+    from common.model_sanitize import had_think_tags, strip_think_tags
+
+    content = legacy_result.get("content") or ""
+    if had_think_tags(content):
+        content = strip_think_tags(content)
+
+    parsed, parse_method = extract_and_repair_json(content)
+    normalized = _coerce_options_tmc_output(parsed) if parsed is not None else None
+
+    # ── Retry-with-fix on parse failure ──────────────────────────
+    if normalized is None and content:
+        _log.warning(
+            "[OPTIONS_TMC_ROUTED] parse failed for %s, retry-with-fix", symbol,
+        )
+        fix_messages = messages + [
+            {"role": "assistant", "content": content},
+            {"role": "user", "content": (
+                "Your previous response was not valid JSON. "
+                "Please return ONLY the raw JSON object matching the schema "
+                "from the system prompt. No commentary, no fences. "
+                "Start with { and end with }."
+            )},
+        ]
+        try:
+            fix_result, fix_trace = execute_routed_model(
+                task_type="options_tmc_final_decision_fix",
+                messages=fix_messages,
+                system_prompt=OPTIONS_TMC_FINAL_DECISION_SYSTEM_PROMPT,
+                timeout=float(timeout),
+                premium=premium,
+                execution_mode=ExecutionMode.ONLINE_DISTRIBUTED.value,
+                max_tokens=3000,
+                temperature=OPTIONS_TMC_TEMPERATURE,
+                metadata={"symbol": symbol, "strategy_id": strategy_id, "fix_attempt": True},
+            )
+            if fix_result["status"] == "success":
+                fix_content = fix_result.get("content") or ""
+                if had_think_tags(fix_content):
+                    fix_content = strip_think_tags(fix_content)
+                parsed2, pm2 = extract_and_repair_json(fix_content)
+                if parsed2 is not None:
+                    normalized = _coerce_options_tmc_output(parsed2)
+                    if normalized is not None:
+                        parse_method = f"retry_fix+{pm2 or 'unknown'}"
+                        trace = fix_trace
+                        _log.info(
+                            "[OPTIONS_TMC_ROUTED] retry-with-fix OK %s method=%s",
+                            symbol, parse_method,
+                        )
+        except Exception as fix_exc:
+            _log.warning(
+                "[OPTIONS_TMC_ROUTED] retry-with-fix failed %s: %s", symbol, fix_exc,
+            )
+
+    if normalized is None:
+        _log.error(
+            "[OPTIONS_TMC_ROUTED] ALL PARSE FAILED for %s — fallback PASS", symbol,
+        )
+        fb = _build_options_fallback(
+            candidate, reason="JSON extraction + repair + retry all failed",
+            raw_text=content,
+        )
+        fb["_routed"] = True
+        fb["_request_id"] = trace.request_id
+        fb["_provider"] = trace.selected_provider
+        return fb
+
+    from datetime import datetime, timezone
+    normalized["timestamp"] = datetime.now(timezone.utc).isoformat()
+    if parse_method and parse_method != "direct":
+        normalized.setdefault("_parse_method", parse_method)
+    normalized["_routed"] = True
+    normalized["_request_id"] = trace.request_id
+    normalized["_provider"] = trace.selected_provider
+
+    _log.info(
+        "[OPTIONS_TMC_ROUTED] OK symbol=%s rec=%s conviction=%s provider=%s",
+        symbol, normalized.get("recommendation"), normalized.get("conviction"),
+        trace.selected_provider,
+    )
+    return normalized
+
+
+def _coerce_options_tmc_output(raw: Any) -> dict[str, Any] | None:
+    """Normalize the LLM response for an Options TMC decision.
+
+    Output contract matches the options TMC prompt schema:
+      recommendation, conviction, score, headline, narrative,
+      structure_analysis, probability_assessment, greeks_assessment,
+      market_alignment, caution_points, key_factors, suggested_adjustment
+    """
+    if isinstance(raw, list) and raw:
+        raw = raw[0] if isinstance(raw[0], dict) else None
+    if not isinstance(raw, dict):
+        return None
+
+    # ── Recommendation ──
+    rec = str(raw.get("recommendation") or raw.get("decision") or "PASS").strip().upper()
+    if rec not in {"EXECUTE", "PASS"}:
+        rec = "EXECUTE" if rec == "BUY" else "PASS"
+
+    # ── Conviction ──
+    conv_raw = raw.get("conviction")
+    try:
+        conviction = int(float(conv_raw))
+    except (TypeError, ValueError):
+        conviction = 10
+    if conviction <= 1:
+        conviction = int(conviction * 100)
+    conviction = max(0, min(conviction, 100))
+
+    # ── Score ──
+    score_raw = raw.get("score")
+    try:
+        score = int(float(score_raw))
+    except (TypeError, ValueError):
+        score = 10
+    score = max(0, min(score, 100))
+
+    # ── Text fields ──
+    headline = str(raw.get("headline") or "").strip() or "No headline provided."
+    narrative = str(raw.get("narrative") or "").strip() or "No narrative provided."
+
+    # ── Structure analysis ──
+    sa_raw = raw.get("structure_analysis") or {}
+    if not isinstance(sa_raw, dict):
+        sa_raw = {}
+    structure_analysis = {
+        "strategy_assessment": str(sa_raw.get("strategy_assessment") or "").strip(),
+        "strike_placement": str(sa_raw.get("strike_placement") or "").strip(),
+        "width_assessment": str(sa_raw.get("width_assessment") or "").strip(),
+        "dte_assessment": str(sa_raw.get("dte_assessment") or "").strip(),
+    }
+
+    # ── Probability assessment ──
+    pa_raw = raw.get("probability_assessment") or {}
+    if not isinstance(pa_raw, dict):
+        pa_raw = {}
+    probability_assessment = {
+        "pop_quality": str(pa_raw.get("pop_quality") or "").strip(),
+        "ev_quality": str(pa_raw.get("ev_quality") or "").strip(),
+        "risk_reward": str(pa_raw.get("risk_reward") or "").strip(),
+    }
+
+    # ── Greeks assessment ──
+    ga_raw = raw.get("greeks_assessment") or {}
+    if not isinstance(ga_raw, dict):
+        ga_raw = {}
+    greeks_assessment = {
+        "delta_read": str(ga_raw.get("delta_read") or "").strip(),
+        "theta_read": str(ga_raw.get("theta_read") or "").strip(),
+        "vega_read": str(ga_raw.get("vega_read") or "").strip(),
+    }
+
+    # ── Market alignment (string in options schema) ──
+    market_alignment = str(raw.get("market_alignment") or "").strip()
+
+    # ── Caution points ──
+    cp_raw = raw.get("caution_points") or []
+    caution_points = [str(c).strip() for c in cp_raw if isinstance(c, str) and c.strip()] if isinstance(cp_raw, list) else []
+
+    # ── Key factors ──
+    kf_raw = raw.get("key_factors") or []
+    key_factors: list[dict[str, str]] = []
+    if isinstance(kf_raw, list):
+        for f in kf_raw:
+            if isinstance(f, dict):
+                assess = str(f.get("assessment") or "NEUTRAL").upper()
+                if assess not in {"FAVORABLE", "NEUTRAL", "UNFAVORABLE"}:
+                    assess = "NEUTRAL"
+                key_factors.append({
+                    "factor": str(f.get("factor") or "").strip(),
+                    "assessment": assess,
+                    "detail": str(f.get("detail") or "").strip(),
+                })
+
+    # ── Suggested adjustment ──
+    suggested_adjustment = raw.get("suggested_adjustment")
+    if suggested_adjustment is not None:
+        suggested_adjustment = str(suggested_adjustment).strip() or None
+
+    # ── Conviction threshold: conviction < 60 with EXECUTE → PASS ──
+    conviction_override = False
+    if rec == "EXECUTE" and conviction < 60:
+        rec = "PASS"
+        conviction_override = True
+
+    result: dict[str, Any] = {
+        "recommendation": rec,
+        "conviction": conviction,
+        "score": score,
+        "headline": headline,
+        "narrative": narrative,
+        "structure_analysis": structure_analysis,
+        "probability_assessment": probability_assessment,
+        "greeks_assessment": greeks_assessment,
+        "market_alignment": market_alignment,
+        "caution_points": caution_points,
+        "key_factors": key_factors,
+        "suggested_adjustment": suggested_adjustment,
+    }
+    if conviction_override:
+        result["_conviction_override"] = True
+        result["_conviction_override_reason"] = (
+            f"Conviction {conviction} below threshold 60; coerced EXECUTE→PASS"
+        )
+    return result
+
+
+def _build_options_fallback(
+    candidate: dict[str, Any],
+    reason: str,
+    raw_text: str | None = None,
+) -> dict[str, Any]:
+    """Build a PASS fallback for options TMC when parsing fails.
+
+    Derived fields:
+      - conviction: 10 (very low — model produced no usable output)
+      - score: 10
+    """
+    from datetime import datetime, timezone
+    return {
+        "recommendation": "PASS",
+        "conviction": 10,
+        "score": 10,
+        "headline": f"Model parse failure — defaulting to PASS. {reason}",
+        "narrative": f"The model did not produce usable output. Reason: {reason}",
+        "structure_analysis": {
+            "strategy_assessment": "",
+            "strike_placement": "",
+            "width_assessment": "",
+            "dte_assessment": "",
+        },
+        "probability_assessment": {
+            "pop_quality": "",
+            "ev_quality": "",
+            "risk_reward": "",
+        },
+        "greeks_assessment": {
+            "delta_read": "",
+            "theta_read": "",
+            "vega_read": "",
+        },
+        "market_alignment": "Unable to assess — model parse failure.",
+        "caution_points": ["Model parse failure — review manually"],
+        "key_factors": [],
+        "suggested_adjustment": None,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "_fallback": True,
+        "_raw_text_preview": (raw_text or "")[:500] if raw_text else None,
+    }

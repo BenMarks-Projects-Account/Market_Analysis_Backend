@@ -82,6 +82,10 @@ _DEFAULT_GENERATION_CAP = 50_000
 # Maximum wing width in dollars (structural bound, not desirability).
 _DEFAULT_MAX_WING_WIDTH = 50.0
 
+# Center strike proximity — must be within ±N% of spot price.
+# Eliminates deep OTM butterflies with near-zero probability of profit.
+_DEFAULT_MAX_CENTER_DISTANCE_PCT = 0.05
+
 
 class ButterfliesV2Scanner(BaseV2Scanner):
     """V2 scanner for butterfly families.
@@ -126,6 +130,11 @@ class ButterfliesV2Scanner(BaseV2Scanner):
 
         generation_cap = int(context.get("generation_cap", _DEFAULT_GENERATION_CAP))
         max_wing = float(context.get("max_wing_width", _DEFAULT_MAX_WING_WIDTH))
+        max_center_pct = float(context.get("max_center_distance_pct", _DEFAULT_MAX_CENTER_DISTANCE_PCT))
+
+        # Pre-compute acceptable center strike range
+        min_center = spot * (1 - max_center_pct)
+        max_center = spot * (1 + max_center_pct)
 
         if strategy_id == "iron_butterfly":
             return self._construct_iron_butterflies(
@@ -133,6 +142,7 @@ class ButterfliesV2Scanner(BaseV2Scanner):
                 scanner_key=scanner_key, spot=spot,
                 narrowed_universe=narrowed_universe,
                 generation_cap=generation_cap, max_wing=max_wing,
+                min_center=min_center, max_center=max_center,
             )
         else:
             option_side = context.get("option_side")
@@ -142,6 +152,7 @@ class ButterfliesV2Scanner(BaseV2Scanner):
                 narrowed_universe=narrowed_universe,
                 generation_cap=generation_cap, max_wing=max_wing,
                 option_side=option_side,
+                min_center=min_center, max_center=max_center,
             )
 
     # ── Debit butterfly construction ───────────────────────────
@@ -157,6 +168,8 @@ class ButterfliesV2Scanner(BaseV2Scanner):
         generation_cap: int,
         max_wing: float,
         option_side: str | None,
+        min_center: float,
+        max_center: float,
     ) -> list[V2Candidate]:
         """Build debit butterfly candidates (3-leg, same option_type).
 
@@ -197,6 +210,9 @@ class ButterfliesV2Scanner(BaseV2Scanner):
                         break
                     for k in range(i + 2, len(strikes)):
                         center_needed = (strikes[i] + strikes[k]) / 2
+                        # Center proximity filter
+                        if center_needed < min_center or center_needed > max_center:
+                            continue
                         if center_needed not in strike_set:
                             continue
 
@@ -250,6 +266,8 @@ class ButterfliesV2Scanner(BaseV2Scanner):
         narrowed_universe: V2NarrowedUniverse,
         generation_cap: int,
         max_wing: float,
+        min_center: float,
+        max_center: float,
     ) -> list[V2Candidate]:
         """Build iron butterfly candidates (4-leg, center straddle).
 
@@ -283,6 +301,9 @@ class ButterfliesV2Scanner(BaseV2Scanner):
             for center in center_strikes:
                 if capped:
                     break
+                # Center proximity filter
+                if center < min_center or center > max_center:
+                    continue
 
                 # Enumerate equidistant wings from available strikes
                 lower_puts = sorted(

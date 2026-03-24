@@ -312,6 +312,19 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
 
       /* Monitor chip data */
       var sym = (trade.symbol || '').toUpperCase();
+      var yahooUrl = 'https://finance.yahoo.com/quote/' + encodeURIComponent(sym);
+
+      /* Days-open computation from date_acquired (Tradier position field) */
+      var daysOpen = null;
+      var openedDateStr = '';
+      if (trade.date_acquired) {
+        var acqDate = new Date(trade.date_acquired);
+        if (!isNaN(acqDate.getTime())) {
+          daysOpen = Math.floor((Date.now() - acqDate.getTime()) / 86400000);
+          openedDateStr = acqDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+      }
+
       var mon = monitorData[sym];
       var monChip = '';
       if (mon) {
@@ -361,7 +374,7 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
       html += '<div class="at-hdr-main">';
       html += '<div class="at-hdr-identity">';
       html += '<span class="chev"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span>';
-      html += '<span class="at-symbol-badge">' + (trade.symbol || 'N/A') + '</span>';
+      html += '<a class="at-symbol-badge at-symbol-link" href="' + yahooUrl + '" target="_blank" rel="noopener noreferrer" title="View on Yahoo Finance">' + (trade.symbol || 'N/A') + '</a>';
       html += '</div>';
       html += '<div class="at-hdr-info">';
       html += '<span class="at-hdr-strategy">' + strategyLabel + '</span>';
@@ -396,6 +409,15 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
       html += '<span class="at-strip-item"><span class="at-strip-lbl">Exp</span><span class="at-strip-val">' + fmtTotal(exposure) + '</span></span>';
       html += '</div>';
       html += '</div>';
+
+      /* ─── 2b. TIMING ROW (secondary metadata, always visible) ─── */
+      if (daysOpen !== null || openedDateStr) {
+        html += '<div class="at-timing-row">';
+        if (daysOpen !== null) html += '<span class="at-timing-days">' + daysOpen + 'D OPEN</span>';
+        if (daysOpen !== null && openedDateStr) html += '<span class="at-timing-sep">\u00b7</span>';
+        if (openedDateStr) html += '<span class="at-timing-date">' + openedDateStr + '</span>';
+        html += '</div>';
+      }
 
       /* ─── 3. COLLAPSIBLE BODY ─── */
       html += '<div class="at-card-body' + (isOpen ? '' : ' at-collapsed') + '" data-body-key="' + key + '">';
@@ -785,7 +807,12 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
 
   /* ── Render structured Active Trade Analysis result ── */
   function renderActiveTradeAnalysis(analysis, ctx, tradeKey) {
-    var stance = analysis.stance || analysis.suggested_action || 'HOLD';
+    // Unified recommendation enum: HOLD | REDUCE | CLOSE | URGENT_REVIEW
+    // Read "recommendation" first, fall back to legacy "stance" for cached responses
+    var stance = analysis.recommendation || analysis.stance || analysis.suggested_action || 'HOLD';
+    // Map legacy values
+    if (stance === 'EXIT') stance = 'CLOSE';
+    else if (stance === 'ADD' || stance === 'WATCH') stance = 'HOLD';
     var conf = analysis.confidence != null ? analysis.confidence : 0;
     // Handle old 0–1 scale: if confidence is a float ≤1, convert to 0–100
     if (typeof conf === 'number' && conf > 0 && conf <= 1) conf = Math.round(conf * 100);
@@ -799,12 +826,12 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
     var memo = analysis.memo || {};
     var pc = analysis.position_context || {};
 
-    /* Stance color class */
-    var stanceCls = 'at-ai-stance-watch';
+    /* Recommendation color class */
+    var stanceCls = 'at-ai-stance-hold';
     if (stance === 'HOLD') stanceCls = 'at-ai-stance-hold';
-    else if (stance === 'ADD') stanceCls = 'at-ai-stance-add';
     else if (stance === 'REDUCE') stanceCls = 'at-ai-stance-reduce';
-    else if (stance === 'EXIT' || stance === 'CLOSE') stanceCls = 'at-ai-stance-exit';
+    else if (stance === 'CLOSE') stanceCls = 'at-ai-stance-close';
+    else if (stance === 'URGENT_REVIEW') stanceCls = 'at-ai-stance-urgent';
 
     /* Thesis status color class */
     var thesisCls = 'at-ai-thesis-intact';
@@ -1115,18 +1142,21 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
   /** Render a structured monitor memo object into styled HTML. */
   function renderMonitorMemo(memo) {
     if (!memo) return '<div class="at-no-data">No analysis available.</div>';
-    var label = memo.label || 'WATCH';
+    var label = memo.label || 'HOLD';
+    // Map legacy values
+    if (label === 'EXIT') label = 'CLOSE';
+    else if (label === 'ADD' || label === 'WATCH') label = 'HOLD';
     var conf = memo.confidence != null ? memo.confidence : 0;
     var summary = memo.summary || '';
     var thesis = memo.thesis_check || '';
     var risks = memo.key_risks || [];
     var action = memo.action || '';
 
-    var labelCls = 'at-ai-stance-watch';
+    var labelCls = 'at-ai-stance-hold';
     if (label === 'HOLD') labelCls = 'at-ai-stance-hold';
-    else if (label === 'ADD') labelCls = 'at-ai-stance-add';
     else if (label === 'REDUCE') labelCls = 'at-ai-stance-reduce';
-    else if (label === 'EXIT') labelCls = 'at-ai-stance-exit';
+    else if (label === 'CLOSE') labelCls = 'at-ai-stance-close';
+    else if (label === 'URGENT_REVIEW') labelCls = 'at-ai-stance-urgent';
 
     var confCls = 'at-ai-conf-low';
     if (conf >= 70) confCls = 'at-ai-conf-high';

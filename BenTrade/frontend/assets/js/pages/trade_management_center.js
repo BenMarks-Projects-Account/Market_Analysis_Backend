@@ -23,6 +23,8 @@
   var _stockPollTimer  = null;
   /** Completion-poll timer for options workflow. */
   var _optionsPollTimer = null;
+  /** Full refresh chain running flag. */
+  var _fullRefreshRunning = false;
 
   /* -- API ref -------------------------------------------------------- */
   var api = window.BenTradeApi;
@@ -287,6 +289,7 @@
     return {
       symbol:       raw.underlying || raw.symbol || null,
       strategy:     raw.strategy_id || raw.strategy_type || raw.family_key || null,
+      strategyId:   raw.strategy_id || null,
       family:       raw.family_key || null,
       ev:           m.ev != null ? Number(m.ev) : null,
       pop:          m.pop != null ? Number(m.pop) : null,
@@ -306,6 +309,23 @@
       rank:         raw.rank || null,
       expiration:   raw.expiration || null,
       underlyingPrice: raw.underlying_price || null,
+      candidateId:  raw.candidate_id || null,
+      // Model analysis fields (populated after options model_analysis stage)
+      modelRecommendation: raw.model_recommendation || null,
+      modelConviction:     raw.model_conviction != null ? raw.model_conviction : null,
+      modelScore:          raw.model_score != null ? raw.model_score : null,
+      modelHeadline:       raw.model_headline || null,
+      modelNarrative:      raw.model_narrative || null,
+      modelCautionNotes:   Array.isArray(raw.model_caution_notes) ? raw.model_caution_notes : [],
+      modelKeyFactors:     Array.isArray(raw.model_key_factors) ? raw.model_key_factors : [],
+      modelDegraded:       !!raw.model_degraded,
+      modelStructureAnalysis:      raw.model_structure_analysis || null,
+      modelProbabilityAssessment:  raw.model_probability_assessment || null,
+      modelGreeksAssessment:       raw.model_greeks_assessment || null,
+      modelMarketAlignment:        raw.model_market_alignment || null,
+      modelSuggestedAdjustment:    raw.model_suggested_adjustment || null,
+      // Preserve raw for action handlers
+      _raw: raw,
     };
   }
 
@@ -1137,70 +1157,152 @@
       });
   }
 
+  /** Keep rendered options rows for action handler lookups. */
+  var _optionsRenderedRows = [];
+  var _optionsExpandState  = {};
+
   function renderOptionsCandidates(grid, candidates, data) {
     if (!grid) return;
-    grid.innerHTML = '';
-    candidates.forEach(function (raw) {
-      grid.appendChild(buildOptionsCard(normalizeOptionsCandidate(raw), data));
+    var tc = window.BenTradeTradeCard;
+
+    _optionsRenderedRows = candidates.slice();
+    var html = '';
+    candidates.forEach(function (raw, idx) {
+      var c = normalizeOptionsCandidate(raw);
+      try {
+        html += buildOptionsTradeCard(c, idx, data);
+      } catch (cardErr) {
+        console.warn('[TMC] Options card render error for candidate ' + idx, cardErr);
+        html += '<div class="trade-card" style="margin-bottom:12px;padding:10px;border:1px solid rgba(255,120,100,0.3);border-radius:10px;background:rgba(8,18,26,0.9);color:rgba(255,180,160,0.8);font-size:12px;">\u26A0 Render error for ' + esc((raw && raw.symbol) || '#' + idx) + '</div>';
+      }
+    });
+
+    grid.innerHTML = html;
+
+    // ── Wire delegated action handlers ──────────────────────────
+    grid.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var action   = btn.dataset.action;
+      var tradeKey = btn.dataset.tradeKey || '';
+      var row      = _findOptionsRowByTradeKey(tradeKey);
+
+      if (action === 'execute' && row) {
+        _executeOptionsTrade(btn, tradeKey, row);
+      } else if (action === 'reject' && tradeKey) {
+        var cardEl = btn.closest('.trade-card');
+        if (cardEl) {
+          cardEl.style.opacity = '0.35';
+          cardEl.style.pointerEvents = 'none';
+        }
+      } else if (action === 'data-workbench' && row) {
+        window.BenTradeTradeCard.openDataWorkbenchByTrade(row);
+      }
+    });
+
+    // Wire expand state persistence
+    grid.querySelectorAll('details.trade-card-collapse').forEach(function (details) {
+      details.addEventListener('toggle', function () {
+        var tk = details.dataset.tradeKey || '';
+        if (tk) _optionsExpandState[tk] = details.open;
+      });
     });
   }
 
-  function buildOptionsCard(c, data) {
-    var card = document.createElement('div');
-    card.className = 'tmc-card tmc-options-card';
+  /**
+   * Build a TradeCard trade key for an options candidate.
+   * Format: SYMBOL|OPTIONS|strategy_id|short_strike|long_strike|dte
+   */
+  function _buildOptionsTradeKey(c) {
+    var sym = String(c.symbol || '').toUpperCase();
+    var sid = String(c.strategyId || c.strategy || '');
+    var shorts = '', longs = '';
+    if (c.legs.length >= 1) {
+      var sortedLegs = c.legs.slice().sort(function (a, b) { return (a.strike || 0) - (b.strike || 0); });
+      var shortLegs = sortedLegs.filter(function (l) { return (l.side || '').toUpperCase() === 'SHORT'; });
+      var longLegs  = sortedLegs.filter(function (l) { return (l.side || '').toUpperCase() === 'LONG'; });
+      shorts = shortLegs.map(function (l) { return l.strike; }).join(',');
+      longs  = longLegs.map(function (l) { return l.strike; }).join(',');
+    }
+    return sym + '|OPTIONS|' + sid + '|' + (shorts || 'NA') + '|' + (longs || 'NA') + '|' + (c.dte != null ? c.dte : 'NA');
+  }
 
+  function _findOptionsRowByTradeKey(tradeKey) {
+    if (!tradeKey) return null;
+    for (var i = 0; i < _optionsRenderedRows.length; i++) {
+      var r = _optionsRenderedRows[i];
+      var c = normalizeOptionsCandidate(r);
+      if (_buildOptionsTradeKey(c) === tradeKey) return r;
+    }
+    return null;
+  }
+
+  /**
+   * Build a single options candidate as a full TradeCard.
+   * Uses the same HTML structure as stock TradeCards: <details> collapse,
+   * header summary, expandable body sections, always-visible action footer.
+   */
+  function buildOptionsTradeCard(c, idx, data) {
+    var tc = window.BenTradeTradeCard;
     var symbol = c.symbol || '???';
-    var strategyLabel = c.strategy ? c.strategy.replace(/_/g, ' ') : '--';
+    var strategyLabel = c.strategy ? c.strategy.replace(/_/g, ' ').replace(/\b\w/g, function (ch) { return ch.toUpperCase(); }) : '--';
+    var tradeKey = _buildOptionsTradeKey(c);
 
-    // ── Header: symbol + strategy + rank badge ──────────────────
-    var rankBadge = c.rank ? '<span class="tmc-options-rank">#' + c.rank + '</span>' : '';
-    var header =
-      '<div class="tmc-card-header">' +
-        '<div class="tmc-card-symbol">' + esc(symbol) + '</div>' +
-        rankBadge +
-        '<div class="tmc-card-strategy tmc-options-strategy-badge">' + esc(strategyLabel) + '</div>' +
-      '</div>';
+    // ── Score badge (model_score preferred, fallback to rank) ──
+    var scoreVal = c.modelScore != null ? c.modelScore : null;
+    var scoreBadge = '';
+    if (scoreVal !== null) {
+      scoreBadge = '<span class="trade-rank-badge" style="font-size:14px;font-weight:700;color:var(--accent-cyan);background:rgba(0,220,255,0.08);border:1px solid rgba(0,220,255,0.24);border-radius:8px;padding:3px 10px;white-space:nowrap;">Score ' + Math.round(scoreVal) + '</span>';
+    } else if (c.rank) {
+      scoreBadge = '<span class="trade-rank-badge" style="font-size:14px;font-weight:700;color:var(--accent-cyan);background:rgba(0,220,255,0.08);border:1px solid rgba(0,220,255,0.24);border-radius:8px;padding:3px 10px;white-space:nowrap;">#' + c.rank + '</span>';
+    }
 
-    // ── Strike structure line ───────────────────────────────────
-    var strikeDisplay = '';
+    // ── Header badges ──
+    var symbolBadge = tc ? tc.pill(symbol) : '<span class="qtPill">' + esc(symbol) + '</span>';
+    var dteBadge = c.dte !== null ? (tc ? tc.pill(c.dte + ' DTE') : '<span class="qtPill">' + c.dte + ' DTE</span>') : '';
+
+    // ── Subtitle: strikes, expiration, premium ──
+    var subtitleParts = [];
     if (c.legs.length >= 2) {
       var strikes = c.legs.map(function (l) { return l.strike; }).filter(function (s) { return s != null; });
       var optType = (c.legs[0].option_type || '').toUpperCase();
-      strikeDisplay =
-        '<div class="tmc-options-strike-line">' +
-          '<span class="tmc-options-strikes">' + strikes.join(' / ') + '</span>' +
-          '<span class="tmc-options-type-badge">' + esc(optType) + '</span>' +
-          (c.expiration ? '<span class="tmc-options-exp">' + esc(c.expiration) + '</span>' : '') +
-        '</div>';
+      subtitleParts.push(strikes.join(' / ') + ' ' + optType);
     }
+    if (c.expiration) {
+      subtitleParts.push(c.expiration);
+    }
+    if (c.premium != null) {
+      subtitleParts.push(c.premiumLabel.charAt(0).toUpperCase() + c.premiumLabel.slice(1) + ': $' + Number(c.premium).toFixed(2));
+    }
+    var subtitleText = subtitleParts.join(' \u00B7 ');
 
-    // ── Premium display (credit or debit) ───────────────────────
-    var premiumClass = c.premiumLabel === 'credit' ? 'tmc-premium-credit' : 'tmc-premium-debit';
-    var premiumRow =
-      '<div class="tmc-options-premium-row">' +
-        '<span class="tmc-options-premium-label">' + esc(c.premiumLabel.toUpperCase()) + '</span>' +
-        '<span class="tmc-options-premium-value ' + premiumClass + '">' +
-          fmtDollar(c.premium) +
-        '</span>' +
-      '</div>';
+    var tradeKeyDisplay = tradeKey
+      ? '<span class="trade-key-wrap"><span class="trade-key-label">' + esc(tradeKey) + '</span>'
+        + (tc ? tc.copyTradeKeyButton(tradeKey) : '') + '</span>'
+      : '';
 
-    // ── Core metrics grid (3 columns) ───────────────────────────
-    var metrics =
-      '<div class="tmc-metrics tmc-options-metrics">' +
-        buildMetric('EV', fmtDollar(c.ev)) +
-        buildMetric('POP', fmtPct(c.pop)) +
-        buildMetric('DTE', c.dte != null ? c.dte + 'd' : '--') +
-        buildMetric('Max Profit', fmtDollar(c.maxProfit)) +
-        buildMetric('Max Loss', c.maxLoss != null ? fmtDollar(Math.abs(c.maxLoss)) : '--') +
-        buildMetric('Width', c.width != null ? '$' + c.width.toFixed(0) : '--') +
-        buildMetric('RoR', c.ror != null ? (c.ror * 100).toFixed(0) + '%' : '--') +
-        buildMetric('EV/Day', fmtDollar(c.evPerDay)) +
-      '</div>';
+    // ── Core metrics section (expanded body) ──
+    var coreItems = [
+      { label: 'EV', value: fmtDollar(c.ev), cssClass: c.ev > 0 ? 'positive' : (c.ev < 0 ? 'negative' : 'neutral') },
+      { label: 'POP', value: fmtPct(c.pop), cssClass: c.pop != null && c.pop >= 0.65 ? 'positive' : (c.pop != null ? 'negative' : 'neutral') },
+      { label: 'RoR', value: c.ror != null ? (c.ror * 100).toFixed(0) + '%' : '--', cssClass: c.ror != null && c.ror > 0.15 ? 'positive' : 'neutral' },
+      { label: 'Max Profit', value: fmtDollar(c.maxProfit), cssClass: 'positive' },
+      { label: 'Max Loss', value: c.maxLoss != null ? fmtDollar(Math.abs(c.maxLoss)) : '--', cssClass: 'negative' },
+      { label: 'Width', value: c.width != null ? '$' + c.width.toFixed(0) : '--', cssClass: 'neutral' },
+      { label: 'EV/Day', value: fmtDollar(c.evPerDay), cssClass: c.evPerDay != null && c.evPerDay > 0 ? 'positive' : 'neutral' },
+      { label: 'DTE', value: c.dte != null ? c.dte + 'd' : '--', cssClass: 'neutral' },
+    ];
+    var coreGridHtml = '<div class="metric-grid">' + coreItems.map(function (item) {
+      return '<div class="metric"><div class="metric-label">' + esc(item.label) + '</div><div class="metric-value ' + item.cssClass + '">' + item.value + '</div></div>';
+    }).join('') + '</div>';
+    var coreSection = '<div class="section section-core"><div class="section-title">CORE METRICS</div>' + coreGridHtml + '</div>';
 
-    // ── Legs detail (compact) ───────────────────────────────────
-    var legsHtml = '';
+    // ── Legs detail section (expanded body) ──
+    var legsSection = '';
     if (c.legs.length > 0) {
-      legsHtml = '<div class="tmc-options-legs">';
+      var legsRows = '';
       c.legs.forEach(function (leg) {
         var side = (leg.side || '').toUpperCase();
         var sideClass = side === 'SHORT' ? 'tmc-leg-short' : 'tmc-leg-long';
@@ -1208,10 +1310,10 @@
         var type = (leg.option_type || '').toUpperCase();
         var bidAsk = '';
         if (leg.bid != null && leg.ask != null) {
-          bidAsk = ' ' + Number(leg.bid).toFixed(2) + '/' + Number(leg.ask).toFixed(2);
+          bidAsk = Number(leg.bid).toFixed(2) + ' / ' + Number(leg.ask).toFixed(2);
         }
-        var delta = leg.delta != null ? ' Δ' + Number(leg.delta).toFixed(2) : '';
-        legsHtml +=
+        var delta = leg.delta != null ? '\u0394 ' + Number(leg.delta).toFixed(2) : '';
+        legsRows +=
           '<div class="tmc-options-leg-row">' +
             '<span class="tmc-leg-side ' + sideClass + '">' + esc(side) + '</span>' +
             '<span class="tmc-leg-strike">' + esc(strike) + ' ' + esc(type) + '</span>' +
@@ -1219,19 +1321,317 @@
             '<span class="tmc-leg-delta">' + esc(delta) + '</span>' +
           '</div>';
       });
-      legsHtml += '</div>';
+      legsSection = '<div class="section"><div class="section-title">LEG DETAILS</div><div class="tmc-options-legs">' + legsRows + '</div></div>';
     }
 
-    // ── Footer: family badge + run metadata ─────────────────────
-    var familyLabel = c.family ? c.family.replace(/_/g, ' ') : '';
-    var footer =
-      '<div class="tmc-card-footer">' +
-        (familyLabel ? '<span class="tmc-scanner-badge">' + esc(familyLabel) + '</span>' : '') +
-        '<span class="tmc-meta-item tmc-meta-muted">' + esc(data.run_id || '') + '</span>' +
-      '</div>';
+    // ── Build enrichment sections (model review, structure, etc.) ──
+    var enrichment = buildOptionsEnrichmentHtml(c);
 
-    card.innerHTML = header + strikeDisplay + premiumRow + metrics + legsHtml + footer;
-    return card;
+    // ── Collapse state ──
+    var isExpanded = tradeKey ? (_optionsExpandState[tradeKey] === true) : false;
+    var openAttr = isExpanded ? ' open' : '';
+
+    // ── Chevron SVG ──
+    var chevronSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+
+    // ── Action buttons (always visible) ──
+    var tradeKeyAttr = ' data-trade-key="' + esc(tradeKey) + '"';
+    var actionsHtml = enrichment.warnings
+      + '<div class="trade-actions">'
+      + '<div class="actions-row">'
+      + '<button type="button" class="btn btn-exec btn-action" data-action="execute"' + tradeKeyAttr + ' title="Preview and execute this options trade">Execute Trade</button>'
+      + '<button type="button" class="btn btn-reject btn-action" data-action="reject"' + tradeKeyAttr + ' title="Reject this trade">Reject</button>'
+      + '</div>'
+      + '<div class="actions-row">'
+      + '<button type="button" class="btn btn-action" data-action="data-workbench"' + tradeKeyAttr + ' title="Send to Data Workbench">Send to Data Workbench</button>'
+      + '</div>'
+      + '</div>';
+
+    // ── Full card HTML ──
+    return '<div class="trade-card" data-idx="' + idx + '"' + tradeKeyAttr + ' style="margin-bottom:14px;display:flex;flex-direction:column;">'
+      + '<details class="trade-card-collapse"' + tradeKeyAttr + openAttr + '>'
+      + '<summary class="trade-summary"><div class="trade-header trade-header-click">'
+      + '<div class="trade-header-left"><span class="chev">' + chevronSvg + '</span></div>'
+      + '<div class="trade-header-center">'
+      + '<div class="trade-type" style="display:flex;align-items:center;gap:8px;justify-content:center;">' + symbolBadge + ' ' + dteBadge + ' ' + esc(strategyLabel) + '</div>'
+      + '<div class="trade-subtitle">' + subtitleText + '</div>'
+      + (tradeKeyDisplay ? '<div style="text-align:center;">' + tradeKeyDisplay + '</div>' : '')
+      + '</div>'
+      + '<div class="trade-header-right">' + scoreBadge + '</div>'
+      + '</div></summary>'
+      + '<div class="trade-body" style="flex:1 1 auto;">'
+      + coreSection
+      + legsSection
+      + enrichment.body
+      + '</div>'
+      + '</details>'
+      + actionsHtml
+      + '</div>';
+  }
+
+  /**
+   * Build options-specific enrichment HTML (expanded body sections).
+   * Returns { body, warnings } matching the stock enrichment pattern.
+   */
+  function buildOptionsEnrichmentHtml(c) {
+    var bodyParts = [];
+    var warningParts = [];
+    var hasModel = !!(c.modelRecommendation && !c.modelDegraded);
+
+    // ── MODEL REVIEW section ──
+    if (hasModel) {
+      var recText = String(c.modelRecommendation).toUpperCase();
+      var confText = c.modelConviction != null ? 'Conf: ' + fmtPctDirect(c.modelConviction) : '';
+      var scoreText = c.modelScore != null ? 'Score: ' + Math.round(c.modelScore) : '';
+      var headerBadges = [recText, confText, scoreText].filter(Boolean).join(' \u00B7 ');
+
+      var recColor = '#b4b4c8';
+      if (recText === 'EXECUTE') recColor = '#00dc78';
+      else if (recText === 'PASS') recColor = '#ff5a5a';
+
+      var modelBody = '';
+      if (c.modelHeadline) {
+        modelBody += '<div style="font-size:13px;font-weight:700;color:var(--text,#d7fbff);margin-bottom:4px;">' + esc(c.modelHeadline) + '</div>';
+      }
+      if (c.modelNarrative) {
+        modelBody += '<div style="font-size:12px;color:var(--text,#d7fbff);line-height:1.6;">' + esc(c.modelNarrative) + '</div>';
+      }
+
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:8px;padding:8px 10px;border-radius:6px;border:1px solid ' + recColor + '33;background:' + recColor + '08;">'
+        + '<div class="section-title" style="margin-bottom:6px;">MODEL REVIEW'
+        + (headerBadges ? ' \u2014 <span style="color:' + recColor + ';">' + headerBadges + '</span>' : '')
+        + '</div>'
+        + modelBody
+        + '</div>'
+      );
+    } else if (c.modelDegraded) {
+      warningParts.push(
+        '<div style="margin-bottom:6px;padding:5px 10px;font-size:11px;font-weight:600;color:#ff8a5a;background:rgba(255,138,90,0.08);border:1px solid rgba(255,138,90,0.2);border-radius:5px;text-align:center;">'
+        + '\u26A0 Model analysis unavailable \u2014 ranked by scanner EV only'
+        + '</div>'
+      );
+    } else if (!c.modelRecommendation) {
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:8px;padding:8px 10px;border-radius:6px;border:1px solid rgba(138,138,180,0.2);background:rgba(138,138,180,0.04);">'
+        + '<div class="section-title" style="color:#8a8ab4;">MODEL REVIEW</div>'
+        + '<div style="font-size:12px;color:var(--muted);">Model analysis unavailable</div>'
+        + '</div>'
+      );
+    }
+
+    // ── STRUCTURE ANALYSIS section ──
+    var sa = c.modelStructureAnalysis;
+    if (sa && typeof sa === 'object') {
+      var saRows = [
+        { label: 'Strategy', val: sa.strategy_assessment },
+        { label: 'Strike Placement', val: sa.strike_placement },
+        { label: 'Width', val: sa.width_assessment },
+        { label: 'DTE', val: sa.dte_assessment },
+      ].filter(function (r) { return !!r.val; });
+
+      if (saRows.length > 0) {
+        var saHtml = '<div class="section" style="margin-bottom:8px;padding:8px 10px;background:rgba(0,220,255,0.03);border-radius:6px;border:1px solid rgba(0,220,255,0.12);">';
+        saHtml += '<div class="section-title" style="color:var(--accent-cyan,#00dcff);">STRUCTURE ANALYSIS</div>';
+        saRows.forEach(function (r) {
+          saHtml += '<div style="font-size:11px;line-height:1.4;padding:2px 0 2px 8px;border-left:2px solid rgba(0,220,255,0.25);margin-bottom:3px;">'
+            + '<span style="color:var(--accent-cyan,#00dcff);font-weight:600;">' + esc(r.label) + ':</span> '
+            + '<span style="color:var(--text-secondary,#bbb);">' + esc(r.val) + '</span></div>';
+        });
+        saHtml += '</div>';
+        bodyParts.push(saHtml);
+      }
+    }
+
+    // ── PROBABILITY ASSESSMENT section ──
+    var pa = c.modelProbabilityAssessment;
+    if (pa && typeof pa === 'object') {
+      var paRows = [
+        { label: 'POP Quality', val: pa.pop_quality },
+        { label: 'EV Quality', val: pa.ev_quality },
+        { label: 'Risk/Reward', val: pa.risk_reward },
+      ].filter(function (r) { return !!r.val; });
+
+      if (paRows.length > 0) {
+        var paHtml = '<div class="section" style="margin-bottom:8px;padding:8px 10px;background:rgba(100,149,237,0.04);border-radius:6px;border:1px solid rgba(100,149,237,0.12);">';
+        paHtml += '<div class="section-title">PROBABILITY ASSESSMENT</div>';
+        paRows.forEach(function (r) {
+          paHtml += '<div style="font-size:11px;line-height:1.4;padding:2px 0 2px 8px;border-left:2px solid rgba(100,149,237,0.25);margin-bottom:3px;">'
+            + '<span style="font-weight:600;color:var(--text,#d7fbff);">' + esc(r.label) + ':</span> '
+            + '<span style="color:var(--text-secondary,#bbb);">' + esc(r.val) + '</span></div>';
+        });
+        paHtml += '</div>';
+        bodyParts.push(paHtml);
+      }
+    }
+
+    // ── GREEKS ASSESSMENT section ──
+    var ga = c.modelGreeksAssessment;
+    if (ga && typeof ga === 'object') {
+      var gaRows = [
+        { label: 'Delta', val: ga.delta_read, icon: '\u0394' },
+        { label: 'Theta', val: ga.theta_read, icon: '\u0398' },
+        { label: 'Vega', val: ga.vega_read, icon: '\u03BD' },
+      ].filter(function (r) { return !!r.val; });
+
+      if (gaRows.length > 0) {
+        var gaHtml = '<div class="section" style="margin-bottom:8px;padding:8px 10px;background:rgba(180,200,220,0.04);border-radius:6px;border:1px solid rgba(180,200,220,0.12);">';
+        gaHtml += '<div class="section-title">GREEKS ASSESSMENT</div>';
+        gaRows.forEach(function (r) {
+          gaHtml += '<div style="font-size:11px;line-height:1.4;padding:2px 0 2px 8px;border-left:2px solid rgba(180,200,220,0.25);margin-bottom:3px;">'
+            + '<span style="font-weight:600;color:var(--accent-cyan,#00dcff);">' + r.icon + ' ' + esc(r.label) + ':</span> '
+            + '<span style="color:var(--text-secondary,#bbb);">' + esc(r.val) + '</span></div>';
+        });
+        gaHtml += '</div>';
+        bodyParts.push(gaHtml);
+      }
+    }
+
+    // ── MARKET ALIGNMENT section ──
+    if (c.modelMarketAlignment) {
+      var maText = String(c.modelMarketAlignment);
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:8px;padding:8px 10px;background:rgba(100,149,237,0.04);border-radius:6px;border:1px solid rgba(100,149,237,0.12);">'
+        + '<div class="section-title">MARKET ALIGNMENT</div>'
+        + '<div style="font-size:12px;color:var(--text,#d7fbff);line-height:1.6;">' + esc(maText) + '</div>'
+        + '</div>'
+      );
+    }
+
+    // ── CAUTION section ──
+    if (c.modelCautionNotes.length > 0) {
+      var cautionLis = c.modelCautionNotes.map(function (note) {
+        return '<li style="margin-bottom:2px;">' + esc(note) + '</li>';
+      }).join('');
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:6px;padding:6px 10px;border-radius:6px;border:1px solid rgba(244,200,95,0.2);background:rgba(244,200,95,0.04);">'
+        + '<div class="section-title" style="color:var(--warn,#f4c85f);">CAUTION</div>'
+        + '<ul style="margin:0;padding-left:16px;font-size:11px;line-height:1.5;">' + cautionLis + '</ul>'
+        + '</div>'
+      );
+    }
+
+    // ── KEY FACTORS section ──
+    if (c.modelKeyFactors.length > 0) {
+      var factorsHtml = '';
+      c.modelKeyFactors.forEach(function (f) {
+        if (typeof f === 'string') {
+          factorsHtml += '<div style="font-size:11px;color:var(--text-secondary,#bbb);line-height:1.4;padding:3px 0 3px 8px;border-left:2px solid #8899aa;margin-bottom:3px;">' + esc(f) + '</div>';
+        } else if (f && typeof f === 'object') {
+          var factorName = f.factor || f.name || '';
+          var impact = String(f.impact || f.assessment || 'neutral').toLowerCase();
+          var evidence = f.evidence || f.detail || '';
+          var impColor = _assessColors[impact] || '#8899aa';
+          var impLabel = impact.charAt(0).toUpperCase() + impact.slice(1);
+
+          factorsHtml += '<div style="font-size:11px;line-height:1.4;padding:4px 0 4px 8px;border-left:2px solid ' + impColor + ';margin-bottom:4px;">'
+            + '<div style="display:flex;align-items:center;gap:6px;">'
+            + '<span style="color:' + impColor + ';font-weight:600;">' + esc(factorName) + '</span>'
+            + '<span style="font-size:9px;padding:1px 5px;border-radius:3px;border:1px solid ' + impColor + '44;color:' + impColor + ';text-transform:uppercase;letter-spacing:0.3px;">' + esc(impLabel) + '</span>'
+            + '</div>'
+            + (evidence ? '<div style="font-size:10px;color:var(--muted,#6a8da8);margin-top:2px;">' + esc(evidence) + '</div>' : '')
+            + '</div>';
+        }
+      });
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:8px;">'
+        + '<div class="section-title">KEY FACTORS</div>'
+        + factorsHtml
+        + '</div>'
+      );
+    }
+
+    // ── SUGGESTED ADJUSTMENT ──
+    if (c.modelSuggestedAdjustment) {
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:6px;padding:6px 10px;border-radius:6px;border:1px solid rgba(0,220,255,0.15);background:rgba(0,220,255,0.03);">'
+        + '<div class="section-title" style="color:var(--accent-cyan,#00dcff);">SUGGESTED ADJUSTMENT</div>'
+        + '<div style="font-size:12px;color:var(--text,#d7fbff);line-height:1.6;">' + esc(c.modelSuggestedAdjustment) + '</div>'
+        + '</div>'
+      );
+    }
+
+    return { body: bodyParts.join(''), warnings: warningParts.join('') };
+  }
+
+  /**
+   * Execute an options trade via the TradingService preview/submit flow.
+   * Builds multi-leg order from candidate legs and opens preview modal.
+   */
+  function _executeOptionsTrade(btn, tradeKey, rawCandidate) {
+    var c = normalizeOptionsCandidate(rawCandidate);
+    if (!c.legs || c.legs.length === 0) {
+      console.warn('[TMC] Cannot execute options trade: no legs on candidate');
+      return;
+    }
+
+    // Build order legs for Tradier multi-leg order
+    var orderLegs = [];
+    c.legs.forEach(function (leg) {
+      var side = (leg.side || '').toUpperCase();
+      var optionType = (leg.option_type || '').toLowerCase();
+      // Build OCC symbol: SYMBOL + YYMMDD + P/C + 8-digit strike
+      var occSymbol = '';
+      if (c.symbol && c.expiration && leg.strike != null && optionType) {
+        var parts = String(c.expiration).split('-');
+        if (parts.length === 3) {
+          var yy = parts[0].slice(-2);
+          var mm = parts[1];
+          var dd = parts[2];
+          var pc = optionType.charAt(0).toUpperCase();
+          var strikeInt = Math.round(Number(leg.strike) * 1000);
+          var strikeStr = String(strikeInt);
+          while (strikeStr.length < 8) strikeStr = '0' + strikeStr;
+          occSymbol = c.symbol.toUpperCase() + yy + mm + dd + pc + strikeStr;
+        }
+      }
+      orderLegs.push({
+        option_symbol: occSymbol,
+        side: side === 'SHORT' ? 'sell_to_open' : 'buy_to_open',
+        quantity: 1,
+        strike: leg.strike,
+        option_type: optionType,
+      });
+    });
+
+    var orderPayload = {
+      class: 'multileg',
+      symbol: c.symbol,
+      type: 'market',
+      duration: 'day',
+      legs: orderLegs,
+      // Preview metadata
+      _meta: {
+        strategy_id: c.strategyId || c.strategy,
+        trade_key: tradeKey,
+        source: 'tmc_options',
+      },
+    };
+
+    // Use TradingService preview if available
+    if (api && api.tradingPreview) {
+      btn.disabled = true;
+      btn.textContent = 'Previewing\u2026';
+      api.tradingPreview(orderPayload)
+        .then(function (preview) {
+          btn.disabled = false;
+          btn.textContent = 'Execute Trade';
+          // Open execution modal with preview data
+          if (window.BenTradeExecutionModal && window.BenTradeExecutionModal.open) {
+            window.BenTradeExecutionModal.open(orderPayload, preview);
+          } else {
+            console.log('[TMC] Options trade preview:', preview);
+            alert('Preview: ' + JSON.stringify(preview, null, 2));
+          }
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          btn.textContent = 'Execute Trade';
+          console.error('[TMC] Options trade preview failed:', err);
+        });
+    } else {
+      console.log('[TMC] TradingService not available. Order payload:', orderPayload);
+    }
   }
 
   function _startOptionsCompletionPoll(baselineRunId, intervalMs, maxAttempts) {
@@ -1320,6 +1720,12 @@
     return 'tmc-urgency-low';
   }
 
+  var _tmcAccountMode = 'paper';
+
+  function _getAccountMode() {
+    return _tmcAccountMode || 'paper';
+  }
+
   function runActivePipeline() {
     if (_activeRunning) return;
     _activeRunning = true;
@@ -1331,7 +1737,8 @@
     var cb = document.getElementById('tmcSkipModel');
     if (cb) skipModel = cb.checked;
 
-    var url = '/api/active-trade-pipeline/run?skip_model=' + (skipModel ? 'true' : 'false');
+    var accountMode = _getAccountMode();
+    var url = '/api/active-trade-pipeline/run?account_mode=' + encodeURIComponent(accountMode) + '&skip_model=' + (skipModel ? 'true' : 'false');
 
     fetch(url, { method: 'POST' })
       .then(function (r) { return r.json(); })
@@ -1384,6 +1791,10 @@
     if (count) { count.textContent = '--'; count.className = 'tmc-count-badge tmc-count-muted'; }
   }
 
+  /** Keep rendered active trade rows for action handler lookups. */
+  var _activeRenderedRows = [];
+  var _activeExpandState  = {};
+
   function renderActiveResults(data) {
     var recs = data.recommendations || [];
     var grid = document.getElementById('tmcActiveTradeGrid');
@@ -1392,7 +1803,7 @@
     if (!grid) return;
 
     if (recs.length === 0) {
-      showActiveEmpty('No active trades found');
+      showActiveEmpty('No open positions found on ' + (_getAccountMode() || 'paper').toUpperCase() + ' account');
       return;
     }
 
@@ -1407,14 +1818,55 @@
       countEl.className = 'tmc-count-badge';
     }
 
-    grid.innerHTML = '';
-    sorted.forEach(function (rec) {
-      grid.appendChild(buildActiveTradeCard(rec));
+    _activeRenderedRows = sorted.slice();
+
+    var html = '';
+    sorted.forEach(function (rec, idx) {
+      try {
+        html += buildActiveTradeCard(rec, idx);
+      } catch (cardErr) {
+        console.warn('[TMC] Active card render error for rec ' + idx, cardErr);
+        html += '<div class="trade-card" style="margin-bottom:12px;padding:10px;border:1px solid rgba(255,120,100,0.3);border-radius:10px;background:rgba(8,18,26,0.9);color:rgba(255,180,160,0.8);font-size:12px;">\u26A0 Render error for ' + esc((rec && rec.symbol) || '#' + idx) + '</div>';
+      }
     });
 
+    grid.innerHTML = html;
+
+    // Wire delegated action handlers
+    grid.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var action   = btn.dataset.action;
+      var tradeKey = btn.dataset.tradeKey || '';
+      var row      = _findActiveRowByTradeKey(tradeKey);
+
+      if (action === 'close-position' && row) {
+        _executeActiveClose(btn, tradeKey, row);
+      } else if (action === 'refresh-analysis' && row) {
+        _refreshSinglePosition(btn, row);
+      } else if (action === 'data-workbench' && row) {
+        window.BenTradeTradeCard.openDataWorkbenchByTrade(row);
+      }
+    });
+
+    // Wire expand state persistence
+    grid.querySelectorAll('details.trade-card-collapse').forEach(function (details) {
+      details.addEventListener('toggle', function () {
+        var tk = details.dataset.tradeKey || '';
+        if (tk) _activeExpandState[tk] = details.open;
+      });
+    });
+
+    // Run meta banner
     var summary = data.summary || {};
+    var acctMode = data.account_mode || _getAccountMode();
+    var acctBadge = '<span class="active-account-badge badge-' + acctMode + '">' + acctMode.toUpperCase() + '</span>';
+
     var metaHtml =
       '<div class="tmc-active-run-meta">' +
+        acctBadge +
         '<span class="tmc-meta-item">Run ' + esc((data.run_id || '').substring(0, 16)) + '</span>' +
         '<span class="tmc-meta-sep">|</span>' +
         '<span class="tmc-meta-item">' + (data.duration_ms || 0) + 'ms</span>' +
@@ -1437,166 +1889,515 @@
     );
   }
 
-  function buildActiveTradeCard(rec) {
+  /**
+   * Build a trade key for an active trade recommendation.
+   * Format: SYMBOL|ACTIVE|strategy|expiration|dte
+   */
+  function _buildActiveTradeKey(rec) {
+    var sym = String(rec.symbol || '').toUpperCase();
+    var strat = String(rec.strategy || rec.strategy_id || '');
+    var exp = rec.expiration || 'NA';
+    var dte = rec.dte != null ? String(rec.dte) : 'NA';
+    return sym + '|ACTIVE|' + strat + '|' + exp + '|' + dte;
+  }
+
+  function _findActiveRowByTradeKey(tradeKey) {
+    if (!tradeKey) return null;
+    for (var i = 0; i < _activeRenderedRows.length; i++) {
+      if (_buildActiveTradeKey(_activeRenderedRows[i]) === tradeKey) return _activeRenderedRows[i];
+    }
+    return null;
+  }
+
+  /**
+   * Build a single active trade recommendation as a full TradeCard.
+   * Same <details>/<summary> pattern as stock and options cards.
+   */
+  function buildActiveTradeCard(rec, idx) {
+    var tc = window.BenTradeTradeCard;
     var symbol = rec.symbol || '???';
     var recommendation = (rec.recommendation || '--').toUpperCase();
     var conviction = rec.conviction;
     var urgency = rec.urgency || 1;
-    var rationale = rec.rationale_summary || '';
-    var points = rec.key_supporting_points || [];
-    var risks = rec.key_risks || [];
+    var strategy = rec.strategy || '';
+    var strategyLabel = strategy ? strategy.replace(/_/g, ' ').replace(/\b\w/g, function (ch) { return ch.toUpperCase(); }) : '--';
+    var dte = rec.dte;
+    var posSnap = rec.position_snapshot || {};
     var engineSummary = rec.internal_engine_summary || {};
     var engineMetrics = rec.internal_engine_metrics || {};
     var modelSummary = rec.model_summary || {};
-    var posSnap = rec.position_snapshot || {};
-    var strategy = rec.strategy || '';
-    var dte = rec.dte;
-    var marketAlign = rec.market_alignment || '--';
+    var tradeKey = _buildActiveTradeKey(rec);
+
+    // ── Health score badge (replaces Score badge) ──
     var healthScore = engineSummary.trade_health_score;
-    var riskFlags = rec.internal_engine_flags || [];
+    var healthColor = '#8a8ab4';
+    if (healthScore != null) {
+      if (healthScore >= 70) healthColor = '#00dc78';
+      else if (healthScore >= 45) healthColor = '#ffc83c';
+      else healthColor = '#ff5a5a';
+    }
+    var healthBadge = healthScore != null
+      ? '<span class="trade-rank-badge" style="font-size:14px;font-weight:700;color:' + healthColor + ';background:' + healthColor + '12;border:1px solid ' + healthColor + '44;border-radius:8px;padding:3px 10px;white-space:nowrap;">Health ' + Math.round(healthScore) + '</span>'
+      : '';
+
+    // ── Recommendation badge ──
+    var recColor = '#b4b4c8';
+    var recPulse = '';
+    if (recommendation === 'HOLD') recColor = '#00dc78';
+    else if (recommendation === 'REDUCE') recColor = '#ffc83c';
+    else if (recommendation === 'CLOSE') recColor = '#ff5a5a';
+    else if (recommendation === 'URGENT_REVIEW') { recColor = '#ff5a5a'; recPulse = ' tmc-pulse'; }
+    var recBadge = '<span class="' + recClass(recommendation) + recPulse + '" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid ' + recColor + '44;color:' + recColor + ';font-weight:700;letter-spacing:0.3px;white-space:nowrap;">' + esc(recommendation.replace(/_/g, ' ')) + '</span>';
+
+    // ── P&L display ──
+    var pnlVal = posSnap.unrealized_pnl;
+    var pnlPct = posSnap.unrealized_pnl_pct;
+    var pnlColor = pnlVal != null ? (pnlVal >= 0 ? '#00dc78' : '#ff5a5a') : '#8a8ab4';
+    var pnlText = pnlVal != null ? '$' + pnlVal.toFixed(2) : '--';
+    var pnlPctText = pnlPct != null ? ' (' + (pnlPct * 100).toFixed(1) + '%)' : '';
+
+    // ── Header pills ──
+    var symbolBadge = tc ? tc.pill(symbol) : '<span class="qtPill">' + esc(symbol) + '</span>';
+    var dteBadge = dte != null ? (tc ? tc.pill(dte + ' DTE') : '<span class="qtPill">' + dte + ' DTE</span>') : '';
+
+    // ── Subtitle: strikes, expiration, P&L ──
+    var subtitleParts = [];
+    subtitleParts.push(strategyLabel);
+    if (rec.expiration) subtitleParts.push(rec.expiration);
+    subtitleParts.push('<span style="color:' + pnlColor + ';">' + pnlText + pnlPctText + '</span>');
+    var subtitleText = subtitleParts.join(' \u00B7 ');
+
+    // ── Chevron SVG ──
+    var chevronSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+
+    // ── Build enrichment sections ──
+    var enrichment = buildActiveEnrichmentHtml(rec);
+
+    // ── Collapse state ──
+    var isExpanded = tradeKey ? (_activeExpandState[tradeKey] === true) : false;
+    var openAttr = isExpanded ? ' open' : '';
+
+    // ── Action buttons (always visible) ──
+    var tradeKeyAttr = ' data-trade-key="' + esc(tradeKey) + '"';
+    var isActionable = recommendation === 'CLOSE' || recommendation === 'URGENT_REVIEW' || recommendation === 'REDUCE';
+    var actionsHtml = enrichment.warnings
+      + '<div class="trade-actions">'
+      + '<div class="actions-row">';
+    if (isActionable) {
+      var closeBtnClass = (recommendation === 'CLOSE' || recommendation === 'URGENT_REVIEW') ? 'btn-danger' : 'btn-warn';
+      var closeBtnLabel = recommendation === 'REDUCE' ? 'Reduce Position' : 'Close Position';
+      actionsHtml += '<button type="button" class="btn ' + closeBtnClass + ' btn-action" data-action="close-position"' + tradeKeyAttr + ' title="' + esc(closeBtnLabel) + '">' + closeBtnLabel + '</button>';
+    }
+    actionsHtml += '<button type="button" class="btn btn-action" data-action="refresh-analysis"' + tradeKeyAttr + ' title="Re-run analysis for this position">Refresh Analysis</button>'
+      + '</div>'
+      + '<div class="actions-row">'
+      + '<button type="button" class="btn btn-action" data-action="data-workbench"' + tradeKeyAttr + ' title="Send to Data Workbench">Send to Data Workbench</button>'
+      + '</div>'
+      + '</div>';
+
+    // ── Full card HTML ──
+    return '<div class="trade-card" data-idx="' + idx + '"' + tradeKeyAttr + ' style="margin-bottom:14px;display:flex;flex-direction:column;">'
+      + '<details class="trade-card-collapse"' + tradeKeyAttr + openAttr + '>'
+      + '<summary class="trade-summary"><div class="trade-header trade-header-click">'
+      + '<div class="trade-header-left"><span class="chev">' + chevronSvg + '</span></div>'
+      + '<div class="trade-header-center">'
+      + '<div class="trade-type" style="display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap;">' + symbolBadge + ' ' + dteBadge + ' <span style="font-size:11px;color:var(--muted);">Active Position</span> ' + recBadge + '</div>'
+      + '<div class="trade-subtitle">' + subtitleText + '</div>'
+      + '</div>'
+      + '<div class="trade-header-right">' + healthBadge + '</div>'
+      + '</div></summary>'
+      + '<div class="trade-body" style="flex:1 1 auto;">'
+      + enrichment.body
+      + '</div>'
+      + '</details>'
+      + actionsHtml
+      + '</div>';
+  }
+
+  /**
+   * Build enrichment HTML for active trade expanded body.
+   * Returns { body, warnings } matching stock/options enrichment pattern.
+   */
+  function buildActiveEnrichmentHtml(rec) {
+    var bodyParts = [];
+    var warningParts = [];
+    var posSnap = rec.position_snapshot || {};
+    var engineSummary = rec.internal_engine_summary || {};
+    var engineMetrics = rec.internal_engine_metrics || {};
+    var modelSummary = rec.model_summary || {};
+    var marketAlignRaw = rec.market_alignment || {};
+    var marketAlignLabel = (typeof marketAlignRaw === 'object' ? marketAlignRaw.label : marketAlignRaw) || '--';
+    var marketAlignDetail = (typeof marketAlignRaw === 'object' ? marketAlignRaw.detail : marketAlignRaw) || '';
     var isDegraded = rec.is_degraded;
     var degradedReasons = rec.degraded_reasons || [];
 
-    var card = document.createElement('div');
-    card.className = 'tmc-card tmc-active-card';
-
-    var header =
-      '<div class="tmc-card-header">' +
-        '<div class="tmc-card-symbol">' + esc(symbol) + '</div>' +
-        '<div class="tmc-card-action ' + recClass(recommendation) + '">' + esc(recommendation) + '</div>' +
-        '<div class="tmc-card-status ' + urgencyClass(urgency) + '">' + esc(urgencyLabel(urgency)) + '</div>' +
-      '</div>';
-
-    var convPct = conviction != null ? Math.round(conviction * 100) : 0;
-    var convBar =
-      '<div class="tmc-conviction-row">' +
-        '<span class="tmc-label">Conviction</span>' +
-        '<div class="tmc-conviction-bar-wrap">' +
-          '<div class="tmc-conviction-bar" style="width:' + convPct + '%"></div>' +
-        '</div>' +
-        '<span class="tmc-conviction-value">' + fmtPct(conviction) + '</span>' +
-      '</div>';
-
-    var pnlVal = posSnap.unrealized_pnl;
-    var pnlPct = posSnap.unrealized_pnl_pct;
-    var pnlClass = pnlVal != null ? (pnlVal >= 0 ? 'tmc-pnl-positive' : 'tmc-pnl-negative') : '';
-    var pnlText = pnlVal != null ? '$' + pnlVal.toFixed(2) : '--';
-    var pnlPctText = pnlPct != null ? '(' + (pnlPct * 100).toFixed(1) + '%)' : '';
-
-    var metrics =
-      '<div class="tmc-metrics">' +
-        '<div class="tmc-metric"><span class="tmc-metric-label">P&L</span><span class="tmc-metric-value ' + pnlClass + '">' + pnlText + ' ' + pnlPctText + '</span></div>' +
-        '<div class="tmc-metric"><span class="tmc-metric-label">Health</span><span class="tmc-metric-value">' + (healthScore != null ? healthScore + '/100' : '--') + '</span></div>' +
-        '<div class="tmc-metric"><span class="tmc-metric-label">DTE</span><span class="tmc-metric-value">' + (dte != null ? dte + 'd' : '--') + '</span></div>' +
-        '<div class="tmc-metric"><span class="tmc-metric-label">Market</span><span class="tmc-metric-value">' + esc(marketAlign) + '</span></div>' +
-      '</div>';
-
-    var engineHtml = '';
-    var compKeys = Object.keys(engineMetrics);
-    if (compKeys.length > 0) {
-      engineHtml = '<div class="tmc-engine-scores"><div class="tmc-points-label">Engine Scores</div><div class="tmc-engine-grid">';
-      compKeys.forEach(function (k) {
-        var v = engineMetrics[k];
-        var displayVal = v != null ? Math.round(v) : '--';
-        engineHtml += '<span class="tmc-engine-item">' + esc(k.replace(/_/g, ' ')) + ': <strong>' + displayVal + '</strong></span>';
-      });
-      engineHtml += '</div></div>';
-    }
-
-    var flagsHtml = '';
-    if (riskFlags.length > 0) {
-      flagsHtml = '<div class="tmc-risk-flags">';
-      riskFlags.forEach(function (f) {
-        flagsHtml += '<span class="tmc-risk-flag">' + esc(f) + '</span>';
-      });
-      flagsHtml += '</div>';
-    }
-
-    var rationaleHtml = '';
-    if (rationale) {
-      rationaleHtml =
-        '<div class="tmc-rationale">' +
-          '<div class="tmc-rationale-label">Rationale</div>' +
-          '<div class="tmc-rationale-text">' + esc(rationale) + '</div>' +
-        '</div>';
-    }
-
-    var pointsHtml = buildListSection(points, 'Supporting Points', 'tmc-points');
-    var risksHtml  = buildListSection(risks, 'Risks', 'tmc-risks');
-
-    var nextMove = rec.suggested_next_move || '';
-    var nextMoveHtml = '';
-    if (nextMove) {
-      nextMoveHtml =
-        '<div class="tmc-next-move">' +
-          '<div class="tmc-points-label">Suggested Next Move</div>' +
-          '<div class="tmc-next-move-text">' + esc(nextMove) + '</div>' +
-        '</div>';
-    }
-
-    var modelMeta = '';
-    if (modelSummary.model_available) {
-      modelMeta =
-        '<div class="tmc-model-meta">' +
-          '<span class="tmc-meta-item">' + esc(modelSummary.provider || '--') + '</span>' +
-          '<span class="tmc-meta-sep">|</span>' +
-          '<span class="tmc-meta-item">' + esc(modelSummary.model_name || '--') + '</span>' +
-          (modelSummary.latency_ms != null ? '<span class="tmc-meta-sep">|</span><span class="tmc-meta-item">' + modelSummary.latency_ms + 'ms</span>' : '') +
-        '</div>';
-    } else {
-      modelMeta = '<div class="tmc-model-meta"><span class="tmc-meta-item tmc-meta-degraded">Engine only (model unavailable)</span></div>';
-    }
-
-    var degradedHtml = '';
+    // ── Degradation banner ──
     if (isDegraded && degradedReasons.length > 0) {
-      degradedHtml =
-        '<div class="tmc-degraded-notice">' +
-          '<span class="tmc-degraded-icon">Warning</span> Degraded: ' + esc(degradedReasons.slice(0, 3).join(', ')) +
-        '</div>';
+      warningParts.push(
+        '<div style="margin-bottom:6px;padding:5px 10px;font-size:11px;font-weight:600;color:#ff8a5a;background:rgba(255,138,90,0.08);border:1px solid rgba(255,138,90,0.2);border-radius:5px;text-align:center;">'
+        + '\u26A0 Analysis degraded: ' + esc(degradedReasons.slice(0, 3).join(', '))
+        + '</div>'
+      );
     }
 
-    var isClose = recommendation === 'CLOSE' || recommendation === 'URGENT_REVIEW';
-    var isReduce = recommendation === 'REDUCE';
-    var footer =
-      '<div class="tmc-card-footer">' +
-        '<button class="btn tmc-btn-execute" ' +
-          'data-symbol="' + esc(symbol) + '" ' +
-          'data-action="execute" ' +
-          'title="Open trade ticket for adjustment">' +
-          'Execute' +
-        '</button>' +
-        '<button class="btn tmc-btn-close' + (isClose || isReduce ? '' : ' tmc-btn-disabled') + '" ' +
-          'data-symbol="' + esc(symbol) + '" ' +
-          'data-action="close" ' +
-          (isClose || isReduce ? '' : 'disabled ') +
-          'title="' + (isClose || isReduce ? 'Close or reduce this position' : 'Position not flagged for closing') + '">' +
-          'Close' +
-        '</button>' +
-        '<span class="tmc-scanner-badge">' + esc(strategy || '--') + '</span>' +
-        (rec.recommendation_source ? '<span class="tmc-source-badge">via ' + esc(rec.recommendation_source) + '</span>' : '') +
-      '</div>';
+    // ── POSITION SNAPSHOT section ──
+    var snapItems = [
+      { label: 'Entry Price', value: posSnap.avg_open_price != null ? '$' + Number(posSnap.avg_open_price).toFixed(2) : '--' },
+      { label: 'Current Price', value: posSnap.mark_price != null ? '$' + Number(posSnap.mark_price).toFixed(2) : '--' },
+      { label: 'Unrealized P&L', value: posSnap.unrealized_pnl != null ? '$' + Number(posSnap.unrealized_pnl).toFixed(2) : '--',
+        cssClass: posSnap.unrealized_pnl != null ? (posSnap.unrealized_pnl >= 0 ? 'positive' : 'negative') : 'neutral' },
+      { label: 'P&L %', value: posSnap.unrealized_pnl_pct != null ? (posSnap.unrealized_pnl_pct * 100).toFixed(1) + '%' : '--',
+        cssClass: posSnap.unrealized_pnl_pct != null ? (posSnap.unrealized_pnl_pct >= 0 ? 'positive' : 'negative') : 'neutral' },
+      { label: 'DTE', value: rec.dte != null ? rec.dte + 'd' : '--' },
+      { label: 'Expiration', value: rec.expiration || posSnap.expiration || '--' },
+      { label: 'Cost Basis', value: posSnap.cost_basis_total != null ? '$' + Number(posSnap.cost_basis_total).toFixed(2) : '--' },
+      { label: 'Market Value', value: posSnap.market_value != null ? '$' + Number(posSnap.market_value).toFixed(2) : '--' },
+    ];
+    var snapGrid = '<div class="metric-grid">' + snapItems.map(function (item) {
+      return '<div class="metric"><div class="metric-label">' + esc(item.label) + '</div><div class="metric-value ' + (item.cssClass || 'neutral') + '">' + item.value + '</div></div>';
+    }).join('') + '</div>';
 
-    card.innerHTML = header + convBar + metrics + engineHtml + flagsHtml +
-      rationaleHtml + pointsHtml + risksHtml + nextMoveHtml +
-      modelMeta + degradedHtml + footer;
-
-    var execBtn = card.querySelector('[data-action="execute"]');
-    if (execBtn) {
-      execBtn.addEventListener('click', function () {
-        executeActivePosition(rec, 'execute');
+    // Per-leg details
+    var legs = posSnap.legs || [];
+    var legsHtml = '';
+    if (legs.length > 0) {
+      var legRows = '';
+      legs.forEach(function (leg) {
+        var qty = leg.quantity || leg.qty || 0;
+        var side = qty < 0 ? 'SHORT' : 'LONG';
+        var sideClass = side === 'SHORT' ? 'tmc-leg-short' : 'tmc-leg-long';
+        var strike = leg.strike != null ? String(leg.strike) : '?';
+        var optType = (leg.option_type || leg.type || '').toUpperCase();
+        var occSymbol = leg.symbol || '';
+        var bidAsk = '';
+        if (leg.bid != null && leg.ask != null) {
+          bidAsk = Number(leg.bid).toFixed(2) + ' / ' + Number(leg.ask).toFixed(2);
+        }
+        var delta = leg.delta != null ? '\u0394 ' + Number(leg.delta).toFixed(2) : '';
+        legRows +=
+          '<div class="tmc-options-leg-row">' +
+            '<span class="tmc-leg-side ' + sideClass + '">' + esc(side) + '</span>' +
+            '<span class="tmc-leg-strike">' + esc(strike) + ' ' + esc(optType) + '</span>' +
+            '<span class="tmc-leg-pricing">' + esc(bidAsk) + '</span>' +
+            '<span class="tmc-leg-delta">' + esc(delta) + '</span>' +
+          '</div>';
       });
-    }
-    var closeBtn = card.querySelector('[data-action="close"]');
-    if (closeBtn && !closeBtn.disabled) {
-      closeBtn.addEventListener('click', function () {
-        executeActivePosition(rec, 'close');
-      });
+      legsHtml = '<div class="tmc-options-legs" style="margin-top:6px;">' + legRows + '</div>';
     }
 
-    return card;
+    // Live Greeks
+    var greeks = rec.live_greeks;
+    var greeksHtml = '';
+    if (greeks) {
+      var gItems = [
+        { label: '\u0394 Trade Delta', value: greeks.trade_delta != null ? greeks.trade_delta.toFixed(2) : '--' },
+        { label: '\u0398 Trade Theta', value: greeks.trade_theta != null ? '$' + greeks.trade_theta.toFixed(2) : '--' },
+        { label: '\u03BD Trade Vega', value: greeks.trade_vega != null ? '$' + greeks.trade_vega.toFixed(2) : '--' },
+      ];
+      greeksHtml = '<div style="display:flex;gap:12px;margin-top:6px;flex-wrap:wrap;">' + gItems.map(function (g) {
+        return '<span style="font-size:11px;color:var(--text-secondary,#bbb);"><span style="color:var(--accent-cyan,#00dcff);font-weight:600;">' + g.label + ':</span> ' + g.value + '</span>';
+      }).join('') + '</div>';
+      if (greeks.any_refreshed) {
+        greeksHtml += '<div style="font-size:9px;color:var(--muted);margin-top:2px;">\u2713 Greeks refreshed from live chain data</div>';
+      }
+    }
+
+    bodyParts.push(
+      '<div class="section section-core"><div class="section-title">POSITION SNAPSHOT</div>'
+      + snapGrid + legsHtml + greeksHtml
+      + '</div>'
+    );
+
+    // ── HEALTH ASSESSMENT section ──
+    var healthScore = engineSummary.trade_health_score;
+    var healthColor = '#8a8ab4';
+    if (healthScore != null) {
+      if (healthScore >= 70) healthColor = '#00dc78';
+      else if (healthScore >= 45) healthColor = '#ffc83c';
+      else healthColor = '#ff5a5a';
+    }
+    var compKeys = Object.keys(engineMetrics);
+    if (healthScore != null || compKeys.length > 0) {
+      var healthHtml = '<div class="section" style="margin-bottom:8px;padding:8px 10px;border-radius:6px;border:1px solid ' + healthColor + '33;background:' + healthColor + '08;">';
+      healthHtml += '<div class="section-title">HEALTH ASSESSMENT';
+      if (healthScore != null) {
+        healthHtml += ' \u2014 <span style="color:' + healthColor + ';">' + Math.round(healthScore) + '/100</span>';
+      }
+      healthHtml += '</div>';
+
+      if (compKeys.length > 0) {
+        healthHtml += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">';
+        compKeys.forEach(function (k) {
+          var v = engineMetrics[k];
+          var displayVal = v != null ? Math.round(v) : '--';
+          var cColor = '#8a8ab4';
+          if (v != null) {
+            if (v >= 70) cColor = '#00dc78';
+            else if (v >= 45) cColor = '#ffc83c';
+            else cColor = '#ff5a5a';
+          }
+          healthHtml += '<span style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid ' + cColor + '33;color:' + cColor + ';background:' + cColor + '08;">'
+            + esc(k.replace(/_/g, ' ')) + ': <strong>' + displayVal + '</strong></span>';
+        });
+        healthHtml += '</div>';
+      }
+
+      // Engine recommendation
+      if (engineSummary.engine_recommendation) {
+        healthHtml += '<div style="margin-top:6px;font-size:11px;color:var(--text-secondary,#bbb);">Engine: <strong>' + esc(engineSummary.engine_recommendation) + '</strong></div>';
+      }
+
+      // Risk flags
+      var riskFlags = rec.internal_engine_flags || [];
+      if (riskFlags.length > 0) {
+        healthHtml += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;">';
+        riskFlags.forEach(function (f) {
+          healthHtml += '<span class="tmc-risk-flag">' + esc(f) + '</span>';
+        });
+        healthHtml += '</div>';
+      }
+
+      healthHtml += '</div>';
+      bodyParts.push(healthHtml);
+    }
+
+    // ── MODEL REVIEW section ──
+    var hasModel = !!(modelSummary.model_available);
+    if (hasModel) {
+      var mRec = String(modelSummary.model_recommendation || rec.recommendation || '--').toUpperCase();
+      var mConv = modelSummary.model_conviction != null ? fmtPctDirect(modelSummary.model_conviction) : '';
+      var mProvider = modelSummary.provider || '';
+      var mLatency = modelSummary.latency_ms != null ? modelSummary.latency_ms + 'ms' : '';
+      var mHeaderBits = [mRec, mConv ? 'Conf: ' + mConv : '', mProvider, mLatency].filter(Boolean).join(' \u00B7 ');
+
+      var mRecColor = '#b4b4c8';
+      if (mRec === 'HOLD') mRecColor = '#00dc78';
+      else if (mRec === 'REDUCE') mRecColor = '#ffc83c';
+      else if (mRec === 'CLOSE' || mRec === 'URGENT_REVIEW' || mRec === 'URGENT REVIEW') mRecColor = '#ff5a5a';
+
+      var modelBody = '';
+      if (rec.rationale_summary) {
+        modelBody += '<div style="font-size:12px;color:var(--text,#d7fbff);line-height:1.6;margin-bottom:4px;">' + esc(rec.rationale_summary) + '</div>';
+      }
+
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:8px;padding:8px 10px;border-radius:6px;border:1px solid ' + mRecColor + '33;background:' + mRecColor + '08;">'
+        + '<div class="section-title" style="margin-bottom:6px;">MODEL REVIEW'
+        + (mHeaderBits ? ' \u2014 <span style="color:' + mRecColor + ';">' + mHeaderBits + '</span>' : '')
+        + '</div>'
+        + modelBody
+        + '</div>'
+      );
+    } else {
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:8px;padding:8px 10px;border-radius:6px;border:1px solid rgba(138,138,180,0.2);background:rgba(138,138,180,0.04);">'
+        + '<div class="section-title" style="color:#8a8ab4;">MODEL REVIEW</div>'
+        + '<div style="font-size:12px;color:var(--muted);">Model analysis unavailable \u2014 engine-only assessment</div>'
+        + '</div>'
+      );
+    }
+
+    // ── SUPPORTING POINTS section ──
+    var points = rec.key_supporting_points || [];
+    if (points.length > 0) {
+      var pointsLis = points.map(function (p) {
+        return '<li style="margin-bottom:2px;">' + esc(p) + '</li>';
+      }).join('');
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:8px;">'
+        + '<div class="section-title">KEY SUPPORTING POINTS</div>'
+        + '<ul style="margin:0;padding-left:16px;font-size:11px;line-height:1.5;">' + pointsLis + '</ul>'
+        + '</div>'
+      );
+    }
+
+    // ── EVENT RISK section ──
+    var eventRisk = rec.event_risk;
+    if (eventRisk) {
+      var erLevel = eventRisk.event_risk_level || 'unknown';
+      var erDetails = eventRisk.event_details || [];
+      var erColor = '#8a8ab4';
+      if (erLevel === 'high' || erLevel === 'critical') erColor = '#ff5a5a';
+      else if (erLevel === 'elevated') erColor = '#ffc83c';
+      else if (erLevel === 'quiet') erColor = '#00dc78';
+
+      var erHtml = '<div class="section" style="margin-bottom:8px;padding:8px 10px;border-radius:6px;border:1px solid ' + erColor + '33;background:' + erColor + '08;">';
+      erHtml += '<div class="section-title">EVENT RISK \u2014 <span style="color:' + erColor + ';">' + esc(erLevel.toUpperCase()) + '</span></div>';
+
+      if (erDetails.length > 0) {
+        erHtml += '<div style="margin-top:4px;">';
+        erDetails.forEach(function (evt) {
+          var evtName = (typeof evt === 'string') ? evt : (evt.event || evt.name || evt.title || JSON.stringify(evt));
+          var evtDate = (typeof evt === 'object' && evt.date) ? ' (' + evt.date + ')' : '';
+          erHtml += '<div style="font-size:11px;color:var(--text-secondary,#bbb);line-height:1.4;padding:2px 0 2px 8px;border-left:2px solid ' + erColor + '44;margin-bottom:3px;">'
+            + esc(evtName) + esc(evtDate) + '</div>';
+        });
+        erHtml += '</div>';
+      }
+      erHtml += '</div>';
+      bodyParts.push(erHtml);
+    }
+
+    // ── PORTFOLIO CONTEXT section ──
+    var portCtx = rec.portfolio_context;
+    if (portCtx) {
+      var pcItems = [
+        { label: 'Position Risk %', value: portCtx.position_risk_pct != null ? (portCtx.position_risk_pct * 100).toFixed(1) + '%' : '--' },
+        { label: 'Underlying Conc.', value: portCtx.underlying_concentration_pct != null ? (portCtx.underlying_concentration_pct * 100).toFixed(1) + '%' : '--' },
+        { label: 'Portfolio \u0394', value: portCtx.net_portfolio_delta != null ? portCtx.net_portfolio_delta.toFixed(2) : '--' },
+        { label: 'Portfolio \u0398', value: portCtx.net_portfolio_theta != null ? '$' + portCtx.net_portfolio_theta.toFixed(2) : '--' },
+        { label: 'Total Positions', value: portCtx.total_positions != null ? String(portCtx.total_positions) : '--' },
+      ];
+
+      var pcHtml = '<div class="section" style="margin-bottom:8px;padding:8px 10px;background:rgba(100,149,237,0.04);border-radius:6px;border:1px solid rgba(100,149,237,0.12);">';
+      pcHtml += '<div class="section-title">PORTFOLIO CONTEXT</div>';
+      pcHtml += '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;">';
+      pcItems.forEach(function (item) {
+        pcHtml += '<span style="font-size:11px;color:var(--text-secondary,#bbb);"><span style="font-weight:600;color:var(--text,#d7fbff);">' + esc(item.label) + ':</span> ' + item.value + '</span>';
+      });
+      pcHtml += '</div>';
+
+      if (portCtx.is_portfolio_concentrated) {
+        pcHtml += '<div style="margin-top:4px;font-size:10px;color:#ffc83c;">\u26A0 Portfolio concentrated in ' + esc(portCtx.top_concentration_symbol || '?') + '</div>';
+      }
+      var pfFlags = portCtx.portfolio_risk_flags || [];
+      if (pfFlags.length > 0) {
+        pcHtml += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">';
+        pfFlags.forEach(function (f) {
+          pcHtml += '<span class="tmc-risk-flag">' + esc(f) + '</span>';
+        });
+        pcHtml += '</div>';
+      }
+      pcHtml += '</div>';
+      bodyParts.push(pcHtml);
+    }
+
+    // ── MARKET ALIGNMENT section ──
+    if (marketAlignDetail) {
+      var maColor = marketAlignLabel === 'Aligned' ? '#00dc78' : marketAlignLabel === 'Unfavorable' ? '#ff5a5a' : '#ffc83c';
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:8px;padding:8px 10px;background:rgba(100,149,237,0.04);border-radius:6px;border:1px solid rgba(100,149,237,0.12);">'
+        + '<div class="section-title">MARKET ALIGNMENT \u2014 <span style="color:' + maColor + ';">' + esc(marketAlignLabel.toUpperCase()) + '</span></div>'
+        + '<div style="font-size:12px;color:var(--text,#d7fbff);line-height:1.6;">' + esc(marketAlignDetail) + '</div>'
+        + '</div>'
+      );
+    }
+
+    // ── CAUTION section (key_risks) ──
+    var risks = rec.key_risks || [];
+    if (risks.length > 0) {
+      var riskLis = risks.map(function (r) {
+        return '<li style="margin-bottom:2px;">' + esc(r) + '</li>';
+      }).join('');
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:6px;padding:6px 10px;border-radius:6px;border:1px solid rgba(244,200,95,0.2);background:rgba(244,200,95,0.04);">'
+        + '<div class="section-title" style="color:var(--warn,#f4c85f);">CAUTION</div>'
+        + '<ul style="margin:0;padding-left:16px;font-size:11px;line-height:1.5;">' + riskLis + '</ul>'
+        + '</div>'
+      );
+    }
+
+    // ── SUGGESTED NEXT MOVE section ──
+    var nextMove = rec.suggested_next_move || '';
+    if (nextMove) {
+      bodyParts.push(
+        '<div class="section" style="margin-bottom:6px;padding:6px 10px;border-radius:6px;border:1px solid rgba(0,220,255,0.15);background:rgba(0,220,255,0.03);">'
+        + '<div class="section-title" style="color:var(--accent-cyan,#00dcff);">SUGGESTED NEXT MOVE</div>'
+        + '<div style="font-size:12px;color:var(--text,#d7fbff);line-height:1.6;">' + esc(nextMove) + '</div>'
+        + '</div>'
+      );
+    }
+
+    // ── Model metadata footer ──
+    if (modelSummary.model_available) {
+      bodyParts.push(
+        '<div style="margin-top:4px;font-size:9px;color:var(--muted);display:flex;gap:6px;align-items:center;">'
+        + '<span>' + esc(modelSummary.provider || '') + '</span>'
+        + '<span>\u00B7</span>'
+        + '<span>' + esc(modelSummary.model_name || '') + '</span>'
+        + (modelSummary.latency_ms != null ? '<span>\u00B7</span><span>' + modelSummary.latency_ms + 'ms</span>' : '')
+        + (rec.recommendation_source ? '<span>\u00B7</span><span>via ' + esc(rec.recommendation_source) + '</span>' : '')
+        + '</div>'
+      );
+    }
+
+    return { body: bodyParts.join(''), warnings: warningParts.join('') };
   }
 
-  function executeActivePosition(rec, action) {
+  /**
+   * Handle close/reduce position via the suggested_close_order from the pipeline.
+   * Uses /api/trading/preview if available, falls back to TradeTicket.
+   */
+  function _executeActiveClose(btn, tradeKey, rec) {
+    var closeOrder = rec.suggested_close_order;
+    if (!closeOrder) {
+      console.warn('[TMC] No suggested_close_order for', tradeKey);
+      // Fall back to TradeTicket
+      _openActiveTradeTicket(rec, 'close');
+      return;
+    }
+
+    if (api && api.tradingPreview) {
+      btn.disabled = true;
+      btn.textContent = 'Previewing\u2026';
+      api.tradingPreview(closeOrder)
+        .then(function (preview) {
+          btn.disabled = false;
+          btn.textContent = btn.textContent.indexOf('Reduce') >= 0 ? 'Reduce Position' : 'Close Position';
+          if (window.BenTradeExecutionModal && window.BenTradeExecutionModal.open) {
+            window.BenTradeExecutionModal.open(closeOrder, preview);
+          } else {
+            console.log('[TMC] Close order preview:', preview);
+            alert('Preview: ' + JSON.stringify(preview, null, 2));
+          }
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          btn.textContent = btn.textContent.indexOf('Reduce') >= 0 ? 'Reduce Position' : 'Close Position';
+          console.error('[TMC] Close order preview failed:', err);
+          alert('Preview failed: ' + (err.message || String(err)));
+        });
+    } else {
+      _openActiveTradeTicket(rec, 'close');
+    }
+  }
+
+  /**
+   * Refresh analysis for a single position (re-runs the pipeline for just this symbol).
+   */
+  function _refreshSinglePosition(btn, rec) {
+    var symbol = rec.symbol || '';
+    btn.disabled = true;
+    btn.textContent = 'Refreshing\u2026';
+
+    var accountMode = _getAccountMode();
+    var skipModel = false;
+    var cb = document.getElementById('tmcSkipModel');
+    if (cb) skipModel = cb.checked;
+
+    var url = '/api/active-trade-pipeline/run?account_mode=' + encodeURIComponent(accountMode) + '&skip_model=' + (skipModel ? 'true' : 'false');
+    fetch(url, { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        btn.disabled = false;
+        btn.textContent = 'Refresh Analysis';
+        if (data.ok === false) {
+          alert('Refresh failed: ' + ((data.error || {}).message || 'unknown'));
+          return;
+        }
+        renderActiveResults(data);
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = 'Refresh Analysis';
+        alert('Refresh failed: ' + (err.message || String(err)));
+      });
+  }
+
+  /**
+   * Fallback: open TradeTicket for active position actions.
+   */
+  function _openActiveTradeTicket(rec, action) {
     var symbol = rec.symbol || '';
     var strategy = rec.strategy || '';
     var posSnap = rec.position_snapshot || {};
@@ -1626,15 +2427,456 @@
     }
   }
 
+  /* =================================================================
+   *  FULL REFRESH -- chains Stock → Options → Active → Balance
+   * ================================================================= */
+
+  var _fullRefreshStages = [
+    { label: 'Stock Scan',        step: 1 },
+    { label: 'Options Scan',      step: 2 },
+    { label: 'Active Trades',     step: 3 },
+    { label: 'Portfolio Balance',  step: 4 },
+  ];
+
+  function _setRefreshStatus(msg, step, total) {
+    var el = document.getElementById('tmcRefreshStatus');
+    if (!el) return;
+    if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.style.display = 'inline';
+    el.textContent = (step && total) ? ('(' + step + '/' + total + ') ' + msg) : msg;
+  }
+
+  function _setFullRefreshEnabled(running) {
+    _fullRefreshRunning = running;
+    var btn = document.getElementById('tmcFullRefreshBtn');
+    if (btn) {
+      btn.disabled = running;
+      btn.textContent = running ? '⟳ Running…' : '⟳ Full Refresh';
+    }
+  }
+
+  function handleFullRefresh() {
+    if (_fullRefreshRunning) return;
+    _setFullRefreshEnabled(true);
+    var total = _fullRefreshStages.length;
+
+    var skipModel = false;
+    var cb = document.getElementById('tmcSkipModel');
+    if (cb) skipModel = cb.checked;
+    var accountMode = _getAccountMode();
+
+    var chainResults = {};
+
+    // Stage 1: Stock Scan
+    _setRefreshStatus('Running stock scan…', 1, total);
+    api.tmcRunStock()
+      .then(function (res) {
+        chainResults.stockTrigger = res;
+        return api.tmcGetLatestStock();
+      })
+      .then(function (resp) {
+        chainResults.stockResults = resp;
+        // Refresh the stock section UI
+        loadStockOpportunities();
+
+        // Stage 2: Options Scan
+        _setRefreshStatus('Running options scan…', 2, total);
+        return api.tmcRunOptions();
+      })
+      .then(function (res) {
+        chainResults.optionsTrigger = res;
+        return api.tmcGetLatestOptions();
+      })
+      .then(function (resp) {
+        chainResults.optionsResults = resp;
+        loadOptionsOpportunities();
+
+        // Stage 3: Active Trades
+        _setRefreshStatus('Analysing active trades…', 3, total);
+        var url = '/api/active-trade-pipeline/run?account_mode=' +
+          encodeURIComponent(accountMode) + '&skip_model=' + (skipModel ? 'true' : 'false');
+        return fetch(url, { method: 'POST' }).then(function (r) { return r.json(); });
+      })
+      .then(function (activeData) {
+        chainResults.activeResults = activeData;
+        renderActiveResults(activeData);
+
+        // Stage 4: Portfolio Balance
+        _setRefreshStatus('Building portfolio balance…', 4, total);
+        return api.tmcRunPortfolioBalance({
+          account_mode: accountMode,
+          skip_model: skipModel,
+          active_trade_results: activeData,
+        });
+      })
+      .then(function (balanceData) {
+        chainResults.balanceResults = balanceData;
+        displayPortfolioBalance(balanceData);
+        _setRefreshStatus('Complete', null, null);
+        setTimeout(function () { _setRefreshStatus(null); }, 4000);
+        _setFullRefreshEnabled(false);
+        console.log('[TMC] Full Refresh complete', chainResults);
+      })
+      .catch(function (err) {
+        console.error('[TMC] Full Refresh failed:', err);
+        _setRefreshStatus('Failed: ' + err.message, null, null);
+        setTimeout(function () { _setRefreshStatus(null); }, 8000);
+        _setFullRefreshEnabled(false);
+      });
+  }
+
+  /* -- Portfolio Balance rendering ----------------------------------- */
+
+  /** Store last balance result for close-button binding */
+  var _lastBalanceResult = null;
+
+  function displayPortfolioBalance(data) {
+    var section = document.getElementById('tmcPortfolioBalanceSection');
+    var grid    = document.getElementById('tmcPortfolioBalanceGrid');
+    var badge   = document.getElementById('tmcBalanceStatus');
+    if (!section || !grid) return;
+    section.style.display = '';
+
+    _lastBalanceResult = data;
+
+    var plan = data && data.rebalance_plan ? data.rebalance_plan : null;
+    if (!plan) {
+      grid.innerHTML = '<div class="tmc-empty-state"><div class="tmc-empty-icon">&#9888;</div>' +
+        '<div class="tmc-empty-text">No balance data returned</div></div>';
+      return;
+    }
+
+    var closes  = plan.close_actions  || [];
+    var holds   = plan.hold_positions || [];
+    var opens   = plan.open_actions   || [];
+    var skips   = plan.skip_actions   || [];
+    var impact  = plan.net_impact     || {};
+    var postAdj = plan.post_adjustment_state || {};
+    var policy  = data.risk_policy || plan.risk_policy_used || {};
+
+    // Separate CLOSE vs REDUCE within close_actions
+    var closeOnly = [];
+    var reduceOnly = [];
+    closes.forEach(function (a) {
+      if (a.action === 'REDUCE') { reduceOnly.push(a); }
+      else { closeOnly.push(a); }
+    });
+
+    var actionCount = closes.length + opens.length;
+    if (badge) {
+      badge.textContent = actionCount > 0 ? actionCount + ' actions' : 'balanced';
+      badge.className = 'tmc-count-badge' + (actionCount > 0 ? ' tmc-count-live' : ' tmc-count-muted');
+    }
+
+    var html = '';
+
+    // ──────────────── 1. SUMMARY BAR ────────────────
+    html += '<div class="tmc-pb-summary-bar">';
+    html += '<div class="tmc-pb-summary-row">';
+    html += '<span class="tmc-pb-summary-item"><span class="tmc-pb-label">Equity</span> <span class="tmc-pb-val">$' + _fmtNum(data.account_equity) + '</span></span>';
+    html += '<span class="tmc-pb-summary-item"><span class="tmc-pb-label">Regime</span> <span class="tmc-pb-val tmc-pb-regime">' + esc(data.regime_label || 'Unknown') + '</span></span>';
+    html += '<span class="tmc-pb-summary-item"><span class="tmc-pb-label">Risk</span> <span class="tmc-pb-val">$' + _fmtNum(impact.risk_before) + ' → $' + _fmtNum(impact.risk_after_opens) + '</span></span>';
+    html += '<span class="tmc-pb-summary-item"><span class="tmc-pb-label">Delta</span> <span class="tmc-pb-val">' + _fmtDec(impact.delta_before, 2) + ' → ' + _fmtDec(impact.delta_after, 2) + '</span></span>';
+    html += '<span class="tmc-pb-summary-item"><span class="tmc-pb-label">Trades</span> <span class="tmc-pb-val">' + _fmtInt(impact.trades_before) + ' → ' + _fmtInt(impact.trades_after) + '</span></span>';
+    html += '</div>';
+    html += '<div class="tmc-pb-change-strip">';
+    html += 'Close ' + _fmtInt(impact.positions_closed) + ', ';
+    html += 'Reduce ' + _fmtInt(impact.positions_reduced) + ', ';
+    html += 'Hold ' + _fmtInt(impact.positions_held) + ', ';
+    html += 'Open ' + _fmtInt(impact.positions_opened) + ' new, ';
+    html += 'Skip ' + _fmtInt(impact.positions_skipped);
+    if (impact.risk_budget_remaining != null) {
+      html += ' | Budget remaining: $' + _fmtNum(impact.risk_budget_remaining);
+    }
+    html += '</div>';
+    html += '</div>';
+
+    // ──────────────── 2. CLOSE / REDUCE ACTIONS ────────────────
+    if (closeOnly.length || reduceOnly.length) {
+      html += '<div class="tmc-pb-group tmc-pb-group-close">';
+      html += '<h4 class="tmc-pb-group-title">Close / Reduce';
+      html += ' <span class="tmc-pb-group-count">' + (closeOnly.length + reduceOnly.length) + '</span></h4>';
+      closeOnly.forEach(function (a, i) {
+        html += _renderCloseAction(a, i);
+      });
+      reduceOnly.forEach(function (a, i) {
+        html += _renderCloseAction(a, closeOnly.length + i);
+      });
+      html += '</div>';
+    }
+
+    // ──────────────── 3. HOLD POSITIONS ────────────────
+    if (holds.length) {
+      html += '<div class="tmc-pb-group tmc-pb-group-hold">';
+      html += '<h4 class="tmc-pb-group-title">Hold';
+      html += ' <span class="tmc-pb-group-count">' + holds.length + '</span></h4>';
+      html += '<div class="tmc-pb-hold-grid">';
+      holds.forEach(function (pos) {
+        html += '<span class="tmc-pb-hold-badge">';
+        html += '<span class="tmc-pb-hold-sym">' + esc(pos.symbol) + '</span> ';
+        html += '<span class="tmc-pb-hold-strat">' + esc((pos.strategy || '').replace(/_/g, ' ')) + '</span>';
+        if (pos.trade_health_score != null) {
+          html += ' <span class="tmc-pb-hold-health">health ' + Math.round(pos.trade_health_score) + '</span>';
+        }
+        html += '</span>';
+      });
+      html += '</div>';
+      html += '</div>';
+    }
+
+    // ──────────────── 4. OPEN SUGGESTIONS ────────────────
+    if (opens.length) {
+      html += '<div class="tmc-pb-group tmc-pb-group-open">';
+      html += '<h4 class="tmc-pb-group-title">Suggested New Trades';
+      html += ' <span class="tmc-pb-group-count">' + opens.length + '</span></h4>';
+      opens.forEach(function (a, i) {
+        html += _renderOpenAction(a, i);
+      });
+      html += '</div>';
+    }
+
+    // ──────────────── 5. SKIPPED CANDIDATES (collapsible) ────────────────
+    if (skips.length) {
+      html += '<details class="tmc-pb-collapsible">';
+      html += '<summary class="tmc-pb-collapsible-summary">' + skips.length + ' candidates skipped</summary>';
+      html += '<div class="tmc-pb-skip-list">';
+      skips.forEach(function (s) {
+        html += '<div class="tmc-pb-skip-item">';
+        html += '<span class="tmc-pb-skip-sym">' + esc(s.symbol) + '</span> ';
+        html += '<span class="tmc-pb-skip-strat">' + esc((s.strategy || '').replace(/_/g, ' ')) + '</span>';
+        html += '<span class="tmc-pb-skip-source">' + esc(s.source || '') + '</span>';
+        html += '<span class="tmc-pb-skip-reason">' + esc(s.skip_reason) + '</span>';
+        html += '</div>';
+      });
+      html += '</div>';
+      html += '</details>';
+    }
+
+    // ──────────────── 6. RISK POLICY SUMMARY (collapsible) ────────────────
+    html += '<details class="tmc-pb-collapsible">';
+    html += '<summary class="tmc-pb-collapsible-summary">Risk Policy Details</summary>';
+    html += '<div class="tmc-pb-policy-grid">';
+    html += _policyRow('Max risk / trade', '$' + _fmtNum(policy.max_risk_per_trade));
+    html += _policyRow('Max total risk', '$' + _fmtNum(policy.max_risk_total));
+    html += _policyRow('Max concurrent trades', _fmtInt(policy.max_concurrent_trades));
+    html += _policyRow('Regime', esc(policy.regime_label || data.regime_label || '—'));
+    html += _policyRow('Regime multiplier', (policy.regime_multiplier != null ? policy.regime_multiplier + 'x' : '—'));
+    html += _policyRow('Suggested max contracts', _fmtInt(policy.suggested_max_contracts));
+    if (postAdj.risk_used != null) {
+      html += _policyRow('Risk used (post-close)', '$' + _fmtNum(postAdj.risk_used));
+      html += _policyRow('Risk budget available', '$' + _fmtNum(postAdj.risk_budget_available));
+      html += _policyRow('Open slots', _fmtInt(postAdj.open_slots));
+      html += _policyRow('Max risk / new trade', '$' + _fmtNum(postAdj.max_risk_per_new_trade));
+    }
+    html += '</div>';
+    html += '</details>';
+
+    // Balanced state — no actions
+    if (closes.length === 0 && opens.length === 0 && holds.length === 0) {
+      html += '<div class="tmc-empty-state"><div class="tmc-empty-icon">&#9989;</div>' +
+        '<div class="tmc-empty-text">Portfolio is balanced — no actions suggested</div></div>';
+    }
+
+    grid.innerHTML = html;
+
+    // Bind close buttons
+    _bindCloseButtons(grid);
+    // Bind preview buttons
+    _bindPreviewButtons(grid);
+  }
+
+  /* -- Close action card ---------------------------------------------- */
+
+  function _renderCloseAction(a, idx) {
+    var isClose = a.action !== 'REDUCE';
+    var typeClass = isClose ? 'close' : 'reduce';
+    var labelText = isClose ? 'CLOSE' : 'REDUCE';
+
+    var card = '<div class="tmc-balance-action-card tmc-balance-action-' + typeClass + '">';
+    card += '<div class="tmc-balance-action-header">';
+    card += '<span class="tmc-balance-action-label tmc-balance-label-' + typeClass + '">' + labelText + '</span>';
+    card += '<span class="tmc-balance-action-symbol">' + esc(a.symbol || '—') + '</span>';
+    if (a.strategy) {
+      card += '<span class="tmc-balance-action-strategy">' + esc((a.strategy || '').replace(/_/g, ' ')) + '</span>';
+    }
+    card += '</div>';
+    if (a.reason) {
+      card += '<div class="tmc-balance-action-reason">' + esc(a.reason) + '</div>';
+    }
+    card += '<div class="tmc-balance-action-metrics">';
+    card += '<span>Risk freed: $' + _fmtNum(a.risk_freed) + '</span>';
+    if (a.delta_freed != null) {
+      card += '<span>Delta freed: ' + _fmtDec(a.delta_freed, 4) + '</span>';
+    }
+    if (a.conviction != null) {
+      card += '<span>Conviction: ' + Math.round(a.conviction) + '</span>';
+    }
+    if (a.trade_health_score != null) {
+      card += '<span>Health: ' + Math.round(a.trade_health_score) + '</span>';
+    }
+    card += '</div>';
+    // Close button — reuses executeActivePosition flow
+    card += '<div class="tmc-balance-action-footer">';
+    card += '<button class="btn tmc-btn tmc-btn-close tmc-pb-close-btn" '
+      + 'data-close-idx="' + idx + '" '
+      + 'data-symbol="' + esc(a.symbol || '') + '" '
+      + 'data-strategy="' + esc(a.strategy || '') + '"'
+      + '>Execute ' + labelText + '</button>';
+    card += '</div>';
+    card += '</div>';
+    return card;
+  }
+
+  /* -- Open suggestion card ------------------------------------------- */
+
+  function _renderOpenAction(a, idx) {
+    var cand = a.candidate_data || {};
+    var alignClass = a.regime_alignment === 'aligned' ? 'aligned' :
+                     a.regime_alignment === 'neutral' ? 'neutral' : 'misaligned';
+
+    var card = '<div class="tmc-balance-action-card tmc-balance-action-open">';
+    card += '<div class="tmc-balance-action-header">';
+    card += '<span class="tmc-balance-action-label tmc-balance-label-open">OPEN</span>';
+    card += '<span class="tmc-balance-action-symbol">' + esc(a.symbol || '—') + '</span>';
+    if (a.strategy) {
+      card += '<span class="tmc-balance-action-strategy">' + esc((a.strategy || '').replace(/_/g, ' ')) + '</span>';
+    }
+    card += '<span class="tmc-pb-source-badge">' + esc(a.source || '') + '</span>';
+    card += '<span class="tmc-pb-align-badge tmc-pb-align-' + alignClass + '">' + esc(a.regime_alignment || '') + '</span>';
+    card += '</div>';
+    card += '<div class="tmc-balance-action-metrics">';
+    card += '<span>' + (a.contracts || 1) + 'x</span>';
+    card += '<span>Risk: $' + _fmtNum(a.max_loss) + '</span>';
+    if (a.ev != null) {
+      card += '<span>EV: $' + _fmtDec(a.ev, 0) + '</span>';
+    }
+    if (a.ror != null) {
+      card += '<span>RoR: ' + _fmtDec(a.ror * 100, 1) + '%</span>';
+    }
+    if (a.delta_impact != null) {
+      card += '<span>Delta: ' + _fmtDec(a.delta_impact, 4) + '</span>';
+    }
+    card += '</div>';
+    // Extra candidate detail line
+    if (cand.scanner_key || cand.dte || cand.pop != null) {
+      card += '<div class="tmc-balance-action-sub">';
+      if (cand.scanner_key) card += '<span>' + esc(cand.scanner_key.replace(/_/g, ' ')) + '</span>';
+      if (cand.dte != null)  card += '<span>DTE ' + cand.dte + '</span>';
+      if (cand.pop != null)  card += '<span>PoP ' + _fmtDec(cand.pop * 100, 0) + '%</span>';
+      if (cand.event_risk)   card += '<span class="tmc-pb-event-risk">' + esc(cand.event_risk) + '</span>';
+      card += '</div>';
+    }
+    card += '<div class="tmc-balance-action-footer">';
+    card += '<button class="btn tmc-btn tmc-btn-execute tmc-pb-preview-btn" '
+      + 'data-preview-idx="' + idx + '" '
+      + 'data-symbol="' + esc(a.symbol || '') + '" '
+      + 'data-strategy="' + esc(a.strategy || '') + '"'
+      + '>Preview Trade</button>';
+    card += '</div>';
+    card += '</div>';
+    return card;
+  }
+
+  /* -- Policy row helper ---------------------------------------------- */
+
+  function _policyRow(label, value) {
+    return '<div class="tmc-pb-policy-row"><span>' + label + '</span><span>' + value + '</span></div>';
+  }
+
+  /* -- Bind close buttons to executeActivePosition -------------------- */
+
+  function _bindCloseButtons(container) {
+    var buttons = container.querySelectorAll('.tmc-pb-close-btn');
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var idx = parseInt(btn.dataset.closeIdx, 10);
+        if (!_lastBalanceResult || !_lastBalanceResult.rebalance_plan) return;
+        var closes = _lastBalanceResult.rebalance_plan.close_actions || [];
+        var action = closes[idx];
+        if (!action) return;
+        // Build a rec shape compatible with executeActivePosition
+        var rec = {
+          symbol: action.symbol,
+          strategy: action.strategy,
+          recommendation: action.action,
+          conviction: action.conviction,
+          rationale_summary: action.reason || '',
+          suggested_next_move: '',
+          dte: null,
+          position_snapshot: {},
+        };
+        // If close_order is present, attach it
+        if (action.close_order) {
+          rec.close_order = action.close_order;
+        }
+        executeActivePosition(rec, 'close');
+      });
+    });
+  }
+
+  /* -- Bind preview buttons to TradeTicket ---------------------------- */
+
+  function _bindPreviewButtons(container) {
+    var buttons = container.querySelectorAll('.tmc-pb-preview-btn');
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var idx = parseInt(btn.dataset.previewIdx, 10);
+        if (!_lastBalanceResult || !_lastBalanceResult.rebalance_plan) return;
+        var opens = _lastBalanceResult.rebalance_plan.open_actions || [];
+        var action = opens[idx];
+        if (!action) return;
+        var tradeData = {
+          underlying: action.symbol,
+          symbol: action.symbol,
+          strategyId: action.strategy,
+          strategyLabel: (action.strategy || '').replace(/_/g, ' '),
+          quantity: action.contracts || 1,
+          orderType: 'limit',
+          tif: 'day',
+          action: 'execute',
+          source: action.source || 'portfolio_balance',
+        };
+        if (window.TradeTicket && typeof window.TradeTicket.open === 'function') {
+          window.TradeTicket.open(tradeData);
+        } else {
+          console.warn('[TMC] TradeTicket not available -- trade data:', tradeData);
+          alert('Trade Ticket module not loaded. Trade data logged to console.');
+        }
+      });
+    });
+  }
+
+  /* -- Formatting helpers --------------------------------------------- */
+
+  function _fmtNum(v) {
+    if (v == null) return '—';
+    var n = Number(v);
+    if (isNaN(n)) return '—';
+    return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  }
+
+  function _fmtDec(v, decimals) {
+    if (v == null) return '—';
+    var n = Number(v);
+    if (isNaN(n)) return '—';
+    return n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  }
+
+  function _fmtInt(v) {
+    if (v == null) return '—';
+    return String(Math.round(Number(v)));
+  }
+
   /* -- Page init ----------------------------------------------------- */
 
   function initTradeManagementCenter(viewEl) {
     if (!viewEl) return;
 
     // Workflow trigger buttons
-    var runStockBtn   = document.getElementById('tmcRunStock');
-    var runOptionsBtn = document.getElementById('tmcRunOptions');
-    var refreshBtn    = document.getElementById('tmcRefreshBtn');
+    var runStockBtn     = document.getElementById('tmcRunStock');
+    var runOptionsBtn   = document.getElementById('tmcRunOptions');
+    var refreshBtn      = document.getElementById('tmcRefreshBtn');
+    var fullRefreshBtn  = document.getElementById('tmcFullRefreshBtn');
 
     if (runStockBtn) {
       runStockBtn.addEventListener('click', function () { triggerStockRun(); });
@@ -1648,8 +2890,25 @@
         loadOptionsOpportunities();
       });
     }
+    if (fullRefreshBtn) {
+      fullRefreshBtn.addEventListener('click', function () { handleFullRefresh(); });
+    }
 
-    // Active trade controls (unchanged)
+    // Account mode toggle
+    var accountToggle = document.getElementById('tmcAccountToggle');
+    if (accountToggle) {
+      accountToggle.querySelectorAll('.active-account-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          accountToggle.querySelectorAll('.active-account-btn').forEach(function (b) {
+            b.classList.remove('is-active');
+          });
+          btn.classList.add('is-active');
+          _tmcAccountMode = btn.dataset.mode || 'paper';
+        });
+      });
+    }
+
+    // Active trade controls
     var runActiveBtn     = document.getElementById('tmcRunActiveBtn');
     var refreshActiveBtn = document.getElementById('tmcRefreshActiveBtn');
 
@@ -1682,6 +2941,10 @@
     normalizeOptionsCandidate: normalizeOptionsCandidate,
     tmcStockToScannerShape: tmcStockToScannerShape,
     buildTmcEnrichmentHtml: buildTmcEnrichmentHtml,
+    buildOptionsEnrichmentHtml: buildOptionsEnrichmentHtml,
+    buildOptionsTradeCard: buildOptionsTradeCard,
+    buildActiveTradeCard: buildActiveTradeCard,
+    buildActiveEnrichmentHtml: buildActiveEnrichmentHtml,
     renderTmcFinalDecisionResult: renderTmcFinalDecisionResult,
     getStatusInfo: getStatusInfo,
     TMC_STATUS_MAP: TMC_STATUS_MAP,

@@ -27,24 +27,18 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.services.data_quality_utils import (
+    build_data_quality_summary,
+    days_stale,
+    extract_value as _extract_value,
+    staleness_tier,
+)
 from app.services.market_context_service import MarketContextService
 
 logger = logging.getLogger(__name__)
 
 
-def _extract_value(metric: dict[str, Any] | float | int | None) -> float | None:
-    """Extract the numeric value from a MarketContextService metric envelope.
-
-    Handles both dict envelopes ({value, source, freshness, ...}) and raw
-    scalars (e.g. yield_curve_spread which is a derived float).
-    """
-    if metric is None:
-        return None
-    if isinstance(metric, (int, float)):
-        return float(metric)
-    if isinstance(metric, dict):
-        return metric.get("value")
-    return None
+# _extract_value imported from data_quality_utils
 
 
 def _extract_source(metric: dict[str, Any] | float | int | None) -> str | None:
@@ -140,6 +134,7 @@ class LiquidityConditionsDataProvider:
             ig_obs = await self.market_context.fred.get_series_with_date("BAMLC0A0CM")
             ig_spread = ig_obs["value"] if ig_obs else None
         except Exception as exc:
+            ig_obs = None
             source_errors["ig_spread_BAMLC0A0CM"] = str(exc)
             logger.warning(
                 "event=liquidity_source_failed source=BAMLC0A0CM error=%s", exc,
@@ -149,6 +144,7 @@ class LiquidityConditionsDataProvider:
             hy_obs = await self.market_context.fred.get_series_with_date("BAMLH0A0HYM2")
             hy_spread = hy_obs["value"] if hy_obs else None
         except Exception as exc:
+            hy_obs = None
             source_errors["hy_spread_BAMLH0A0HYM2"] = str(exc)
             logger.warning(
                 "event=liquidity_source_failed source=BAMLH0A0HYM2 error=%s", exc,
@@ -231,6 +227,53 @@ class LiquidityConditionsDataProvider:
             "freshness": "eod" if hy_spread is not None else "unavailable",
         }
 
+        # ── Staleness tracking for all FRED-sourced metrics ──────
+        ig_date = ig_obs.get("observation_date") if ig_obs else None
+        hy_date = hy_obs.get("observation_date") if hy_obs else None
+        ig_age = days_stale(ig_date)
+        hy_age = days_stale(hy_date)
+
+        # Market context FRED metrics
+        ten_y_date = market_ctx.get("ten_year_yield", {}).get("observation_date") if isinstance(market_ctx.get("ten_year_yield"), dict) else None
+        two_y_date = market_ctx.get("two_year_yield", {}).get("observation_date") if isinstance(market_ctx.get("two_year_yield"), dict) else None
+        ff_date = market_ctx.get("fed_funds_rate", {}).get("observation_date") if isinstance(market_ctx.get("fed_funds_rate"), dict) else None
+        usd_date = market_ctx.get("usd_index", {}).get("observation_date") if isinstance(market_ctx.get("usd_index"), dict) else None
+
+        ten_y_age = days_stale(ten_y_date)
+        two_y_age = days_stale(two_y_date)
+        ff_age = days_stale(ff_date)
+        usd_age = days_stale(usd_date)
+
+        # Log stale daily series (> 3 days)
+        for series_name, age, obs_date in [
+            ("BAMLC0A0CM", ig_age, ig_date),
+            ("BAMLH0A0HYM2", hy_age, hy_date),
+            ("DGS10", ten_y_age, ten_y_date),
+            ("DGS2", two_y_age, two_y_date),
+            ("DFF", ff_age, ff_date),
+            ("DTWEXBGS", usd_age, usd_date),
+        ]:
+            if age is not None and age > 3:
+                logger.warning(
+                    "event=fred_data_stale series=%s age_days=%d tier=%s observation_date=%s",
+                    series_name, age, staleness_tier(age), obs_date,
+                )
+
+        staleness_summary: dict[str, dict[str, Any]] = {}
+        for series_name, age, obs_date in [
+            ("BAMLC0A0CM", ig_age, ig_date),
+            ("BAMLH0A0HYM2", hy_age, hy_date),
+            ("DGS10", ten_y_age, ten_y_date),
+            ("DGS2", two_y_age, two_y_date),
+            ("DFF", ff_age, ff_date),
+            ("DTWEXBGS", usd_age, usd_date),
+        ]:
+            staleness_summary[series_name] = {
+                "age_days": age,
+                "tier": staleness_tier(age),
+                "observation_date": obs_date,
+            }
+
         # Proxy signals: FCI composite, funding stress proxy
         proxy_count = 2  # FCI proxy and funding stress proxy are always proxy
 
@@ -253,7 +296,16 @@ class LiquidityConditionsDataProvider:
                 source_errors,
             )
 
+        # Build per-metric data quality tags from market context envelopes
+        _quality_metrics = {
+            k: market_ctx.get(k)
+            for k in ("vix", "ten_year_yield", "two_year_yield", "fed_funds_rate",
+                      "usd_index", "yield_curve_spread")
+        }
+        data_quality = build_data_quality_summary(_quality_metrics)
+
         source_meta = {
+            "data_quality": data_quality,
             "market_context_generated_at": market_ctx.get("context_generated_at"),
             "source_detail": source_detail,
             "direct_signals_available": direct_available,
@@ -262,6 +314,7 @@ class LiquidityConditionsDataProvider:
             "stale_source_count": stale_count,
             "has_credit_spreads": has_credit,
             "has_funding_data": has_funding,
+            "staleness": staleness_summary,
             "data_note": (
                 "Most rate/credit/dollar data is direct from FRED. "
                 "FCI composite and funding stress are proxy estimates. "

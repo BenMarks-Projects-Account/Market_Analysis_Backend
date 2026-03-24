@@ -64,6 +64,11 @@ from app.workflows.market_state_consumer import (
     load_market_state_for_consumer,
 )
 from app.workflows.workflow_debug_log import WorkflowDebugLogger
+from app.services.event_calendar_context import (
+    build_event_context,
+    classify_candidate_event_risk,
+)
+from app.services.regime_alignment import classify_regime_alignment
 
 logger = logging.getLogger(__name__)
 
@@ -378,6 +383,12 @@ def _extract_compact_stock_candidate(cand: dict[str, Any]) -> dict[str, Any]:
         "model_key_factors": cand.get("model_key_factors"),
         "model_caution_notes": cand.get("model_caution_notes"),
         "model_technical_analysis": cand.get("model_technical_analysis"),
+        # Event risk
+        "event_risk": cand.get("event_risk", "unknown"),
+        "event_details": cand.get("event_details", []),
+        # Regime alignment
+        "regime_alignment": cand.get("regime_alignment", "unknown"),
+        "regime_warning": cand.get("regime_warning"),
     }
     return compact
 
@@ -976,10 +987,43 @@ def _stage_enrich_filter_rank_select(
             enriched_cand["support_state"] = support_state
             enriched_cand["market_summary_text"] = market_summary_text
             enriched_cand["market_confidence"] = market_confidence
+
+            # Regime-strategy alignment
+            ra = classify_regime_alignment(
+                market_regime=market_regime,
+                strategy_id=enriched_cand.get("scanner_key", ""),
+            )
+            enriched_cand["regime_alignment"] = ra["regime_alignment"]
+            enriched_cand["regime_warning"] = ra["regime_warning"]
+
             enriched.append(enriched_cand)
 
         if is_degraded:
             warnings.append("[enrich] Market state is degraded — enrichment may be incomplete")
+
+        # ── Event risk classification ────────────────────────────
+        # Load event calendar context once for the run, then classify
+        # each candidate with a fixed 5-day look-forward window
+        # (typical stock swing trade hold period).
+        _STOCK_EVENT_WINDOW_DAYS = 5
+
+        try:
+            event_context = build_event_context()
+        except Exception as exc:
+            _log.warning("event=event_calendar_unavailable error=%s", exc)
+            event_context = None
+
+        for cand in enriched:
+            if event_context is not None:
+                er = classify_candidate_event_risk(
+                    event_context,
+                    window_days=_STOCK_EVENT_WINDOW_DAYS,
+                )
+                cand["event_risk"] = er["event_risk"]
+                cand["event_details"] = er["event_details"]
+            else:
+                cand["event_risk"] = "unknown"
+                cand["event_details"] = []
 
         enriched_input = len(enriched)
 
@@ -1425,7 +1469,55 @@ def _stage_model_filter_rank(
     selected: list[dict[str, Any]] = stage_data.get("selected_candidates", [])
     before_count = len(selected)
 
-    # 1 + 2: Remove PASS recommendations and candidates without model analysis
+    # Detect full model degradation: every candidate lacks model analysis
+    model_available = any(c.get("model_review") is not None for c in selected)
+
+    if not model_available and before_count > 0:
+        # ─── FULL DEGRADATION: No model analysis available ───
+        logger.warning(
+            "event=model_fully_degraded action=bypass_model_filter count=%d",
+            before_count,
+        )
+        warnings.append(
+            "Model analysis unavailable — candidates ranked by scanner score only"
+        )
+        for cand in selected:
+            cand["model_degraded"] = True
+            cand["model_recommendation"] = None
+            cand["model_score"] = None
+
+        trimmed = sorted(
+            selected,
+            key=lambda c: -(c.get("setup_quality") or 0),
+        )[:DEFAULT_TOP_N]
+
+        stage_data["selected_candidates"] = trimmed
+
+        stage_data["model_filter_counts"] = {
+            "before": before_count,
+            "passed_removed": 0,
+            "passed_symbols": [],
+            "no_analysis_removed": 0,
+            "no_analysis_symbols": [],
+            "buy_candidates": len(trimmed),
+            "dropped_by_rank": max(0, before_count - len(trimmed)),
+            "dropped_symbols": [
+                c.get("symbol", "?") for c in selected[len(trimmed):]
+            ],
+            "after": len(trimmed),
+            "model_degraded": True,
+            "ranking_fallback": "setup_quality",
+            "cap_used": DEFAULT_TOP_N,
+        }
+
+        return StageOutcome(
+            stage_key="model_filter_rank",
+            status="completed",
+            started_at=started,
+            completed_at=_now_iso(),
+        )
+
+    # ─── NORMAL OR PARTIAL: existing behavior ───
     passed = []
     no_analysis = []
     buy_candidates = []

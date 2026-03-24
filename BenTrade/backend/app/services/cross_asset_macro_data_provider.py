@@ -19,10 +19,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from app.clients.fred_client import FredClient
+from app.services.data_quality_utils import (
+    build_data_quality_summary,
+    days_stale,
+    extract_value as _extract_value,
+    staleness_tier,
+)
 from app.services.market_context_service import MarketContextService
 
 logger = logging.getLogger(__name__)
@@ -37,19 +42,7 @@ _FRED_IG_SPREAD = "BAMLC0A0CM"        # ICE BofA US Corp IG OAS
 _FRED_HY_SPREAD = "BAMLH0A0HYM2"     # ICE BofA US HY OAS
 
 
-def _extract_value(metric: dict[str, Any] | float | int | None) -> float | None:
-    """Extract the numeric value from a MarketContextService metric envelope.
-
-    Handles both dict envelopes ({value, source, freshness, ...}) and raw
-    scalars for robustness.
-    """
-    if metric is None:
-        return None
-    if isinstance(metric, (int, float)):
-        return float(metric)
-    if isinstance(metric, dict):
-        return metric.get("value")
-    return None
+# _extract_value imported from data_quality_utils
 
 
 class CrossAssetMacroDataProvider:
@@ -219,38 +212,94 @@ class CrossAssetMacroDataProvider:
             "cpi_yoy": cpi_yoy,
         }
 
-        # Compute staleness in days for sources with observation dates
-        def _days_stale(obs_date_str: str | None) -> int | None:
-            if not obs_date_str:
-                return None
-            try:
-                obs = datetime.strptime(obs_date_str, "%Y-%m-%d").replace(
-                    tzinfo=timezone.utc
-                )
-                return (datetime.now(timezone.utc) - obs).days
-            except (ValueError, TypeError):
-                return None
-
+        # Compute staleness for ALL FRED sources
         gold_date = gold_obs.get("observation_date") if gold_obs else None
         copper_date = copper_obs.get("observation_date") if copper_obs else None
-        copper_days_stale = _days_stale(copper_date)
+        ig_date = ig_obs.get("observation_date") if ig_obs else None
+        hy_date = hy_obs.get("observation_date") if hy_obs else None
 
-        if copper_days_stale is not None and copper_days_stale > 5:
+        gold_age = days_stale(gold_date)
+        copper_age = days_stale(copper_date)
+        ig_age = days_stale(ig_date)
+        hy_age = days_stale(hy_date)
+
+        # Also compute staleness for market-context FRED metrics
+        ten_y_date = market_ctx.get("ten_year_yield", {}).get("observation_date") if isinstance(market_ctx.get("ten_year_yield"), dict) else None
+        two_y_date = market_ctx.get("two_year_yield", {}).get("observation_date") if isinstance(market_ctx.get("two_year_yield"), dict) else None
+        oil_date = market_ctx.get("oil_wti", {}).get("observation_date") if isinstance(market_ctx.get("oil_wti"), dict) else None
+        usd_date = market_ctx.get("usd_index", {}).get("observation_date") if isinstance(market_ctx.get("usd_index"), dict) else None
+        ff_date = market_ctx.get("fed_funds_rate", {}).get("observation_date") if isinstance(market_ctx.get("fed_funds_rate"), dict) else None
+
+        ten_y_age = days_stale(ten_y_date)
+        two_y_age = days_stale(two_y_date)
+        oil_age = days_stale(oil_date)
+        usd_age = days_stale(usd_date)
+        ff_age = days_stale(ff_date)
+
+        # Log stale daily series (> 3 days) at WARNING, monthly at INFO
+        _daily_series_staleness = [
+            ("NASDAQQGLDI", gold_age, gold_date),
+            ("BAMLC0A0CM", ig_age, ig_date),
+            ("BAMLH0A0HYM2", hy_age, hy_date),
+            ("DGS10", ten_y_age, ten_y_date),
+            ("DGS2", two_y_age, two_y_date),
+            ("DCOILWTICO", oil_age, oil_date),
+            ("DTWEXBGS", usd_age, usd_date),
+            ("DFF", ff_age, ff_date),
+        ]
+        for series_name, age, obs_date in _daily_series_staleness:
+            if age is not None and age > 3:
+                logger.warning(
+                    "event=fred_data_stale series=%s age_days=%d tier=%s observation_date=%s",
+                    series_name, age, staleness_tier(age), obs_date,
+                )
+
+        # Monthly series logged at INFO (high staleness is expected)
+        if copper_age is not None and copper_age > 5:
             logger.info(
                 "event=cross_asset_copper_stale days_stale=%d observation_date=%s",
-                copper_days_stale, copper_date,
+                copper_age, copper_date,
             )
 
+        # Build staleness summary for source_meta
+        staleness_summary: dict[str, dict[str, Any]] = {}
+        for series_name, age, obs_date in [
+            ("NASDAQQGLDI", gold_age, gold_date),
+            ("PCOPPUSDM", copper_age, copper_date),
+            ("BAMLC0A0CM", ig_age, ig_date),
+            ("BAMLH0A0HYM2", hy_age, hy_date),
+            ("DGS10", ten_y_age, ten_y_date),
+            ("DGS2", two_y_age, two_y_date),
+            ("DCOILWTICO", oil_age, oil_date),
+            ("DTWEXBGS", usd_age, usd_date),
+            ("DFF", ff_age, ff_date),
+        ]:
+            staleness_summary[series_name] = {
+                "age_days": age,
+                "tier": staleness_tier(age),
+                "observation_date": obs_date,
+            }
+
         # Source metadata for UI freshness display
-        source_meta = {
+        # Build per-metric data quality tags from market context envelopes
+        _quality_metrics = {
+            k: market_ctx.get(k)
+            for k in ("ten_year_yield", "two_year_yield", "fed_funds_rate",
+                      "vix", "oil_wti", "usd_index", "yield_curve_spread", "cpi_yoy")
+        }
+        data_quality = build_data_quality_summary(_quality_metrics)
+
+        source_meta: dict[str, Any] = {
+            "data_quality": data_quality,
             "market_context_generated_at": market_ctx.get("context_generated_at"),
             "vix_source": market_ctx.get("vix", {}).get("source"),
             "vix_freshness": market_ctx.get("vix", {}).get("freshness"),
             "fred_gold_date": gold_date,
             "fred_copper_date": copper_date,
-            "fred_copper_days_stale": copper_days_stale,
-            "fred_ig_date": ig_obs.get("observation_date") if ig_obs else None,
-            "fred_hy_date": hy_obs.get("observation_date") if hy_obs else None,
+            "fred_copper_days_stale": copper_age,
+            "fred_ig_date": ig_date,
+            "fred_hy_date": hy_date,
+            "staleness": staleness_summary,
             # FRED source honesty — frequency and delay metadata
             "fred_source_detail": {
                 _FRED_GOLD: {
@@ -270,7 +319,7 @@ class CrossAssetMacroDataProvider:
                     "frequency": "monthly",
                     "typical_delay": "up to 30 days (monthly average)",
                     "unit": "USD/metric ton",
-                    "days_stale": copper_days_stale,
+                    "days_stale": copper_age,
                     "stale_warning": (
                         "Monthly series — may not reflect recent price "
                         "movements. Treat as slow proxy for growth."

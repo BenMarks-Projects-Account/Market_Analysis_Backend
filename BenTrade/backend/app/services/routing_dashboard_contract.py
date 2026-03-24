@@ -162,6 +162,7 @@ class ProviderHealthSummary:
     state_display_label: str = ""
     status_detail_text: str = ""
     last_checked_at: str | None = None
+    circuit_breaker: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -182,6 +183,7 @@ class ProviderHealthSummary:
             "state_display_label": self.state_display_label,
             "status_detail_text": self.status_detail_text,
             "last_checked_at": self.last_checked_at,
+            "circuit_breaker": self.circuit_breaker,
         }
 
 

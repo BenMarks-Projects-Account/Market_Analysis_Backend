@@ -516,7 +516,15 @@ Prefer specific, data-linked reasoning over generic statements.
 largest concern.
 - Mention the largest concern explicitly in risk_review or thesis.
 
-OUTPUT FORMAT — return valid JSON only (no markdown, no code fences):
+OUTPUT FORMAT:
+1. Return ONLY a single JSON object — no prose, no markdown, no commentary.
+2. Do NOT wrap in ```json``` or any code fence.
+3. Do NOT prefix with "Here is…" or any leading text.
+4. Do NOT append trailing explanation after the closing brace.
+5. Start your response with { and end with } — nothing before, nothing after.
+6. Do NOT emit <think>, </think>, or any XML-style tags.
+7. Every string value must use double quotes. No trailing commas.
+
 {
   "recommendation": "TAKE" | "PASS" | "WATCH",
   "score_0_100": <integer 0-100>,
@@ -1040,16 +1048,9 @@ def analyze_trade_with_model(trade: dict, source_filename: str, model_url=None, 
             raw_snippet = (assistant_text[:500] + '…') if len(assistant_text) > 500 else assistant_text
             print(f"{TAG} assistant_text length={len(assistant_text)} first500={raw_snippet!r}")
 
-            # --- Strip <think> / reasoning traces before JSON extraction ---
-            import re as _re
-            assistant_text = _re.sub(r"<think>.*?</think>", "", assistant_text, flags=_re.DOTALL | _re.IGNORECASE)
-            assistant_text = _re.sub(r"<think>.*$", "", assistant_text, flags=_re.DOTALL | _re.IGNORECASE)
-            assistant_text = _re.sub(r"<scratchpad>.*?</scratchpad>", "", assistant_text, flags=_re.DOTALL | _re.IGNORECASE)
-            assistant_text = _re.sub(r"</?(?:think|scratchpad|reasoning|thought|internal)>", "", assistant_text, flags=_re.IGNORECASE)
-            assistant_text = assistant_text.strip()
-
-            # --- Robust JSON extraction (code fences, bare objects, arrays) ---
-            parsed = _find_json_block(assistant_text)
+            # --- Robust JSON extraction (handles think tags, fences, trailing commas, etc.) ---
+            from common.json_repair import extract_and_repair_json
+            parsed, _repair_method = extract_and_repair_json(assistant_text)
             if parsed is None:
                 print(f"{TAG} FAIL: could not extract any JSON from LLM output")
                 last_err = f'unparsable_response (requestId={request_id})'
@@ -1194,7 +1195,8 @@ def _attempt_repair(
         if assistant_text is None:
             assistant_text = getattr(resp, 'text', '') or ''
 
-        parsed = _find_json_block(assistant_text)
+        from common.json_repair import extract_and_repair_json as _repair_json
+        parsed, _rm = _repair_json(assistant_text)
         if parsed is None:
             print(f"{tag} REPAIR_FAIL: could not parse repair response")
             return None

@@ -69,6 +69,18 @@ _DEFAULT_GENERATION_CAP = 50_000
 # Maximum wing width in dollars (structural bound, not desirability).
 _DEFAULT_MAX_WING_WIDTH = 50.0
 
+# Minimum wing width in dollars.
+# Skips narrow wings (e.g. $1-wide SPY) that yield marginal credit.
+_DEFAULT_MIN_WIDTH = 2.0
+
+# Short-leg delta range — only generate sides whose short strike
+# has abs(delta) within this band.
+_DEFAULT_SHORT_DELTA_MIN = 0.05
+_DEFAULT_SHORT_DELTA_MAX = 0.40
+
+# Max ratio between put/call short deltas — prevents heavily skewed condors.
+_DEFAULT_MAX_DELTA_RATIO = 2.5
+
 
 class IronCondorsV2Scanner(BaseV2Scanner):
     """V2 scanner for iron condors.
@@ -128,18 +140,89 @@ class IronCondorsV2Scanner(BaseV2Scanner):
 
         generation_cap = int(context.get("generation_cap", _DEFAULT_GENERATION_CAP))
         max_wing = float(context.get("max_wing_width", _DEFAULT_MAX_WING_WIDTH))
+        min_width = float(context.get("min_width", _DEFAULT_MIN_WIDTH))
+        short_delta_min = float(context.get("short_delta_min", _DEFAULT_SHORT_DELTA_MIN))
+        short_delta_max = float(context.get("short_delta_max", _DEFAULT_SHORT_DELTA_MAX))
+        max_delta_ratio = float(context.get("max_delta_ratio", _DEFAULT_MAX_DELTA_RATIO))
+
+        # === TEMPORARY DIAGNOSTIC LOGGING (remove after debugging) ===
+        import json as _diag_json
+        from pathlib import Path as _DiagPath
+        from datetime import datetime as _DiagDT
+        _diag: dict[str, Any] = {
+            "timestamp": _DiagDT.now().isoformat(),
+            "scanner_key": scanner_key,
+            "strategy_id": strategy_id,
+            "symbol": symbol,
+            "phase_a": {},
+            "phase_b": {
+                "per_expiry": [],
+                "total_constructed": 0,
+                "put_delta_none_skipped": 0,
+                "put_delta_filter_skipped": 0,
+                "call_delta_none_skipped": 0,
+                "call_delta_filter_skipped": 0,
+                "put_width_skipped": 0,
+                "call_width_skipped": 0,
+                "delta_balance_skipped": 0,
+                "cap_hit": False,
+            },
+            "config": {
+                "generation_cap": generation_cap,
+                "max_wing": max_wing,
+                "min_width": min_width,
+                "short_delta_min": short_delta_min,
+                "short_delta_max": short_delta_max,
+                "max_delta_ratio": max_delta_ratio,
+                "spot": spot,
+            },
+        }
+        # === END DIAG INIT ===
 
         candidates: list[V2Candidate] = []
         seq = 0
         capped = False
 
-        # Side-array cap: since condors = put_sides × call_sides,
-        # cap each side at √generation_cap to prevent memory spikes.
-        side_cap = int(math.isqrt(generation_cap)) or generation_cap
+        # Per-expiration side cap — ensures all expirations get fair representation.
+        # With 10 exps: √(50000/10) = √5000 ≈ 70 sides per exp.
+        num_expirations = len(narrowed_universe.expiry_buckets)
+        per_exp_side_cap = max(30, int(math.isqrt(generation_cap // max(num_expirations, 1))))
 
-        for exp, bucket in narrowed_universe.expiry_buckets.items():
+        # === DIAG: Phase A summary ===
+        _diag["phase_a"] = {
+            "total_expirations": num_expirations,
+            "expiration_dates": sorted(narrowed_universe.expiry_buckets.keys()),
+            "contracts_per_expiry": {
+                exp: len(bucket.strikes)
+                for exp, bucket in narrowed_universe.expiry_buckets.items()
+            },
+            "total_contracts": sum(
+                len(bucket.strikes)
+                for bucket in narrowed_universe.expiry_buckets.values()
+            ),
+            "underlying_price": underlying_price,
+            "per_exp_side_cap": per_exp_side_cap,
+        }
+
+        for exp in sorted(narrowed_universe.expiry_buckets.keys()):
+            bucket = narrowed_universe.expiry_buckets[exp]
             if capped:
                 break
+
+            # === DIAG: per-expiry entry ===
+            _diag_exp: dict[str, Any] = {
+                "expiry": exp,
+                "dte": getattr(bucket, 'dte', None),
+                "put_delta_values": [],
+                "call_delta_values": [],
+                "put_delta_none_skipped": 0,
+                "put_delta_filter_skipped": 0,
+                "call_delta_none_skipped": 0,
+                "call_delta_filter_skipped": 0,
+                "put_width_skipped": 0,
+                "call_width_skipped": 0,
+                "delta_balance_skipped": 0,
+            }
 
             # ── 1. Separate OTM puts and calls ─────────────────
             puts: list[tuple[float, Any]] = []
@@ -154,44 +237,108 @@ class IronCondorsV2Scanner(BaseV2Scanner):
             puts.sort(key=lambda x: x[0])    # ascending
             calls.sort(key=lambda x: x[0])   # ascending
 
+            _diag_exp["otm_put_count"] = len(puts)
+            _diag_exp["otm_call_count"] = len(calls)
+
+            # Sample delta values from puts and calls
+            for _idx, (_s, _c) in enumerate(puts[:10]):
+                _dv = getattr(_c, 'delta', None)
+                if _dv is None and hasattr(_c, 'greeks'):
+                    _dv = (_c.greeks or {}).get('delta') if isinstance(getattr(_c, 'greeks', None), dict) else None
+                _diag_exp["put_delta_values"].append({"strike": _s, "delta": _dv, "bid": getattr(_c, 'bid', None), "ask": getattr(_c, 'ask', None)})
+            for _idx, (_s, _c) in enumerate(calls[:10]):
+                _dv = getattr(_c, 'delta', None)
+                if _dv is None and hasattr(_c, 'greeks'):
+                    _dv = (_c.greeks or {}).get('delta') if isinstance(getattr(_c, 'greeks', None), dict) else None
+                _diag_exp["call_delta_values"].append({"strike": _s, "delta": _dv, "bid": getattr(_c, 'bid', None), "ask": getattr(_c, 'ask', None)})
+
             if len(puts) < 2 or len(calls) < 2:
+                _diag_exp["skipped_reason"] = f"insufficient_contracts (puts={len(puts)}, calls={len(calls)})"
+                _diag["phase_b"]["per_expiry"].append(_diag_exp)
                 continue
 
             # ── 2. Build put credit spread sides ───────────────
             # short_put > long_put  (credit: short closer to ATM)
+            # Short put is the HIGHER strike (j), so delta-filter on j.
             put_sides: list[tuple[float, Any, float, Any]] = []
             for i in range(len(puts)):
-                if len(put_sides) >= side_cap:
+                if len(put_sides) >= per_exp_side_cap:
                     break
                 for j in range(i + 1, len(puts)):
                     lp_s, lp_c = puts[i]   # lower strike  = long put
                     sp_s, sp_c = puts[j]   # higher strike = short put
+                    # Delta filter on the short put
+                    if sp_c.delta is None:
+                        _diag_exp["put_delta_none_skipped"] += 1
+                        _diag["phase_b"]["put_delta_none_skipped"] += 1
+                        continue
+                    if not (short_delta_min <= abs(sp_c.delta) <= short_delta_max):
+                        _diag_exp["put_delta_filter_skipped"] += 1
+                        _diag["phase_b"]["put_delta_filter_skipped"] += 1
+                        continue
+                    if sp_s - lp_s < min_width:
+                        _diag_exp["put_width_skipped"] += 1
+                        _diag["phase_b"]["put_width_skipped"] += 1
+                        continue
                     if sp_s - lp_s > max_wing:
                         continue
                     put_sides.append((sp_s, sp_c, lp_s, lp_c))
-                    if len(put_sides) >= side_cap:
+                    if len(put_sides) >= per_exp_side_cap:
                         break
 
             # ── 3. Build call credit spread sides ──────────────
             # short_call < long_call  (credit: short closer to ATM)
+            # Short call is the LOWER strike (i), so delta-filter on outer loop.
             call_sides: list[tuple[float, Any, float, Any]] = []
             for i in range(len(calls)):
-                if len(call_sides) >= side_cap:
+                if len(call_sides) >= per_exp_side_cap:
                     break
+                sc_s, sc_c = calls[i]   # lower strike  = short call
+                # Delta filter on the short call
+                if sc_c.delta is None:
+                    _diag_exp["call_delta_none_skipped"] += 1
+                    _diag["phase_b"]["call_delta_none_skipped"] += 1
+                    continue
+                if not (short_delta_min <= abs(sc_c.delta) <= short_delta_max):
+                    _diag_exp["call_delta_filter_skipped"] += 1
+                    _diag["phase_b"]["call_delta_filter_skipped"] += 1
+                    continue
                 for j in range(i + 1, len(calls)):
-                    sc_s, sc_c = calls[i]   # lower strike  = short call
                     lc_s, lc_c = calls[j]   # higher strike = long call
+                    if lc_s - sc_s < min_width:
+                        _diag_exp["call_width_skipped"] += 1
+                        _diag["phase_b"]["call_width_skipped"] += 1
+                        continue
                     if lc_s - sc_s > max_wing:
                         continue
                     call_sides.append((sc_s, sc_c, lc_s, lc_c))
-                    if len(call_sides) >= side_cap:
+                    if len(call_sides) >= per_exp_side_cap:
                         break
 
+            _diag_exp["put_sides_constructed"] = len(put_sides)
+            _diag_exp["call_sides_constructed"] = len(call_sides)
+            _diag_exp["cross_product_possible"] = len(put_sides) * len(call_sides)
+
             # ── 4. Cross-product into condors ──────────────────
+            _exp_constructed = 0
             for ps_s, ps_c, pl_s, pl_c in put_sides:
                 if capped:
                     break
+                put_short_delta = abs(ps_c.delta or 0)
                 for cs_s, cs_c, cl_s, cl_c in call_sides:
+                    # Delta balance check — skip heavily skewed condors
+                    call_short_delta = abs(cs_c.delta or 0)
+                    if put_short_delta < 0.01 or call_short_delta < 0.01:
+                        _diag_exp["delta_balance_skipped"] += 1
+                        _diag["phase_b"]["delta_balance_skipped"] += 1
+                        continue
+                    delta_ratio = (max(put_short_delta, call_short_delta)
+                                   / min(put_short_delta, call_short_delta))
+                    if delta_ratio > max_delta_ratio:
+                        _diag_exp["delta_balance_skipped"] += 1
+                        _diag["phase_b"]["delta_balance_skipped"] += 1
+                        continue
+
                     cand = _build_condor_candidate(
                         symbol=symbol,
                         strategy_id=strategy_id,
@@ -208,20 +355,41 @@ class IronCondorsV2Scanner(BaseV2Scanner):
                     )
                     candidates.append(cand)
                     seq += 1
+                    _exp_constructed += 1
+                    _diag["phase_b"]["total_constructed"] += 1
 
                     if seq >= generation_cap:
                         capped = True
+                        _diag["phase_b"]["cap_hit"] = True
                         _log.warning(
                             "Iron condor %s: hit generation cap (%d)",
                             symbol, generation_cap,
                         )
                         break
 
+            _diag_exp["candidates_constructed"] = _exp_constructed
+            _diag["phase_b"]["per_expiry"].append(_diag_exp)
+
         _log.info(
             "Iron condor %s: constructed %d candidates from %d expirations",
             symbol, len(candidates),
             len(narrowed_universe.expiry_buckets),
         )
+
+        # === WRITE DIAGNOSTIC REPORT (TEMPORARY — remove after debugging) ===
+        import os as _diag_os
+        if not _diag_os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                _diag_dir = _DiagPath("results/diagnostics")
+                _diag_dir.mkdir(parents=True, exist_ok=True)
+                _diag_file = _diag_dir / f"options_diag_iron_condor_{symbol}_{_DiagDT.now().strftime('%Y%m%d_%H%M%S')}.json"
+                with open(_diag_file, "w") as _f:
+                    _diag_json.dump(_diag, _f, indent=2, default=str)
+                _log.info("DIAG: wrote %s", _diag_file)
+            except Exception as _diag_exc:
+                _log.warning("event=diag_write_failed error=%s", _diag_exc)
+        # === END DIAGNOSTIC LOGGING ===
+
         return candidates
 
     # ── Phase C hook: family structural checks ──────────────────

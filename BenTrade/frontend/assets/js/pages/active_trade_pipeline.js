@@ -382,6 +382,110 @@
       if (elDetailContent) elDetailContent.style.display = 'none';
     }
 
+    /* ── Account mode from TMC toggle ─────────────────────────── */
+    function getAccountMode() {
+      var activeBtn = document.querySelector('#tmcAccountToggle .active-account-btn.is-active');
+      return (activeBtn && activeBtn.getAttribute('data-mode')) || 'paper';
+    }
+
+    /* ── Close order preview → confirm → submit flow ──────────── */
+    function handleClosePreview(rec) {
+      var co = rec.suggested_close_order;
+      if (!co || !co.ready_for_preview) return;
+
+      var mode = getAccountMode();
+      var desc = co.description || (rec.symbol + ' close');
+      var costLine = '';
+      if (co.estimated_cost != null) {
+        costLine = '\nEstimated cost: $' + Math.abs(co.estimated_cost).toFixed(2) + ' (' + (co.price_effect || '') + ')';
+      } else if (co.estimated_proceeds != null) {
+        costLine = '\nEstimated proceeds: $' + co.estimated_proceeds.toFixed(2);
+      }
+
+      if (!confirm('Preview close order?\n\n' + desc + costLine + '\nAccount: ' + mode.toUpperCase())) {
+        return;
+      }
+
+      var previewPayload = {
+        order_type: co.order_type,
+        symbol: co.symbol,
+        limit_price: co.limit_price,
+        price_effect: co.price_effect,
+        time_in_force: co.time_in_force || 'DAY',
+        mode: mode,
+      };
+      if (co.order_type === 'multileg' && co.legs) {
+        previewPayload.legs = co.legs;
+      }
+      if (co.order_type === 'equity') {
+        previewPayload.side = co.side;
+        previewPayload.quantity = co.quantity;
+      }
+
+      // Show loading state on button
+      var closeBtn = elRecDetail && elRecDetail.querySelector('[data-action="close-preview"]');
+      if (closeBtn) { closeBtn.textContent = 'Previewing...'; closeBtn.disabled = true; }
+
+      apiFetch('/api/trading/close-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(previewPayload),
+      })
+        .then(function (preview) {
+          if (closeBtn) { closeBtn.textContent = 'Preview Complete'; closeBtn.disabled = false; }
+
+          if (!preview.ok) {
+            alert('Preview failed: ' + (preview.tradier_preview_error || 'Unknown error'));
+            if (closeBtn) closeBtn.textContent = co.action === 'REDUCE' ? 'Reduce Position' : 'Close Position';
+            return;
+          }
+
+          // Show preview details and confirm submission
+          var previewInfo = '';
+          var tp = preview.tradier_preview;
+          if (tp && tp.order) {
+            var orderInfo = tp.order;
+            previewInfo += '\nStatus: ' + (orderInfo.status || '—');
+            if (orderInfo.commission != null) previewInfo += '\nCommission: $' + orderInfo.commission;
+            if (orderInfo.cost != null) previewInfo += '\nCost: $' + orderInfo.cost;
+          }
+
+          if (!confirm('Submit this close order?\n\n' + desc + costLine + previewInfo + '\n\nAccount: ' + mode.toUpperCase())) {
+            if (closeBtn) closeBtn.textContent = co.action === 'REDUCE' ? 'Reduce Position' : 'Close Position';
+            return;
+          }
+
+          // Submit
+          if (closeBtn) { closeBtn.textContent = 'Submitting...'; closeBtn.disabled = true; }
+
+          var submitPayload = Object.assign({}, previewPayload);
+          apiFetch('/api/trading/close-submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(submitPayload),
+          })
+            .then(function (result) {
+              if (result.ok) {
+                var statusMsg = result.dry_run ? 'DRY RUN' : result.status;
+                alert('Order ' + statusMsg + '\n\n' + (result.message || '') +
+                  (result.broker_order_id ? '\nOrder ID: ' + result.broker_order_id : ''));
+                if (closeBtn) { closeBtn.textContent = 'Submitted'; closeBtn.disabled = true; closeBtn.classList.add('atp-btn-done'); }
+              } else {
+                alert('Order rejected: ' + (result.message || 'Unknown error'));
+                if (closeBtn) { closeBtn.textContent = co.action === 'REDUCE' ? 'Reduce Position' : 'Close Position'; closeBtn.disabled = false; }
+              }
+            })
+            .catch(function (err) {
+              alert('Submit error: ' + err.message);
+              if (closeBtn) { closeBtn.textContent = co.action === 'REDUCE' ? 'Reduce Position' : 'Close Position'; closeBtn.disabled = false; }
+            });
+        })
+        .catch(function (err) {
+          alert('Preview error: ' + err.message);
+          if (closeBtn) { closeBtn.textContent = co.action === 'REDUCE' ? 'Reduce Position' : 'Close Position'; closeBtn.disabled = false; }
+        });
+    }
+
     /* ── Show recommendation in detail panel ──────────────────── */
     function showRecInDetail(rec) {
       if (elDetailEmpty) elDetailEmpty.style.display = 'none';
@@ -481,7 +585,33 @@
         h += '<div class="tmc-model-meta"><span class="tmc-meta-item tmc-meta-degraded">Engine only</span></div>';
       }
 
-      if (elRecDetail) elRecDetail.innerHTML = h;
+      // Close / Reduce button — only for actionable recommendations
+      var closeOrder = rec.suggested_close_order;
+      if (closeOrder && closeOrder.ready_for_preview && recommendation !== 'HOLD') {
+        var btnLabel = recommendation === 'REDUCE' ? 'Reduce Position' : 'Close Position';
+        var btnClass = recommendation === 'REDUCE' ? 'atp-btn-reduce' : 'atp-btn-close';
+        h += '<div class="atp-close-action">'
+           + '<button class="btn atp-close-btn ' + btnClass + '" data-action="close-preview">'
+           + btnLabel + '</button>';
+        if (closeOrder.description) {
+          h += '<div class="atp-close-desc">' + esc(closeOrder.description) + '</div>';
+        }
+        if (closeOrder.estimated_cost != null) {
+          h += '<div class="atp-close-cost">Est. cost: $' + Math.abs(closeOrder.estimated_cost).toFixed(2) + ' (' + esc(closeOrder.price_effect || '') + ')</div>';
+        } else if (closeOrder.estimated_proceeds != null) {
+          h += '<div class="atp-close-cost">Est. proceeds: $' + closeOrder.estimated_proceeds.toFixed(2) + '</div>';
+        }
+        h += '</div>';
+      }
+
+      if (elRecDetail) {
+        elRecDetail.innerHTML = h;
+        // Attach close button handler via DOM query
+        var closeBtn = elRecDetail.querySelector('[data-action="close-preview"]');
+        if (closeBtn) {
+          closeBtn.addEventListener('click', function () { handleClosePreview(rec); });
+        }
+      }
     }
 
     /* ── Results section (recommendation mini-cards below graph) ── */
@@ -544,9 +674,10 @@
       var urgency = rec.urgency || 1;
       var healthScore = (rec.internal_engine_summary || {}).trade_health_score;
       var isDegraded = rec.is_degraded;
+      var hasCloseOrder = rec.suggested_close_order && rec.suggested_close_order.ready_for_preview;
 
       var card = document.createElement('div');
-      card.className = 'atp-rec-mini-card';
+      card.className = 'atp-rec-mini-card atp-rec-border-' + recommendation.toLowerCase().replace('_', '-');
 
       card.innerHTML =
         '<div class="atp-mini-symbol">' + esc(symbol) + '</div>'
@@ -554,7 +685,8 @@
         + '<div class="atp-mini-conviction">' + fmtPct(conviction) + '</div>'
         + '<div class="atp-mini-health">' + (healthScore != null ? healthScore + '/100' : '—') + '</div>'
         + '<div class="' + urgencyClass(urgency) + '">' + esc(urgencyLabel(urgency)) + '</div>'
-        + (isDegraded ? '<span class="atp-mini-degraded">⚠</span>' : '');
+        + (isDegraded ? '<span class="atp-mini-degraded">⚠</span>' : '')
+        + (hasCloseOrder && recommendation !== 'HOLD' ? '<span class="atp-mini-actionable" title="Close order available">⚡</span>' : '');
 
       return card;
     }

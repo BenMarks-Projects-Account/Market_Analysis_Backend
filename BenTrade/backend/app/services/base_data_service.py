@@ -575,19 +575,20 @@ class BaseDataService:
             return []
 
         # Primary: Polygon aggregates
+        polygon_bars: list[dict[str, Any]] = []
         if self.polygon_client is not None and self._source_configured("polygon"):
             try:
-                bars = await self.polygon_client.get_daily_closes_dated(
+                polygon_bars = await self.polygon_client.get_daily_closes_dated(
                     normalized_symbol, lookback_days=lookback_days
                 )
-                if bars:
+                if polygon_bars:
                     self._mark_success("polygon", http_status=200, message="dated history ok")
-                    return bars
-                self._mark_failure(
-                    "polygon",
-                    UpstreamError("Polygon returned empty dated history", details={"status_code": 204}),
-                )
-                logger.warning("event=prices_history_dated_empty symbol=%s source=polygon", normalized_symbol)
+                else:
+                    self._mark_failure(
+                        "polygon",
+                        UpstreamError("Polygon returned empty dated history", details={"status_code": 204}),
+                    )
+                    logger.warning("event=prices_history_dated_empty symbol=%s source=polygon", normalized_symbol)
             except Exception as exc:
                 self._mark_failure("polygon", exc)
                 logger.warning(
@@ -596,25 +597,55 @@ class BaseDataService:
                     str(exc),
                 )
 
-        # Fallback: Tradier daily history
-        end_date = datetime.now(timezone.utc).date()
-        start_date = end_date - timedelta(days=lookback_days)
-        try:
-            fallback = await self.tradier_client.get_daily_closes_dated(
-                normalized_symbol,
-                start_date=start_date.isoformat(),
-                end_date=end_date.isoformat(),
-            )
-            self._mark_success("tradier", http_status=200, message="dated history fallback ok")
-            return fallback
-        except Exception as exc:
-            self._mark_failure("tradier", exc)
-            logger.warning(
-                "event=prices_history_dated_unavailable symbol=%s source=tradier error=%s",
-                normalized_symbol,
-                str(exc),
-            )
-            return []
+        # Staleness check: if Polygon data ends >2 calendar days before today,
+        # also fetch Tradier history and use whichever source is fresher.
+        # This handles Polygon free-plan delay and any upstream lag.
+        today = datetime.now(timezone.utc).date()
+        polygon_stale = False
+        if polygon_bars:
+            try:
+                last_bar_date = datetime.strptime(polygon_bars[-1]["date"], "%Y-%m-%d").date()
+                polygon_stale = (today - last_bar_date).days > 2
+                if polygon_stale:
+                    logger.info(
+                        "event=polygon_data_stale symbol=%s last_bar=%s today=%s",
+                        normalized_symbol, polygon_bars[-1]["date"], today.isoformat(),
+                    )
+            except (KeyError, ValueError):
+                pass
+
+        # Fallback / freshness supplement: Tradier daily history
+        if not polygon_bars or polygon_stale:
+            start_date = today - timedelta(days=lookback_days)
+            try:
+                tradier_bars = await self.tradier_client.get_daily_closes_dated(
+                    normalized_symbol,
+                    start_date=start_date.isoformat(),
+                    end_date=today.isoformat(),
+                )
+                if tradier_bars:
+                    self._mark_success("tradier", http_status=200, message="dated history fallback ok")
+                    # Use Tradier if Polygon had no data or Tradier is fresher
+                    if not polygon_bars:
+                        return tradier_bars
+                    tradier_last = tradier_bars[-1].get("date", "")
+                    polygon_last = polygon_bars[-1].get("date", "")
+                    if tradier_last > polygon_last:
+                        logger.info(
+                            "event=tradier_fresher symbol=%s tradier_last=%s polygon_last=%s",
+                            normalized_symbol, tradier_last, polygon_last,
+                        )
+                        return tradier_bars
+            except Exception as exc:
+                self._mark_failure("tradier", exc)
+                logger.warning(
+                    "event=prices_history_dated_unavailable symbol=%s source=tradier error=%s",
+                    normalized_symbol,
+                    str(exc),
+                )
+
+        # Return Polygon data if we have any (even stale), otherwise empty
+        return polygon_bars
 
     async def get_intraday_bars(self, symbol: str, lookback_days: int = 14) -> list[dict[str, Any]]:
         """Return hourly bars with ISO-datetime timestamps for intraday charts.

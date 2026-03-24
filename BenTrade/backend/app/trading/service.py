@@ -36,6 +36,7 @@ from app.services.trading.order_builder import (
     build_occ_symbol,
     build_tradier_multileg_order,
 )
+from app.trading.execution_validator import validate_trade_for_execution
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +50,14 @@ class TradingService:
         repository: InMemoryTradingRepository,
         paper_broker: BrokerBase,
         live_broker: BrokerBase,
+        risk_policy_service: Any | None = None,
     ) -> None:
         self.settings = settings
         self.base_data_service = base_data_service
         self.repository = repository
         self.paper_broker = paper_broker
         self.live_broker = live_broker
+        self.risk_policy_service = risk_policy_service
 
     def _secret(self) -> bytes:
         secret = self.settings.TRADING_CONFIRMATION_SECRET or "unsafe-dev-secret"
@@ -542,6 +545,22 @@ class TradingService:
                 exc_info=True,
             )
 
+        # ── Risk policy check (Phase 1 — warnings only) ─────────
+        policy_warnings: list[dict[str, str]] = []
+        policy_status = "clear"
+        if self.risk_policy_service is not None:
+            try:
+                snapshot = await self.risk_policy_service.build_snapshot(None)
+                warn_groups = (snapshot.get("exposure") or {}).get("warnings") or {}
+                for msg in warn_groups.get("hard_limits", []):
+                    policy_warnings.append({"severity": "hard", "message": str(msg)})
+                for msg in warn_groups.get("soft_gates", []):
+                    policy_warnings.append({"severity": "soft", "message": str(msg)})
+                if policy_warnings:
+                    policy_status = "warning"
+            except Exception as pol_exc:
+                logger.warning("event=risk_policy_check_failed trace_id=%s error=%s", trace_id, pol_exc)
+
         return OrderPreviewResponse(
             ticket=ticket,
             checks=checks,
@@ -552,6 +571,8 @@ class TradingService:
             tradier_preview=tradier_preview_data,
             tradier_preview_error=tradier_preview_error,
             payload_sent=tradier_payload_sent,
+            policy_warnings=policy_warnings,
+            policy_status=policy_status,
         )
 
     async def submit(self, req: TradingSubmitRequest) -> OrderSubmitResponse:
@@ -572,6 +593,18 @@ class TradingService:
         cached = self.repository.get_idempotent(req.ticket_id, req.idempotency_key)
         if cached:
             return OrderSubmitResponse.model_validate(cached)
+
+        # ── Server-side validation safety net ────────────────────
+        validation = validate_trade_for_execution(ticket_raw)
+        if not validation["valid"]:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "server_side_validation_failed",
+                    "blocking_errors": validation["blocking_errors"],
+                    "warnings": validation["warnings"],
+                },
+            )
 
         # ── Development safety: force PAPER mode ─────────────────
         is_dev = self.settings.ENVIRONMENT == "development"

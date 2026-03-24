@@ -220,6 +220,17 @@ class BaseV2Scanner(ABC):
         passed = [c for c in candidates if c.passed]
         rejected = [c for c in candidates if not c.passed]
 
+        # === TEMPORARY DIAGNOSTIC: phase-level funnel summary (remove after debugging) ===
+        _log.info(
+            "V2_DIAG %s %s: phase_funnel "
+            "constructed=%d structural=%d quote_liq=%d trust=%d math=%d normalized=%d "
+            "passed=%d rejected=%d",
+            scanner_key, symbol,
+            total_constructed, remaining_c, remaining_d, remaining_d2,
+            remaining_e, remaining_f, len(passed), len(rejected),
+        )
+        # === END DIAGNOSTIC ===
+
         # ── Aggregate diagnostics ───────────────────────────────
         reject_counter: Counter[str] = Counter()
         warning_counter: Counter[str] = Counter()
