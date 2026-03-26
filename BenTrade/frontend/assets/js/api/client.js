@@ -553,6 +553,26 @@ window.BenTradeApi = (function(){
     return jsonFetch('/api/data-population/trigger', { method: 'POST' });
   }
 
+  /* ── Orchestrator (continuous MI → TMC loop) ── */
+  function getOrchestratorStatus(){
+    return jsonFetch('/api/orchestrator/status');
+  }
+  function startOrchestrator(accountMode){
+    return jsonFetch('/api/orchestrator/start?account_mode=' + encodeURIComponent(accountMode || 'paper'), { method: 'POST' });
+  }
+  function stopOrchestrator(){
+    return jsonFetch('/api/orchestrator/stop', { method: 'POST' });
+  }
+  function pauseOrchestrator(){
+    return jsonFetch('/api/orchestrator/pause', { method: 'POST' });
+  }
+  function resumeOrchestrator(){
+    return jsonFetch('/api/orchestrator/resume', { method: 'POST' });
+  }
+  function setOrchestratorDelay(seconds){
+    return jsonFetch('/api/orchestrator/delay?seconds=' + encodeURIComponent(seconds || 0), { method: 'POST' });
+  }
+
   /* ── Contextual Chat ── */
   function contextualChat(context, message, history){
     return modelFetch('/api/chat/contextual', {
@@ -641,6 +661,12 @@ window.BenTradeApi = (function(){
     tmcFinalDecision,
     getDataPopulationStatus,
     triggerDataPopulation,
+    getOrchestratorStatus,
+    startOrchestrator,
+    stopOrchestrator,
+    pauseOrchestrator,
+    resumeOrchestrator,
+    setOrchestratorDelay,
     contextualChat,
     MODEL_TIMEOUT_MS: MODEL_TIMEOUT_MS,
     modelFetch: modelFetch,

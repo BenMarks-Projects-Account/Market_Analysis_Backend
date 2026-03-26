@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 
@@ -77,13 +77,17 @@ def _make_service() -> TradingService:
     )
 
 
+# Use a date guaranteed to be in the future for test fixtures
+_FUTURE_EXP = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+
+
 class TradingWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_preview_builds_multileg_ticket_and_checks(self):
         service = _make_service()
         req = TradingPreviewRequest(
             symbol="SPY",
             strategy="put_credit",
-            expiration="2026-03-20",
+            expiration=_FUTURE_EXP,
             short_strike=665,
             long_strike=660,
             quantity=1,
@@ -121,7 +125,7 @@ class TradingWorkflowTests(unittest.IsolatedAsyncioTestCase):
         req = TradingPreviewRequest(
             symbol="SPY",
             strategy="put_credit",
-            expiration="2026-03-20",
+            expiration=_FUTURE_EXP,
             short_strike=665,
             long_strike=660,
             quantity=1,
@@ -137,7 +141,7 @@ class TradingWorkflowTests(unittest.IsolatedAsyncioTestCase):
         req = TradingPreviewRequest(
             symbol="SPY",
             strategy="put_credit",
-            expiration="2026-03-20",
+            expiration=_FUTURE_EXP,
             short_strike=665,
             long_strike=660,
             quantity=1,
@@ -166,7 +170,7 @@ class TradingWorkflowTests(unittest.IsolatedAsyncioTestCase):
             mode="paper",
             strategy="put_credit",
             underlying="SPY",
-            expiration="2026-03-20",
+            expiration=_FUTURE_EXP,
             quantity=1,
             limit_price=0.75,
             price_effect="CREDIT",
@@ -174,7 +178,7 @@ class TradingWorkflowTests(unittest.IsolatedAsyncioTestCase):
             legs=[
                 OrderLeg(
                     option_type="put",
-                    expiration="2026-03-20",
+                    expiration=_FUTURE_EXP,
                     strike=665,
                     side="SELL_TO_OPEN",
                     quantity=1,
@@ -184,7 +188,7 @@ class TradingWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 OrderLeg(
                     option_type="put",
-                    expiration="2026-03-20",
+                    expiration=_FUTURE_EXP,
                     strike=660,
                     side="BUY_TO_OPEN",
                     quantity=1,

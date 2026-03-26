@@ -95,32 +95,7 @@ def narrow_chain(
     # ── Diagnostics container ───────────────────────────────────
     diag = V2NarrowingDiagnostics()
 
-    # ── DIAGNOSTIC: narrow_chain entry trace (TEMPORARY — remove after debugging) ──
     _narrow_log = logging.getLogger("bentrade.narrow_chain")
-    _narrow_diag: dict[str, object] = {
-        "timestamp": datetime.now().isoformat(),
-        "symbol": symbol,
-        "underlying_price": underlying_price,
-        "dte_min": req.dte_min,
-        "dte_max": req.dte_max,
-        "option_types": req.option_types,
-        "multi_expiry": req.multi_expiry,
-    }
-    # Count raw contracts in input chain
-    if isinstance(chain, dict):
-        _raw_opts = (chain.get("options") or {})
-        if isinstance(_raw_opts, dict):
-            _inner = _raw_opts.get("option", [])
-            _narrow_diag["input_contract_count"] = len(_inner) if isinstance(_inner, list) else 1
-        elif isinstance(_raw_opts, list):
-            _narrow_diag["input_contract_count"] = len(_raw_opts)
-        else:
-            _narrow_diag["input_contract_count"] = f"unexpected: {type(_raw_opts).__name__}"
-    elif isinstance(chain, list):
-        _narrow_diag["input_contract_count"] = len(chain)
-    else:
-        _narrow_diag["input_contract_type"] = type(chain).__name__
-    # ── END DIAGNOSTIC HEADER ──
 
     # ── Build underlying snapshot ───────────────────────────────
     underlying = V2UnderlyingSnapshot(
@@ -152,15 +127,6 @@ def narrow_chain(
             f"Chain possibly incomplete: {_contract_count} contracts "
             f"(expected ≥{_min_expected} for {_sym_upper})"
         )
-
-    # ── DIAGNOSTIC: after normalize ──
-    _narrow_diag["after_normalize_count"] = len(contracts) if contracts else 0
-    if contracts:
-        # Sample first 5 expirations seen
-        _exp_set = sorted({c.expiration for c in contracts})
-        _narrow_diag["unique_expirations_after_normalize"] = len(_exp_set)
-        _narrow_diag["sample_expirations"] = _exp_set[:10]
-    # ── END DIAGNOSTIC ──
 
     if not contracts:
         return V2NarrowedUniverse(
@@ -205,49 +171,6 @@ def narrow_chain(
         )
 
     # ── Stage 4: Package ────────────────────────────────────────
-    # ── DIAGNOSTIC: finalize narrow_chain trace ──
-    _narrow_diag["after_expiry_filter_count"] = diag.contracts_after_expiry_filter
-    _narrow_diag["expirations_kept"] = diag.expirations_kept
-    _narrow_diag["expirations_dropped"] = diag.expirations_dropped
-    _narrow_diag["expirations_kept_list"] = diag.expirations_kept_list[:10] if diag.expirations_kept_list else []
-    _narrow_diag["expiry_drop_reasons"] = dict(diag.expiry_drop_reasons) if hasattr(diag, "expiry_drop_reasons") and diag.expiry_drop_reasons else {}
-    _narrow_diag["after_strike_filter_count"] = diag.contracts_after_strike_filter
-    _narrow_diag["contracts_final"] = diag.contracts_final
-    _narrow_diag["strike_drop_reasons"] = dict(diag.strike_drop_reasons) if hasattr(diag, "strike_drop_reasons") and diag.strike_drop_reasons else {}
-    _narrow_diag["data_quality"] = {
-        "missing_bid": diag.contracts_missing_bid,
-        "missing_ask": diag.contracts_missing_ask,
-        "inverted_quote": diag.contracts_inverted_quote,
-        "missing_delta": diag.contracts_missing_delta,
-        "missing_iv": diag.contracts_missing_iv,
-    }
-    _narrow_diag["warnings"] = diag.warnings[:10] if diag.warnings else []
-    _narrow_diag["final_bucket_expirations"] = sorted(all_buckets.keys()) if all_buckets else []
-    _narrow_diag["final_bucket_strike_counts"] = {
-        k: len(b.strikes) if hasattr(b, "strikes") else 0
-        for k, b in (all_buckets or {}).items()
-    }
-    # Only write diag file in production (skip when underlying_price looks synthetic)
-    import os as _os
-    if not _os.environ.get("PYTEST_CURRENT_TEST"):
-        try:
-            _diag_dir = Path("results/diagnostics")
-            _diag_dir.mkdir(parents=True, exist_ok=True)
-            _diag_file = _diag_dir / f"narrow_diag_{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.json"
-            with open(_diag_file, "w") as _f:
-                json.dump(_narrow_diag, _f, indent=2, default=str)
-        except Exception:
-            pass
-    _narrow_log.info(
-        "NARROW_DIAG %s: input=%s normalize=%d expiry_kept=%d strikes_final=%d buckets=%d",
-        symbol,
-        _narrow_diag.get("input_contract_count", "?"),
-        _narrow_diag.get("after_normalize_count", 0),
-        _narrow_diag.get("after_expiry_filter_count", 0),
-        _narrow_diag.get("contracts_final", 0),
-        len(all_buckets) if all_buckets else 0,
-    )
-    # ── END DIAGNOSTIC ──
     return V2NarrowedUniverse(
         underlying=underlying,
         expiry_buckets=all_buckets,

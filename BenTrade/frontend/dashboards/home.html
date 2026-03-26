@@ -20,6 +20,36 @@
     <!-- General error banner (used by setError in home.js) -->
     <div id="homeError" class="active-error" style="display:none;margin-bottom:6px;"></div>
 
+    <!-- ═══ Pre-Market Intelligence Panel ═══ -->
+    <div id="home-pre-market-intel" style="display:none;"></div>
+
+    <!-- ═══ Pre-Market Indicators ═══ -->
+    <section class="stock-card home-premarket-panel">
+      <div class="home-premarket-header">
+        <div class="stock-card-title bt-panel-title">Pre-Market Indicators</div>
+        <button id="homePreMarketRefreshBtn" class="btn qtButton home-premarket-refresh-btn" type="button" title="Refresh pre-market charts">↻ Refresh</button>
+      </div>
+      <div id="homePreMarketEmpty" class="home-premarket-empty" style="display:none;">Pre-market indicator data unavailable.</div>
+      <div id="homePreMarketCharts" class="home-premarket-grid">
+        <div class="home-premarket-card">
+          <div class="home-chart-title">Index Futures — Overnight (24h)</div>
+          <svg id="homePreMarketIndexFutures" class="home-chart home-premarket-svg" viewBox="0 0 800 240" preserveAspectRatio="none"></svg>
+        </div>
+        <div class="home-premarket-card">
+          <div class="home-chart-title">VIX &amp; Term Structure (2 weeks)</div>
+          <svg id="homePreMarketVix" class="home-chart home-premarket-svg" viewBox="0 0 800 240" preserveAspectRatio="none"></svg>
+        </div>
+        <div class="home-premarket-card">
+          <div class="home-chart-title">Macro Cross-Asset (2 weeks)</div>
+          <svg id="homePreMarketMacro" class="home-chart home-premarket-svg" viewBox="0 0 800 240" preserveAspectRatio="none"></svg>
+        </div>
+        <div class="home-premarket-card">
+          <div class="home-chart-title">Gap History (2 weeks)</div>
+          <svg id="homePreMarketGap" class="home-chart home-premarket-svg" viewBox="0 0 800 240" preserveAspectRatio="none"></svg>
+        </div>
+      </div>
+    </section>
+
     <!-- ═══ 1. Market Regime ═══ -->
     <section class="stock-card home-regime-panel">
       <div class="stock-card-title bt-panel-title">Market Regime</div>

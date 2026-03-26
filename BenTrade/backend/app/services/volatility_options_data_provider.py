@@ -83,10 +83,12 @@ class VolatilityOptionsDataProvider:
         tradier_client: Any,
         market_context_service: Any | None = None,
         fred_client: Any | None = None,
+        futures_client: Any | None = None,
     ) -> None:
         self.tradier = tradier_client
         self.market_ctx = market_context_service
         self.fred = fred_client
+        self.futures_client = futures_client
 
     async def fetch_volatility_data(self) -> dict[str, Any]:
         """Fetch all raw data needed by the volatility engine.
@@ -243,24 +245,64 @@ class VolatilityOptionsDataProvider:
             "vvix": vvix_val,
         }
 
-        # Term structure — use VIX front/2nd/3rd month futures approximation
-        # VIX futures are not directly available via Tradier, so we use
-        # VIX spot and VVIX as proxy signals. Term structure shape is
-        # inferred from VIX level relative to its average.
+        # Term structure — try live VIX futures data first, fall back to heuristic.
+        # FuturesClient.get_vix_term_structure() returns VIX spot + VXX-based
+        # contango/backwardation estimate — better than the heuristic below.
         vix_front = vix_spot
         vix_2nd = None
         vix_3rd = None
-        if vix_spot is not None and vix_avg_20d is not None:
-            if vix_avg_20d > 0:
-                ratio = vix_spot / vix_avg_20d
-                if ratio < 1.0:
-                    # VIX below average → contango likely
-                    vix_2nd = vix_avg_20d
-                    vix_3rd = vix_avg_20d * 1.03
+        term_structure_source = "proxy"  # default: heuristic
+
+        if self.futures_client is not None:
+            try:
+                vix_term = await self.futures_client.get_vix_term_structure()
+                if (
+                    vix_term
+                    and vix_term.get("spot") is not None
+                    and vix_term.get("vxx_price") is not None
+                ):
+                    # VIX spot from Yahoo is authoritative
+                    vix_front = vix_term["spot"]
+                    # VXX tracks a blend of front/2nd month VIX futures.
+                    # Use VXX price as 2nd-month proxy, extrapolate 3rd.
+                    vix_2nd = vix_term["vxx_price"]
+                    structure = (vix_term.get("structure") or "").lower()
+                    if structure == "contango":
+                        # Curve slopes up: 3rd month > 2nd month
+                        vix_3rd = vix_2nd * 1.02 if vix_2nd else None
+                    elif structure == "backwardation":
+                        # Curve slopes down: 3rd month < 2nd month
+                        vix_3rd = vix_2nd * 0.97 if vix_2nd else None
+                    else:
+                        vix_3rd = vix_2nd  # flat
+                    term_structure_source = "direct"
+                    logger.info(
+                        "[VOL_PROVIDER] vix_term_structure source=direct "
+                        "spot=%.2f vxx=%.2f structure=%s",
+                        vix_front, vix_2nd, structure,
+                    )
                 else:
-                    # VIX above average → backwardation possible
-                    vix_2nd = vix_spot * 0.97
-                    vix_3rd = vix_spot * 0.95
+                    raise ValueError("VIX term structure data incomplete")
+            except Exception as exc:
+                logger.warning(
+                    "[VOL_PROVIDER] vix_term_structure futures_fallback reason=%s",
+                    exc,
+                )
+                # Fall through to heuristic below
+
+        # Heuristic fallback when live data unavailable
+        if term_structure_source != "direct":
+            if vix_spot is not None and vix_avg_20d is not None:
+                if vix_avg_20d > 0:
+                    ratio = vix_spot / vix_avg_20d
+                    if ratio < 1.0:
+                        # VIX below average → contango likely
+                        vix_2nd = vix_avg_20d
+                        vix_3rd = vix_avg_20d * 1.03
+                    else:
+                        # VIX above average → backwardation possible
+                        vix_2nd = vix_spot * 0.97
+                        vix_3rd = vix_spot * 0.95
 
         structure_data = {
             "vix_front_month": vix_front,
@@ -268,6 +310,7 @@ class VolatilityOptionsDataProvider:
             "vix_3rd_month": vix_3rd,
             "iv_30d": spy_iv.get("iv_30d"),
             "rv_30d": rv_30d,
+            "term_structure_source": term_structure_source,
         }
 
         # Skew data — from SPY options + CBOE SKEW from FRED
@@ -318,6 +361,7 @@ class VolatilityOptionsDataProvider:
             "metric_availability": metric_availability,
             "data_sources": {
                 "vix_source": vix_source,
+                "term_structure_source": term_structure_source,
                 "vvix_available": vvix_val is not None,
                 "spy_iv_available": bool(spy_iv),
                 "vix_history_days": vix_hist.get("history_count", 0),

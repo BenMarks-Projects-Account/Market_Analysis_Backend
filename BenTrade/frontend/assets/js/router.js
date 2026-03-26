@@ -205,6 +205,7 @@
     "market/cross-asset": { title: "Cross-Asset / Macro", group: "Market Picture", subgroup: "Macro", description: "Cross-asset confirmation signals" },
     "market/flows": { title: "Flows & Positioning", group: "Market Picture", subgroup: "Flows", description: "Positioning & flow dynamics" },
     "market/liquidity": { title: "Liquidity & Financial Conditions", group: "Market Picture", subgroup: "Liquidity", description: "Financial conditions & policy" },
+    "notifications": { title: "Notifications", group: "Navigation", subgroup: "Alerts", description: "BUY/EXECUTE signal alerts" },
   };
 
   const routes = {
@@ -367,6 +368,11 @@
       view: "dashboards/liquidity_conditions.html",
       init: () => window.BenTradePages?.initLiquidityConditions?.(document.getElementById('view')),
       title: routeMeta["market/liquidity"].title
+    },
+    "notifications": {
+      view: "dashboards/notifications.html",
+      init: () => window.BenTradePages?.initNotifications?.(document.getElementById('view')),
+      title: routeMeta["notifications"].title
     }
   };
 
@@ -464,4 +470,38 @@
   });
 
   navigate();
+
+  // ── Notification badge + toast polling (global) ──
+  var _lastNotifCheck = new Date().toISOString();
+
+  setInterval(function() {
+    fetch('/api/notifications?limit=10&unread_only=true')
+      .then(function(res) { return res.ok ? res.json() : null; })
+      .then(function(data) {
+        if (!data) return;
+
+        // Update nav badge
+        var badge = document.getElementById('nav-notif-badge');
+        if (badge) {
+          if (data.unread_count > 0) {
+            badge.textContent = data.unread_count;
+            badge.style.display = '';
+          } else {
+            badge.style.display = 'none';
+          }
+        }
+
+        // Show toasts for notifications newer than last check
+        if (window.BenTradeToastNotification && data.notifications) {
+          for (var i = 0; i < data.notifications.length; i++) {
+            var n = data.notifications[i];
+            if (n.timestamp > _lastNotifCheck) {
+              window.BenTradeToastNotification.showTradeSignal(n);
+            }
+          }
+        }
+        _lastNotifCheck = new Date().toISOString();
+      })
+      .catch(function() {});
+  }, 10000);
 })();

@@ -650,6 +650,33 @@ Rules:
 - portfolio_fit: reference the portfolio_context data provided. Flag if this position contributes to over-concentration in one underlying or pushes portfolio delta too far in one direction. If closing this position would improve portfolio balance, say so explicitly. If portfolio_context is null, state that portfolio data is unavailable.
 - If data is limited, say so explicitly rather than guessing
 - Do NOT invent catalysts, fundamentals, earnings dates, or news events. If event or portfolio information is not provided, do not speculate about them.
+
+SCORING PRECISION — THIS IS CRITICAL:
+You MUST use precise values, NOT lazy round numbers.
+- conviction must be a precise float (e.g. 0.73, 0.82, 0.61) — NOT multiples \
+of 0.05 like 0.70, 0.75, 0.80.  Values like 0.73 are almost always more \
+accurate than 0.75.
+- trade_health_score in your internal assessment should map to precise integers \
+(73, not 75).
+- Do NOT round any numeric value to multiples of 5.  Scores like 70, 75, 80, \
+85 are LAZY and PROHIBITED.
+
+Conviction calibration:
+  conviction = "how confident am I in the accuracy of my analysis" \
+(data quality, position clarity, completeness of information)
+  This is INDEPENDENT from the recommendation.  A HOLD with conviction 0.92 \
+means you are very sure the position is healthy.  A CLOSE with conviction 0.58 \
+means you think it should close but the data is ambiguous.
+
+RECOMMENDATION CALIBRATION:
+  HOLD: Position is healthy, no action needed.  Internal health score 60+.
+  REDUCE: Position is deteriorating or over-concentrated.  Health score 40-60.
+  CLOSE: Position should be exited.  Health score below 40 OR critical risk event.
+  URGENT_REVIEW: Immediate attention — position at risk of significant loss.
+
+ANTI-ROUNDING RULE: Before returning your response, check conviction.  \
+If it is a multiple of 0.05 (0.70, 0.75, 0.80, etc.), adjust by +0.01 or \
+-0.01 to the more accurate value.
 """
 
 
@@ -844,7 +871,6 @@ def _routed_model_executor(
     symbol = payload.get("symbol", "unknown")
 
     messages = [
-        {"role": "system", "content": _ACTIVE_TRADE_SYSTEM_PROMPT},
         {"role": "user", "content": rendered_text or _json.dumps(payload)},
     ]
 
@@ -854,6 +880,7 @@ def _routed_model_executor(
         legacy_result, trace = execute_routed_model(
             task_type="active_trade_reassessment",
             messages=messages,
+            system_prompt=_ACTIVE_TRADE_SYSTEM_PROMPT,
             timeout=120.0,
             max_tokens=1200,
             temperature=0.0,
@@ -911,6 +938,7 @@ def _routed_model_executor(
             fix_result, _fix_trace = execute_routed_model(
                 task_type="active_trade_reassessment_fix",
                 messages=fix_messages,
+                system_prompt=_ACTIVE_TRADE_SYSTEM_PROMPT,
                 timeout=120.0,
                 max_tokens=1200,
                 temperature=0.0,
@@ -1404,8 +1432,8 @@ async def run_active_trade_pipeline(
     market_context: dict[str, Any] = {}
     try:
         regime = await regime_service.get_regime()
-        market_context["regime_label"] = regime.get("label")
-        market_context["regime_score"] = regime.get("score")
+        market_context["regime_label"] = regime.get("regime_label")
+        market_context["regime_score"] = regime.get("regime_score")
     except Exception as exc:
         logger.warning("[active_trade_pipeline] Regime unavailable: %s", exc)
         market_context["regime_label"] = None

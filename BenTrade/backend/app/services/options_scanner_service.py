@@ -47,13 +47,44 @@ Output contract::
 
 from __future__ import annotations
 
-import json
 import logging
-from datetime import datetime
-from pathlib import Path
+import time
+from datetime import date, timedelta
 from typing import Any
 
 _log = logging.getLogger("bentrade.options_scanner_service")
+
+# Maximum DTE any scanner family uses (verticals & calendars = 90).
+# Expirations beyond this are never candidates and can be skipped during
+# prefetch to save Tradier API calls.
+_MAX_PREFETCH_DTE = 90
+
+
+class _PrefetchedSymbol:
+    """Lightweight container for one symbol's pre-fetched chain data."""
+
+    __slots__ = ("symbol", "merged_options", "underlying_price", "chain")
+
+    def __init__(
+        self,
+        symbol: str,
+        *,
+        merged_options: list[dict[str, Any]] | None = None,
+        underlying_price: float | None = None,
+    ) -> None:
+        self.symbol = symbol
+        self.merged_options = merged_options or []
+        self.underlying_price = underlying_price
+        # Pre-build the chain dict shape V2 scanners expect
+        self.chain: dict[str, Any] = (
+            {"options": {"option": self.merged_options}}
+            if self.merged_options
+            else {}
+        )
+
+    @property
+    def contract_count(self) -> int:
+        return len(self.merged_options)
 
 
 class OptionsScannerService:
@@ -69,6 +100,8 @@ class OptionsScannerService:
     def __init__(self, *, base_data_service: Any) -> None:
         self._bds = base_data_service
 
+    # ── public API ──────────────────────────────────────────────────────
+
     async def scan(
         self,
         symbols: list[str],
@@ -77,11 +110,11 @@ class OptionsScannerService:
     ) -> dict[str, Any]:
         """Run V2 scanners across symbols and scanner_keys.
 
-        For each (scanner_key, symbol) pair:
-        1. Resolve expirations via Tradier
-        2. Fetch the full chain for each expiration
-        3. Run the V2 scanner family
-        4. Collect results
+        Phase 1 — Prefetch: fetch expirations, underlying prices, and
+        option chains ONCE per symbol (DTE-filtered to 0-90).
+
+        Phase 2 — Scan: iterate (scanner_key × symbol) and run each V2
+        scanner on the prefetched merged chain.  No Tradier calls here.
 
         Returns the aggregate result dict matching the runner's expected shape.
         """
@@ -92,6 +125,25 @@ class OptionsScannerService:
         )
 
         ctx = context or {}
+
+        # ── Phase 1: prefetch chain data per symbol ──────────────────
+        prefetch_start = time.monotonic()
+        _log.info("event=scan_prefetch_start symbols=%d", len(symbols))
+
+        prefetched: dict[str, _PrefetchedSymbol] = {}
+        for symbol in symbols:
+            prefetched[symbol] = await self._prefetch_symbol(symbol)
+
+        prefetch_dur = time.monotonic() - prefetch_start
+        total_chains = sum(p.contract_count for p in prefetched.values())
+        _log.info(
+            "event=scan_prefetch_complete duration_s=%.1f symbols=%d "
+            "total_contracts=%d",
+            prefetch_dur, len(prefetched), total_chains,
+        )
+
+        # ── Phase 2: run scanners on prefetched data ─────────────────
+        scan_start = time.monotonic()
         all_results: list[dict[str, Any]] = []
         warnings: list[str] = []
         scanners_total = 0
@@ -100,21 +152,39 @@ class OptionsScannerService:
 
         for scanner_key in scanner_keys:
             if not is_v2_supported(scanner_key):
-                warnings.append(f"Scanner key {scanner_key!r} has no V2 implementation — skipped")
+                warnings.append(
+                    f"Scanner key {scanner_key!r} has no V2 implementation — skipped"
+                )
                 continue
 
             family_meta = get_v2_family(scanner_key)
             if family_meta is None:
                 continue
 
+            scanner = get_v2_scanner(scanner_key)
+
             for symbol in symbols:
                 scanners_total += 1
+                pf = prefetched.get(symbol)
+                if pf is None or not pf.merged_options:
+                    all_results.append(
+                        self._empty_result(
+                            scanner_key, scanner_key,
+                            family_meta.family_key, symbol,
+                        )
+                    )
+                    scanners_ok += 1
+                    continue
+
                 try:
-                    result = await self._run_one(
+                    result = self._run_on_cached(
+                        scanner=scanner,
                         scanner_key=scanner_key,
                         strategy_id=scanner_key,
                         family_key=family_meta.family_key,
                         symbol=symbol,
+                        chain=pf.chain,
+                        underlying_price=pf.underlying_price,
                         context=ctx,
                     )
                     all_results.append(result)
@@ -129,6 +199,14 @@ class OptionsScannerService:
                         scanner_key, symbol, exc,
                     )
 
+        scan_dur = time.monotonic() - scan_start
+        _log.info(
+            "event=scan_phase2_complete duration_s=%.1f scanners=%d ok=%d "
+            "failed=%d candidates=%d",
+            scan_dur, scanners_total, scanners_ok, scanners_failed,
+            sum(r.get("total_passed", 0) for r in all_results),
+        )
+
         return {
             "scan_results": all_results,
             "warnings": warnings,
@@ -137,109 +215,96 @@ class OptionsScannerService:
             "scanners_failed": scanners_failed,
         }
 
-    async def _run_one(
-        self,
-        *,
-        scanner_key: str,
-        strategy_id: str,
-        family_key: str,
-        symbol: str,
-        context: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Run a single V2 scanner for one symbol.
+    # ── prefetch helpers ────────────────────────────────────────────────
 
-        Fetches chains from base_data_service, then delegates to the
-        synchronous V2 scanner.run() method.
+    async def _prefetch_symbol(self, symbol: str) -> _PrefetchedSymbol:
+        """Fetch expirations, underlying price, and merged chain for *symbol*.
+
+        Only expirations within ``_MAX_PREFETCH_DTE`` days are fetched.
+        Returns a lightweight container used by Phase 2.
         """
-        from app.services.scanner_v2.registry import get_v2_scanner
+        try:
+            expirations = await self._bds.tradier_client.get_expirations(symbol)
+        except Exception as exc:
+            _log.warning("event=prefetch_expirations_failed symbol=%s error=%s", symbol, exc)
+            return _PrefetchedSymbol(symbol)
 
-        scanner = get_v2_scanner(scanner_key)
-
-        # Get expirations for this symbol
-        expirations = await self._bds.tradier_client.get_expirations(symbol)
         if not expirations:
-            _log.info(
-                "event=no_expirations scanner_key=%s symbol=%s", scanner_key, symbol,
-            )
-            return self._empty_result(scanner_key, strategy_id, family_key, symbol)
+            _log.info("event=prefetch_no_expirations symbol=%s", symbol)
+            return _PrefetchedSymbol(symbol)
 
-        # Get underlying price
-        underlying_price = await self._bds.get_underlying_price(symbol)
-
-        # ── DIAGNOSTIC: chain fetch tracing (TEMPORARY — remove after debugging) ──
-        _chain_diag: dict[str, Any] = {
-            "timestamp": datetime.now().isoformat(),
-            "symbol": symbol,
-            "scanner_key": scanner_key,
-            "expirations_returned": len(expirations),
-            "expiration_list": list(expirations)[:20],
-            "underlying_price": underlying_price,
-            "data_source_class": type(self._bds.chain_source).__name__
-            if hasattr(self._bds, "chain_source") else "unknown",
-        }
-        _per_exp_counts: dict[str, Any] = {}
-        # ── END DIAGNOSTIC HEADER ──
-
-        # Fetch chains for available expirations and merge into one chain dict.
-        # base_data_service.get_analysis_inputs returns OptionContract (Pydantic)
-        # objects via normalize_chain, but V2 scanners expect raw dicts.
-        # Convert via .model_dump() at this boundary.
-        merged_options: list[dict[str, Any]] = []
+        # DTE-filter: keep only expirations within the window any scanner uses
+        today = date.today()
+        max_exp_date = today + timedelta(days=_MAX_PREFETCH_DTE)
+        relevant: list[str] = []
         for exp in expirations:
             try:
-                inputs = await self._bds.get_analysis_inputs(symbol, exp, include_prices_history=False)
+                exp_date = date.fromisoformat(str(exp))
+            except (ValueError, TypeError):
+                continue
+            if today < exp_date <= max_exp_date:
+                relevant.append(exp)
+
+        if not relevant:
+            _log.info(
+                "event=prefetch_no_relevant_expirations symbol=%s total=%d max_dte=%d",
+                symbol, len(expirations), _MAX_PREFETCH_DTE,
+            )
+            return _PrefetchedSymbol(symbol)
+
+        underlying_price = await self._bds.get_underlying_price(symbol)
+
+        # Fetch chains per expiration and merge.
+        # get_analysis_inputs returns OptionContract (Pydantic) objects;
+        # V2 scanners expect raw dicts → convert at this boundary.
+        merged_options: list[dict[str, Any]] = []
+        for exp in relevant:
+            try:
+                inputs = await self._bds.get_analysis_inputs(
+                    symbol, exp, include_prices_history=False,
+                )
                 contracts = inputs.get("contracts") or []
-                _exp_count = len(contracts) if hasattr(contracts, "__len__") else 0
-                _per_exp_counts[str(exp)] = _exp_count  # DIAGNOSTIC
                 for c in contracts:
                     merged_options.append(
                         c.model_dump() if hasattr(c, "model_dump") else c
                     )
             except Exception as exc:
-                _per_exp_counts[str(exp)] = f"ERROR: {exc}"  # DIAGNOSTIC
                 _log.debug(
-                    "event=chain_fetch_skip scanner_key=%s symbol=%s exp=%s error=%s",
-                    scanner_key, symbol, exp, exc,
+                    "event=prefetch_chain_skip symbol=%s exp=%s error=%s",
+                    symbol, exp, exc,
                 )
-                continue
 
-        # ── DIAGNOSTIC: finalize chain fetch trace ──
-        _chain_diag["per_expiration_contract_counts"] = _per_exp_counts
-        _chain_diag["total_contracts_fetched"] = len(merged_options)
-        _chain_diag["expirations_with_contracts"] = sum(
-            1 for v in _per_exp_counts.values() if isinstance(v, int) and v > 0
+        chain_source = (
+            type(self._bds.chain_source).__name__
+            if hasattr(self._bds, "chain_source")
+            else "unknown"
         )
-        if merged_options:
-            _chain_diag["sample_contracts"] = merged_options[:3]
-        # Skip file write during test runs (MagicMock data source)
-        _ds_class = _chain_diag.get("data_source_class", "")
-        if _ds_class not in ("MagicMock", "Mock", "unknown"):
-            try:
-                _diag_dir = Path("results/diagnostics")
-                _diag_dir.mkdir(parents=True, exist_ok=True)
-                _diag_file = _diag_dir / f"chain_diag_{symbol}_{scanner_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-                with open(_diag_file, "w") as _f:
-                    json.dump(_chain_diag, _f, indent=2, default=str)
-            except Exception:
-                pass
-        # ── END DIAGNOSTIC ──
-
-        if not merged_options:
-            _log.info(
-                "event=no_chain_data scanner_key=%s symbol=%s", scanner_key, symbol,
-            )
-            return self._empty_result(scanner_key, strategy_id, family_key, symbol)
-
         _log.info(
-            "event=chain_merged scanner_key=%s symbol=%s expirations=%d contracts=%d chain_source=%s",
-            scanner_key, symbol, len(expirations), len(merged_options),
-            _chain_diag.get("data_source_class", "unknown"),
+            "event=prefetch_symbol_done symbol=%s expirations=%d "
+            "contracts=%d chain_source=%s",
+            symbol, len(relevant), len(merged_options), chain_source,
+        )
+        return _PrefetchedSymbol(
+            symbol,
+            merged_options=merged_options,
+            underlying_price=underlying_price,
         )
 
-        # Build chain dict in the shape V2 scanners expect
-        chain = {"options": {"option": merged_options}}
+    # ── scanner execution (no I/O) ─────────────────────────────────────
 
-        # Run the V2 scanner (synchronous)
+    @staticmethod
+    def _run_on_cached(
+        *,
+        scanner: Any,
+        scanner_key: str,
+        strategy_id: str,
+        family_key: str,
+        symbol: str,
+        chain: dict[str, Any],
+        underlying_price: float | None,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Run a V2 scanner on pre-fetched chain data (pure computation)."""
         scan_result = scanner.run(
             scanner_key=scanner_key,
             strategy_id=strategy_id,

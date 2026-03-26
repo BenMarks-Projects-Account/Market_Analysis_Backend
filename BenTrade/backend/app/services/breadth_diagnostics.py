@@ -216,9 +216,12 @@ def assess_survivorship_risk(
             "historical analysis."
         )
     else:
-        # Current/live snapshot mode — still a concern but less severe
+        # Current/live snapshot mode — survivorship is a known permanent
+        # limitation (no point-in-time constituent provider).  Apply a
+        # small penalty for awareness but don't let it push confidence
+        # into degraded territory by itself.
         severity = SEVERITY_HIGH
-        confidence_penalty = 5.0
+        confidence_penalty = 2.0
         historical_validity_penalty = 25.0
         message = (
             "Survivorship bias risk: no point-in-time constituent data. "

@@ -1395,40 +1395,45 @@ def _compute_confidence(
                 f"Cross-pillar range {score_range:.0f} (-{disagree_penalty:.1f})"
             )
 
-    # Proxy penalties: Per-pillar proxy concentration (above) + source-level
-    # proxy checks (below) already cover the proxy metrics in this engine
-    # (financial_conditions_proxy, funding_stress_proxy).
-    # SIGNAL_PROVENANCE-based penalties not needed — existing coverage is sufficient.
+    # Source-level penalties (proxy count, staleness, missing credit/funding).
+    # These are individually reasonable but compound too aggressively.
+    # Cap total source_meta penalty at -15 to prevent routine FRED lag
+    # or missing optional data from pushing confidence into LOW territory.
+    source_meta_penalty = 0.0
     if source_meta:
         proxy_count = source_meta.get("proxy_source_count", 0)
         if proxy_count >= 4:
-            confidence -= 8
-            penalties.append(f"Heavy proxy reliance ({proxy_count} proxy sources) (-8)")
+            source_meta_penalty += 6
+            penalties.append(f"Heavy proxy reliance ({proxy_count} proxy sources) (-6)")
         elif proxy_count >= 2:
-            confidence -= 4
-            penalties.append(f"Moderate proxy reliance ({proxy_count} proxy sources) (-4)")
+            source_meta_penalty += 3
+            penalties.append(f"Moderate proxy reliance ({proxy_count} proxy sources) (-3)")
 
         stale_count = source_meta.get("stale_source_count", 0)
         if stale_count > 0:
-            stale_pen = min(stale_count * 3, 12)
-            confidence -= stale_pen
+            stale_pen = min(stale_count * 2, 8)
+            source_meta_penalty += stale_pen
             penalties.append(f"{stale_count} stale source(s) (-{stale_pen})")
 
         if not source_meta.get("has_credit_spreads", False):
-            confidence -= 5
-            penalties.append("No credit spread data — proxy only (-5)")
+            source_meta_penalty += 3
+            penalties.append("No credit spread data — proxy only (-3)")
 
         if not source_meta.get("has_funding_data", False):
-            confidence -= 5
-            penalties.append("No direct funding stress data (-5)")
+            source_meta_penalty += 3
+            penalties.append("No direct funding stress data (-3)")
 
-    # Penalty for aggregate data staleness (from data_quality tags)
+    # Aggregate data staleness
     dq_summary = (source_meta or {}).get("data_quality", {}).get("_summary", {})
     dq_max_age = dq_summary.get("max_age_days")
     if dq_max_age is not None and dq_max_age > 3:
-        age_penalty = min(15, round((dq_max_age - 3) * 2, 1))
-        confidence -= age_penalty
+        age_penalty = min(10, round((dq_max_age - 3) * 1.5, 1))
+        source_meta_penalty += age_penalty
         penalties.append(f"data_staleness: max_age={dq_max_age}d (-{age_penalty})")
+
+    # Apply capped source-meta penalty
+    source_meta_penalty = min(source_meta_penalty, 15)
+    confidence -= source_meta_penalty
 
     return _clamp(round(confidence, 1), 0, 100), penalties
 

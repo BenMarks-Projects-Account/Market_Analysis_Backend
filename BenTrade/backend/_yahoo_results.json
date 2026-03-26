@@ -1,0 +1,161 @@
+{
+  "ES=F": {
+    "name": "E-mini S&P 500 Futures",
+    "available": true,
+    "rows": 84,
+    "last_close": 6617.5,
+    "last_timestamp": "2026-03-24 14:00:00-04:00",
+    "columns": [
+      "Open",
+      "High",
+      "Low",
+      "Close",
+      "Volume",
+      "Dividends",
+      "Stock Splits"
+    ]
+  },
+  "NQ=F": {
+    "name": "E-mini Nasdaq 100 Futures",
+    "available": true,
+    "rows": 84,
+    "last_close": 24249.75,
+    "last_timestamp": "2026-03-24 14:00:00-04:00",
+    "columns": [
+      "Open",
+      "High",
+      "Low",
+      "Close",
+      "Volume",
+      "Dividends",
+      "Stock Splits"
+    ]
+  },
+  "RTY=F": {
+    "name": "E-mini Russell 2000 Futures",
+    "available": true,
+    "rows": 84,
+    "last_close": 2520.6,
+    "last_timestamp": "2026-03-24 14:00:00-04:00",
+    "columns": [
+      "Open",
+      "High",
+      "Low",
+      "Close",
+      "Volume",
+      "Dividends",
+      "Stock Splits"
+    ]
+  },
+  "YM=F": {
+    "name": "Mini Dow Futures",
+    "available": true,
+    "rows": 84,
+    "last_close": 46522.0,
+    "last_timestamp": "2026-03-24 14:00:00-04:00",
+    "columns": [
+      "Open",
+      "High",
+      "Low",
+      "Close",
+      "Volume",
+      "Dividends",
+      "Stock Splits"
+    ]
+  },
+  "CL=F": {
+    "name": "Crude Oil Futures",
+    "available": true,
+    "rows": 84,
+    "last_close": 91.73,
+    "last_timestamp": "2026-03-24 14:00:00-04:00",
+    "columns": [
+      "Open",
+      "High",
+      "Low",
+      "Close",
+      "Volume",
+      "Dividends",
+      "Stock Splits"
+    ]
+  },
+  "DX-Y.NYB": {
+    "name": "US Dollar Index Futures",
+    "available": true,
+    "rows": 86,
+    "last_close": 99.51,
+    "last_timestamp": "2026-03-24 14:00:00-04:00",
+    "columns": [
+      "Open",
+      "High",
+      "Low",
+      "Close",
+      "Volume",
+      "Dividends",
+      "Stock Splits"
+    ]
+  },
+  "ZN=F": {
+    "name": "10-Year Treasury Note Futures",
+    "available": true,
+    "rows": 84,
+    "last_close": 110.33,
+    "last_timestamp": "2026-03-24 14:00:00-04:00",
+    "columns": [
+      "Open",
+      "High",
+      "Low",
+      "Close",
+      "Volume",
+      "Dividends",
+      "Stock Splits"
+    ]
+  },
+  "VX=F": {
+    "name": "VIX Futures (front month)",
+    "available": false,
+    "rows": 0
+  },
+  "^GSPC": {
+    "name": "S&P 500 Index",
+    "available": true,
+    "rows": 33,
+    "last_close": 6561.55,
+    "last_timestamp": "2026-03-24 13:30:00-04:00"
+  },
+  "^NDX": {
+    "name": "Nasdaq 100 Index",
+    "available": true,
+    "rows": 33,
+    "last_close": 24016.58,
+    "last_timestamp": "2026-03-24 13:30:00-04:00"
+  },
+  "^RUT": {
+    "name": "Russell 2000 Index",
+    "available": true,
+    "rows": 33,
+    "last_close": 2503.93,
+    "last_timestamp": "2026-03-24 13:30:00-04:00"
+  },
+  "^DJI": {
+    "name": "Dow Jones Industrial Average",
+    "available": true,
+    "rows": 33,
+    "last_close": 46182.38,
+    "last_timestamp": "2026-03-24 13:30:00-04:00"
+  },
+  "^VIX": {
+    "name": "CBOE Volatility Index",
+    "available": true,
+    "rows": 68,
+    "last_close": 26.55,
+    "last_timestamp": "2026-03-24 13:00:00-05:00"
+  },
+  "^TNX": {
+    "name": "10-Year Treasury Yield",
+    "available": true,
+    "rows": 34,
+    "last_close": 4.41,
+    "last_timestamp": "2026-03-24 12:20:00-05:00"
+  }
+}

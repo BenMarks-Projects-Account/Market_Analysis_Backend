@@ -1276,7 +1276,7 @@ class TestScannerAttributes:
 
     def test_dte_range(self):
         s = _scanner()
-        assert s.dte_min == 1
+        assert s.dte_min == 5
         assert s.dte_max == 90
 
     def test_no_family_math_override(self):

@@ -34,6 +34,7 @@ window.BenTradeUtils.tradeAccessor = (function(){
     ev:               { computed: 'expected_value',        fallbacks: ['ev', 'edge'] },
     pop:              { computed: 'pop',                   fallbacks: ['pop'] },
     ror:              { computed: 'return_on_risk',        fallbacks: ['return_on_risk', 'ror'] },
+    expected_ror:    { computed: 'expected_ror',           fallbacks: ['expected_ror'] },
     max_loss:         { computed: 'max_loss',              fallbacks: ['max_loss'] },
     max_profit:       { computed: 'max_profit',            fallbacks: ['max_profit'] },
     net_credit:       { computed: 'net_credit',            fallbacks: ['net_credit', 'credit'] },

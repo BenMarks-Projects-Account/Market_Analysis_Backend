@@ -72,6 +72,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
   /* ── Regime proxy charts ref ── */
   const regimeProxiesEl = scope.querySelector('#homeRegimeProxies');
 
+  /* ── Pre-Market refs removed: now handled by BenTradePreMarket module ── */
+
   /* ── Contextual Chat button ── */
   const regimeChatBtnEl = scope.querySelector('#homeRegimeChatBtn');
   if (regimeChatBtnEl) {
@@ -1781,6 +1783,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
     });
   }
 
+  /* ── Pre-Market: delegated to BenTradePreMarket standalone module ── */
+
   /* ── Dynamic Regime Summary Tooltip Builder ─────────────────── */
 
   const FACTOR_NAMES = {
@@ -2439,10 +2443,20 @@ window.BenTradePages.initHome = function initHome(rootEl){
       // Includes the specific reason when available so the warning is traceable.
       let statusBadge = '';
       if(eng.status !== 'ok' && eng.status !== 'missing'){
+        const _readableReason = function(r){
+          return _esc(r
+            .replace(/_/g, ' ')
+            .replace(/^low signal quality$/, 'Low confidence data')
+            .replace(/^missing inputs:(\d+)$/, '$1 input(s) unavailable')
+            .replace(/^elevated warnings:(\d+)$/, '$1 data quality warning(s)')
+            .replace(/^stale data:(.+)$/, 'Data is $1 old'));
+        };
         const reasons = Array.isArray(eng.degraded_reasons) && eng.degraded_reasons.length
-          ? eng.degraded_reasons.map(function(r){ return _esc(r.replace(/_/g, ' ')); }).join(', ')
+          ? eng.degraded_reasons.map(_readableReason).join('\n• ')
           : _esc(eng.status);
-        statusBadge = `<span class="qtPill qtPill-warn" style="font-size:10px;margin-left:6px;" title="${reasons}">${_esc(eng.status)}</span>`;
+        const confStr = eng.confidence != null ? ' (confidence: ' + Math.round(eng.confidence) + '%)' : '';
+        const tooltipText = '• ' + reasons + confStr;
+        statusBadge = `<span class="qtPill qtPill-warn" style="font-size:10px;margin-left:6px;cursor:help;" title="${_esc(tooltipText)}">⚠ ${_esc(eng.status)}</span>`;
       }
       const freshBadge = _modelFreshnessBadge(eng);
       const modelBadgeHtml = freshBadge.text ? `<span class="home-model-freshness-badge ${freshBadge.cssClass}">${freshBadge.text}</span>` : '';
@@ -3617,6 +3631,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
     // Macro proxy charts — fire-and-forget async fetch + render
     loadAndRenderRegimeProxies(macro);
 
+    // NOTE: Pre-market intelligence + indicator charts are loaded independently
+    // during page init (not tied to snapshot rendering). See bottom of initHome.
+
     // VIX canary: compare chart last price (VIXY ETF) with macro card VIX value
     var mc = window.BenTradeMarketContext;
     if(mc){
@@ -3904,6 +3921,18 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
   const cacheStore = window.BenTradeHomeCacheStore;
   let activeLoadToken = 0;
+
+  // Pre-Market Intelligence + Indicator Charts
+  // These use independent API endpoints (not the market-picture snapshot),
+  // so they load once at init and refresh on their own timers.
+  // MUST be before the cacheStore guard — pre-market is independent.
+  if(window.BenTradePreMarket){
+    console.log('[Home] Initializing pre-market panels via BenTradePreMarket.init()');
+    window.BenTradePreMarket.init({ scope: scope });
+  } else {
+    console.warn('[Home] BenTradePreMarket module not loaded — pre-market panels will not render');
+  }
+
   let _loadInFlight = null;       // singleton guard — prevents overlapping load sequences
   const overlay = window.BenTradeHomeLoadingOverlay?.create?.(scope) || null;
 
@@ -4011,6 +4040,12 @@ window.BenTradePages.initHome = function initHome(rootEl){
     renderFallbackBlank();
   }
 
+  // ── Pre-Market Intelligence + Indicator Charts ──
+  // These use independent API endpoints (not the market-picture snapshot),
+  // so they load once at init and refresh on their own timers.
+  // Pre-Market: Delegated to standalone BenTradePreMarket module.
+  // (Moved to before cacheStore guard — see above)
+
   /**
    * Poll backend data-population status until it completes or fails.
    * Updates the welcome modal phase indicators if provided.
@@ -4112,6 +4147,13 @@ window.BenTradePages.initHome = function initHome(rootEl){
       }, 1500);
       _holdRefreshBadge = false;
       setRefreshingBadge(false);
+
+      // Start the continuous workflow orchestrator after boot completes.
+      // This replaces the standalone MI cron job with a unified MI → TMC loop.
+      fetch('/api/orchestrator/start?account_mode=paper', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) { console.log('[ORCHESTRATOR] Started after boot:', d); })
+        .catch(function(e) { console.warn('[ORCHESTRATOR] Start failed:', e); });
     });
 
   } else {
@@ -4181,6 +4223,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     queueState.runId += 1;
     _loadInFlight = null;
     activeLoadToken += 1;
+    if(window.BenTradePreMarket) window.BenTradePreMarket.destroy();
     if(overlay){
       overlay.destroy();
     }

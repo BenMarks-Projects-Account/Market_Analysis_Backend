@@ -1030,8 +1030,8 @@ class TestDebitMath:
         # be_high = 590 - 0.80 = 589.20
         assert result.breakeven == [580.80, 589.20]
 
-    def test_pop_delta_approx_call(self):
-        """POP ≈ |Δ_lower| − |Δ_upper| for calls."""
+    def test_pop_breakeven_range_call(self):
+        """POP = P(BE_low < S_T < BE_high) via breakeven-range lognormal for calls."""
         scanner = ButterfliesV2Scanner()
         cand = _make_debit_butterfly(
             lower_delta=0.65, upper_delta=0.35,
@@ -1039,12 +1039,12 @@ class TestDebitMath:
         )
         result = scanner.family_math(cand)
 
-        # POP ≈ 0.65 - 0.35 = 0.30
-        assert result.pop == 0.30
-        assert result.pop_source == "delta_approx"
+        # Breakeven range lognormal: P(580.8 < S_T < 589.2), iv=0.25, dte=36
+        assert result.pop_source == "breakeven_range_lognormal"
+        assert 0.05 <= result.pop <= 0.15  # narrow zone → low POP
 
-    def test_pop_delta_approx_put(self):
-        """POP ≈ |Δ_upper| − |Δ_lower| for puts."""
+    def test_pop_breakeven_range_put(self):
+        """POP = P(BE_low < S_T < BE_high) via breakeven-range lognormal for puts."""
         scanner = ButterfliesV2Scanner()
         cand = _make_debit_butterfly(
             option_type="put",
@@ -1054,11 +1054,11 @@ class TestDebitMath:
         )
         result = scanner.family_math(cand)
 
-        # POP ≈ |−0.55| − |−0.25| = 0.30
-        assert result.pop == 0.30
+        assert result.pop_source == "breakeven_range_lognormal"
+        assert 0.05 <= result.pop <= 0.15
 
     def test_ev_computed(self):
-        """EV = pop × max_profit − (1−pop) × max_loss."""
+        """EV adjusted for triangular payoff: pop*max_profit*0.50 - (1-pop)*max_loss."""
         scanner = ButterfliesV2Scanner()
         cand = _make_debit_butterfly(
             lower_ask=8.20, center_bid=5.50, upper_ask=3.60,
@@ -1066,9 +1066,14 @@ class TestDebitMath:
         )
         result = scanner.family_math(cand)
 
-        # pop=0.30, max_profit=420, max_loss=80
-        # EV = 0.30 × 420 - 0.70 × 80 = 126 - 56 = 70
-        assert result.ev == 70.0
+        # With breakeven_range_lognormal POP and triangular adjustment
+        assert result.ev is not None
+        assert result.ev_adjustment == "triangular_payoff_0.50"
+        assert result.ev_raw_binary is not None
+        # Adjusted EV < raw binary EV (triangular payoff reduces the gain side)
+        assert result.ev < result.ev_raw_binary
+        assert result.ev_caveat is not None
+        assert result.ev_accuracy == "adjusted"
 
     def test_ror_computed(self):
         """RoR = max_profit / max_loss."""
@@ -1185,8 +1190,8 @@ class TestIronMath:
         # be_high = 590 + 3.00 = 593.00
         assert result.breakeven == [587.00, 593.00]
 
-    def test_pop_delta_approx(self):
-        """POP ≈ 1 − |Δ_ps| − |Δ_cs|."""
+    def test_pop_breakeven_range(self):
+        """POP = P(BE_low < S_T < BE_high) via breakeven-range lognormal."""
         scanner = ButterfliesV2Scanner()
         cand = _make_iron_butterfly(
             ps_delta=-0.50, cs_delta=0.50,
@@ -1195,12 +1200,12 @@ class TestIronMath:
         )
         result = scanner.family_math(cand)
 
-        # POP = 1 - 0.50 - 0.50 = 0.0
-        assert result.pop == 0.0
-        assert result.pop_source == "delta_approx"
+        # Breakeven range [587, 593] with spot=590, iv=0.25, dte=36
+        assert result.pop_source == "breakeven_range_lognormal"
+        assert 0.03 <= result.pop <= 0.15
 
-    def test_pop_off_center(self):
-        """POP with slightly OTM short strikes."""
+    def test_pop_independent_of_delta(self):
+        """POP depends on breakevens, not on delta values."""
         scanner = ButterfliesV2Scanner()
         cand = _make_iron_butterfly(
             ps_delta=-0.40, cs_delta=0.40,
@@ -1209,11 +1214,12 @@ class TestIronMath:
         )
         result = scanner.family_math(cand)
 
-        # POP = 1 - 0.40 - 0.40 = 0.20
-        assert result.pop == 0.20
+        # Same breakevens → same POP regardless of delta
+        assert result.pop_source == "breakeven_range_lognormal"
+        assert 0.03 <= result.pop <= 0.15
 
     def test_ev_computed(self):
-        """EV is computed from pop, max_profit, max_loss."""
+        """EV adjusted for triangular payoff."""
         scanner = ButterfliesV2Scanner()
         cand = _make_iron_butterfly(
             ps_delta=-0.40, cs_delta=0.40,
@@ -1222,9 +1228,12 @@ class TestIronMath:
         )
         result = scanner.family_math(cand)
 
-        # pop=0.20, max_profit=300, max_loss=200
-        # EV = 0.20×300 - 0.80×200 = 60 - 160 = -100
-        assert result.ev == -100.0
+        assert result.ev is not None
+        assert result.ev_adjustment == "triangular_payoff_0.50"
+        assert result.ev_raw_binary is not None
+        assert result.ev < result.ev_raw_binary
+        assert result.ev_caveat is not None
+        assert result.ev_accuracy == "adjusted"
 
     def test_missing_quotes_returns_early(self):
         """Missing bid/ask → math returns without pricing."""

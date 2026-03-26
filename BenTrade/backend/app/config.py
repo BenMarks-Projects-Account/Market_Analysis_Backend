@@ -73,9 +73,9 @@ class Settings(BaseModel):
 
     FRED_VIX_SERIES_ID: str = "VIXCLS"
 
-    QUOTE_CACHE_TTL_SECONDS: int = 10
+    QUOTE_CACHE_TTL_SECONDS: int = 60
     EXPIRATIONS_CACHE_TTL_SECONDS: int = 300
-    CHAIN_CACHE_TTL_SECONDS: int = 60
+    CHAIN_CACHE_TTL_SECONDS: int = 300
     CANDLES_CACHE_TTL_SECONDS: int = 1800
     FRED_CACHE_TTL_SECONDS: int = 300
 
@@ -87,8 +87,8 @@ class Settings(BaseModel):
     TRADING_CONTRACT_MULTIPLIER: int = int(os.getenv("TRADING_CONTRACT_MULTIPLIER", "100"))
     LIVE_DATA_MAX_AGE_SECONDS: int = int(os.getenv("LIVE_DATA_MAX_AGE_SECONDS", "30"))
 
-    MAX_WIDTH_DEFAULT: float = float(os.getenv("MAX_WIDTH_DEFAULT", "10"))
-    MAX_LOSS_PER_SPREAD_DEFAULT: float = float(os.getenv("MAX_LOSS_PER_SPREAD_DEFAULT", "500"))
+    MAX_WIDTH_DEFAULT: float = float(os.getenv("MAX_WIDTH_DEFAULT", "50"))
+    MAX_LOSS_PER_SPREAD_DEFAULT: float = float(os.getenv("MAX_LOSS_PER_SPREAD_DEFAULT", "2000"))
     MIN_CREDIT_DEFAULT: float = float(os.getenv("MIN_CREDIT_DEFAULT", "0.2"))
 
     DTE_MIN: int = int(os.getenv("DTE_MIN", "3"))

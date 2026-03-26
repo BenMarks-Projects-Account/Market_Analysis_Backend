@@ -39,6 +39,7 @@ from app.workflows.tmc_service import (
     load_latest_stock_output,
     load_latest_run_summary,
 )
+from app.services.notification_service import get_notification_service
 
 logger = logging.getLogger("bentrade.routes_tmc")
 
@@ -178,6 +179,16 @@ async def trigger_stock_workflow(
         "[TMC] Stock workflow trigger complete: run_id=%s status=%s candidates=%d",
         result.run_id, result.status, result.candidate_count,
     )
+
+    # Check for BUY/EXECUTE signals (load full output from disk)
+    try:
+        data_dir = _get_data_dir(request)
+        stock_full = load_latest_stock_output(data_dir)
+        if stock_full:
+            get_notification_service().check_stock_results(stock_full.to_dict())
+    except Exception as exc:
+        logger.warning("[TMC] Stock notification check failed: %s", exc)
+
     return TMCTriggerResponse(**result.to_dict())
 
 
@@ -211,6 +222,16 @@ async def trigger_options_workflow(
         "[TMC] Options workflow trigger complete: run_id=%s status=%s candidates=%d",
         result.run_id, result.status, result.candidate_count,
     )
+
+    # Check for BUY/EXECUTE signals (load full output from disk)
+    try:
+        data_dir = _get_data_dir(request)
+        options_full = load_latest_options_output(data_dir)
+        if options_full:
+            get_notification_service().check_options_results(options_full.to_dict())
+    except Exception as exc:
+        logger.warning("[TMC] Options notification check failed: %s", exc)
+
     return TMCTriggerResponse(**result.to_dict())
 
 
@@ -502,9 +523,13 @@ async def run_portfolio_balance(
     params = body or TMCPortfolioBalanceRequest()
 
     logger.info(
-        "[TMC_PORTFOLIO_BALANCE] endpoint hit — account_mode=%s skip_model=%s",
+        "[TMC_PORTFOLIO_BALANCE] endpoint hit — account_mode=%s skip_model=%s "
+        "has_stock=%s has_options=%s has_active=%s",
         params.account_mode,
         params.skip_model,
+        params.stock_results is not None,
+        params.options_results is not None,
+        params.active_trade_results is not None,
     )
 
     result = await run_portfolio_balance_workflow(

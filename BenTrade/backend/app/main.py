@@ -47,6 +47,11 @@ from app.api.routes_market_picture import router as market_picture_router
 from app.api.routes_tmc import router as tmc_router
 from app.clients.finnhub_client import FinnhubClient
 from app.clients.fred_client import FredClient
+from app.clients.futures_client import FuturesClient
+from app.services.pre_market_intelligence import PreMarketIntelligenceService
+from app.api.routes_pre_market import router as pre_market_router
+from app.api.routes_orchestrator import router as orchestrator_router
+from app.api.routes_notifications import router as notifications_router
 from app.clients.polygon_client import PolygonClient
 from app.clients.tradier_client import TradierClient
 from app.config import get_settings
@@ -129,6 +134,7 @@ def create_app() -> FastAPI:
     finnhub_client = FinnhubClient(settings=settings, http_client=http_client, cache=cache)
     polygon_client = PolygonClient(settings=settings, http_client=http_client, cache=cache)
     fred_client = FredClient(settings=settings, http_client=http_client, cache=cache)
+    futures_client = FuturesClient(settings=settings, cache=cache, http_client=http_client)
 
     # -- Snapshot chain source / recorder -----------------------------------
     _logger = logging.getLogger(__name__)
@@ -251,6 +257,12 @@ def create_app() -> FastAPI:
     app.state.finnhub_client = finnhub_client
     app.state.polygon_client = polygon_client
     app.state.fred_client = fred_client
+    app.state.futures_client = futures_client
+    pre_market_service = PreMarketIntelligenceService(
+        futures_client=futures_client,
+        cache=cache,
+    )
+    app.state.pre_market_service = pre_market_service
     app.state.base_data_service = base_data_service
     app.state.signal_service = signal_service
     app.state.spread_service = spread_service
@@ -300,6 +312,7 @@ def create_app() -> FastAPI:
         tradier_client=tradier_client,
         market_context_service=market_context_service,
         fred_client=fred_client,
+        futures_client=futures_client,
     )
     vol_service = VolatilityOptionsService(
         data_provider=vol_data_provider,
@@ -310,6 +323,7 @@ def create_app() -> FastAPI:
     cross_asset_data_provider = CrossAssetMacroDataProvider(
         market_context_service=market_context_service,
         fred_client=fred_client,
+        futures_client=futures_client,
     )
     cross_asset_macro_service = CrossAssetMacroService(
         data_provider=cross_asset_data_provider,
@@ -377,6 +391,7 @@ def create_app() -> FastAPI:
         news_sentiment_service=news_sentiment_service,
         http_client=http_client,
         model_request_fn=mi_model_fn,
+        pre_market_service=pre_market_service,
     )
     data_population_service = DataPopulationService(
         data_dir=data_dir,
@@ -417,10 +432,13 @@ def create_app() -> FastAPI:
     app.include_router(scanner_review_router)
     app.include_router(tmc_router)
     app.include_router(market_picture_router)
+    app.include_router(pre_market_router)
     app.include_router(routing_router, prefix="/api/admin", tags=["routing"])
     app.include_router(data_population_router)
     app.include_router(contextual_chat_router)
     app.include_router(dev_router)
+    app.include_router(orchestrator_router)
+    app.include_router(notifications_router)
     app.include_router(frontend_router)
 
     @app.exception_handler(UpstreamError)

@@ -6349,6 +6349,7 @@ a.at-symbol-link:hover{
 .home-chart text,
 .home-mp-history-svg text,
 .home-regime-proxy-svg text,
+.home-premarket-svg text,
 #stockSparkline text,
 #saEquityCurve text,
 .mod-trend-chart text{
@@ -8162,6 +8163,46 @@ a.at-symbol-link:hover{
 }
 .bt-chat-banner-label{
     opacity:0.85;
+}
+
+/* ═══ Pre-Market Indicators Section ═══ */
+.home-premarket-panel{
+    margin-top:0;
+}
+.home-premarket-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:8px;
+}
+.home-premarket-refresh-btn{
+    font-size:11px;
+    padding:3px 10px;
+    min-width:auto;
+}
+.home-premarket-grid{
+    display:grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap:12px;
+}
+@media (max-width:720px){
+    .home-premarket-grid{ grid-template-columns:1fr; }
+}
+.home-premarket-card{
+    min-width:0;
+    background:rgba(22,27,34,0.6);
+    border:1px solid rgba(255,255,255,0.06);
+    border-radius:8px;
+    padding:16px;
+}
+.home-premarket-svg{
+    height:240px;
+}
+.home-premarket-empty{
+    text-align:center;
+    padding:24px 12px;
+    color:var(--muted);
+    font-size:13px;
 }
 .bt-chat-banner-label strong{
     color:var(--cyan);

@@ -36,10 +36,11 @@ window.BenTradeTradeTicket = (function () {
   var _preview   = null;   // preview response from backend
   var _mode      = 'paper'; // paper | live
   var _loading   = false;
-  var _step      = 'review'; // review | previewing | confirmed | submitting | submitted | reconciling | done | error
+  var _step      = 'review'; // review | previewing | warning | confirmed | submitting | submitted | reconciling | done | error
   var _traceId   = null;   // end-to-end trace ID for this session
   var _submitResp = null;  // last submit response (for order ID display)
   var _lastError = null;   // last error object { message, status, detail, endpoint, bodySnippet }
+  var _submitIdempotencyKey = null; // stable per-preview idempotency key (prevents duplicate orders)
 
   /* ── Helpers ───────────────────────────────────────────────── */
 
@@ -387,6 +388,19 @@ window.BenTradeTradeTicket = (function () {
           : '') +
       '</div>';
     }
+    if (_step === 'warning' && _preview) {
+      var softWarns = _preview.soft_warnings || [];
+      var warnHtml = '<div class="tt-status tt-status-warning">';
+      warnHtml += '<div class="tt-preview-label" style="color:#ff9800;">\u26A0 Risk Warnings</div>';
+      warnHtml += '<div style="background:rgba(255,152,0,0.08); border:1px solid rgba(255,152,0,0.25); border-radius:6px; padding:10px 14px; margin:8px 0;">';
+      for (var wi = 0; wi < softWarns.length; wi++) {
+        warnHtml += '<div style="color:rgba(224,224,224,0.85); font-size:0.85rem; margin-bottom:4px;">\u2022 ' + softWarns[wi] + '</div>';
+      }
+      warnHtml += '</div>';
+      warnHtml += '<div style="color:rgba(224,224,224,0.5); font-size:0.8rem; margin-top:6px;">The trade preview succeeded but triggered risk warnings. You can override and continue or cancel.</div>';
+      warnHtml += '</div>';
+      return warnHtml;
+    }
     if (_step === 'confirmed' && _preview) {
       var warns = _preview.warnings || [];
       var warnHtml = '';
@@ -538,6 +552,11 @@ window.BenTradeTradeTicket = (function () {
       confirmLabel    = 'Preview Order';
       confirmDisabled = !actuallyValid;
       confirmTitle    = !actuallyValid ? val.errors.join(' ') : '';
+    } else if (_step === 'warning') {
+      // Soft risk warnings — offer override
+      confirmLabel    = 'Override & Continue';
+      confirmDisabled = false;
+      confirmTitle    = 'Proceed despite risk warnings';
     } else if (_step === 'error') {
       // Preview failed — offer retry, never offer submit
       confirmLabel    = 'Retry Preview';
@@ -628,6 +647,7 @@ window.BenTradeTradeTicket = (function () {
     if (confirmBtn) {
       confirmBtn.addEventListener('click', function () {
         if (_step === 'review' || _step === 'error') _doPreview();
+        else if (_step === 'warning') _doPreview(true);
         else if (_step === 'confirmed') _doSubmit();
       });
     }
@@ -703,7 +723,7 @@ window.BenTradeTradeTicket = (function () {
 
   /* ── Preview flow ──────────────────────────────────────────── */
 
-  async function _doPreview() {
+  async function _doPreview(overrideFlag) {
     if (_loading) return;
     _step = 'previewing';
     _loading = true;
@@ -713,6 +733,7 @@ window.BenTradeTradeTicket = (function () {
     try {
       var req = toPreview(_ticket, _mode);
       if (_traceId) req.trace_id = _traceId;
+      if (overrideFlag) req.override = true;
 
       // ── Pre-request diagnostic ──────────────────────────────
       console.log('[TRADE_TICKET] preview_click', {
@@ -720,18 +741,35 @@ window.BenTradeTradeTicket = (function () {
         destination: _mode,
         execution_enabled: _status && _status.tradier_execution_enabled,
         endpoint: 'POST /api/trading/preview',
+        override: !!overrideFlag,
         payload: JSON.parse(JSON.stringify(req)),
       });
 
       var resp = await api.tradingPreview(req);
       _preview = resp;
       if (resp.trace_id) _traceId = resp.trace_id;
-      _step = 'confirmed';
+
+      // Check if backend returned soft warnings requiring override
+      if (resp.requires_override && resp.soft_warnings && resp.soft_warnings.length > 0) {
+        _step = 'warning';
+        _submitIdempotencyKey = null; // reset on re-preview
+        console.info('[TRADE_TICKET] preview_soft_warnings', {
+          soft_warnings: resp.soft_warnings,
+          checks: resp.checks,
+        });
+      } else {
+        _step = 'confirmed';
+        // Generate stable idempotency key once per successful preview
+        _submitIdempotencyKey = 'idem-' + (_preview.ticket.id || _traceId) + '-' + Date.now().toString(36);
+      }
+
       console.info('[TRADE_TICKET] preview_ok', {
         ticket_id: resp.ticket && resp.ticket.id,
         trace_id: resp.trace_id,
         checks: resp.checks,
         warnings: resp.warnings,
+        soft_warnings: resp.soft_warnings || [],
+        requires_override: resp.requires_override || false,
         tradier_preview: resp.tradier_preview || null,
         tradier_preview_error: resp.tradier_preview_error || null,
         payload_sent: resp.payload_sent || null,
@@ -771,10 +809,17 @@ window.BenTradeTradeTicket = (function () {
     _render();
 
     try {
+      // Use the stable idempotency key generated at preview-confirm time.
+      // This ensures that retries or double-clicks hit the backend cache
+      // instead of creating duplicate orders.
+      if (!_submitIdempotencyKey) {
+        _submitIdempotencyKey = 'idem-' + (_preview.ticket.id || _traceId) + '-' + Date.now().toString(36);
+      }
+
       var payload = {
         ticket_id:          _preview.ticket.id,
         confirmation_token: _preview.confirmation_token,
-        idempotency_key:    _uuid(),
+        idempotency_key:    _submitIdempotencyKey,
         mode:               _mode,
         trace_id:           _traceId,
       };
@@ -933,6 +978,7 @@ window.BenTradeTradeTicket = (function () {
     _mode    = 'paper';
     _submitResp = null;
     _lastError = null;
+    _submitIdempotencyKey = null;
     // Generate trace_id on frontend when opening modal
     _traceId = 'ttk-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
 
@@ -1002,6 +1048,7 @@ window.BenTradeTradeTicket = (function () {
     _traceId = null;
     _submitResp = null;
     _lastError = null;
+    _submitIdempotencyKey = null;
 
     // Restore background app shell
     var shell = document.querySelector('.shell');

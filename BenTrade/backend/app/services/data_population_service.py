@@ -93,10 +93,25 @@ class DataPopulationService:
         return self._status
 
     async def start(self) -> None:
-        """Start the background scheduler. Runs first cycle immediately."""
+        """Run the first MI cycle on startup (no repeating loop).
+
+        The continuous workflow orchestrator now controls the MI cadence
+        by calling ``trigger()`` at the start of each cycle.  The old
+        auto-repeating ``_run_loop()`` is retained but no longer started
+        automatically — call ``start_legacy_loop()`` if you need it.
+        """
+        self._stopped = False
+        asyncio.create_task(self._run_once())
+        logger.info("event=data_population_initial_run_started")
+
+    async def start_legacy_loop(self) -> None:
+        """Start the old repeating background loop (5-min interval).
+
+        Only use this if the continuous orchestrator is NOT running.
+        """
         self._stopped = False
         self._loop_task = asyncio.create_task(self._run_loop())
-        logger.info("event=data_population_scheduler_started interval_s=%d", INTERVAL_SECONDS)
+        logger.info("event=data_population_legacy_loop_started interval_s=%d", INTERVAL_SECONDS)
 
     async def stop(self) -> None:
         """Stop the background scheduler."""

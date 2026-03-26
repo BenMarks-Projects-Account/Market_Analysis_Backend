@@ -104,7 +104,8 @@ STAGE_KEYS: tuple[str, ...] = (
     "select_package",
 )
 
-# Default: return top 30 options candidates in the final output.
+# Default: top 30 candidates from scanner/ranking (pre-model).
+# After model analysis + filter, final output is MODEL_ANALYSIS_TOP_N_OUTPUT (10).
 DEFAULT_TOP_N: int = 30
 
 # Default symbol universe — index ETFs per BenTrade philosophy.
@@ -390,6 +391,7 @@ def _extract_compact_candidate(cand: dict[str, Any]) -> dict[str, Any]:
             "ev": math.get("ev"),                       # per-contract
             "ev_per_day": math.get("ev_per_day"),       # EV / DTE
             "ror": math.get("ror"),                     # max_profit / max_loss
+            "expected_ror": math.get("expected_ror"),   # ev / |max_loss|
             "kelly": math.get("kelly"),
             "breakeven": math.get("breakeven", []),
         },
@@ -657,61 +659,6 @@ async def run_options_opportunity(
                         stage_data.get("enriched_candidates", []),
                         keys=["candidate_id", "scanner_key", "symbol",
                               "expiration", "rank", "math"])
-
-        # === TEMPORARY PIPELINE DIAGNOSTIC (remove after debugging) ===
-        import os as _pdiag_os
-        if not _pdiag_os.environ.get("PYTEST_CURRENT_TEST"):
-            try:
-                import json as _pdiag_json
-                from pathlib import Path as _PdiagPath
-                _pdiag_now = datetime.now(timezone.utc)
-                _raw = stage_data.get("raw_candidates", [])
-                _rejected = stage_data.get("rejected_candidates", [])
-                _validated = stage_data.get("validated_candidates", [])
-                _enriched = stage_data.get("enriched_candidates", [])
-
-                _per_scanner: dict[str, int] = {}
-                for _c in (_raw or []):
-                    _sk = _c.get("scanner_key", "unknown") if isinstance(_c, dict) else getattr(_c, 'scanner_key', 'unknown')
-                    _per_scanner[_sk] = _per_scanner.get(_sk, 0) + 1
-
-                _reject_per_scanner: dict[str, int] = {}
-                for _c in (_rejected or []):
-                    _sk = _c.get("scanner_key", "unknown") if isinstance(_c, dict) else getattr(_c, 'scanner_key', 'unknown')
-                    _reject_per_scanner[_sk] = _reject_per_scanner.get(_sk, 0) + 1
-
-                pipeline_diag = {
-                    "timestamp": _pdiag_now.isoformat(),
-                    "run_id": run_id,
-                    "stage_2_scan": {
-                        "total_raw_candidates": len(_raw) if _raw else 0,
-                        "total_rejected": len(_rejected) if _rejected else 0,
-                        "per_scanner_key_passed": _per_scanner,
-                        "per_scanner_key_rejected": _reject_per_scanner,
-                        "scan_diagnostics_keys": list((stage_data.get("scan_diagnostics") or {}).keys()),
-                        "reject_reason_counts": (stage_data.get("scan_diagnostics") or {}).get("reject_reason_counts", {}),
-                    },
-                    "stage_3_validate": {
-                        "validated_count": len(_validated) if _validated else 0,
-                        "filtered_count": stage_data.get("validation_filtered_count", 0),
-                        "filter_reasons": stage_data.get("validation_filter_reasons", {}),
-                    },
-                    "stage_4_enrich": {
-                        "enriched_count": len(_enriched) if _enriched else 0,
-                        "credibility_filter": stage_data.get("credibility_filter"),
-                        "market_state_ref": stage_data.get("market_state_ref"),
-                    },
-                }
-
-                _pdiag_dir = _PdiagPath("results/diagnostics")
-                _pdiag_dir.mkdir(parents=True, exist_ok=True)
-                _pdiag_file = _pdiag_dir / f"options_pipeline_diag_{_pdiag_now.strftime('%Y%m%d_%H%M%S')}.json"
-                with open(_pdiag_file, "w") as _f:
-                    _pdiag_json.dump(pipeline_diag, _f, indent=2, default=str)
-                logger.info("[options_opportunity] DIAG: wrote %s", _pdiag_file)
-            except Exception as _pdiag_exc:
-                logger.warning("event=pipeline_diag_write_failed error=%s", _pdiag_exc)
-        # === END PIPELINE DIAGNOSTIC ===
 
         if outcome.status == "failed":
             result.status = "failed"
@@ -1192,6 +1139,35 @@ def _stage_enrich_evaluate(
                 credibility_reasons["all_legs_zero_bid"] = credibility_reasons.get("all_legs_zero_bid", 0) + 1
                 continue
 
+            # Check 4: credit strategy must have positive credit (safety net)
+            _CREDIT_STRATEGY_IDS = frozenset({
+                "put_credit_spread", "call_credit_spread",
+                "iron_condor", "iron_butterfly",
+            })
+            scanner_key = cand.get("scanner_key") or cand.get("strategy_id") or ""
+            if scanner_key in _CREDIT_STRATEGY_IDS:
+                if net_credit <= 0:
+                    credibility_rejections += 1
+                    credibility_reasons["credit_spread_no_credit"] = credibility_reasons.get("credit_spread_no_credit", 0) + 1
+                    continue
+
+            # Check 5: short leg bid-ask spread must be reasonable for credit strategies
+            if scanner_key in _CREDIT_STRATEGY_IDS:
+                _wide_short = False
+                for leg in legs:
+                    if leg.get("side") == "short":
+                        bid = _safe_float(leg.get("bid"))
+                        ask = _safe_float(leg.get("ask"))
+                        if bid > 0 and ask > 0:
+                            spread_pct = (ask - bid) / bid
+                            if spread_pct > 0.20:
+                                _wide_short = True
+                                break
+                if _wide_short:
+                    credibility_rejections += 1
+                    credibility_reasons["wide_spread_short_leg"] = credibility_reasons.get("wide_spread_short_leg", 0) + 1
+                    continue
+
             credible.append(cand)
 
         logger.info(
@@ -1580,10 +1556,13 @@ def _stage_model_filter(
     """Stage 6: Filter and rank candidates by model analysis results.
 
     Rules:
-      1. Discard candidates where model_recommendation == "PASS".
+      1. Prefer candidates where model_recommendation == "EXECUTE".
       2. Discard candidates with no model analysis (model_review is None).
       3. Rank remaining by model_score descending (None scores sort last).
       4. Keep top MODEL_ANALYSIS_TOP_N_OUTPUT (10).
+      5. When ALL candidates get PASS (model ran but none qualify for EXECUTE),
+         keep the top model-scored PASS candidates so the user sees model
+         reviews.  "All PASS" is a valid analytical conclusion, not degradation.
 
     On full model degradation (no candidate has model_review), falls back
     to the enriched ranking (EV-based) and keeps top 10, so the pipeline
@@ -1645,6 +1624,7 @@ def _stage_model_filter(
 
     # ── NORMAL: filter by model recommendation ──
     passed_syms: list[str] = []
+    passed_candidates: list[dict[str, Any]] = []
     no_analysis_syms: list[str] = []
     execute_candidates: list[dict[str, Any]] = []
 
@@ -1658,6 +1638,7 @@ def _stage_model_filter(
             passed_syms.append(
                 f"{cand.get('symbol', '?')}/{cand.get('scanner_key', '')}",
             )
+            passed_candidates.append(cand)
         else:
             execute_candidates.append(cand)
 
@@ -1666,6 +1647,50 @@ def _stage_model_filter(
         key=lambda c: c.get("model_score") if c.get("model_score") is not None else -1,
         reverse=True,
     )
+
+    # ── ALL-PASS RECOVERY: when the model ran successfully but every
+    # candidate received PASS, keep the top model-scored candidates
+    # with their model data intact instead of producing an empty list
+    # that would trigger the degradation fallback.  The model DID run;
+    # "all PASS" is a valid analytical conclusion, not an outage.
+    if not execute_candidates and passed_candidates:
+        passed_candidates.sort(
+            key=lambda c: c.get("model_score") if c.get("model_score") is not None else -1,
+            reverse=True,
+        )
+        trimmed = passed_candidates[:MODEL_ANALYSIS_TOP_N_OUTPUT]
+        dropped = passed_candidates[MODEL_ANALYSIS_TOP_N_OUTPUT:]
+
+        for i, c in enumerate(trimmed, start=1):
+            c["rank"] = i
+
+        stage_data["selected_candidates"] = trimmed
+        stage_data["model_filter_counts"] = {
+            "before": before_count,
+            "passed_removed": 0,
+            "passed_kept": len(trimmed),
+            "no_analysis_removed": len(no_analysis_syms),
+            "no_analysis_symbols": no_analysis_syms,
+            "execute_candidates": 0,
+            "dropped_by_rank": len(dropped),
+            "after": len(trimmed),
+            "all_pass_recovery": True,
+            "ranking_method": "model_score",
+        }
+
+        logger.info(
+            "[options_model_filter] ALL-PASS recovery: before=%d all_pass=%d "
+            "no_analysis=%d kept=%d (ranked by model_score)",
+            before_count, len(passed_candidates), len(no_analysis_syms),
+            len(trimmed),
+        )
+
+        return StageOutcome(
+            stage_key="model_filter",
+            status="completed",
+            started_at=started,
+            completed_at=_now_iso(),
+        )
 
     trimmed = execute_candidates[:MODEL_ANALYSIS_TOP_N_OUTPUT]
     dropped = execute_candidates[MODEL_ANALYSIS_TOP_N_OUTPUT:]
@@ -1725,12 +1750,21 @@ def _stage_select_package(
     try:
         # Prefer model-filtered candidates; fall back to enriched if
         # model stages were skipped (CancelledError / partial output).
-        selected: list[dict[str, Any]] = (
-            stage_data.get("selected_candidates")
-            or stage_data.get("enriched_candidates", [])
-        )
-        top_n = config.top_n
-        selected = selected[:top_n]
+        # Final cap: never exceed MODEL_ANALYSIS_TOP_N_OUTPUT (10) even
+        # when config.top_n is the higher scanner default (30).
+        final_cap = min(config.top_n, MODEL_ANALYSIS_TOP_N_OUTPUT)
+        model_filtered = stage_data.get("selected_candidates")
+        if model_filtered is not None:
+            # Model filter ran — use its output (may be EXECUTE, PASS-recovery, or degraded).
+            selected: list[dict[str, Any]] = model_filtered[:final_cap]
+        else:
+            # Model stages didn't complete — still cap at the model output
+            # limit so the TMC never shows more candidates than the
+            # pipeline's designed final output.
+            selected = stage_data.get("enriched_candidates", [])[:final_cap]
+            for i, c in enumerate(selected, start=1):
+                c["model_degraded"] = True
+                c["rank"] = i
 
         market_state_ref = stage_data.get("market_state_ref")
         consumer_result: MarketStateConsumerResult | None = stage_data.get("market_state_consumer")
@@ -1821,7 +1855,7 @@ def _stage_select_package(
                 "level": quality_level,
                 "total_candidates_found": total_candidates,
                 "selected_count": selected_count,
-                "top_n_cap": top_n,
+                "top_n_cap": final_cap,
                 "scanners_ok": scanners_ok,
                 "scanners_total": scanners_total,
                 "credibility_filter": stage_data.get("credibility_filter"),
@@ -1927,7 +1961,7 @@ def _stage_select_package(
             "generated_at": completed_at,
             "status": "completed",
             "selected_count": selected_count,
-            "top_n_cap": top_n,
+            "top_n_cap": final_cap,
             "candidates": selected,
         }
         stage_path = get_stage_artifact_path(data_dir, WORKFLOW_ID, run_id, "select_package")

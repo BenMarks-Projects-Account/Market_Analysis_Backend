@@ -16,7 +16,7 @@
       <span id="tmcRefreshStatus" class="tmc-refresh-status" style="display:none;"></span>
     </div>
     <div class="tmc-control-right">
-      <span id="tmcStockStatus" class="tmc-run-status"></span>
+      <span id="orchestratorStatus" class="tmc-orchestrator-status" title="Continuous workflow orchestrator status"></span>
     </div>
   </div>
 
@@ -26,7 +26,6 @@
       <h3 class="tmc-section-title">Stock Opportunities</h3>
       <span id="tmcStockCount" class="tmc-count-badge">0</span>
       <span id="tmcStockQuality" class="tmc-quality-badge"></span>
-      <span id="tmcStockBatchStatus" class="tmc-batch-status"></span>
       <span id="tmcStockFreshness" class="tmc-freshness"></span>
     </div>
     <div id="tmcStockGrid" class="tmc-candidate-grid">
@@ -71,6 +70,7 @@
     <div class="tmc-section-header">
       <h3 class="tmc-section-title">Active Trade Candidates</h3>
       <span id="tmcActiveCount" class="tmc-count-badge tmc-count-muted">—</span>
+      <span id="tmcActiveTimestamp" class="tmc-freshness"></span>
       <div class="tmc-active-controls">
         <div class="active-account-toggle" id="tmcAccountToggle">
           <button class="active-account-btn is-active" data-mode="paper">PAPER</button>
@@ -92,15 +92,17 @@
   </section>
 
   <!-- ═══ SECTION 4 — Suggested Portfolio Rebalance ═══ -->
-  <section class="tmc-section" id="tmcPortfolioBalanceSection" style="display:none;">
+  <section class="tmc-section" id="tmcPortfolioBalanceSection">
     <div class="tmc-section-header">
       <h3 class="tmc-section-title">Suggested Portfolio Rebalance</h3>
       <span id="tmcBalanceStatus" class="tmc-count-badge tmc-count-muted">—</span>
+      <span id="tmcBalanceTimestamp" class="tmc-freshness"></span>
+      <button id="tmcRunBalanceBtn" class="btn tmc-btn" title="Run Portfolio Rebalance">▶ Run Rebalance</button>
     </div>
     <div id="tmcPortfolioBalanceGrid" class="tmc-portfolio-balance-grid">
       <div class="tmc-empty-state">
         <div class="tmc-empty-icon">⚖</div>
-        <div class="tmc-empty-text">Run Full Refresh to generate portfolio rebalance suggestions</div>
+        <div class="tmc-empty-text">Click "Run Rebalance" or Full Refresh to generate portfolio rebalance suggestions</div>
       </div>
     </div>
   </section>

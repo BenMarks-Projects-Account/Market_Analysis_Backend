@@ -348,6 +348,53 @@ class TestStageModelFilter:
         assert outcome.status == "completed"
         assert len(stage_data["selected_candidates"]) == 0
 
+    def test_all_pass_recovery_keeps_model_data(self):
+        """When all candidates are PASS, keep top model-scored with model data."""
+        cands = []
+        for i, (sym, score) in enumerate([("SPY", 78), ("QQQ", 63), ("IWM", 50)]):
+            c = _make_enriched_candidate(sym, rank=i + 1)
+            c["model_review"] = _make_model_result("PASS", 40, score)
+            c["model_recommendation"] = "PASS"
+            c["model_score"] = score
+            cands.append(c)
+
+        stage_data: dict[str, Any] = {"model_candidates": cands, "model_overflow": []}
+        warnings: list[str] = []
+
+        outcome = _stage_model_filter(stage_data, warnings)
+
+        assert outcome.status == "completed"
+        selected = stage_data["selected_candidates"]
+        assert len(selected) == 3
+        # Ranked by model_score descending
+        assert [c["model_score"] for c in selected] == [78, 63, 50]
+        # Model data preserved (not degraded)
+        assert all(c.get("model_degraded") is not True for c in selected)
+        assert all(c["model_recommendation"] == "PASS" for c in selected)
+        assert all(c["model_review"] is not None for c in selected)
+        # Correct metadata
+        counts = stage_data["model_filter_counts"]
+        assert counts["all_pass_recovery"] is True
+        assert counts["passed_kept"] == 3
+        assert counts["execute_candidates"] == 0
+        # No degradation warning
+        assert not any("unavailable" in w for w in warnings)
+
+    def test_all_pass_recovery_caps_at_top_n(self):
+        """All-PASS recovery still caps at MODEL_ANALYSIS_TOP_N_OUTPUT."""
+        cands = []
+        for i in range(MODEL_ANALYSIS_TOP_N_OUTPUT + 5):
+            c = _make_enriched_candidate(f"SYM{i}", rank=i + 1)
+            c["model_review"] = _make_model_result("PASS", 40, 80 - i)
+            c["model_recommendation"] = "PASS"
+            c["model_score"] = 80 - i
+            cands.append(c)
+
+        stage_data: dict[str, Any] = {"model_candidates": cands, "model_overflow": []}
+        _stage_model_filter(stage_data, [])
+
+        assert len(stage_data["selected_candidates"]) == MODEL_ANALYSIS_TOP_N_OUTPUT
+
 
 # ══════════════════════════════════════════════════════════════════════
 # _stage_model_analysis

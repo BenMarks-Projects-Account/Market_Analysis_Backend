@@ -1627,6 +1627,92 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
   margin: 0;
 }
 
+/* ── Pre-Market Intelligence panel ─────────────────────────────────────── */
+.tmc-pre-market-panel {
+  padding: 14px 18px;
+  margin-bottom: 14px;
+  background:
+    linear-gradient(180deg, rgba(222,240,255,0.04), transparent 40%),
+    rgba(10,14,22,0.92);
+  border: 1px solid rgba(126,170,200,0.18);
+  border-radius: 8px;
+}
+.tmc-pm-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.tmc-pm-title {
+  font-family: var(--font-display, sans-serif);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--cyan, #00eaff);
+}
+.tmc-pm-time {
+  font-size: 11px;
+  color: var(--muted, #93a7b6);
+}
+.tmc-pm-signal-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.tmc-pm-signal-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+.tmc-pm-conviction {
+  font-size: 12px;
+  color: var(--muted, #93a7b6);
+  margin-left: 4px;
+}
+.tmc-pm-futures-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.tmc-pm-future-card {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(126,170,200,0.10);
+}
+.tmc-pm-future-label {
+  font-size: 11px;
+  color: var(--muted, #93a7b6);
+}
+.tmc-pm-meta-row {
+  display: flex;
+  gap: 18px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.tmc-pm-meta-row small {
+  font-size: 12px;
+  color: var(--muted, #93a7b6);
+}
+.tmc-pm-alerts {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255,23,68,0.08);
+  border-left: 3px solid #ff1744;
+}
+.tmc-pm-alerts-title {
+  font-weight: 700;
+  color: #ff1744;
+}
+.tmc-pm-alert-item {
+  font-size: 12px;
+  color: var(--text-secondary, #b0bec5);
+  margin-top: 2px;
+}
+
 /* ── Control bar ───────────────────────────────────────────────────────── */
 .tmc-control-bar {
   display: flex;
@@ -1774,6 +1860,14 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
 .tmc-count-muted {
   background: rgba(126,170,200,0.1);
   color: var(--muted, #93a7b6);
+}
+.tmc-count-live {
+  background: rgba(0,234,255,0.15);
+  color: var(--cyan, #00eaff);
+}
+.tmc-count-error {
+  background: rgba(255,23,68,0.15);
+  color: #ff1744;
 }
 
 /* ── Candidate grid ────────────────────────────────────────────────────── */

@@ -338,3 +338,58 @@ class TestWorkflowNoRequest:
 
         assert result["rebalance_plan"] is not None
         assert result["rebalance_plan"]["hold_positions"][0]["symbol"] == "IWM"
+
+
+class TestWorkflowEnvelopeUnwrap:
+    """Runner unwraps {status, data: {candidates}} envelope from /latest responses."""
+
+    def test_stock_envelope_unwrapped(self):
+        active = _make_active_results([])
+        # Simulate response shape from /api/tmc/workflows/stock/latest
+        stock_envelope = {"status": "completed", "data": {"candidates": [{"symbol": "AAPL"}]}}
+
+        with patch(
+            "app.trading.tradier_credentials.get_tradier_context",
+            side_effect=Exception("skip"),
+        ):
+            result = _run(run_portfolio_balance_workflow(
+                account_mode="paper",
+                active_trade_results=active,
+                stock_results=stock_envelope,
+            ))
+
+        assert result["stages"]["stock_candidates"]["count"] == 1
+
+    def test_options_envelope_unwrapped(self):
+        active = _make_active_results([])
+        # Simulate response shape from /api/tmc/workflows/options/latest
+        opts_envelope = {"status": "completed", "data": {"candidates": [{"symbol": "SPY"}]}}
+
+        with patch(
+            "app.trading.tradier_credentials.get_tradier_context",
+            side_effect=Exception("skip"),
+        ):
+            result = _run(run_portfolio_balance_workflow(
+                account_mode="paper",
+                active_trade_results=active,
+                options_results=opts_envelope,
+            ))
+
+        assert result["stages"]["options_candidates"]["count"] == 1
+
+    def test_flat_results_still_work(self):
+        """Direct {candidates: [...]} format continues to work."""
+        active = _make_active_results([])
+        flat = {"candidates": [{"symbol": "QQQ"}, {"symbol": "DIA"}]}
+
+        with patch(
+            "app.trading.tradier_credentials.get_tradier_context",
+            side_effect=Exception("skip"),
+        ):
+            result = _run(run_portfolio_balance_workflow(
+                account_mode="paper",
+                active_trade_results=active,
+                stock_results=flat,
+            ))
+
+        assert result["stages"]["stock_candidates"]["count"] == 2

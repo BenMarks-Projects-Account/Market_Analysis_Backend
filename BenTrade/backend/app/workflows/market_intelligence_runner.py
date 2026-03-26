@@ -114,6 +114,7 @@ class MarketIntelligenceDeps:
     news_sentiment_service: Any
     http_client: Any | None = None
     model_request_fn: Callable | None = None
+    pre_market_service: Any | None = None
 
 
 @dataclass
@@ -238,6 +239,15 @@ async def run_market_intelligence(
         deps, stage_data, warnings,
     )
     stages.append(outcome)
+
+    # ── Pre-market intelligence (non-blocking enrichment) ────────
+    if deps.pre_market_service:
+        try:
+            pre_market_briefing = await deps.pre_market_service.build_briefing()
+            stage_data["pre_market_briefing"] = pre_market_briefing
+        except Exception as exc:
+            logger.warning("event=pre_market_intelligence_failed error=%s", exc)
+            warnings.append(f"Pre-market intelligence failed: {exc}")
 
     # ── Stage 5: assemble_market_state ───────────────────────────
     _notify("assemble_market_state")
@@ -629,8 +639,9 @@ def _stage_assemble_market_state(
             "overall_quality": overall_quality,
         }
 
+        pre_market = stage_data.get("pre_market_briefing")
         consumer_summary = _build_consumer_summary(
-            composite, market_snapshot, pub_status,
+            composite, market_snapshot, pub_status, pre_market,
         )
 
         generated_at = timestamp.isoformat()
@@ -902,6 +913,7 @@ def _build_consumer_summary(
     composite: dict[str, Any] | None,
     market_snapshot: dict[str, Any],
     pub_status: str,
+    pre_market_briefing: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the compact consumer_summary section.
 
@@ -909,6 +921,7 @@ def _build_consumer_summary(
         composite.market_state / support_state / stability_state / confidence
         market_snapshot.metrics.vix.value
         pub_status (to set is_degraded)
+        pre_market_briefing (optional, from PreMarketIntelligenceService)
     """
     metrics = market_snapshot.get("metrics", {})
     vix_data = metrics.get("vix")
@@ -937,7 +950,7 @@ def _build_consumer_summary(
         summary_text = "Market state composite unavailable."
         regime_tags = []
 
-    return {
+    summary: dict[str, Any] = {
         "market_state": market_state,
         "support_state": support_state,
         "stability_state": stability_state,
@@ -947,6 +960,22 @@ def _build_consumer_summary(
         "is_degraded": pub_status != PublicationStatus.VALID.value,
         "summary_text": summary_text,
     }
+
+    # Attach pre-market intelligence when available
+    if pre_market_briefing:
+        sig = pre_market_briefing.get("overnight_signal", {})
+        snaps = pre_market_briefing.get("snapshots", {})
+        summary["pre_market"] = {
+            "overnight_signal": sig.get("signal"),
+            "overnight_conviction": sig.get("conviction"),
+            "gap_risk": sig.get("gap_risk"),
+            "vix_term_structure": sig.get("vix_term_structure"),
+            "es_change_pct": snaps.get("es", {}).get("change_pct"),
+            "nq_change_pct": snaps.get("nq", {}).get("change_pct"),
+            "cross_asset_confirmation": sig.get("cross_asset_confirmation"),
+        }
+
+    return summary
 
 
 # ═══════════════════════════════════════════════════════════════════════

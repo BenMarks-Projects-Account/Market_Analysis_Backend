@@ -35,8 +35,26 @@ async def build_rebalance_plan(
     Returns:
         Rebalance plan dict with close_actions, open_actions, skip_reasons, net_impact
     """
-    
-    equity = float(account_balance.get("equity") or 0)
+    # Defensive defaults — prevent NoneType.get() errors when upstream stages fail
+    if not isinstance(active_trade_results, dict):
+        active_trade_results = {"recommendations": []}
+    active_trade_results = active_trade_results or {"recommendations": []}
+    stock_candidates = stock_candidates if isinstance(stock_candidates, list) else []
+    options_candidates = options_candidates if isinstance(options_candidates, list) else []
+    if not isinstance(account_balance, dict):
+        account_balance = {}
+    account_balance = account_balance or {}
+    if not isinstance(risk_policy, dict):
+        risk_policy = {}
+    risk_policy = risk_policy or {}
+    if not isinstance(portfolio_greeks, dict):
+        portfolio_greeks = {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}
+    portfolio_greeks = portfolio_greeks or {"delta": 0, "gamma": 0, "theta": 0, "vega": 0}
+    if not isinstance(concentration, dict):
+        concentration = {}
+    concentration = concentration or {}
+
+    equity = float(account_balance.get("equity") or account_balance.get("total_equity") or 0)
     
     # ─── STEP 1: Categorize active trade recommendations ───
     closes = []
@@ -129,8 +147,8 @@ async def build_rebalance_plan(
         cand["_max_loss"] = _extract_max_loss(cand)
         cand["_underlying"] = cand.get("symbol") or cand.get("underlying")
         cand["_strategy"] = cand.get("scanner_key") or cand.get("strategy_id")
-        cand["_ev"] = _safe_float(cand.get("math", {}).get("ev"))
-        cand["_ror"] = _safe_float(cand.get("math", {}).get("ror"))
+        cand["_ev"] = _safe_float((cand.get("math") or {}).get("ev"))
+        cand["_ror"] = _safe_float((cand.get("math") or {}).get("ror"))
         cand["_regime_alignment"] = cand.get("regime_alignment", "neutral")
         cand["_delta"] = _extract_candidate_delta(cand)
         all_new_candidates.append(cand)
@@ -273,16 +291,18 @@ async def build_rebalance_plan(
 # ─── Helper functions ───
 
 def _estimate_trade_risk(rec):
-    snap = rec.get("position_snapshot", {})
-    # Use max_loss if available from the trade, otherwise estimate from cost basis
+    rec = rec or {}
+    snap = (rec.get("position_snapshot") or {})
     return abs(snap.get("max_loss") or snap.get("cost_basis_total") or 0)
 
 def _estimate_trade_delta(rec):
-    greeks = rec.get("live_greeks", {})
+    rec = rec or {}
+    greeks = (rec.get("live_greeks") or {})
     return greeks.get("trade_delta", 0) or 0
 
 def _extract_max_loss(cand):
-    math = cand.get("math", {})
+    cand = cand or {}
+    math = (cand.get("math") or {})
     return abs(math.get("max_loss") or 0) / 100  # Convert from per-contract cents to dollars
 
 def _extract_stock_risk(cand, max_per_trade):
@@ -291,9 +311,7 @@ def _extract_stock_risk(cand, max_per_trade):
     return max_per_trade
 
 def _extract_candidate_delta(cand):
-    math = cand.get("math", {})
-    # Options: use the net delta from the spread
-    # Approximate: short credit spread ≈ negative delta (short put = positive delta)
+    cand = cand or {}
     scanner_key = cand.get("scanner_key", "")
     if "put_credit" in scanner_key:
         return 0.15  # Approximate positive delta
@@ -310,14 +328,20 @@ def _safe_float(val):
 
 def _get_held_underlyings(holds, reduces):
     underlyings = set()
-    for h in holds + reduces:
+    for h in (holds or []) + (reduces or []):
+        if not isinstance(h, dict):
+            continue
         u = h.get("symbol") or h.get("underlying")
         if u: underlyings.add(u)
     return underlyings
 
 def _get_underlying_risk(concentration, underlying):
-    items = concentration.get("by_underlying", {}).get("items", [])
+    concentration = concentration or {}
+    by_underlying = concentration.get("by_underlying") or {}
+    items = by_underlying.get("items") or []
     for item in items:
+        if not isinstance(item, dict):
+            continue
         if item.get("symbol") == underlying:
             return item.get("risk", 0)
     return 0
@@ -327,19 +351,22 @@ def _size_position(max_loss_per_contract, max_risk_per_trade, policy):
     if max_loss_per_contract <= 0:
         return 1
     contracts = int(max_risk_per_trade / max_loss_per_contract)
+    policy = policy or {}
     cap = policy.get("default_contracts_cap", 3) or policy.get("suggested_max_contracts", 3)
     return max(1, min(contracts, cap))
 
 def _extract_candidate_summary(cand):
     """Extract key fields for display."""
+    cand = cand or {}
+    math = cand.get("math") or {}
     return {
         "symbol": cand.get("symbol") or cand.get("underlying"),
         "scanner_key": cand.get("scanner_key"),
         "dte": cand.get("dte"),
         "dte_bucket": cand.get("dte_bucket"),
-        "ev": cand.get("math", {}).get("ev"),
-        "pop": cand.get("math", {}).get("pop"),
-        "max_profit": cand.get("math", {}).get("max_profit"),
-        "max_loss": cand.get("math", {}).get("max_loss"),
+        "ev": math.get("ev"),
+        "pop": math.get("pop"),
+        "max_profit": math.get("max_profit"),
+        "max_loss": math.get("max_loss"),
         "event_risk": cand.get("event_risk"),
     }

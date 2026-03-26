@@ -111,6 +111,12 @@ REJECT_BF_INVALID_GEOMETRY = "v2_bf_invalid_geometry"
 # Prompt 12 — calendar/diagonal geometry
 REJECT_CAL_INVALID_GEOMETRY = "v2_cal_invalid_geometry"
 
+# Phase E — credit strategy without actual credit
+REJECT_CREDIT_SPREAD_NO_CREDIT = "v2_credit_spread_no_credit"
+
+# Phase D — wide bid-ask spread on short leg (credit strategies)
+REJECT_WIDE_SPREAD_SHORT_LEG = "v2_wide_spread_short_leg"
+
 # Phase E — math
 REJECT_IMPOSSIBLE_MAX_LOSS = "v2_impossible_max_loss"
 REJECT_IMPOSSIBLE_MAX_PROFIT = "v2_impossible_max_profit"
@@ -202,6 +208,10 @@ _REJECT_REGISTRY: dict[str, CodeInfo] = {
     REJECT_BF_INVALID_GEOMETRY: CodeInfo(REJECT_BF_INVALID_GEOMETRY, CAT_STRUCTURAL, SEV_ERROR, "Butterfly geometry invalid"),
     # Calendar/diagonal geometry (Prompt 12)
     REJECT_CAL_INVALID_GEOMETRY: CodeInfo(REJECT_CAL_INVALID_GEOMETRY, CAT_STRUCTURAL, SEV_ERROR, "Calendar/diagonal geometry invalid"),
+    # Credit strategy without actual credit (Phase E)
+    REJECT_CREDIT_SPREAD_NO_CREDIT: CodeInfo(REJECT_CREDIT_SPREAD_NO_CREDIT, CAT_MATH, SEV_ERROR, "Credit spread produces no credit"),
+    # Wide bid-ask spread on short leg (Phase D)
+    REJECT_WIDE_SPREAD_SHORT_LEG: CodeInfo(REJECT_WIDE_SPREAD_SHORT_LEG, CAT_QUOTE, SEV_ERROR, "Wide bid-ask spread on short leg"),
     # Math
     REJECT_IMPOSSIBLE_MAX_LOSS:   CodeInfo(REJECT_IMPOSSIBLE_MAX_LOSS, CAT_MATH, SEV_ERROR, "Impossible max loss"),
     REJECT_IMPOSSIBLE_MAX_PROFIT: CodeInfo(REJECT_IMPOSSIBLE_MAX_PROFIT, CAT_MATH, SEV_ERROR, "Impossible max profit"),

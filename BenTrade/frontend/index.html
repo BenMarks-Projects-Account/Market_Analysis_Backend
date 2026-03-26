@@ -261,6 +261,16 @@
   
     #view{ min-width:0; min-height:0; display:block; height:auto; overflow:visible; padding-bottom: var(--scroll-pad); box-sizing:border-box; }
     .view-wrap{ width:100%; min-height:0; padding-bottom: var(--scroll-pad); box-sizing:border-box; }
+
+    /* Toast slide animations */
+    @keyframes btToastSlideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to   { transform: translateX(0);    opacity: 1; }
+    }
+    @keyframes btToastSlideOut {
+      from { transform: translateX(0);    opacity: 1; }
+      to   { transform: translateX(100%); opacity: 0; }
+    }
 </style>
 </head>
 <body>
@@ -311,6 +321,14 @@
                 <span class="nav-item-title">Trade Management Center</span>
                 <span class="nav-item-sub">Candidate review + execution</span>
               </span>
+            </a>
+            <a class="nav-link" href="#/notifications" data-route="notifications">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Notifications</span>
+                <span class="nav-item-sub">BUY/EXECUTE alerts</span>
+              </span>
+              <span id="nav-notif-badge" class="badge bg-danger ms-1" style="display:none; font-size:0.7rem;">0</span>
             </a>
           </section>
 
@@ -764,6 +782,7 @@
   <script src="assets/js/ui/home_loading_overlay.js?v=20260216b"></script>
   <script src="assets/js/ui/chat_drawer.js?v=20260614a"></script>
   <script src="assets/js/ui/panel_expand.js?v=20260318a"></script>
+  <script src="assets/js/ui/toast_notification.js?v=20260326a"></script>
   <script src="assets/js/utils/rateLimiter.js?v=20260216a"></script>
   <script src="assets/js/ui/notes.js?v=20260216a"></script>
   <script src="assets/js/stores/sessionStats.js?v=20260216b"></script>
@@ -790,12 +809,13 @@
   <script src="assets/js/pages/active_trades.js?v=20260306a"></script>
   <script src="assets/js/pages/trade_workbench.js?v=20260217a"></script>
   <script src="assets/js/pages/stock_analysis.js?v=20260216d"></script>
+  <script src="assets/js/components/pre_market_display.js?v=20260325a"></script>
   <script src="assets/js/pages/stock_scanner.js?v=20260217a"></script>
   <script src="assets/js/pages/stock_pullback_swing.js?v=20260302e"></script>
   <script src="assets/js/pages/stock_momentum_breakout.js?v=20260302e"></script>
   <script src="assets/js/pages/stock_mean_reversion.js?v=20260302e"></script>
   <script src="assets/js/pages/stock_volatility_expansion.js?v=20260302e"></script>
-  <script src="assets/js/pages/home.js?v=20260319a"></script>
+  <script src="assets/js/pages/home.js?v=20260325a"></script>
   <script src="assets/js/pages/risk_capital.js?v=20260306a"></script>
   <script src="assets/js/pages/portfolio_risk.js?v=20260306a"></script>
   <script src="assets/js/pages/trade_lifecycle.js?v=20260216a"></script>
@@ -811,6 +831,7 @@
   <script src="assets/js/pages/scanner_review.js?v=20260312a"></script>
   <script src="assets/js/pages/active_trade_pipeline.js?v=20260312a"></script>
   <script src="assets/js/pages/trade_management_center.js?v=20260311a"></script>
+  <script src="assets/js/pages/notifications.js?v=20260326a"></script>
   <script src="assets/js/app.js?v=20260217a"></script>
   <script src="assets/js/router.js?v=20260216c"></script>
 </body>

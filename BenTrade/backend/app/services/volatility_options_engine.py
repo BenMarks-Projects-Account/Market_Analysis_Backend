@@ -147,6 +147,30 @@ SIGNAL_PROVENANCE: dict[str, dict[str, str]] = {
     },
 }
 
+
+def _runtime_provenance(structure_data: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Return SIGNAL_PROVENANCE, upgrading vix_2nd/3rd if live data was used."""
+    if structure_data.get("term_structure_source") != "direct":
+        return SIGNAL_PROVENANCE
+
+    prov = {k: dict(v) for k, v in SIGNAL_PROVENANCE.items()}
+    prov["vix_2nd_month"] = {
+        "type": "direct",
+        "upstream": "FuturesClient → Yahoo Finance VXX proxy",
+        "frequency": "intraday",
+        "delay": "near-realtime",
+        "notes": "Real VIX term structure data via FuturesClient (VXX as 2nd-month proxy).",
+    }
+    prov["vix_3rd_month"] = {
+        "type": "derived",
+        "upstream": "FuturesClient → VXX + structure classification",
+        "frequency": "intraday",
+        "delay": "near-realtime",
+        "notes": "Extrapolated from live VXX price using contango/backwardation slope estimate.",
+    }
+    return prov
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # CONFIGURATION — weights, thresholds, scoring bands
 # ═══════════════════════════════════════════════════════════════════════
@@ -1087,6 +1111,7 @@ def _signal_quality(confidence: float) -> str:
 
 def _compute_confidence(
     pillars: dict[str, dict[str, Any]],
+    provenance: dict[str, dict[str, str]] | None = None,
 ) -> tuple[float, list[str]]:
     """Compute confidence score (0-100) independent of vol score.
 
@@ -1124,25 +1149,19 @@ def _compute_confidence(
         base -= penalty
         penalties.append(f"few_active_pillars: only {active_pillars} (-{penalty:.1f})")
 
-    # Proxy reliance penalty (from SIGNAL_PROVENANCE)
-    proxy_count = sum(
-        1 for info in SIGNAL_PROVENANCE.values()
-        if isinstance(info, dict) and info.get("type") in ("proxy", "proxy_of_proxy")
-    )
-    if proxy_count >= 5:
-        base -= 10
-        penalties.append(f"proxy_heavy: {proxy_count} proxy/proxy-of-proxy metrics (-10.0)")
-    elif proxy_count >= 3:
-        base -= 5
-        penalties.append(f"proxy_moderate: {proxy_count} proxy metrics (-5.0)")
-
-    # Proxy-of-proxy additional penalty
+    # Proxy reliance — SIGNAL_PROVENANCE describes the engine's
+    # architectural design (which metrics ARE proxies by definition).
+    # These are permanent and don't represent runtime data quality
+    # failures.  Only penalise for genuinely excessive proxy-of-proxy
+    # concentration, capped conservatively so known architecture
+    # doesn't push confidence into "low" territory by itself.
+    _prov = provenance if provenance is not None else SIGNAL_PROVENANCE
     pofp_count = sum(
-        1 for info in SIGNAL_PROVENANCE.values()
+        1 for info in _prov.values()
         if isinstance(info, dict) and info.get("type") == "proxy_of_proxy"
     )
     if pofp_count > 0:
-        pofp_penalty = min(9, pofp_count * 3)
+        pofp_penalty = min(5, pofp_count * 2)
         base -= pofp_penalty
         penalties.append(f"proxy_of_proxy: {pofp_count} metrics (-{pofp_penalty:.1f})")
 
@@ -1371,7 +1390,8 @@ def compute_volatility_scores(
             short_label = short_label + " (Gated)"
 
     # ── Confidence ───────────────────────────────────────────────
-    confidence, confidence_penalties = _compute_confidence(pillars)
+    _rt_prov = _runtime_provenance(structure_data)
+    confidence, confidence_penalties = _compute_confidence(pillars, _rt_prov)
     sig_quality = _signal_quality(confidence)
 
     # ── Explanation ───────────────────────────────────────────────
@@ -1447,7 +1467,8 @@ def compute_volatility_scores(
                 if pdata.get("score") is None
             ],
         },
-        "signal_provenance": SIGNAL_PROVENANCE,
+        "signal_provenance": _runtime_provenance(structure_data),
+        "term_structure_source": structure_data.get("term_structure_source", "proxy"),
     }
 
     # ── Raw inputs ───────────────────────────────────────────────

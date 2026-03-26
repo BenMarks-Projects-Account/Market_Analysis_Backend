@@ -23,6 +23,35 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
+
+def _normal_cdf(x: float) -> float:
+    """Standard normal CDF using math.erf (no scipy needed)."""
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _pop_breakeven_lognormal(
+    underlying_price: float,
+    breakeven: float,
+    iv: float,
+    dte: int,
+) -> float | None:
+    """P(S_T < breakeven) under Black-Scholes lognormal model.
+
+    For put debit spreads this IS the POP (profit when stock falls below breakeven).
+    For call debit spreads the caller should use 1 - result.
+
+    Formula: d2 = [ln(S/K) + (-0.5 * sigma^2 * T)] / (sigma * sqrt(T))
+             P(S_T < K) = N(-d2)
+    """
+    if underlying_price <= 0 or breakeven <= 0 or iv <= 0 or dte <= 0:
+        return None
+    t = dte / 365.0
+    sigma_sqrt_t = iv * math.sqrt(t)
+    if sigma_sqrt_t <= 0:
+        return 1.0 if underlying_price < breakeven else 0.0
+    d2 = (math.log(underlying_price / breakeven) + (-0.5 * iv * iv * t)) / sigma_sqrt_t
+    return round(_normal_cdf(-d2), 4)
+
 from app.services.scanner_v2.contracts import (
     V2Candidate,
     V2CheckResult,
@@ -35,11 +64,13 @@ from app.services.scanner_v2.diagnostics.builder import (
     collect_pass_reasons,
 )
 from app.services.scanner_v2.diagnostics.reason_codes import (
+    REJECT_CREDIT_SPREAD_NO_CREDIT,
     REJECT_INVERTED_QUOTE,
     REJECT_MISSING_OI,
     REJECT_MISSING_QUOTE,
     REJECT_MISSING_SHORT_DELTA,
     REJECT_MISSING_VOLUME,
+    REJECT_WIDE_SPREAD_SHORT_LEG,
     REJECT_ZERO_BID_SHORT_LEG,
     REJECT_ZERO_MID,
 )
@@ -250,6 +281,27 @@ def phase_d_quote_liquidity_sanity(
                     )
                     break  # One zero-bid short is enough to reject
 
+        # ── Wide bid-ask spread on short leg (credit strategies only) ─
+        # A short leg with >20% spread often produces a negative actual
+        # credit even when mid-price construction looks viable.
+        if cand.scanner_key in _CREDIT_SCANNER_KEYS and not builder._reject_codes:
+            for leg in cand.legs:
+                if leg.side == "short" and leg.bid is not None and leg.ask is not None and leg.bid > 0:
+                    spread_pct = (leg.ask - leg.bid) / leg.bid
+                    if spread_pct > 0.20:
+                        prefix = f"leg[{leg.index}] {leg.side} {leg.option_type} {leg.strike}"
+                        q_checks.append(V2CheckResult(
+                            "short_leg_spread_ok", False,
+                            f"{prefix}: spread_pct={spread_pct:.2%}",
+                        ))
+                        builder.add_reject(
+                            REJECT_WIDE_SPREAD_SHORT_LEG,
+                            source_check="short_leg_spread_ok",
+                            message=f"{prefix}: bid={leg.bid} ask={leg.ask} spread={spread_pct:.2%}",
+                            leg_index=leg.index,
+                        )
+                        break  # One wide-spread short is enough to reject
+
         builder.set_check_results("quote", q_checks)
         builder.set_check_results("liquidity", l_checks)
         builder.apply(cand.diagnostics)
@@ -347,6 +399,51 @@ def phase_e_recomputed_math(
         # Step 3: Use builder to import results into diagnostics
         builder = DiagnosticsBuilder(source_phase="E")
         builder.merge_validation_summary(summary, check_section="math")
+
+        # Deep ITM long-leg rejection for debit spreads
+        if not cand.diagnostics.reject_reasons and not builder._reject_codes:
+            m = cand.math
+            is_debit = m.net_debit is not None and m.net_debit > 0
+            if is_debit and len(cand.legs) >= 2:
+                long_legs = [l for l in cand.legs if l.side == "long"]
+                if long_legs and long_legs[0].delta is not None:
+                    if abs(long_legs[0].delta) > 0.85:
+                        builder.add_reject("v2_deep_itm_long_leg")
+
+        # Credit strategy must actually produce a credit after recomputation.
+        # Phase C checks mid-price credit; this catches cases where bid/ask
+        # spread makes the actual credit (short.bid - long.ask) non-positive.
+        _CREDIT_SCANNER_KEYS_E = frozenset({
+            "put_credit_spread", "call_credit_spread",
+            "iron_condor", "iron_butterfly",
+        })
+        if not cand.diagnostics.reject_reasons and not builder._reject_codes:
+            m = cand.math
+            if cand.scanner_key in _CREDIT_SCANNER_KEYS_E:
+                if m.net_credit is None or m.net_credit <= 0:
+                    builder.add_reject(
+                        REJECT_CREDIT_SPREAD_NO_CREDIT,
+                        source_check="credit_positive_after_recompute",
+                        message=(
+                            f"{cand.symbol} {cand.scanner_key}: "
+                            f"net_credit={m.net_credit} net_debit={m.net_debit}"
+                        ),
+                    )
+                    _log.debug(
+                        "event=credit_no_credit scanner_key=%s symbol=%s "
+                        "net_credit=%s net_debit=%s",
+                        cand.scanner_key, cand.symbol,
+                        m.net_credit, m.net_debit,
+                    )
+
+        # Expected RoR: probability-weighted return = EV / |max_loss|
+        # More realistic than raw RoR (max_profit / max_loss) for
+        # strategies with low POP (butterflies, debit spreads).
+        # Derived field: expected_ror = ev / abs(max_loss)
+        m = cand.math
+        if m.ev is not None and m.max_loss is not None and m.max_loss != 0:
+            m.expected_ror = round(m.ev / abs(m.max_loss), 4)
+
         builder.apply(cand.diagnostics)
 
     return candidates
@@ -405,18 +502,37 @@ def _recompute_vertical_math(cand: V2Candidate) -> None:
         m.notes = notes
         return
 
-    # POP — delta approximation
+    # POP — delta approximation for credits, breakeven lognormal for debits
     # Credit spread: profits when short leg expires OTM → POP = 1 - |delta_short|
-    # Debit spread: profits when long leg finishes ITM  → POP = |delta_long|
+    # Debit spread: profits when stock moves past breakeven → lognormal model
     is_credit = m.net_credit is not None and m.net_credit > 0
     if is_credit and short.delta is not None:
         m.pop = round(1.0 - abs(short.delta), 4)
         m.pop_source = "delta_approx"
         notes["pop"] = f"credit: 1 - |short.delta({short.delta})| = {m.pop}"
     elif not is_credit and long.delta is not None:
-        m.pop = round(abs(long.delta), 4)
-        m.pop_source = "delta_approx"
-        notes["pop"] = f"debit: |long.delta({long.delta})| = {m.pop}"
+        # Debit spread: use breakeven lognormal POP when possible
+        pop_set = False
+        if m.net_debit is not None and cand.underlying_price and cand.dte and cand.dte > 0:
+            iv = long.iv or short.iv or None
+            if iv and iv > 0:
+                if long.option_type == "call":
+                    be = long.strike + m.net_debit
+                else:
+                    be = long.strike - m.net_debit
+                pop_be = _pop_breakeven_lognormal(cand.underlying_price, be, iv, cand.dte)
+                if pop_be is not None:
+                    # For call debit: profit when S_T > breakeven → 1 - P(S_T < breakeven)
+                    if long.option_type == "call":
+                        pop_be = round(1.0 - pop_be, 4)
+                    m.pop = pop_be
+                    m.pop_source = "breakeven_lognormal"
+                    notes["pop"] = f"debit breakeven_lognormal: be={be:.2f}, iv={iv:.4f}, dte={cand.dte} → {m.pop}"
+                    pop_set = True
+        if not pop_set:
+            m.pop = round(abs(long.delta), 4)
+            m.pop_source = "delta_approx_fallback" if (m.net_debit is not None) else "delta_approx"
+            notes["pop"] = f"debit: |long.delta({long.delta})| = {m.pop}"
 
     # EV
     if m.pop is not None and m.max_profit is not None and m.max_loss is not None:

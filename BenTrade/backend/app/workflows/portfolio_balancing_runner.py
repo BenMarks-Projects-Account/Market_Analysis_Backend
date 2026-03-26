@@ -2,6 +2,7 @@
 
 import logging
 import time
+import traceback
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -61,7 +62,7 @@ async def run_portfolio_balance_workflow(
                     "Accept": "application/json",
                 },
             )
-            account_balance = bal_resp.json().get("balances", {})
+            account_balance = bal_resp.json().get("balances") or {}
         stages["account_state"] = {
             "status": "completed",
             "duration_ms": _elapsed_ms(stage_start),
@@ -108,10 +109,13 @@ async def run_portfolio_balance_workflow(
     stage_start = time.time()
     if active_trade_results is None:
         active_trade_results = await _run_active_trades(request, account_mode, skip_model)
-        if active_trade_results.get("ok") is False:
-            errors.append(
-                f"Active trade analysis failed: {active_trade_results.get('error', {}).get('message', 'unknown')}"
-            )
+    # Defensive: ensure active_trade_results is always a dict
+    if not isinstance(active_trade_results, dict):
+        active_trade_results = {"recommendations": []}
+    if active_trade_results.get("ok") is False:
+        errors.append(
+            f"Active trade analysis failed: {(active_trade_results.get('error') or {}).get('message', 'unknown')}"
+        )
     stages["active_trades"] = {
         "status": "provided" if active_trade_results.get("_provided") else "completed",
         "count": len(active_trade_results.get("recommendations", [])),
@@ -124,9 +128,15 @@ async def run_portfolio_balance_workflow(
 
     stage_start = time.time()
     if stock_results:
-        stock_candidates = stock_results.get(
-            "candidates", stock_results.get("recommendations", [])
-        )
+        # Unwrap {status, data: {candidates}} envelope if present
+        _sr = stock_results.get("data", stock_results) if isinstance(stock_results, dict) else stock_results
+        if isinstance(_sr, dict):
+            stock_candidates = _sr.get(
+                "candidates", _sr.get("recommendations", [])
+            )
+    # Guard against explicit null values in JSON responses
+    if not isinstance(stock_candidates, list):
+        stock_candidates = []
     stages["stock_candidates"] = {
         "status": "provided" if stock_results else "skipped",
         "count": len(stock_candidates),
@@ -135,9 +145,15 @@ async def run_portfolio_balance_workflow(
 
     stage_start = time.time()
     if options_results:
-        options_candidates = options_results.get(
-            "candidates", options_results.get("selected", [])
-        )
+        # Unwrap {status, data: {candidates}} envelope if present
+        _or = options_results.get("data", options_results) if isinstance(options_results, dict) else options_results
+        if isinstance(_or, dict):
+            options_candidates = _or.get(
+                "candidates", _or.get("selected", [])
+            )
+    # Guard against explicit null values in JSON responses
+    if not isinstance(options_candidates, list):
+        options_candidates = []
     stages["options_candidates"] = {
         "status": "provided" if options_results else "skipped",
         "count": len(options_candidates),
@@ -155,6 +171,29 @@ async def run_portfolio_balance_workflow(
     # ─── STEP 7: Run portfolio balancer ───
     stage_start = time.time()
     rebalance_plan: dict | None = None
+    _log.info(
+        "PORTFOLIO_DEBUG build_rebalance_plan inputs: "
+        "active_trade_results type=%s keys=%s, "
+        "stock_candidates type=%s len=%s, "
+        "options_candidates type=%s len=%s, "
+        "account_balance type=%s keys=%s, "
+        "risk_policy type=%s, "
+        "portfolio_greeks type=%s, "
+        "concentration type=%s, "
+        "regime_label=%r",
+        type(active_trade_results).__name__,
+        list(active_trade_results.keys()) if isinstance(active_trade_results, dict) else "N/A",
+        type(stock_candidates).__name__,
+        len(stock_candidates) if isinstance(stock_candidates, list) else "N/A",
+        type(options_candidates).__name__,
+        len(options_candidates) if isinstance(options_candidates, list) else "N/A",
+        type(account_balance).__name__,
+        list(account_balance.keys()) if isinstance(account_balance, dict) else "N/A",
+        type(risk_policy).__name__,
+        type(portfolio_greeks).__name__,
+        type(concentration).__name__,
+        regime_label,
+    )
     try:
         from app.services.portfolio_balancer import build_rebalance_plan
         rebalance_plan = await build_rebalance_plan(
@@ -168,7 +207,11 @@ async def run_portfolio_balance_workflow(
             regime_label=regime_label,
         )
     except Exception as exc:
-        _log.error("event=pb_balancer_failed error=%s", exc)
+        _log.error(
+            "event=pb_balancer_failed error=%s\n%s",
+            exc,
+            traceback.format_exc(),
+        )
         errors.append(f"Portfolio balancer failed: {exc}")
     stages["portfolio_balance"] = {
         "status": "completed" if rebalance_plan else "error",
@@ -176,6 +219,10 @@ async def run_portfolio_balance_workflow(
     }
 
     duration_ms = _elapsed_ms(started)
+
+    # Final defensive guard — account_balance must be a dict for safe .get()
+    if not isinstance(account_balance, dict):
+        account_balance = {}
 
     return {
         "ok": len(errors) == 0,
@@ -286,6 +333,8 @@ def _build_portfolio_state(
     account_balance: dict,
 ) -> tuple[dict, dict]:
     """Build portfolio Greeks and concentration from active trade results."""
+    active_trade_results = active_trade_results or {"recommendations": []}
+    account_balance = account_balance or {}
     try:
         from app.services.portfolio_risk_engine import build_portfolio_exposure
 

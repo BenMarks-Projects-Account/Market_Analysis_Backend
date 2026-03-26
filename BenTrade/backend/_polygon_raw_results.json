@@ -1,0 +1,557 @@
+{
+  "polygon_plan": "Stocks Basic (inferred from entitlements)",
+  "api_key_found": true,
+  "api_key_source": "BenTrade/backend/.env (POLYGON_API_KEY)",
+  "base_url": "https://api.polygon.io",
+  "auth_pattern": "Query param apiKey=",
+  "existing_usage": "OHLCV daily bars for stock scanning (polygon_client.py)",
+  "test_date": "2026-03-24",
+  "tests": [
+    {
+      "description": "Index snapshots (SPX, NDX, RUT, DJI)",
+      "endpoint": "v3/snapshot",
+      "tickers_queried": "I:SPX,I:NDX,I:RUT,I:DJI",
+      "status": 200,
+      "ticker_results": [
+        {
+          "ticker": "I:SPX",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        },
+        {
+          "ticker": "I:NDX",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        },
+        {
+          "ticker": "I:RUT",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        },
+        {
+          "ticker": "I:DJI",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        }
+      ]
+    },
+    {
+      "description": "Futures plain (ES, NQ, RTY, YM)",
+      "endpoint": "v3/snapshot",
+      "tickers_queried": "ES,NQ,RTY,YM",
+      "status": 200,
+      "ticker_results": [
+        {
+          "ticker": "ES",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        },
+        {
+          "ticker": "NQ",
+          "error": "NOT_FOUND",
+          "message": "Ticker not found."
+        },
+        {
+          "ticker": "RTY",
+          "error": "NOT_FOUND",
+          "message": "Ticker not found."
+        },
+        {
+          "ticker": "YM",
+          "error": "NOT_FOUND",
+          "message": "Ticker not found."
+        }
+      ]
+    },
+    {
+      "description": "VIX indices",
+      "endpoint": "v3/snapshot",
+      "tickers_queried": "I:VIX,I:VIX1D,I:VIX9D,I:VIX3M,I:VIX6M",
+      "status": 200,
+      "ticker_results": [
+        {
+          "ticker": "I:VIX",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        },
+        {
+          "ticker": "I:VIX1D",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        },
+        {
+          "ticker": "I:VIX9D",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        },
+        {
+          "ticker": "I:VIX3M",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        },
+        {
+          "ticker": "I:VIX6M",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        }
+      ]
+    },
+    {
+      "description": "Commodities/FX",
+      "endpoint": "v3/snapshot",
+      "tickers_queried": "CL,GC,DX,C:EURUSD",
+      "status": 200,
+      "ticker_results": [
+        {
+          "ticker": "CL",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        },
+        {
+          "ticker": "GC",
+          "error": "NOT_FOUND",
+          "message": "Ticker not found."
+        },
+        {
+          "ticker": "DX",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        },
+        {
+          "ticker": "C:EURUSD",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        }
+      ]
+    },
+    {
+      "description": "Treasury indices",
+      "endpoint": "v3/snapshot",
+      "tickers_queried": "I:TNX,I:TYX,I:IRX,I:FVX",
+      "status": 200,
+      "ticker_results": [
+        {
+          "ticker": "I:TNX",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        },
+        {
+          "ticker": "I:TYX",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        },
+        {
+          "ticker": "I:IRX",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        },
+        {
+          "ticker": "I:FVX",
+          "error": "NOT_ENTITLED",
+          "message": "Not entitled to this ticker."
+        }
+      ]
+    },
+    {
+      "description": "Prev close I:SPX",
+      "endpoint": "v2/aggs/ticker/I:SPX/prev",
+      "ticker": "I:SPX",
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Prev close I:NDX",
+      "endpoint": "v2/aggs/ticker/I:NDX/prev",
+      "ticker": "I:NDX",
+      "status": 200,
+      "available": true,
+      "sample_data": {
+        "open": 24270.77334088808,
+        "high": 24465.15619891934,
+        "low": 24097.67546484881,
+        "close": 24188.59036008419,
+        "volume": null,
+        "timestamp": 1774296000000
+      }
+    },
+    {
+      "description": "Prev close I:RUT",
+      "endpoint": "v2/aggs/ticker/I:RUT/prev",
+      "ticker": "I:RUT",
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Prev close I:DJI",
+      "endpoint": "v2/aggs/ticker/I:DJI/prev",
+      "ticker": "I:DJI",
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Prev close I:VIX",
+      "endpoint": "v2/aggs/ticker/I:VIX/prev",
+      "ticker": "I:VIX",
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Prev close I:VIX1D",
+      "endpoint": "v2/aggs/ticker/I:VIX1D/prev",
+      "ticker": "I:VIX1D",
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Prev close I:VIX9D",
+      "endpoint": "v2/aggs/ticker/I:VIX9D/prev",
+      "ticker": "I:VIX9D",
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Prev close I:VIX3M",
+      "endpoint": "v2/aggs/ticker/I:VIX3M/prev",
+      "ticker": "I:VIX3M",
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Prev close I:VIX6M",
+      "endpoint": "v2/aggs/ticker/I:VIX6M/prev",
+      "ticker": "I:VIX6M",
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Prev close I:TNX",
+      "endpoint": "v2/aggs/ticker/I:TNX/prev",
+      "ticker": "I:TNX",
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Prev close I:TYX",
+      "endpoint": "v2/aggs/ticker/I:TYX/prev",
+      "ticker": "I:TYX",
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Prev close I:IRX",
+      "endpoint": "v2/aggs/ticker/I:IRX/prev",
+      "ticker": "I:IRX",
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Prev close I:FVX",
+      "endpoint": "v2/aggs/ticker/I:FVX/prev",
+      "ticker": "I:FVX",
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Prev close CL",
+      "endpoint": "v2/aggs/ticker/CL/prev",
+      "ticker": "CL",
+      "status": 200,
+      "available": true,
+      "sample_data": {
+        "open": 86.45,
+        "high": 86.6,
+        "low": 84.89,
+        "close": 85.15,
+        "volume": 7342214.0,
+        "timestamp": 1774296000000
+      }
+    },
+    {
+      "description": "Prev close DX",
+      "endpoint": "v2/aggs/ticker/DX/prev",
+      "ticker": "DX",
+      "status": 200,
+      "available": true,
+      "sample_data": {
+        "open": 12.3,
+        "high": 12.555,
+        "low": 12.24,
+        "close": 12.42,
+        "volume": 9729412.0,
+        "timestamp": 1774296000000
+      }
+    },
+    {
+      "description": "Prev close GC",
+      "endpoint": "v2/aggs/ticker/GC/prev",
+      "ticker": "GC",
+      "status": 200,
+      "available": false,
+      "error": "OK"
+    },
+    {
+      "description": "Daily bars I:SPX",
+      "endpoint": "v2/aggs/ticker/I:SPX/range/1/day",
+      "ticker": "I:SPX",
+      "timespan": "day",
+      "multiplier": 1,
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Daily bars I:NDX",
+      "endpoint": "v2/aggs/ticker/I:NDX/range/1/day",
+      "ticker": "I:NDX",
+      "timespan": "day",
+      "multiplier": 1,
+      "status": 200,
+      "available": true,
+      "results_count": 5,
+      "sample_data": {
+        "open": 24270.77334088808,
+        "high": 24465.15619891934,
+        "low": 24097.67546484881,
+        "close": 24188.59036008419,
+        "volume": null,
+        "timestamp": 1774242000000
+      }
+    },
+    {
+      "description": "Daily bars I:RUT",
+      "endpoint": "v2/aggs/ticker/I:RUT/range/1/day",
+      "ticker": "I:RUT",
+      "timespan": "day",
+      "multiplier": 1,
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Daily bars I:DJI",
+      "endpoint": "v2/aggs/ticker/I:DJI/range/1/day",
+      "ticker": "I:DJI",
+      "timespan": "day",
+      "multiplier": 1,
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Daily bars I:VIX",
+      "endpoint": "v2/aggs/ticker/I:VIX/range/1/day",
+      "ticker": "I:VIX",
+      "timespan": "day",
+      "multiplier": 1,
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Daily bars I:VIX1D",
+      "endpoint": "v2/aggs/ticker/I:VIX1D/range/1/day",
+      "ticker": "I:VIX1D",
+      "timespan": "day",
+      "multiplier": 1,
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Daily bars I:VIX3M",
+      "endpoint": "v2/aggs/ticker/I:VIX3M/range/1/day",
+      "ticker": "I:VIX3M",
+      "timespan": "day",
+      "multiplier": 1,
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "5min bars I:SPX",
+      "endpoint": "v2/aggs/ticker/I:SPX/range/5/minute",
+      "ticker": "I:SPX",
+      "timespan": "minute",
+      "multiplier": 5,
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "5min bars I:NDX",
+      "endpoint": "v2/aggs/ticker/I:NDX/range/5/minute",
+      "ticker": "I:NDX",
+      "timespan": "minute",
+      "multiplier": 5,
+      "status": 200,
+      "available": true,
+      "results_count": 2,
+      "sample_data": {
+        "open": 24820.89136754458,
+        "high": 24840.73230747195,
+        "low": 24814.68051053063,
+        "close": 24837.88121237145,
+        "volume": null,
+        "timestamp": 1773754500000
+      }
+    },
+    {
+      "description": "5min bars I:VIX",
+      "endpoint": "v2/aggs/ticker/I:VIX/range/5/minute",
+      "ticker": "I:VIX",
+      "timespan": "minute",
+      "multiplier": 5,
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Hourly bars I:SPX",
+      "endpoint": "v2/aggs/ticker/I:SPX/range/1/hour",
+      "ticker": "I:SPX",
+      "timespan": "hour",
+      "multiplier": 1,
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Hourly bars I:NDX",
+      "endpoint": "v2/aggs/ticker/I:NDX/range/1/hour",
+      "ticker": "I:NDX",
+      "timespan": "hour",
+      "multiplier": 1,
+      "status": 200,
+      "available": false,
+      "error": "DELAYED"
+    },
+    {
+      "description": "Hourly bars I:VIX",
+      "endpoint": "v2/aggs/ticker/I:VIX/range/1/hour",
+      "ticker": "I:VIX",
+      "timespan": "hour",
+      "multiplier": 1,
+      "status": 403,
+      "available": false,
+      "error": "You are not entitled to this data. Please upgrade your plan at https://massive.com/pricing"
+    },
+    {
+      "description": "Prev close ETF SPY",
+      "endpoint": "v2/aggs/ticker/SPY/prev",
+      "ticker": "SPY",
+      "status": 200,
+      "available": true,
+      "sample_data": {
+        "open": 658.07,
+        "high": 662.615,
+        "low": 653.94,
+        "close": 655.38,
+        "volume": 134802732.0,
+        "timestamp": 1774296000000
+      }
+    },
+    {
+      "description": "Prev close ETF QQQ",
+      "endpoint": "v2/aggs/ticker/QQQ/prev",
+      "ticker": "QQQ",
+      "status": 200,
+      "available": true,
+      "sample_data": {
+        "open": 590.52,
+        "high": 595.08,
+        "low": 585.96,
+        "close": 588,
+        "volume": 89936118.0,
+        "timestamp": 1774296000000
+      }
+    },
+    {
+      "description": "Prev close ETF IWM",
+      "endpoint": "v2/aggs/ticker/IWM/prev",
+      "ticker": "IWM",
+      "status": 429,
+      "available": false,
+      "error": "ERROR"
+    },
+    {
+      "description": "Prev close ETF DIA",
+      "endpoint": "v2/aggs/ticker/DIA/prev",
+      "ticker": "DIA",
+      "status": 429,
+      "available": false,
+      "error": "ERROR"
+    },
+    {
+      "description": "Daily bars ETF SPY",
+      "endpoint": "v2/aggs/ticker/SPY/range/1/day",
+      "ticker": "SPY",
+      "timespan": "day",
+      "multiplier": 1,
+      "status": 429,
+      "available": false,
+      "error": "ERROR"
+    },
+    {
+      "description": "Daily bars ETF QQQ",
+      "endpoint": "v2/aggs/ticker/QQQ/range/1/day",
+      "ticker": "QQQ",
+      "timespan": "day",
+      "multiplier": 1,
+      "status": 429,
+      "available": false,
+      "error": "ERROR"
+    },
+    {
+      "description": "Daily bars ETF IWM",
+      "endpoint": "v2/aggs/ticker/IWM/range/1/day",
+      "ticker": "IWM",
+      "timespan": "day",
+      "multiplier": 1,
+      "status": 429,
+      "available": false,
+      "error": "ERROR"
+    },
+    {
+      "description": "Daily bars ETF DIA",
+      "endpoint": "v2/aggs/ticker/DIA/range/1/day",
+      "ticker": "DIA",
+      "timespan": "day",
+      "multiplier": 1,
+      "status": 429,
+      "available": false,
+      "error": "ERROR"
+    },
+    {
+      "description": "Daily bars ETF UVXY",
+      "endpoint": "v2/aggs/ticker/UVXY/range/1/day",
+      "ticker": "UVXY",
+      "timespan": "day",
+      "multiplier": 1,
+      "status": 429,
+      "available": false,
+      "error": "ERROR"
+    },
+    {
+      "description": "Daily bars ETF VXX",
+      "endpoint": "v2/aggs/ticker/VXX/range/1/day",
+      "ticker": "VXX",
+      "timespan": "day",
+      "multiplier": 1,
+      "status": 429,
+      "available": false,
+      "error": "ERROR"
+    }
+  ]
+}

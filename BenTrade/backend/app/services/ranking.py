@@ -71,9 +71,9 @@ def _compute_rank_components(trade: dict[str, Any]) -> dict[str, float | None]:
     pop = _get_pop(trade)
     tqs_raw = safe_float(trade.get("trade_quality_score"))
 
-    edge = minmax_norm(ev_to_risk, 0.00, 0.05)
-    ror = minmax_norm(return_on_risk, 0.05, 0.50)
-    pop_norm = minmax_norm(pop, 0.50, 0.95)
+    edge = minmax_norm(ev_to_risk, 0.00, 0.30)
+    ror = minmax_norm(return_on_risk, 0.05, 2.00)
+    pop_norm = minmax_norm(pop, 0.25, 0.95)
     liquidity = compute_liquidity_score(trade)
     tqs_norm = minmax_norm(tqs_raw, 0.40, 0.85) if tqs_raw is not None else None
 

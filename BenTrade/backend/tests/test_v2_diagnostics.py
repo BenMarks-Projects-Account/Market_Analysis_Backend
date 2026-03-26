@@ -162,8 +162,8 @@ class TestReasonCodeRegistry:
     """Verify all reason codes are properly registered."""
 
     def test_reject_codes_count(self):
-        """All 30 reject codes registered (20 original + 5 hygiene + 1 IC + 1 BF + 1 CAL + 1 missing-short-delta + 1 zero-bid-short)."""
-        assert len(all_reject_codes()) == 30
+        """All 32 reject codes registered (30 previous + 2 credit integrity)."""
+        assert len(all_reject_codes()) == 32
 
     def test_warn_codes_count(self):
         """All 14 warn codes registered (9 original + 5 hygiene)."""
@@ -913,6 +913,10 @@ class TestContractStability:
         # Phase D — quote checks
         "v2_missing_short_delta",
         "v2_zero_bid_short_leg",
+        # Phase D — wide spread on short leg (credit strategies)
+        "v2_wide_spread_short_leg",
+        # Phase E — credit strategy without actual credit
+        "v2_credit_spread_no_credit",
     }
 
     EXPECTED_WARN_CODES = {

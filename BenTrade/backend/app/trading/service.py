@@ -137,7 +137,8 @@ class TradingService:
         Returns (legs, price_effect).
         """
         # Determine price_effect from strategy
-        if req.strategy in ("iron_condor", "put_credit", "call_credit"):
+        _CREDIT_STRATEGIES = {"put_credit", "call_credit", "iron_condor", "iron_butterfly"}
+        if req.strategy in _CREDIT_STRATEGIES:
             price_effect = "CREDIT"
         else:
             price_effect = "DEBIT"
@@ -145,8 +146,9 @@ class TradingService:
         order_legs: list[OrderLeg] = []
         for i, pleg in enumerate(req.legs):
             side = self._normalize_side(pleg.side)
-            # Lookup contract in chain (keyed by option_type + strike)
-            key = f"{pleg.option_type}:{pleg.strike:.8f}"
+            leg_exp = pleg.expiration or req.expiration
+            # Lookup contract in chain (keyed by expiration:option_type:strike)
+            key = f"{leg_exp}:{pleg.option_type}:{pleg.strike:.8f}"
             contract = contract_map.get(key)
             if not contract:
                 available = sorted(contract_map.keys())[:10]
@@ -156,6 +158,7 @@ class TradingService:
                         "message": f"Leg {i} not found in option chain",
                         "strike": pleg.strike,
                         "option_type": pleg.option_type,
+                        "expiration": leg_exp,
                         "available_sample": available,
                     },
                 )
@@ -164,12 +167,12 @@ class TradingService:
                 pleg.option_symbol
                 or getattr(contract, "symbol", None)
                 or build_occ_symbol(
-                    req.symbol.upper(), req.expiration, pleg.strike, pleg.option_type
+                    req.symbol.upper(), leg_exp, pleg.strike, pleg.option_type
                 )
             )
             order_legs.append(OrderLeg(
                 option_type=pleg.option_type,
-                expiration=req.expiration,
+                expiration=leg_exp,
                 strike=pleg.strike,
                 side=side,
                 quantity=pleg.quantity * req.quantity,
@@ -295,32 +298,50 @@ class TradingService:
             "event=preview_tradier_chain trace_id=%s symbol=%s expiration=%s",
             trace_id, symbol, req.expiration,
         )
-        try:
-            raw_chain = await self.base_data_service.tradier_client.get_chain(symbol, req.expiration, greeks=True)
-        except Exception as exc:
-            logger.error(
-                "event=preview_chain_failed trace_id=%s symbol=%s expiration=%s error=%s",
-                trace_id, symbol, req.expiration, exc,
-            )
-            raise HTTPException(
-                status_code=502,
-                detail=f"Tradier chain fetch failed for {symbol} exp={req.expiration}: {exc}",
-            ) from exc
+
+        # Collect all unique expirations (header + per-leg for calendar/diagonal)
+        all_expirations: set[str] = {req.expiration}
+        if req.legs:
+            for pleg in req.legs:
+                if pleg.expiration:
+                    all_expirations.add(pleg.expiration)
+
+        # Fetch chains for all unique expirations
+        all_contracts = []
+        for exp in sorted(all_expirations):
+            try:
+                raw_chain = await self.base_data_service.tradier_client.get_chain(
+                    symbol, exp, greeks=True,
+                )
+                all_contracts.extend(
+                    self.base_data_service.normalize_chain(raw_chain)
+                )
+            except Exception as exc:
+                logger.error(
+                    "event=preview_chain_failed trace_id=%s symbol=%s expiration=%s error=%s",
+                    trace_id, symbol, exp, exc,
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Tradier chain fetch failed for {symbol} exp={exp}: {exc}",
+                ) from exc
         chain_ts = datetime.now(timezone.utc)
 
-        contracts = self.base_data_service.normalize_chain(raw_chain)
+        contracts = all_contracts
 
         if has_legs:
             # ── Legs-based path (all strategies with legs array) ─────
-            # Index ALL contracts by option_type + strike for mixed put/call lookup
-            filtered = [c for c in contracts if c.expiration == req.expiration]
-            contract_map = {f"{c.option_type}:{c.strike:.8f}": c for c in filtered}
+            # Index contracts by expiration + option_type + strike for multi-exp lookup
+            contract_map = {
+                f"{c.expiration}:{c.option_type}:{c.strike:.8f}": c
+                for c in contracts
+            }
 
             logger.info(
                 "event=preview_chain_normalized trace_id=%s total_contracts=%d "
-                "filtered=%d strategy=%s legs=%d expiration=%s",
-                trace_id, len(contracts), len(filtered), req.strategy,
-                len(req.legs), req.expiration,
+                "strategy=%s legs=%d expirations=%s",
+                trace_id, len(contracts), req.strategy,
+                len(req.legs), sorted(all_expirations),
             )
 
             order_legs, price_effect = self._build_legs_from_preview(
@@ -408,6 +429,7 @@ class TradingService:
             short_leg=short_leg,
             long_leg=long_leg,
             limit_price=req.limit_price,
+            expiration=req.expiration,
         )
 
         checks = dict(risk.checks)
@@ -419,21 +441,32 @@ class TradingService:
             }
         )
 
-        hard_reject_keys = ["width_ok", "max_loss_ok", "credit_floor_ok", "legs_have_bid_ask"]
-        hard_failures = [k for k in hard_reject_keys if checks.get(k) is False]
-        if hard_failures:
+        # ── Hard failures: block execution entirely (no override) ──
+        if risk.hard_failures:
             logger.warning(
                 "event=preview_hard_check_fail trace_id=%s failed=%s checks=%s",
-                trace_id, hard_failures, checks,
+                trace_id, risk.hard_failures, checks,
             )
             raise HTTPException(
                 status_code=400,
                 detail={
-                    "message": "Preview failed risk hard checks",
-                    "failed_checks": hard_failures,
+                    "message": "Preview blocked by safety checks",
+                    "failed_checks": risk.hard_failures,
                     "checks": checks,
                     "warnings": risk.warnings,
+                    "overridable": False,
                 },
+            )
+
+        # ── Soft failures: warn but allow override ──
+        has_soft_warnings = len(risk.soft_warnings) > 0
+        override_requested = getattr(req, "override", False)
+        requires_override = has_soft_warnings and not override_requested
+
+        if has_soft_warnings and not override_requested:
+            logger.info(
+                "event=preview_soft_warnings trace_id=%s warnings=%s checks=%s",
+                trace_id, risk.soft_warnings, checks,
             )
 
         ticket = OrderTicket(
@@ -565,6 +598,8 @@ class TradingService:
             ticket=ticket,
             checks=checks,
             warnings=risk.warnings,
+            soft_warnings=risk.soft_warnings,
+            requires_override=requires_override,
             confirmation_token=token,
             expires_at=expires_at,
             trace_id=trace_id,

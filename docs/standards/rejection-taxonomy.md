@@ -38,6 +38,9 @@ The codes below are already used in the BenTrade UI and are the canonical set.
 | `kelly_negative` | Kelly fraction is negative (negative edge). | — (hardcoded) |
 | `credit_ge_width` | Net credit ≥ width (degenerate spread). | — (structural) |
 | `invalid_width` | Spread width is zero or negative. | — (structural) |
+| `v2_deep_itm_long_leg` | Long leg delta > 0.85 on a debit spread (deep ITM inflates POP). | — (hardcoded 0.85) |
+| `v2_credit_spread_no_credit` | Credit strategy produces no actual credit after bid/ask recomputation (Phase E). | — (structural) |
+| `v2_wide_spread_short_leg` | Short leg bid-ask spread > 20% on a credit strategy (unreliable fill). | — (hardcoded 0.20) |
 
 ---
 
@@ -63,6 +66,7 @@ In the scanner's `rejection_reason_counts`, data-quality rejections for OI/volum
 | `missing_iv` | Implied volatility is null/absent when required. |
 | `missing_delta` | Delta is null/absent when required for POP estimation. |
 | `zero_bid_short_leg` | Short leg has bid=0 on a credit strategy — no premium collectible. |
+| `wide_spread_short_leg` | Short leg bid-ask spread > 20% on a credit strategy — unreliable fill pricing. |
 
 ---
 

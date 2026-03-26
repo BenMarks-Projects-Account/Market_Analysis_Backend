@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import date
 from typing import Any
 
 from app.clients.fred_client import FredClient
@@ -29,6 +30,7 @@ from app.services.data_quality_utils import (
     staleness_tier,
 )
 from app.services.market_context_service import MarketContextService
+from app.utils.market_hours import market_status
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +54,11 @@ class CrossAssetMacroDataProvider:
         self,
         market_context_service: MarketContextService,
         fred_client: FredClient,
+        futures_client: Any | None = None,
     ) -> None:
         self.market_context = market_context_service
         self.fred = fred_client
+        self.futures_client = futures_client
 
     async def fetch_cross_asset_data(self) -> dict[str, Any]:
         """Fetch all cross-asset data and return pillar-keyed input dicts.
@@ -149,6 +153,62 @@ class CrossAssetMacroDataProvider:
         ig_spread = ig_obs["value"] if ig_obs else None
         hy_spread = hy_obs["value"] if hy_obs else None
 
+        # ── Live futures overlay (market/extended hours only) ────
+        # During trading hours, real-time futures prices for oil (CL),
+        # USD (DX), and 10Y yield (TNX) are fresher than FRED's 1-day
+        # lagged observations.  We try each independently and tag the source.
+        futures_sources: dict[str, str] = {}  # metric → "futures_live" | "fred"
+        _status = market_status()
+
+        if _status in ("open", "extended") and self.futures_client is not None:
+            today_iso = date.today().isoformat()
+
+            # Oil: CL=F → DCOILWTICO fallback
+            try:
+                cl_snap = await self.futures_client.get_snapshot("cl")
+                if cl_snap and cl_snap.get("last") is not None:
+                    oil = cl_snap["last"]
+                    futures_sources["oil_wti"] = "futures_live"
+                    # Override the observation date / staleness to today
+                    oil_date = today_iso
+                    logger.info(
+                        "event=futures_overlay metric=oil_wti price=%.2f source=CL=F",
+                        oil,
+                    )
+            except Exception as exc:
+                logger.warning("event=futures_overlay_failed metric=oil_wti error=%s", exc)
+
+            # USD: DX-Y.NYB → DTWEXBGS fallback
+            try:
+                dx_snap = await self.futures_client.get_snapshot("dx")
+                if dx_snap and dx_snap.get("last") is not None:
+                    usd = dx_snap["last"]
+                    futures_sources["usd_index"] = "futures_live"
+                    usd_date = today_iso
+                    logger.info(
+                        "event=futures_overlay metric=usd_index price=%.2f source=DX-Y.NYB",
+                        usd,
+                    )
+            except Exception as exc:
+                logger.warning("event=futures_overlay_failed metric=usd_index error=%s", exc)
+
+            # 10Y yield: ^TNX → DGS10 fallback
+            try:
+                tnx_snap = await self.futures_client.get_snapshot("tnx")
+                if tnx_snap and tnx_snap.get("last") is not None:
+                    ten_year = tnx_snap["last"]
+                    futures_sources["ten_year_yield"] = "futures_live"
+                    ten_y_date = today_iso
+                    # Recompute yield curve spread if we have both yields
+                    if two_year is not None:
+                        yield_spread = round(ten_year - two_year, 4)
+                    logger.info(
+                        "event=futures_overlay metric=ten_year_yield value=%.3f source=^TNX",
+                        ten_year,
+                    )
+            except Exception as exc:
+                logger.warning("event=futures_overlay_failed metric=ten_year_yield error=%s", exc)
+
         # Log data availability
         available = sum(1 for v in [ten_year, two_year, fed_funds, vix, oil,
                                      usd, yield_spread, gold, copper,
@@ -224,10 +284,14 @@ class CrossAssetMacroDataProvider:
         hy_age = days_stale(hy_date)
 
         # Also compute staleness for market-context FRED metrics
-        ten_y_date = market_ctx.get("ten_year_yield", {}).get("observation_date") if isinstance(market_ctx.get("ten_year_yield"), dict) else None
+        # Only use market_ctx dates if not already overridden by live futures
+        if "ten_year_yield" not in futures_sources:
+            ten_y_date = market_ctx.get("ten_year_yield", {}).get("observation_date") if isinstance(market_ctx.get("ten_year_yield"), dict) else None
         two_y_date = market_ctx.get("two_year_yield", {}).get("observation_date") if isinstance(market_ctx.get("two_year_yield"), dict) else None
-        oil_date = market_ctx.get("oil_wti", {}).get("observation_date") if isinstance(market_ctx.get("oil_wti"), dict) else None
-        usd_date = market_ctx.get("usd_index", {}).get("observation_date") if isinstance(market_ctx.get("usd_index"), dict) else None
+        if "oil_wti" not in futures_sources:
+            oil_date = market_ctx.get("oil_wti", {}).get("observation_date") if isinstance(market_ctx.get("oil_wti"), dict) else None
+        if "usd_index" not in futures_sources:
+            usd_date = market_ctx.get("usd_index", {}).get("observation_date") if isinstance(market_ctx.get("usd_index"), dict) else None
         ff_date = market_ctx.get("fed_funds_rate", {}).get("observation_date") if isinstance(market_ctx.get("fed_funds_rate"), dict) else None
 
         ten_y_age = days_stale(ten_y_date)
@@ -294,6 +358,7 @@ class CrossAssetMacroDataProvider:
             "market_context_generated_at": market_ctx.get("context_generated_at"),
             "vix_source": market_ctx.get("vix", {}).get("source"),
             "vix_freshness": market_ctx.get("vix", {}).get("freshness"),
+            "futures_sources": futures_sources,  # which metrics used live futures
             "fred_gold_date": gold_date,
             "fred_copper_date": copper_date,
             "fred_copper_days_stale": copper_age,

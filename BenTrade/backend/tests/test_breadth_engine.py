@@ -534,9 +534,9 @@ class TestSurvivorshipBias:
         assert len(bias_penalties) >= 1
 
     def test_confidence_slightly_lower(self, result):
-        """Survivorship flag costs -5 points relative to healthy universe."""
-        # With full healthy data, confidence is ~90. With bias flag, ~85.
-        assert result["confidence_score"] <= 95
+        """Survivorship flag costs -2 points relative to healthy universe."""
+        # With full healthy data, confidence is ~100. With bias flag, ~98.
+        assert result["confidence_score"] <= 99
 
 
 # ═══════════════════════════════════════════════════════════════════════

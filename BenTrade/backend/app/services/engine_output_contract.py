@@ -578,9 +578,11 @@ def _derive_engine_status(
       - degraded:  score present but data quality is materially compromised
       - ok:        score present, quality acceptable
 
-    Degraded thresholds scale with signal_quality:
-      high:   missing > 3  or warnings > 6
-      medium: missing > 2  or warnings > 4
+    Degraded thresholds scale with signal_quality.  Thresholds are set
+    conservatively so degradation is RARE — only for genuine data failures,
+    not routine proxy usage or known-unavailable optional data.
+      high:   missing > 5  or warnings > 8
+      medium: missing > 3  or warnings > 6
       low:    always degraded (low signal quality itself is a reason)
 
     Staleness always degrades regardless of signal_quality.
@@ -600,6 +602,8 @@ def _derive_engine_status(
     # Score present — check for degraded conditions.
     # Thresholds are signal-quality-aware: a high-quality engine with a
     # few proxy warnings is operating normally, not degraded.
+    # Thresholds are set so degradation is RARE — only for genuine data
+    # failures, not routine proxy usage or known-unavailable optional data.
     if signal_quality == "low":
         reasons.append("low_signal_quality")
         # Also enumerate specifics for traceability
@@ -608,15 +612,15 @@ def _derive_engine_status(
         if warning_count > 0:
             reasons.append(f"elevated_warnings:{warning_count}")
     elif signal_quality == "medium":
-        if missing_count > 2:
-            reasons.append(f"missing_inputs:{missing_count}")
-        if warning_count > 4:
-            reasons.append(f"elevated_warnings:{warning_count}")
-    else:
-        # high (or unknown treated as high)
         if missing_count > 3:
             reasons.append(f"missing_inputs:{missing_count}")
         if warning_count > 6:
+            reasons.append(f"elevated_warnings:{warning_count}")
+    else:
+        # high (or unknown treated as high)
+        if missing_count > 5:
+            reasons.append(f"missing_inputs:{missing_count}")
+        if warning_count > 8:
             reasons.append(f"elevated_warnings:{warning_count}")
 
     # Staleness check — always applies

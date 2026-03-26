@@ -26,6 +26,14 @@
   /** Full refresh chain running flag. */
   var _fullRefreshRunning = false;
 
+  /**
+   * Stored event handler references — prevents listener stacking on re-render.
+   * Each grid gets ONE delegated click handler; old handler removed before new one is added.
+   */
+  var _stockGridClickHandler   = null;
+  var _optionsGridClickHandler = null;
+  var _activeGridClickHandler  = null;
+
   /* -- API ref -------------------------------------------------------- */
   var api = window.BenTradeApi;
 
@@ -195,7 +203,7 @@
     }
 
     var data = resp.data;
-    if (qualEl) qualEl.textContent = data.quality_level || '';
+    if (qualEl) qualEl.textContent = '';
 
     var candidates = data.candidates || [];
     if (countEl) countEl.textContent = String(candidates.length);
@@ -346,12 +354,7 @@
     var grid     = document.getElementById('tmcStockGrid');
     var countEl  = document.getElementById('tmcStockCount');
     var qualEl   = document.getElementById('tmcStockQuality');
-    var statusEl = document.getElementById('tmcStockStatus');
-    var batchEl  = document.getElementById('tmcStockBatchStatus');
     var freshEl  = document.getElementById('tmcStockFreshness');
-
-    updateStatusBadge(statusEl, null); // shows "loading"
-    if (statusEl) statusEl.textContent = 'Loading...';
 
     api.tmcGetLatestStock()
       .then(function (resp) {
@@ -367,17 +370,14 @@
 
         // Update batch status and freshness indicators
         var data = resp.data;
-        updateBatchStatusBadge(batchEl, data ? data.batch_status : null);
         updateFreshness(freshEl, data ? data.generated_at : null);
 
-        var result = handleWorkflowResponse(resp, grid, countEl, qualEl, statusEl, 'stock');
+        var result = handleWorkflowResponse(resp, grid, countEl, qualEl, null, 'stock');
         if (!result) return;
         renderStockCandidates(grid, result.candidates, result.data);
       })
       .catch(function (err) {
         console.error('[TMC] Failed to load stock opportunities:', err);
-        updateStatusBadge(statusEl, 'failed');
-        updateBatchStatusBadge(batchEl, null);
         updateFreshness(freshEl, null);
         showEmptyGrid(grid, countEl, 'Failed to load stock opportunities');
       });
@@ -467,8 +467,11 @@
 
     grid.innerHTML = html;
 
-    // ── Wire delegated action handlers (same pattern as all stock dashboards) ──
-    grid.addEventListener('click', function (e) {
+    // ── Wire delegated action handlers (remove old listener to prevent stacking) ──
+    if (_stockGridClickHandler) {
+      grid.removeEventListener('click', _stockGridClickHandler);
+    }
+    _stockGridClickHandler = function (e) {
       var btn = e.target.closest('[data-action]');
       if (!btn) return;
       var action   = btn.dataset.action;
@@ -493,10 +496,11 @@
         stockMapper.openDataWorkbenchForStock(scannerRow, strategyId);
       } else if (action === 'stock-analysis') {
         stockMapper.openStockAnalysis(symbol || (row && row.symbol));
-      } else if (action === 'workbench') {
-        console.log('[TMC] Testing Workbench stub for:', tradeKey);
+      } else if (action === 'workbench' && scannerRow) {
+        stockMapper.openDataWorkbenchForStock(scannerRow, strategyId);
       }
-    });
+    };
+    grid.addEventListener('click', _stockGridClickHandler);
 
     // Wire expand state persistence
     grid.querySelectorAll('details.trade-card-collapse').forEach(function (details) {
@@ -1004,6 +1008,49 @@
     return html;
   }
 
+  /* ================================================================
+   *  _openDataWorkbenchInline — open inline Data Workbench modal
+   *  for options or active trade candidates.
+   * ================================================================ */
+  function _openDataWorkbenchInline(row, context) {
+    var sym = String(row.symbol || row.underlying || row.ticker || '?').toUpperCase();
+    var modal = window.BenTradeDataWorkbenchModal;
+    if (modal && typeof modal.open === 'function') {
+      modal.open({
+        symbol:     sym,
+        normalized: row,
+        rawSource:  row,
+        derived:    { source: 'tmc_' + (context || 'unknown'), trade_key: row.trade_key || '' },
+      });
+      return;
+    }
+    // Fallback: inline JSON viewer
+    console.log('[TMC] Data Workbench - Raw candidate:', JSON.stringify(row, null, 2));
+    var overlay = document.createElement('div');
+    overlay.className = 'dwb-tmc-fallback-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:5000;overflow:auto;padding:2rem;';
+    overlay.innerHTML =
+      '<div style="max-width:800px;margin:0 auto;background:#161b22;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:1.5rem;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">' +
+          '<h6 style="color:#00e0c3;margin:0;">DATA WORKBENCH — ' + sym + '</h6>' +
+          '<button class="dwb-tmc-fallback-close" style="background:none;border:none;color:#e0e0e0;font-size:1.5rem;cursor:pointer;">&times;</button>' +
+        '</div>' +
+        '<pre style="color:#e0e0e0;font-size:0.75rem;max-height:70vh;overflow:auto;white-space:pre-wrap;word-break:break-all;">' +
+          _escapeHtml(JSON.stringify(row, null, 2)) +
+        '</pre>' +
+      '</div>';
+    overlay.querySelector('.dwb-tmc-fallback-close').addEventListener('click', function () { overlay.remove(); });
+    overlay.addEventListener('click', function (ev) { if (ev.target === overlay) overlay.remove(); });
+    var root = (window.BenTradeOverlayRoot && window.BenTradeOverlayRoot.get)
+      ? window.BenTradeOverlayRoot.get()
+      : document.body;
+    root.appendChild(overlay);
+  }
+
+  function _escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
   /** Find a raw TMC candidate by trade key for action handlers. */
   function _findStockRowByTradeKey(tradeKey) {
     if (!tradeKey) return null;
@@ -1087,9 +1134,6 @@
   }
 
   function triggerStockRun() {
-    var statusEl = document.getElementById('tmcStockStatus');
-    if (statusEl) { statusEl.textContent = 'Running...'; statusEl.className = 'tmc-run-status'; }
-
     var baselineRunId = _lastStockRunId;
     console.log('[TMC] Triggering stock workflow (baseline run_id=' + (baselineRunId || 'none') + ')');
 
@@ -1097,13 +1141,11 @@
       .then(function (result) {
         console.log('[TMC] Stock workflow trigger returned: status=' + result.status +
           ' run_id=' + (result.run_id || '?') + ' candidates=' + (result.candidate_count || 0));
-        updateStatusBadge(statusEl, result.status);
         _stopStockCompletionPoll();
         loadStockOpportunities();
       })
       .catch(function (err) {
         console.error('[TMC] Stock workflow trigger failed:', err);
-        updateStatusBadge(statusEl, 'failed');
         // The workflow may still be running in the background (shielded
         // from HTTP disconnect on the backend).  Start polling to detect
         // when it completes and refresh automatically.
@@ -1179,8 +1221,11 @@
 
     grid.innerHTML = html;
 
-    // ── Wire delegated action handlers ──────────────────────────
-    grid.addEventListener('click', function (e) {
+    // ── Wire delegated action handlers (remove old listener to prevent stacking) ──
+    if (_optionsGridClickHandler) {
+      grid.removeEventListener('click', _optionsGridClickHandler);
+    }
+    _optionsGridClickHandler = function (e) {
       var btn = e.target.closest('[data-action]');
       if (!btn) return;
       e.preventDefault();
@@ -1198,9 +1243,10 @@
           cardEl.style.pointerEvents = 'none';
         }
       } else if (action === 'data-workbench' && row) {
-        window.BenTradeTradeCard.openDataWorkbenchByTrade(row);
+        _openDataWorkbenchInline(row, 'options');
       }
-    });
+    };
+    grid.addEventListener('click', _optionsGridClickHandler);
 
     // Wire expand state persistence
     grid.querySelectorAll('details.trade-card-collapse').forEach(function (details) {
@@ -1559,78 +1605,23 @@
    * Builds multi-leg order from candidate legs and opens preview modal.
    */
   function _executeOptionsTrade(btn, tradeKey, rawCandidate) {
-    var c = normalizeOptionsCandidate(rawCandidate);
-    if (!c.legs || c.legs.length === 0) {
+    if (!rawCandidate || !rawCandidate.legs || rawCandidate.legs.length === 0) {
       console.warn('[TMC] Cannot execute options trade: no legs on candidate');
+      if (typeof showToast === 'function') {
+        showToast('Cannot execute: trade has no leg data', 'warning');
+      }
       return;
     }
 
-    // Build order legs for Tradier multi-leg order
-    var orderLegs = [];
-    c.legs.forEach(function (leg) {
-      var side = (leg.side || '').toUpperCase();
-      var optionType = (leg.option_type || '').toLowerCase();
-      // Build OCC symbol: SYMBOL + YYMMDD + P/C + 8-digit strike
-      var occSymbol = '';
-      if (c.symbol && c.expiration && leg.strike != null && optionType) {
-        var parts = String(c.expiration).split('-');
-        if (parts.length === 3) {
-          var yy = parts[0].slice(-2);
-          var mm = parts[1];
-          var dd = parts[2];
-          var pc = optionType.charAt(0).toUpperCase();
-          var strikeInt = Math.round(Number(leg.strike) * 1000);
-          var strikeStr = String(strikeInt);
-          while (strikeStr.length < 8) strikeStr = '0' + strikeStr;
-          occSymbol = c.symbol.toUpperCase() + yy + mm + dd + pc + strikeStr;
-        }
-      }
-      orderLegs.push({
-        option_symbol: occSymbol,
-        side: side === 'SHORT' ? 'sell_to_open' : 'buy_to_open',
-        quantity: 1,
-        strike: leg.strike,
-        option_type: optionType,
-      });
-    });
-
-    var orderPayload = {
-      class: 'multileg',
-      symbol: c.symbol,
-      type: 'market',
-      duration: 'day',
-      legs: orderLegs,
-      // Preview metadata
-      _meta: {
-        strategy_id: c.strategyId || c.strategy,
-        trade_key: tradeKey,
-        source: 'tmc_options',
-      },
-    };
-
-    // Use TradingService preview if available
-    if (api && api.tradingPreview) {
-      btn.disabled = true;
-      btn.textContent = 'Previewing\u2026';
-      api.tradingPreview(orderPayload)
-        .then(function (preview) {
-          btn.disabled = false;
-          btn.textContent = 'Execute Trade';
-          // Open execution modal with preview data
-          if (window.BenTradeExecutionModal && window.BenTradeExecutionModal.open) {
-            window.BenTradeExecutionModal.open(orderPayload, preview);
-          } else {
-            console.log('[TMC] Options trade preview:', preview);
-            alert('Preview: ' + JSON.stringify(preview, null, 2));
-          }
-        })
-        .catch(function (err) {
-          btn.disabled = false;
-          btn.textContent = 'Execute Trade';
-          console.error('[TMC] Options trade preview failed:', err);
-        });
+    // Open the TradeTicket modal — it handles normalize, validate, preview, submit
+    console.log('[TMC] Raw candidate passed to modal:', JSON.stringify(rawCandidate, null, 2));
+    if (window.BenTradeTradeTicket && typeof window.BenTradeTradeTicket.open === 'function') {
+      window.BenTradeTradeTicket.open(rawCandidate);
     } else {
-      console.log('[TMC] TradingService not available. Order payload:', orderPayload);
+      console.error('[TMC] BenTradeTradeTicket not available');
+      if (typeof showToast === 'function') {
+        showToast('Execution modal not loaded. Try refreshing the page.', 'error');
+      }
     }
   }
 
@@ -1740,44 +1731,67 @@
     var accountMode = _getAccountMode();
     var url = '/api/active-trade-pipeline/run?account_mode=' + encodeURIComponent(accountMode) + '&skip_model=' + (skipModel ? 'true' : 'false');
 
+    var startTime = Date.now();
+    console.log('[TMC] Active pipeline started (standalone)', { accountMode: accountMode, skipModel: skipModel });
+
     fetch(url, { method: 'POST' })
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        if (!r.ok) {
+          return r.text().then(function (t) {
+            var err = new Error('HTTP ' + r.status);
+            err.responseText = t;
+            throw err;
+          });
+        }
+        return r.json();
+      })
       .then(function (data) {
+        var elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         _activeRunning = false;
         if (btn) { btn.textContent = 'Analyse Positions'; btn.disabled = false; }
+        console.log('[TMC] Active pipeline response (standalone):', {
+          elapsed: elapsed + 's', ok: data.ok, keys: Object.keys(data),
+          recCount: (data.recommendations || []).length,
+        });
         if (data.ok === false) {
-          showActiveEmpty('Pipeline error: ' + ((data.error || {}).message || 'unknown'));
+          showActiveError('Pipeline error: ' + ((data.error || {}).message || 'unknown'), data);
           return;
         }
         renderActiveResults(data);
       })
       .catch(function (err) {
+        var elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         _activeRunning = false;
         if (btn) { btn.textContent = 'Analyse Positions'; btn.disabled = false; }
-        console.error('[TMC] Active pipeline failed:', err);
-        showActiveEmpty('Failed to run pipeline: ' + err.message);
+        console.error('[TMC] Active pipeline failed (standalone):', err, err.responseText || '');
+        showActiveError('Request failed (' + elapsed + 's): ' + err.message, null);
       });
   }
 
   function loadLatestActiveResults() {
+    console.log('[TMC] Loading latest active results…');
     fetch('/api/active-trade-pipeline/results')
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
       .then(function (data) {
+        console.log('[TMC] Latest active results:', { ok: data.ok, keys: Object.keys(data), recCount: (data.recommendations || []).length });
         if (data.ok === false) {
-          showActiveEmpty((data.error || {}).message || 'No results available');
+          // On initial page load this is expected — show non-alarming empty state
+          var msg = (data.error || {}).message || 'No results available';
+          showActiveEmpty(msg);
           return;
         }
         renderActiveResults(data);
       })
       .catch(function (err) {
         console.error('[TMC] Failed to load active results:', err);
-        showActiveEmpty('Failed to load results');
+        showActiveEmpty('Failed to load results: ' + err.message);
       });
   }
 
+  /** Show a non-error empty state (e.g. "no positions", "run the pipeline first"). */
   function showActiveEmpty(msg) {
     var grid = document.getElementById('tmcActiveTradeGrid');
     if (grid) {
@@ -1791,16 +1805,84 @@
     if (count) { count.textContent = '--'; count.className = 'tmc-count-badge tmc-count-muted'; }
   }
 
+  /**
+   * Show an error state with diagnostic detail (expandable).
+   * Used when the pipeline returns ok:false or an HTTP error.
+   */
+  function showActiveError(msg, responseData) {
+    var grid = document.getElementById('tmcActiveTradeGrid');
+    if (grid) {
+      var detailHtml = '';
+      if (responseData) {
+        var snippet = JSON.stringify(responseData, null, 2);
+        if (snippet.length > 2000) snippet = snippet.substring(0, 2000) + '…';
+        detailHtml =
+          '<details style="margin-top:8px;">' +
+            '<summary style="color:rgba(224,224,224,0.4); cursor:pointer; font-size:0.75rem;">Response details</summary>' +
+            '<pre style="color:rgba(224,224,224,0.5); font-size:0.7rem; max-height:200px; overflow:auto; margin-top:4px; white-space:pre-wrap;">' +
+              esc(snippet) + '</pre>' +
+          '</details>';
+      }
+      grid.innerHTML =
+        '<div style="background:rgba(255,23,68,0.1); border:1px solid rgba(255,23,68,0.3); border-radius:6px; padding:12px; margin:8px 0;">' +
+          '<div style="color:#ff1744; font-weight:600;">Pipeline Error</div>' +
+          '<div style="color:rgba(224,224,224,0.7); font-size:0.85rem; margin-top:4px;">' + esc(msg) + '</div>' +
+          detailHtml +
+        '</div>';
+    }
+    var count = document.getElementById('tmcActiveCount');
+    if (count) { count.textContent = 'ERR'; count.className = 'tmc-count-badge tmc-count-error'; }
+  }
+
+  /**
+   * Show an error state for the portfolio balance section.
+   */
+  function showBalanceError(msg, responseData) {
+    var grid = document.getElementById('tmcPortfolioBalanceGrid');
+    var section = document.getElementById('tmcPortfolioBalanceSection');
+    if (section) section.style.display = '';
+    if (grid) {
+      var detailHtml = '';
+      if (responseData) {
+        var snippet = JSON.stringify(responseData, null, 2);
+        if (snippet.length > 2000) snippet = snippet.substring(0, 2000) + '…';
+        detailHtml =
+          '<details style="margin-top:8px;">' +
+            '<summary style="color:rgba(224,224,224,0.4); cursor:pointer; font-size:0.75rem;">Response details</summary>' +
+            '<pre style="color:rgba(224,224,224,0.5); font-size:0.7rem; max-height:200px; overflow:auto; margin-top:4px; white-space:pre-wrap;">' +
+              esc(snippet) + '</pre>' +
+          '</details>';
+      }
+      grid.innerHTML =
+        '<div style="background:rgba(255,23,68,0.1); border:1px solid rgba(255,23,68,0.3); border-radius:6px; padding:12px;">' +
+          '<div style="color:#ff1744; font-weight:600;">Rebalance Error</div>' +
+          '<div style="color:rgba(224,224,224,0.7); font-size:0.85rem; margin-top:4px;">' + esc(msg) + '</div>' +
+          detailHtml +
+        '</div>';
+    }
+    var badge = document.getElementById('tmcBalanceStatus');
+    if (badge) { badge.textContent = 'ERR'; badge.className = 'tmc-count-badge tmc-count-error'; }
+  }
+
   /** Keep rendered active trade rows for action handler lookups. */
   var _activeRenderedRows = [];
   var _activeExpandState  = {};
 
   function renderActiveResults(data) {
-    var recs = data.recommendations || [];
     var grid = document.getElementById('tmcActiveTradeGrid');
     var countEl = document.getElementById('tmcActiveCount');
 
     if (!grid) return;
+
+    // Guard: pipeline returned an error envelope
+    if (data && data.ok === false) {
+      var errMsg = (data.error || {}).message || 'Pipeline returned an error';
+      console.error('[TMC] renderActiveResults received ok:false —', errMsg);
+      showActiveError(errMsg, data);
+      return;
+    }
+
+    var recs = data.recommendations || [];
 
     if (recs.length === 0) {
       showActiveEmpty('No open positions found on ' + (_getAccountMode() || 'paper').toUpperCase() + ' account');
@@ -1818,6 +1900,13 @@
       countEl.className = 'tmc-count-badge';
     }
 
+    var tsEl = document.getElementById('tmcActiveTimestamp');
+    if (tsEl) {
+      var ts = data.generated_at || data.timestamp;
+      var display = ts ? new Date(ts).toLocaleTimeString() : new Date().toLocaleTimeString();
+      tsEl.textContent = 'Last updated: ' + display;
+    }
+
     _activeRenderedRows = sorted.slice();
 
     var html = '';
@@ -1832,8 +1921,11 @@
 
     grid.innerHTML = html;
 
-    // Wire delegated action handlers
-    grid.addEventListener('click', function (e) {
+    // Wire delegated action handlers (remove old listener to prevent stacking)
+    if (_activeGridClickHandler) {
+      grid.removeEventListener('click', _activeGridClickHandler);
+    }
+    _activeGridClickHandler = function (e) {
       var btn = e.target.closest('[data-action]');
       if (!btn) return;
       e.preventDefault();
@@ -1847,9 +1939,10 @@
       } else if (action === 'refresh-analysis' && row) {
         _refreshSinglePosition(btn, row);
       } else if (action === 'data-workbench' && row) {
-        window.BenTradeTradeCard.openDataWorkbenchByTrade(row);
+        _openDataWorkbenchInline(row, 'active');
       }
-    });
+    };
+    grid.addEventListener('click', _activeGridClickHandler);
 
     // Wire expand state persistence
     grid.querySelectorAll('details.trade-card-collapse').forEach(function (details) {
@@ -2455,80 +2548,159 @@
     }
   }
 
-  function handleFullRefresh() {
+  async function handleFullRefresh() {
     if (_fullRefreshRunning) return;
     _setFullRefreshEnabled(true);
-    var total = _fullRefreshStages.length;
 
     var skipModel = false;
     var cb = document.getElementById('tmcSkipModel');
     if (cb) skipModel = cb.checked;
     var accountMode = _getAccountMode();
+    var t0 = Date.now();
 
     var chainResults = {};
 
-    // Stage 1: Stock Scan
-    _setRefreshStatus('Running stock scan…', 1, total);
-    api.tmcRunStock()
-      .then(function (res) {
-        chainResults.stockTrigger = res;
-        return api.tmcGetLatestStock();
-      })
-      .then(function (resp) {
-        chainResults.stockResults = resp;
-        // Refresh the stock section UI
+    console.log('[TMC] Full Refresh started', { accountMode: accountMode, skipModel: skipModel });
+
+    try {
+      // Stages 1-3: Run in PARALLEL (independent workflows)
+      _setRefreshStatus('Running Stock, Options & Active Trade analysis…', 1, 2);
+
+      var results = await Promise.allSettled([
+        // Stock scan
+        api.tmcRunStock()
+          .then(function (res) { chainResults.stockTrigger = res; return api.tmcGetLatestStock(); }),
+        // Options scan
+        api.tmcRunOptions()
+          .then(function (res) { chainResults.optionsTrigger = res; return api.tmcGetLatestOptions(); }),
+        // Active trades — handle HTTP errors explicitly
+        fetch('/api/active-trade-pipeline/run?account_mode=' +
+          encodeURIComponent(accountMode) + '&skip_model=' + (skipModel ? 'true' : 'false'),
+          { method: 'POST' }).then(function (r) {
+            if (!r.ok) {
+              return r.text().then(function (t) {
+                var err = new Error('HTTP ' + r.status);
+                err.responseText = t;
+                throw err;
+              });
+            }
+            return r.json();
+          }),
+      ]);
+
+      var stockResult   = results[0];
+      var optionsResult = results[1];
+      var activeResult  = results[2];
+
+      console.log('[TMC] Parallel stages complete:', {
+        elapsed: ((Date.now() - t0) / 1000).toFixed(1) + 's',
+        stock: stockResult.status,
+        options: optionsResult.status,
+        active: activeResult.status,
+        activeOk: activeResult.status === 'fulfilled' ? activeResult.value.ok : 'N/A',
+      });
+
+      // Display results from each settled promise
+      if (stockResult.status === 'fulfilled' && stockResult.value) {
+        chainResults.stockResults = stockResult.value;
         loadStockOpportunities();
+      } else if (stockResult.status === 'rejected') {
+        console.warn('[TMC] Stock scan failed:', stockResult.reason);
+      }
 
-        // Stage 2: Options Scan
-        _setRefreshStatus('Running options scan…', 2, total);
-        return api.tmcRunOptions();
-      })
-      .then(function (res) {
-        chainResults.optionsTrigger = res;
-        return api.tmcGetLatestOptions();
-      })
-      .then(function (resp) {
-        chainResults.optionsResults = resp;
+      if (optionsResult.status === 'fulfilled' && optionsResult.value) {
+        chainResults.optionsResults = optionsResult.value;
         loadOptionsOpportunities();
+      } else if (optionsResult.status === 'rejected') {
+        console.warn('[TMC] Options scan failed:', optionsResult.reason);
+      }
 
-        // Stage 3: Active Trades
-        _setRefreshStatus('Analysing active trades…', 3, total);
-        var url = '/api/active-trade-pipeline/run?account_mode=' +
-          encodeURIComponent(accountMode) + '&skip_model=' + (skipModel ? 'true' : 'false');
-        return fetch(url, { method: 'POST' }).then(function (r) { return r.json(); });
-      })
-      .then(function (activeData) {
-        chainResults.activeResults = activeData;
-        renderActiveResults(activeData);
+      // Active trades — check ok:false from pipeline error envelope
+      var activeOk = false;
+      if (activeResult.status === 'fulfilled' && activeResult.value) {
+        chainResults.activeResults = activeResult.value;
+        if (activeResult.value.ok === false) {
+          var errMsg = (activeResult.value.error || {}).message || 'Pipeline returned an error';
+          console.error('[TMC] Active trade pipeline error:', errMsg, activeResult.value.error);
+          showActiveError(errMsg, activeResult.value);
+        } else {
+          activeOk = true;
+          renderActiveResults(activeResult.value);
+        }
+      } else if (activeResult.status === 'rejected') {
+        var reason = activeResult.reason;
+        console.error('[TMC] Active trade analysis failed:', reason);
+        showActiveError('Request failed: ' + (reason.message || String(reason)), null);
+      }
 
-        // Stage 4: Portfolio Balance
-        _setRefreshStatus('Building portfolio balance…', 4, total);
-        return api.tmcRunPortfolioBalance({
+      // Stage 4: Portfolio Balance (needs results from stages 1-3)
+      _setRefreshStatus('Building portfolio balance…', 2, 2);
+      console.log('[TMC] Starting portfolio balance…', { activeOk: activeOk });
+      try {
+        var balanceData = await api.tmcRunPortfolioBalance({
           account_mode: accountMode,
           skip_model: skipModel,
-          active_trade_results: activeData,
+          // Only pass active results if pipeline succeeded
+          active_trade_results: activeOk ? activeResult.value : null,
+          stock_results: stockResult.status === 'fulfilled' && stockResult.value ? stockResult.value.data || null : null,
+          options_results: optionsResult.status === 'fulfilled' && optionsResult.value ? optionsResult.value.data || null : null,
         });
-      })
-      .then(function (balanceData) {
         chainResults.balanceResults = balanceData;
+        console.log('[TMC] Portfolio balance response:', {
+          ok: balanceData.ok, hasPlan: !!(balanceData && balanceData.rebalance_plan),
+          errors: balanceData.errors || [],
+        });
         displayPortfolioBalance(balanceData);
-        _setRefreshStatus('Complete', null, null);
-        setTimeout(function () { _setRefreshStatus(null); }, 4000);
-        _setFullRefreshEnabled(false);
-        console.log('[TMC] Full Refresh complete', chainResults);
-      })
-      .catch(function (err) {
-        console.error('[TMC] Full Refresh failed:', err);
-        _setRefreshStatus('Failed: ' + err.message, null, null);
-        setTimeout(function () { _setRefreshStatus(null); }, 8000);
-        _setFullRefreshEnabled(false);
-      });
+      } catch (balanceErr) {
+        console.error('[TMC] Portfolio balance failed:', balanceErr);
+        showBalanceError('Request failed: ' + (balanceErr.message || String(balanceErr)), balanceErr.payload || null);
+      }
+
+      var totalElapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      _setRefreshStatus('Complete (' + totalElapsed + 's)', null, null);
+      setTimeout(function () { _setRefreshStatus(null); }, 4000);
+      console.log('[TMC] Full Refresh complete (' + totalElapsed + 's)', chainResults);
+    } catch (err) {
+      console.error('[TMC] Full Refresh failed:', err);
+      _setRefreshStatus('Failed: ' + err.message, null, null);
+      setTimeout(function () { _setRefreshStatus(null); }, 8000);
+    } finally {
+      _setFullRefreshEnabled(false);
+    }
   }
 
   /* -- Portfolio Balance rendering ----------------------------------- */
 
   /** Store last balance result for close-button binding */
   var _lastBalanceResult = null;
+
+  /** Standalone portfolio rebalance run (not part of Full Refresh) */
+  async function runPortfolioRebalance() {
+    var btn = document.getElementById('tmcRunBalanceBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Running…'; }
+    var section = document.getElementById('tmcPortfolioBalanceSection');
+    if (section) section.style.display = '';
+    var t0 = Date.now();
+    console.log('[TMC] Portfolio rebalance started (standalone)');
+    try {
+      var balanceData = await api.tmcRunPortfolioBalance({
+        account_mode: _getAccountMode(),
+      });
+      var elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      console.log('[TMC] Portfolio rebalance response (standalone):', {
+        elapsed: elapsed + 's', ok: balanceData.ok,
+        hasPlan: !!(balanceData && balanceData.rebalance_plan),
+        errors: balanceData.errors || [],
+      });
+      displayPortfolioBalance(balanceData);
+    } catch (err) {
+      var elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      console.error('[TMC] Portfolio rebalance failed (standalone):', elapsed + 's', err);
+      showBalanceError('Request failed (' + elapsed + 's): ' + (err.message || String(err)), err.payload || null);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '▶ Run Rebalance'; }
+    }
+  }
 
   function displayPortfolioBalance(data) {
     var section = document.getElementById('tmcPortfolioBalanceSection');
@@ -2539,10 +2711,36 @@
 
     _lastBalanceResult = data;
 
+    var tsEl = document.getElementById('tmcBalanceTimestamp');
+    if (tsEl) {
+      var ts = data && (data.generated_at || data.timestamp);
+      var display = ts ? new Date(ts).toLocaleTimeString() : new Date().toLocaleTimeString();
+      tsEl.textContent = 'Last updated: ' + display;
+    }
+
+    // Guard: check for ok:false error envelope
+    if (data && data.ok === false) {
+      var errList = (data.errors && data.errors.length)
+        ? data.errors.map(function(e){ return '<li>' + esc(String(e)) + '</li>'; }).join('')
+        : '';
+      var errHtml = errList ? '<ul style="text-align:left;margin-top:.5rem;">' + errList + '</ul>' : '';
+      var errMsg = (data.error || {}).message || '';
+      if (errMsg) errHtml = '<div style="margin-top:.5rem;">' + esc(errMsg) + '</div>' + errHtml;
+      console.error('[TMC] displayPortfolioBalance received ok:false', data.errors || data.error);
+      grid.innerHTML = '<div class="tmc-empty-state"><div class="tmc-empty-icon">&#9888;</div>' +
+        '<div class="tmc-empty-text">Rebalance failed' + errHtml + '</div></div>';
+      if (badge) { badge.textContent = 'ERR'; badge.className = 'tmc-count-badge tmc-count-error'; }
+      return;
+    }
+
     var plan = data && data.rebalance_plan ? data.rebalance_plan : null;
     if (!plan) {
+      var errList = (data && data.errors && data.errors.length)
+        ? data.errors.map(function(e){ return '<li>' + esc(String(e)) + '</li>'; }).join('')
+        : '';
+      var errHtml = errList ? '<ul style="text-align:left;margin-top:.5rem;">' + errList + '</ul>' : '';
       grid.innerHTML = '<div class="tmc-empty-state"><div class="tmc-empty-icon">&#9888;</div>' +
-        '<div class="tmc-empty-text">No balance data returned</div></div>';
+        '<div class="tmc-empty-text">No rebalance plan produced' + errHtml + '</div></div>';
       return;
     }
 
@@ -2674,7 +2872,11 @@
     // Balanced state — no actions
     if (closes.length === 0 && opens.length === 0 && holds.length === 0) {
       html += '<div class="tmc-empty-state"><div class="tmc-empty-icon">&#9989;</div>' +
-        '<div class="tmc-empty-text">Portfolio is balanced — no actions suggested</div></div>';
+        '<div class="tmc-empty-text">No rebalancing actions needed — all positions are healthy ' +
+        'and no new candidates meet the risk policy constraints.</div></div>';
+    } else if (closes.length === 0 && opens.length === 0 && holds.length > 0) {
+      html += '<div class="tmc-empty-state"><div class="tmc-empty-icon">&#9989;</div>' +
+        '<div class="tmc-empty-text">All ' + holds.length + ' positions healthy — no changes needed</div></div>';
     }
 
     grid.innerHTML = html;
@@ -2911,6 +3113,7 @@
     // Active trade controls
     var runActiveBtn     = document.getElementById('tmcRunActiveBtn');
     var refreshActiveBtn = document.getElementById('tmcRefreshActiveBtn');
+    var runBalanceBtn    = document.getElementById('tmcRunBalanceBtn');
 
     if (runActiveBtn) {
       runActiveBtn.addEventListener('click', function () { runActivePipeline(); });
@@ -2918,20 +3121,83 @@
     if (refreshActiveBtn) {
       refreshActiveBtn.addEventListener('click', function () { loadLatestActiveResults(); });
     }
+    if (runBalanceBtn) {
+      runBalanceBtn.addEventListener('click', function () { runPortfolioRebalance(); });
+    }
 
     // Load latest workflow outputs on page entry
     loadStockOpportunities();
     loadOptionsOpportunities();
+    loadLatestActiveResults();
+    if (_lastBalanceResult) displayPortfolioBalance(_lastBalanceResult);
+
+    // ── Orchestrator status indicator + auto-refresh ──
+    var _orchLastCycle = null;
+    var _orchPollTimer = setInterval(function () {
+      if (!api.getOrchestratorStatus) return;
+      api.getOrchestratorStatus().then(function (status) {
+        _updateOrchestratorIndicator(status);
+        // Auto-refresh TMC displays when a new cycle completes
+        if (status.last_cycle_completed && status.last_cycle_completed !== _orchLastCycle) {
+          _orchLastCycle = status.last_cycle_completed;
+          // Only refresh if not currently running a manual full refresh
+          if (!_fullRefreshRunning) {
+            console.log('[TMC] Orchestrator cycle complete — refreshing displays');
+            loadStockOpportunities();
+            loadOptionsOpportunities();
+            loadLatestActiveResults();
+          }
+        }
+      }).catch(function () {
+        // Orchestrator may not be running — show idle
+        _updateOrchestratorIndicator({ running: false, current_stage: 'idle', cycle_count: 0 });
+      });
+    }, 5000);
 
     // Cleanup handler for SPA navigation
     window.BenTradeActiveViewCleanup = function () {
       if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+      if (_orchPollTimer) { clearInterval(_orchPollTimer); _orchPollTimer = null; }
       _stopStockCompletionPoll();
       _stopOptionsCompletionPoll();
       _activeRunning = false;
       var metaEl = document.getElementById('tmcActiveRunMeta');
       if (metaEl) metaEl.remove();
     };
+  }
+
+  /* -- Orchestrator status display ----------------------------------- */
+
+  var _ORCH_STAGE_LABELS = {
+    'idle': 'Idle',
+    'stopped': 'Stopped',
+    'paused': 'Paused',
+    'market_intelligence': 'MI Running',
+    'tmc_stock_options_active': 'Stock/Options/Active',
+    'tmc_portfolio_balance': 'Portfolio Balance',
+    'delay': 'Delay',
+    'error_cooldown': 'Error (retrying)',
+  };
+
+  function _updateOrchestratorIndicator(status) {
+    var el = document.getElementById('orchestratorStatus');
+    if (!el) return;
+
+    var running = status.running;
+    var paused = status.paused;
+    var stage = status.current_stage || 'idle';
+    var cycle = status.cycle_count || 0;
+
+    var color = running ? (paused ? '#ffd600' : '#00c853') : '#ff1744';
+    var label = _ORCH_STAGE_LABELS[stage] || stage;
+    var durationText = '';
+    if (status.last_cycle_duration_ms) {
+      var secs = Math.round(status.last_cycle_duration_ms / 1000);
+      durationText = ' · Last: ' + (secs >= 60 ? Math.round(secs / 60) + 'm' : secs + 's');
+    }
+
+    el.innerHTML = '<span style="color:' + color + '; font-size: 0.9em;">●</span> ' +
+      '<small class="text-muted">Cycle ' + cycle + ': ' + label + durationText + '</small>';
   }
 
   /* -- Expose for testing -------------------------------------------- */

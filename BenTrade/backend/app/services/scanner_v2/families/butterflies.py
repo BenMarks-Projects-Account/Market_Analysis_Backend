@@ -63,6 +63,7 @@ without any butterfly-specific relaxation of OI/volume thresholds.
 from __future__ import annotations
 
 import logging
+import math as _math
 from typing import Any
 
 from app.services.scanner_v2.base_scanner import BaseV2Scanner
@@ -75,6 +76,51 @@ from app.services.scanner_v2.contracts import (
 from app.services.scanner_v2.data import V2NarrowedUniverse
 
 _log = logging.getLogger("bentrade.scanner_v2.families.butterflies")
+
+
+def _pop_butterfly_breakeven_range(
+    underlying_price: float,
+    breakeven_low: float,
+    breakeven_high: float,
+    iv: float,
+    dte: int,
+) -> float | None:
+    """P(breakeven_low < S_T < breakeven_high) under lognormal model.
+
+    Butterfly profit zone is the interval between the two breakevens.
+    POP = P(S_T < breakeven_high) - P(S_T < breakeven_low).
+    """
+    if underlying_price <= 0 or iv <= 0 or dte <= 0:
+        return None
+    if breakeven_low is None or breakeven_high is None:
+        return None
+    if breakeven_low <= 0 or breakeven_high <= 0:
+        return None
+
+    t = dte / 365.0
+    sigma_sqrt_t = iv * _math.sqrt(t)
+
+    if sigma_sqrt_t <= 0:
+        return 1.0 if breakeven_low < underlying_price < breakeven_high else 0.0
+
+    def _ncdf(x: float) -> float:
+        return 0.5 * (1.0 + _math.erf(x / _math.sqrt(2.0)))
+
+    d2_high = (
+        _math.log(underlying_price / breakeven_high)
+        + (-0.5 * iv * iv * t)
+    ) / sigma_sqrt_t
+    p_below_high = _ncdf(-d2_high)
+
+    d2_low = (
+        _math.log(underlying_price / breakeven_low)
+        + (-0.5 * iv * iv * t)
+    ) / sigma_sqrt_t
+    p_below_low = _ncdf(-d2_low)
+
+    pop = round(p_below_high - p_below_low, 4)
+    return max(0.0, pop)
+
 
 # Construction safety cap — prevent combinatorial explosion.
 _DEFAULT_GENERATION_CAP = 50_000
@@ -646,31 +692,78 @@ class ButterfliesV2Scanner(BaseV2Scanner):
         m.breakeven = [be_low, be_high]
         notes["breakeven"] = f"[{be_low}, {be_high}]"
 
-        # POP — delta approximation
-        # P(lower < S_T < upper) ≈ |Δ_lower| − |Δ_upper| (calls)
-        #                        ≈ |Δ_upper| − |Δ_lower| (puts)
-        # Overestimates: covers full strike range, not just profit zone.
-        if lower.delta is not None and upper.delta is not None:
+        # POP — breakeven-range lognormal (preferred) with delta fallback
+        # Butterfly profits only between breakevens: P(BE_low < S_T < BE_high)
+        if m.breakeven and len(m.breakeven) == 2:
+            avg_iv = center.iv or lower.iv or upper.iv or 0.25
+            pop_bf = _pop_butterfly_breakeven_range(
+                underlying_price=candidate.underlying_price,
+                breakeven_low=min(m.breakeven),
+                breakeven_high=max(m.breakeven),
+                iv=avg_iv,
+                dte=candidate.dte,
+            )
+            if pop_bf is not None:
+                m.pop = pop_bf
+                m.pop_source = "breakeven_range_lognormal"
+                notes["pop"] = (
+                    f"P({min(m.breakeven)} < S_T < {max(m.breakeven)})"
+                    f" iv={avg_iv} dte={candidate.dte} = {m.pop}"
+                )
+            else:
+                # Fallback: delta approximation
+                if lower.delta is not None and upper.delta is not None:
+                    if lower.option_type == "call":
+                        pop = abs(lower.delta) - abs(upper.delta)
+                    else:
+                        pop = abs(upper.delta) - abs(lower.delta)
+                    m.pop = round(max(0.0, min(1.0, pop)), 4)
+                    m.pop_source = "delta_approx_fallback"
+                    notes["pop"] = (
+                        f"|Δ_lower({lower.delta})| − |Δ_upper({upper.delta})|"
+                        f" = {m.pop} (fallback — lognormal failed)"
+                    )
+        elif lower.delta is not None and upper.delta is not None:
             if lower.option_type == "call":
                 pop = abs(lower.delta) - abs(upper.delta)
             else:
                 pop = abs(upper.delta) - abs(lower.delta)
             m.pop = round(max(0.0, min(1.0, pop)), 4)
-            m.pop_source = "delta_approx"
+            m.pop_source = "delta_approx_fallback"
             notes["pop"] = (
                 f"|Δ_lower({lower.delta})| − |Δ_upper({upper.delta})|"
-                f" = {m.pop} (full strike range, overestimates profit zone)"
+                f" = {m.pop} (fallback — no breakevens)"
             )
 
-        # EV
+        # EV — triangular payoff adjustment for butterflies
+        # Binary EV (POP × max_profit - (1-POP) × max_loss) overestimates
+        # because butterfly payoff peaks sharply at center and tapers to
+        # breakeven at the wings.  Average payoff ≈ max_profit × 0.50.
         if (m.pop is not None and m.max_profit is not None
                 and m.max_loss is not None):
-            m.ev = round(
-                m.pop * m.max_profit - (1.0 - m.pop) * m.max_loss, 2,
-            )
-            notes["ev"] = f"pop*max_profit - (1-pop)*max_loss = {m.ev}"
+            binary_ev = m.pop * m.max_profit - (1.0 - m.pop) * m.max_loss
+            if m.pop_source != "delta_approx_fallback":
+                adjusted_ev = (
+                    m.pop * (m.max_profit * 0.50)
+                    - (1.0 - m.pop) * m.max_loss
+                )
+                m.ev = round(adjusted_ev, 2)
+                m.ev_raw_binary = round(binary_ev, 2)
+                m.ev_adjustment = "triangular_payoff_0.50"
+                notes["ev"] = (
+                    f"adjusted: pop*max_profit*0.50 - (1-pop)*max_loss"
+                    f" = {m.ev} (binary_ev={m.ev_raw_binary})"
+                )
+            else:
+                m.ev = round(binary_ev, 2)
+                notes["ev"] = f"pop*max_profit - (1-pop)*max_loss = {m.ev}"
             if candidate.dte and candidate.dte > 0:
                 m.ev_per_day = round(m.ev / candidate.dte, 4)
+        m.ev_caveat = (
+            "EV adjusted for triangular payoff — actual EV depends on"
+            " where underlying finishes relative to center strike"
+        )
+        m.ev_accuracy = "adjusted" if m.ev_adjustment else "standard"
 
         # RoR
         if (m.max_profit is not None and m.max_loss is not None
@@ -781,26 +874,69 @@ class ButterfliesV2Scanner(BaseV2Scanner):
             f" = [{be_low}, {be_high}]"
         )
 
-        # POP — delta approximation (same formula as iron condor)
-        # POP ≈ 1 − |Δ_short_put| − |Δ_short_call|
-        if put_short.delta is not None and call_short.delta is not None:
+        # POP — breakeven-range lognormal (preferred) with delta fallback
+        # Iron butterfly profits only between breakevens: P(BE_low < S_T < BE_high)
+        if m.breakeven and len(m.breakeven) == 2:
+            avg_iv = put_short.iv or call_short.iv or 0.25
+            pop_bf = _pop_butterfly_breakeven_range(
+                underlying_price=candidate.underlying_price,
+                breakeven_low=min(m.breakeven),
+                breakeven_high=max(m.breakeven),
+                iv=avg_iv,
+                dte=candidate.dte,
+            )
+            if pop_bf is not None:
+                m.pop = pop_bf
+                m.pop_source = "breakeven_range_lognormal"
+                notes["pop"] = (
+                    f"P({min(m.breakeven)} < S_T < {max(m.breakeven)})"
+                    f" iv={avg_iv} dte={candidate.dte} = {m.pop}"
+                )
+            else:
+                # Fallback: delta approximation
+                if put_short.delta is not None and call_short.delta is not None:
+                    pop = 1.0 - abs(put_short.delta) - abs(call_short.delta)
+                    m.pop = round(max(0.0, min(1.0, pop)), 4)
+                    m.pop_source = "delta_approx_fallback"
+                    notes["pop"] = (
+                        f"1 - |Δ_ps({put_short.delta})| - |Δ_cs({call_short.delta})|"
+                        f" = {m.pop} (fallback — lognormal failed)"
+                    )
+        elif put_short.delta is not None and call_short.delta is not None:
             pop = 1.0 - abs(put_short.delta) - abs(call_short.delta)
             m.pop = round(max(0.0, min(1.0, pop)), 4)
-            m.pop_source = "delta_approx"
+            m.pop_source = "delta_approx_fallback"
             notes["pop"] = (
                 f"1 - |Δ_ps({put_short.delta})| - |Δ_cs({call_short.delta})|"
-                f" = {m.pop}"
+                f" = {m.pop} (fallback — no breakevens)"
             )
 
-        # EV
+        # EV — triangular payoff adjustment for iron butterflies
         if (m.pop is not None and m.max_profit is not None
                 and m.max_loss is not None):
-            m.ev = round(
-                m.pop * m.max_profit - (1.0 - m.pop) * m.max_loss, 2,
-            )
-            notes["ev"] = f"pop*max_profit - (1-pop)*max_loss = {m.ev}"
+            binary_ev = m.pop * m.max_profit - (1.0 - m.pop) * m.max_loss
+            if m.pop_source != "delta_approx_fallback":
+                adjusted_ev = (
+                    m.pop * (m.max_profit * 0.50)
+                    - (1.0 - m.pop) * m.max_loss
+                )
+                m.ev = round(adjusted_ev, 2)
+                m.ev_raw_binary = round(binary_ev, 2)
+                m.ev_adjustment = "triangular_payoff_0.50"
+                notes["ev"] = (
+                    f"adjusted: pop*max_profit*0.50 - (1-pop)*max_loss"
+                    f" = {m.ev} (binary_ev={m.ev_raw_binary})"
+                )
+            else:
+                m.ev = round(binary_ev, 2)
+                notes["ev"] = f"pop*max_profit - (1-pop)*max_loss = {m.ev}"
             if candidate.dte and candidate.dte > 0:
                 m.ev_per_day = round(m.ev / candidate.dte, 4)
+        m.ev_caveat = (
+            "EV adjusted for triangular payoff — actual EV depends on"
+            " where underlying finishes relative to center strike"
+        )
+        m.ev_accuracy = "adjusted" if m.ev_adjustment else "standard"
 
         # RoR
         if (m.max_profit is not None and m.max_loss is not None

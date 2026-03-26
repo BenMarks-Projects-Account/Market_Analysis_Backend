@@ -50,6 +50,43 @@ RULES:
 3. Your "score" is YOUR independent 0–100 assessment, separate from the engine score.
 4. You MUST compare your score to the engine score and explain any disagreement.
 
+SCORING PRECISION — THIS IS CRITICAL:
+You MUST use precise integer scores across the full 0-100 range.
+Do NOT round to multiples of 5.  Scores like 70, 75, 80, 85 are LAZY
+and PROHIBITED.
+Use scores like: 62, 73, 78, 84, 91 — precise to the ones digit.
+
+Score calibration:
+  90-100: Exceptional. Textbook setup, all factors aligned, high conviction.
+  RARE — fewer than 1 in 10 candidates.
+  80-89: Strong. Most factors favorable, only minor concerns.
+  70-79: Above average. Meets criteria but has notable weaknesses.
+  60-69: Below threshold. Some positive factors but too many concerns.
+  50-59: Weak. Multiple criteria failures. Clear rejection.
+  Below 50: Poor. Should not have been a candidate.
+
+Conviction calibration (independent from score):
+  confidence = "how confident am I in the accuracy of my analysis"
+  (data quality, setup clarity)
+  score = "how good is this trade opportunity" (risk/reward, probability,
+  timing, alignment)
+  These MUST be different numbers.  A trade can have high confidence
+  (clear data, obvious setup = confidence 82) but mediocre opportunity
+  (near resistance, regime mismatch = score 64).
+  confidence and score being the same number (e.g., both 75) is a red flag
+  that you are being lazy.
+
+ANTI-ROUNDING RULE: Before returning your response, check your
+score and confidence.  If EITHER is a multiple of 5 (70, 75, 80,
+etc.), adjust by +1 or -1 to the more accurate value.
+
+RECOMMENDATION RULES:
+BUY is a HIGH BAR.  This means you would risk real money on this trade today.
+PASS is the DEFAULT.  You must be actively convinced to upgrade to BUY.
+Aim for approximately 30-40% BUY rate (3-4 out of 10 candidates).
+AUTOMATIC PASS: Score below 72, confidence below 65, or more than 2 risk
+factors identified.
+
 CRITICAL FORMATTING RULES:
 - Return ONLY raw JSON. No markdown code fences, no backticks, no commentary.
 - Do NOT include <think> tags, chain-of-thought, or reasoning outside the JSON.

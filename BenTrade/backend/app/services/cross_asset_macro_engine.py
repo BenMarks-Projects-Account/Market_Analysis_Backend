@@ -170,6 +170,48 @@ SIGNAL_PROVENANCE: dict[str, dict[str, str]] = {
 }
 
 
+# Live-futures provenance overrides keyed by metric name
+_FUTURES_PROVENANCE_OVERRIDES: dict[str, dict[str, str]] = {
+    "oil_wti": {
+        "source": "FuturesClient → Yahoo Finance CL=F",
+        "type": "direct",
+        "delay": "near-realtime (live futures)",
+        "unit": "USD/barrel",
+        "notes": "Live WTI crude oil futures price via FuturesClient. "
+                 "Falls back to FRED DCOILWTICO when market is closed.",
+    },
+    "usd_index": {
+        "source": "FuturesClient → Yahoo Finance DX-Y.NYB",
+        "type": "direct",
+        "delay": "near-realtime (live futures)",
+        "unit": "index level",
+        "notes": "Live US Dollar Index futures via FuturesClient. "
+                 "Falls back to FRED DTWEXBGS when market is closed.",
+    },
+    "ten_year_yield": {
+        "source": "FuturesClient → Yahoo Finance ^TNX",
+        "type": "direct",
+        "delay": "near-realtime (live index)",
+        "unit": "percent",
+        "notes": "Live 10-Year Treasury Yield via FuturesClient. "
+                 "Falls back to FRED DGS10 / MarketContextService when market is closed.",
+    },
+}
+
+
+def _runtime_provenance_macro(source_meta: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Return SIGNAL_PROVENANCE with live-futures overrides when applicable."""
+    futures_sources = source_meta.get("futures_sources") if isinstance(source_meta, dict) else None
+    if not futures_sources:
+        return SIGNAL_PROVENANCE
+
+    prov = {k: dict(v) for k, v in SIGNAL_PROVENANCE.items()}
+    for metric, override in _FUTURES_PROVENANCE_OVERRIDES.items():
+        if metric in futures_sources:
+            prov[metric] = dict(override)
+    return prov
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # SCORING UTILITIES
 # ═══════════════════════════════════════════════════════════════════════
@@ -1245,7 +1287,7 @@ def compute_cross_asset_scores(
             ],
         },
         "source_meta": source_meta,
-        "signal_provenance": SIGNAL_PROVENANCE,
+        "signal_provenance": _runtime_provenance_macro(source_meta),
     }
 
     raw_inputs = {

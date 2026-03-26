@@ -39,6 +39,7 @@ window.BenTradeStrategyCardConfig = (function () {
     pop:            { key: 'pop',            computedKey: 'pop',            rootFallbacks: ['p_win_used', 'pop_delta_approx', 'pop_approx', 'implied_prob_profit'],  label: 'Win Probability',   format: 'pct',     toneOpts: { threshold: 0.5 } },
     expected_value: { key: 'expected_value', computedKey: 'expected_value', rootFallbacks: ['ev_per_contract', 'ev', 'expected_value'],                             label: 'Expected Value',    format: 'money' },
     return_on_risk: { key: 'return_on_risk', computedKey: 'return_on_risk', rootFallbacks: ['ror'],                                                                 label: 'Return on Risk',    format: 'pct' },
+    expected_ror:   { key: 'expected_ror',   computedKey: 'expected_ror',   rootFallbacks: ['expected_ror'],                                                             label: 'Expected RoR',     format: 'pct' },
     max_profit:     { key: 'max_profit',     computedKey: 'max_profit',     rootFallbacks: ['max_profit_per_contract'],                                             label: 'Max Profit',        format: 'dollars' },
     max_loss:       { key: 'max_loss',       computedKey: 'max_loss',       rootFallbacks: ['max_loss_per_contract'],                                               label: 'Max Loss',          format: 'dollars',  toneOpts: { invert: true } },
     kelly_fraction: { key: 'kelly_fraction', computedKey: 'kelly_fraction', rootFallbacks: [],                                                                      label: 'Kelly Fraction',    format: 'pct' },
@@ -65,6 +66,7 @@ window.BenTradeStrategyCardConfig = (function () {
         SHARED.pop,
         SHARED.expected_value,
         SHARED.return_on_risk,
+        SHARED.expected_ror,
         SHARED.max_profit,
         SHARED.max_loss,
         SHARED.kelly_fraction,
@@ -88,6 +90,7 @@ window.BenTradeStrategyCardConfig = (function () {
       coreMetrics: [
         SHARED.expected_value,
         SHARED.ev_to_risk,
+        SHARED.expected_ror,
         SHARED.return_on_risk,
         SHARED.max_profit,
         SHARED.max_loss,
@@ -112,6 +115,7 @@ window.BenTradeStrategyCardConfig = (function () {
       coreMetrics: [
         SHARED.pop,
         SHARED.expected_value,
+        SHARED.expected_ror,
         SHARED.return_on_risk,
         SHARED.max_profit,
         SHARED.max_loss,
@@ -135,6 +139,7 @@ window.BenTradeStrategyCardConfig = (function () {
         { key: 'peak_profit_at_center',      computedKey: null, rootFallbacks: ['peak_profit_at_center'],      label: 'Peak Profit',       format: 'dollars' },
         { key: 'probability_of_touch_center', computedKey: null, rootFallbacks: ['probability_of_touch_center'], label: 'Prob Touch Center',  format: 'pct' },
         { key: 'cost_efficiency',             computedKey: null, rootFallbacks: ['cost_efficiency'],             label: 'Cost Efficiency',   format: 'num' },
+        SHARED.expected_ror,
         SHARED.max_profit,
         SHARED.max_loss,
         SHARED.return_on_risk,
@@ -313,6 +318,7 @@ window.BenTradeStrategyCardConfig = (function () {
     coreMetrics: [
       SHARED.pop,
       SHARED.expected_value,
+      SHARED.expected_ror,
       SHARED.return_on_risk,
       SHARED.max_profit,
       SHARED.max_loss,

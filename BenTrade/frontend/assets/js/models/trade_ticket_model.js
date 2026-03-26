@@ -57,6 +57,8 @@ window.BenTradeTradeTicketModel = (function () {
   var SIDE_MAP = {
     sell:          'sell_to_open',
     buy:           'buy_to_open',
+    short:         'sell_to_open',
+    long:          'buy_to_open',
     sell_to_open:  'sell_to_open',
     buy_to_open:   'buy_to_open',
     sell_to_close: 'sell_to_close',
@@ -142,9 +144,18 @@ window.BenTradeTradeTicketModel = (function () {
     }
 
     return rawLegs.map(function (leg) {
+      var occ = String(leg.occ_symbol || leg.option_symbol || leg.optionSymbol || '');
+
+      // Build OCC from components when not pre-built
+      if (!occ) {
+        var cp = String(leg.callput || leg.right || leg.option_type || '').toLowerCase();
+        var exp = String(leg.expiration || header.expiration || '');
+        occ = _buildOccSymbol(header.symbol, exp, toNum(leg.strike), cp);
+      }
+
       return {
         side:          _normSide(leg.side),
-        optionSymbol:  String(leg.occ_symbol || leg.option_symbol || leg.optionSymbol || ''),
+        optionSymbol:  occ,
         expiration:    String(leg.expiration || header.expiration || ''),
         strike:        toNum(leg.strike) || 0,
         right:         String(leg.callput || leg.right || leg.option_type || 'put').toLowerCase(),
@@ -161,10 +172,12 @@ window.BenTradeTradeTicketModel = (function () {
   function _dig(raw, keys) {
     for (var i = 0; i < keys.length; i++) {
       var v = null;
-      // check computed, computed_metrics, details, then root
+      // check computed, computed_metrics, math, details, then root
       if (raw.computed && raw.computed[keys[i]] != null)         v = toNum(raw.computed[keys[i]]);
       if (v != null) return v;
       if (raw.computed_metrics && raw.computed_metrics[keys[i]] != null) v = toNum(raw.computed_metrics[keys[i]]);
+      if (v != null) return v;
+      if (raw.math && raw.math[keys[i]] != null)                 v = toNum(raw.math[keys[i]]);
       if (v != null) return v;
       if (raw.details && raw.details[keys[i]] != null)           v = toNum(raw.details[keys[i]]);
       if (v != null) return v;
@@ -187,6 +200,7 @@ window.BenTradeTradeTicketModel = (function () {
    */
   function normalizeForTicket(input) {
     if (!input || typeof input !== 'object') return _empty();
+    console.log('[TradeTicket] Input to normalize:', JSON.stringify(input, null, 2));
 
     // If input has _raw, use it for deep metric resolution
     var raw = (input._raw && typeof input._raw === 'object') ? input._raw : input;
@@ -210,9 +224,9 @@ window.BenTradeTradeTicketModel = (function () {
           var side = String(leg.side || '').toLowerCase();
           var st = toNum(leg.strike);
           if (st != null && st > 0) {
-            if (side === 'sell_to_open' || side === 'sell') {
+            if (side === 'sell_to_open' || side === 'sell' || side === 'short') {
               if (shortStrike == null) shortStrike = st;
-            } else if (side === 'buy_to_open' || side === 'buy') {
+            } else if (side === 'buy_to_open' || side === 'buy' || side === 'long') {
               if (longStrike == null) longStrike = st;
             }
           }
@@ -252,6 +266,7 @@ window.BenTradeTradeTicketModel = (function () {
     //               details.break_even, break_even (root)
     var breakevens = null;
     var be = raw.breakevens || raw.breakeven
+      || (raw.math && (raw.math.breakevens || raw.math.breakeven))
       || (raw.computed && raw.computed.breakevens)
       || (raw.details && (raw.details.breakevens || raw.details.break_even))
       || raw.break_even;
@@ -275,11 +290,34 @@ window.BenTradeTradeTicketModel = (function () {
     // Limit price: default to net premium (which is per-spread mid-based)
     var limitPrice = netPremium != null ? Math.abs(netPremium) : (midPrice != null ? Math.abs(midPrice) : null);
 
+    // Compute spread-level pricing from leg bid/ask when not already set
+    var isCredit = _priceEffect(strategyId) === 'CREDIT';
+    if (midPrice == null && legs && legs.length >= 2) {
+      var sellLeg = legs.find(function(l) { return l.side === 'sell_to_open'; });
+      var buyLeg  = legs.find(function(l) { return l.side === 'buy_to_open'; });
+      if (sellLeg && buyLeg) {
+        var sellMid = (sellLeg.bid != null && sellLeg.ask != null) ? (sellLeg.bid + sellLeg.ask) / 2 : null;
+        var buyMid  = (buyLeg.bid != null && buyLeg.ask != null) ? (buyLeg.bid + buyLeg.ask) / 2 : null;
+        if (sellMid != null && buyMid != null) {
+          if (isCredit) {
+            midPrice     = sellMid - buyMid;
+            naturalPrice = sellLeg.bid - buyLeg.ask;
+          } else {
+            midPrice     = buyMid - sellMid;
+            naturalPrice = buyLeg.ask - sellLeg.bid;
+          }
+        }
+      }
+      if (limitPrice == null && midPrice != null) {
+        limitPrice = Math.round(Math.abs(midPrice) * 100) / 100;
+      }
+    }
+
     // Execution readiness — backend may flag this when legs lack OCC
     var executionInvalid = !!(raw.execution_invalid);
     var executionInvalidReason = raw.execution_invalid_reason || null;
 
-    return {
+    var _result = {
       underlying:      symbol,
       strategyId:      strategyId,
       strategyLabel:   strategyLabel,
@@ -310,6 +348,8 @@ window.BenTradeTradeTicketModel = (function () {
       executionInvalid:       executionInvalid,
       executionInvalidReason: executionInvalidReason,
     };
+    console.log('[TradeTicket] Output from normalize:', JSON.stringify(_result, null, 2));
+    return _result;
   }
 
   function _empty() {
@@ -388,6 +428,17 @@ window.BenTradeTradeTicketModel = (function () {
 
     if (!ticket.expiration) {
       warnings.push('Expiration is missing.');
+    } else {
+      // Block execution of expired options
+      var expParts = String(ticket.expiration).split('-');
+      if (expParts.length === 3) {
+        var expDate = new Date(Number(expParts[0]), Number(expParts[1]) - 1, Number(expParts[2]));
+        // Set to end of expiration day (market close)
+        expDate.setHours(23, 59, 59, 999);
+        if (expDate < new Date()) {
+          errors.push('Options expired on ' + ticket.expiration + ' — cannot execute.');
+        }
+      }
     }
 
     if (!ticket.breakevens || ticket.breakevens.length === 0) {
@@ -433,8 +484,13 @@ window.BenTradeTradeTicketModel = (function () {
       call_debit_spread: 'call_debit',
       call_debit:        'call_debit',
       iron_condor:       'iron_condor',
+      iron_butterfly:        'iron_butterfly',
       butterfly_debit:   'butterfly_debit',
       butterflies:       'butterfly_debit',
+      calendar_call_spread:  'calendar_call',
+      calendar_put_spread:   'calendar_put',
+      diagonal_call_spread:  'diagonal_call',
+      diagonal_put_spread:   'diagonal_put',
     };
     var strategy = strategyMap[ticket.strategyId] || 'put_credit';
 
@@ -454,6 +510,10 @@ window.BenTradeTradeTicketModel = (function () {
         };
         // Pass through exact OCC symbol from option chain when available
         if (leg.optionSymbol) legObj.option_symbol = leg.optionSymbol;
+        // Per-leg expiration for calendar/diagonal strategies
+        if (leg.expiration && leg.expiration !== ticket.expiration) {
+          legObj.expiration = leg.expiration;
+        }
         legsPayload.push(legObj);
       }
     }
@@ -472,7 +532,9 @@ window.BenTradeTradeTicketModel = (function () {
       expiration:    ticket.expiration,
       legs:          legsPayload,
       quantity:      ticket.quantity,
-      limit_price:   ticket.limitPrice || 0,
+      limit_price:   (ticket.limitPrice != null && ticket.limitPrice > 0) ? ticket.limitPrice : (function() {
+        throw new Error('Limit price is missing or zero — cannot submit preview without a valid price.');
+      })(),
       time_in_force: ticket.tif.toUpperCase(),
       mode:          mode || 'paper',
     };

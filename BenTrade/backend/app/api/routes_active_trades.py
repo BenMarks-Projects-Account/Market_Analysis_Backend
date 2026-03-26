@@ -1019,7 +1019,7 @@ async def get_monitor_narrative(
                     system_prompt=system_msg,
                     timeout=90.0,
                     max_tokens=600,
-                    temperature=0.2,
+                    temperature=0.0,  # Precise, deterministic scoring
                     metadata={"symbol": symbol},
                 ),
             )
@@ -1242,6 +1242,30 @@ _MODEL_ANALYSIS_SYSTEM_MSG = (
     "11. thesis_status must be exactly: INTACT, WEAKENING, or BROKEN\n"
     "12. urgency must be exactly: LOW, MEDIUM, or HIGH\n"
     "13. Every string value must use double quotes. No trailing commas.\n\n"
+    "SCORING PRECISION — THIS IS CRITICAL:\n"
+    "You MUST use precise integer scores across the full 0-100 range.\n"
+    "Do NOT round to multiples of 5. Scores like 70, 75, 80, 85 are LAZY "
+    "and PROHIBITED.\n"
+    "Use scores like: 62, 73, 78, 84, 91 — precise to the ones digit.\n\n"
+    "Score calibration:\n"
+    "  90-100: Exceptional. Position is perfectly healthy, all factors aligned.\n"
+    "  80-89: Strong. Most factors favorable, only minor concerns.\n"
+    "  70-79: Above average. Healthy but has notable risks to monitor.\n"
+    "  60-69: Borderline. Deteriorating or mixed signals.\n"
+    "  50-59: Weak. Multiple concerns, consider reducing.\n"
+    "  Below 50: Poor. Should likely be closed.\n\n"
+    "confidence = 'how confident am I in the accuracy of my analysis' "
+    "(data quality, clarity of signals). This is INDEPENDENT from the "
+    "recommendation. confidence and any health score being the same number "
+    "is a red flag that you are being lazy.\n\n"
+    "ANTI-ROUNDING RULE: Before returning your response, check confidence. "
+    "If it is a multiple of 5 (70, 75, 80, etc.), adjust by +1 or -1 to "
+    "the more accurate value.\n\n"
+    "RECOMMENDATION CALIBRATION:\n"
+    "  HOLD: Position is healthy, no action needed. Health score 60+.\n"
+    "  REDUCE: Position is deteriorating or over-concentrated. Health score 40-60.\n"
+    "  CLOSE: Position should be exited. Health score below 40 OR critical risk.\n"
+    "  URGENT_REVIEW: Immediate attention — position at risk of significant loss.\n\n"
     "Required JSON schema:\n" + _MODEL_ANALYSIS_SCHEMA
 )
 
@@ -1496,7 +1520,7 @@ Produce a concise position review memo as JSON. Be decisive."""
             {"role": "system", "content": _MODEL_ANALYSIS_SYSTEM_MSG},
             {"role": "user", "content": user_msg},
         ],
-        "temperature": 0.2,
+        "temperature": 0.0,  # Precise, deterministic scoring
         "max_tokens": 900,
     }
 
@@ -1522,7 +1546,7 @@ Produce a concise position review memo as JSON. Be decisive."""
                         system_prompt=_MODEL_ANALYSIS_SYSTEM_MSG,
                         timeout=90.0,
                         max_tokens=900,
-                        temperature=0.2,
+                        temperature=0.0,  # Precise, deterministic scoring
                         metadata={"symbol": symbol, "attempt": attempt},
                     ),
                 )

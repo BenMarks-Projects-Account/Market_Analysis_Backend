@@ -138,7 +138,12 @@ class V2RecomputedMath:
     pop_source: str | None = None        # "delta_approx" | "normal_cdf" | "model" | None
     ev: float | None = None              # expected value per-contract
     ev_per_day: float | None = None      # EV / DTE
+    ev_raw_binary: float | None = None   # pre-adjustment binary EV (butterflies)
+    ev_adjustment: str | None = None     # adjustment label (e.g. "triangular_payoff_0.50")
+    ev_caveat: str | None = None         # human-readable caveat about EV accuracy
+    ev_accuracy: str | None = None       # "standard" | "adjusted"
     ror: float | None = None             # return on risk (max_profit / max_loss)
+    expected_ror: float | None = None    # expected RoR (ev / |max_loss|)
     kelly: float | None = None           # Kelly fraction
 
     breakeven: list[float] = field(default_factory=list)

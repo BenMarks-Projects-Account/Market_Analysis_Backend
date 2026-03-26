@@ -115,6 +115,64 @@ amount, delta, DTE).  Be specific.
 - Do NOT invent support/resistance levels, earnings dates, or news events \
 not in the data.
 
+RECOMMENDATION RULES — READ CAREFULLY:
+EXECUTE means you would open this position with real capital today.
+PASS is the default — the trade must earn EXECUTE through clear merit.
+
+AUTOMATIC PASS (any ONE triggers PASS):
+- Score below 72
+- Conviction below 65
+- POP below 60% for income strategies (credit spreads, iron condors)
+- POP below 35% for directional strategies (debit spreads, butterflies)
+- Credit-to-width ratio below 15% for credit strategies
+- EV is negative or below 5% of max loss
+- Any leg has bid-ask spread > 30% of mid
+- DTE is outside the sweet spot for this strategy (< 14 or > 50 for income)
+- Short leg delta > 0.35 for income strategies (too aggressive)
+
+EXECUTE requires ALL of these:
+- Score 72 or above
+- Conviction 65 or above
+- POP meets strategy-appropriate threshold
+- EV is meaningfully positive (> 10% of max loss)
+- Liquidity is adequate (reasonable bid-ask spreads on all legs)
+- Regime alignment is favorable or neutral
+
+SCORING PRECISION — THIS IS CRITICAL:
+You MUST use precise integer scores across the full 0-100 range.
+Do NOT round to multiples of 5.  Scores like 70, 75, 80, 85 are LAZY \
+and PROHIBITED.
+Use scores like: 62, 73, 78, 84, 91 — precise to the ones digit.
+
+Score calibration:
+  90-100: Exceptional. Textbook setup, all factors aligned, high conviction. \
+RARE — fewer than 1 in 10 candidates.
+  80-89: Strong. Most factors favorable, only minor concerns. A trade you \
+would confidently take with real money.
+  70-79: Above average. Meets criteria but has notable weaknesses or timing \
+uncertainty.
+  60-69: Below threshold. Some positive factors but too many concerns for \
+execution.
+  50-59: Weak. Multiple criteria failures. Clear rejection.
+  Below 50: Poor. Should not have been a candidate.
+
+Conviction calibration (independent from score):
+  conviction = "how confident am I in the accuracy of my analysis" \
+(data quality, setup clarity)
+  score = "how good is this trade opportunity" (risk/reward, probability, \
+timing, alignment)
+  These MUST be different numbers.  A trade can have high confidence \
+(clear data, obvious setup = conviction 82) but mediocre opportunity \
+(poor credit-to-width, weak EV = score 64).
+  conviction and score being the same number (e.g., both 75) is a red flag \
+that you are being lazy.
+
+ANTI-ROUNDING RULE: Before returning your response, check your \
+score and conviction.  If EITHER is a multiple of 5 (70, 75, 80, \
+etc.), adjust by +1 or -1 to the more accurate value.  A score of 73 is \
+almost always more accurate than 75.  A conviction of 68 is almost always \
+more accurate than 70.
+
 CRITICAL FORMATTING RULES:
 - Return ONLY raw JSON.  No markdown fences, no backticks, no commentary.
 - Do NOT include <think> tags, chain-of-thought, or reasoning outside the JSON.
@@ -283,6 +341,7 @@ def build_options_tmc_user_prompt(
         "ev": math.get("ev"),
         "ev_per_day": math.get("ev_per_day"),
         "ror": math.get("ror"),
+        "expected_ror": math.get("expected_ror"),
         "kelly": math.get("kelly"),
     }
 

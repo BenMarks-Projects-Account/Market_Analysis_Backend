@@ -16,6 +16,7 @@ strategy-specific sub-scores.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -84,9 +85,11 @@ def _sort_key(candidate: dict[str, Any]) -> tuple:
 
 
 class StockEngineService:
-    """Runs all stock scanners sequentially and returns the top N.
+    """Runs all stock scanners in parallel and returns the top N.
 
-    Sequential execution avoids overwhelming the shared Tradier API key.
+    The global TradierClient rate limiter (2 req/sec) prevents API overload
+    regardless of concurrent callers; parallelism lets scanners overlap
+    computation and share the TTLCache simultaneously.
     """
 
     def __init__(
@@ -112,22 +115,20 @@ class StockEngineService:
         If one scanner fails, the others still contribute.  Partial failures
         are reported in ``warnings``.
 
-        Scanners run SEQUENTIALLY to avoid overwhelming the Tradier API.
-        All four scanners share the same HTTP client and Tradier API key;
-        running them concurrently (4×8 = 32 parallel requests) exceeds
-        Tradier's rate limit and causes mass timeouts/429s, leaving only
-        the fastest scanner's results (typically Mean Reversion).
-        Sequential execution ensures each scanner gets full API bandwidth
-        and later scanners benefit from the TTLCache populated by earlier
-        ones (shared symbol universe).
+        Scanners run in PARALLEL via asyncio.gather.  The global
+        TradierClient rate limiter (2 req/sec, asyncio.Lock-gated)
+        prevents API overload regardless of concurrent callers.
+        All scanners share the same TTLCache (1800s bars), so cache
+        hits improve when multiple scanners request the same symbols
+        simultaneously.
         """
         t0 = time.monotonic()
         all_candidates: list[dict[str, Any]] = []
         scanner_meta: list[dict[str, Any]] = []
         warnings: list[str] = []
 
-        # Run scanners SEQUENTIALLY to avoid Tradier API rate-limit exhaustion.
-        # See docstring above for rationale.
+        # Build tasks for all initialised scanners
+        active: list[tuple[str, Any]] = []
         for sid, svc in self._scanners.items():
             if svc is None:
                 warnings.append(f"{sid}: service not initialised")
@@ -136,21 +137,25 @@ class StockEngineService:
                     "status": "skipped",
                     "candidates_count": 0,
                 })
-                continue
+            else:
+                active.append((sid, svc))
 
-            try:
-                result = await svc.scan()
-            except BaseException as exc:
-                msg = f"{sid}: {str(exc)[:200]}"
+        # Dispatch all scanners in parallel — rate limiter handles throttling
+        tasks = [svc.scan() for _, svc in active]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for (sid, _svc), result in zip(active, results):
+            if isinstance(result, BaseException):
+                msg = f"{sid}: {str(result)[:200]}"
                 logger.exception(
                     "event=stock_engine_scanner_error scanner=%s", sid,
-                    exc_info=exc,
+                    exc_info=result,
                 )
                 warnings.append(msg)
                 scanner_meta.append({
                     "strategy_id": sid,
                     "status": "error",
-                    "error": str(exc)[:200],
+                    "error": str(result)[:200],
                     "candidates_count": 0,
                 })
                 continue

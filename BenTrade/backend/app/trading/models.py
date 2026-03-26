@@ -8,7 +8,9 @@ from pydantic import BaseModel, Field
 
 STRATEGY_LITERAL = Literal[
     "put_credit", "call_credit", "put_debit", "call_debit",
-    "iron_condor", "butterfly_debit",
+    "iron_condor", "iron_butterfly", "butterfly_debit",
+    "calendar_call", "calendar_put",
+    "diagonal_call", "diagonal_put",
 ]
 
 
@@ -58,6 +60,8 @@ class PreviewLeg(BaseModel):
     quantity: int = 1
     # Exact OCC symbol from option chain; preferred over reconstructed symbol
     option_symbol: str | None = None
+    # Per-leg expiration for calendar/diagonal strategies (different from header)
+    expiration: str | None = None
 
 
 class TradingPreviewRequest(BaseModel):
@@ -74,12 +78,15 @@ class TradingPreviewRequest(BaseModel):
     time_in_force: Literal["DAY", "GTC"] = "DAY"
     mode: Literal["paper", "live"] = "paper"
     trace_id: str | None = None
+    override: bool = False  # Allow user to bypass soft risk checks
 
 
 class OrderPreviewResponse(BaseModel):
     ticket: OrderTicket
     checks: dict[str, Any]
     warnings: list[str]
+    soft_warnings: list[str] = []
+    requires_override: bool = False
     confirmation_token: str
     expires_at: datetime
     trace_id: str | None = None
