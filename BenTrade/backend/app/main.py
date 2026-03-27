@@ -52,6 +52,7 @@ from app.services.pre_market_intelligence import PreMarketIntelligenceService
 from app.api.routes_pre_market import router as pre_market_router
 from app.api.routes_orchestrator import router as orchestrator_router
 from app.api.routes_notifications import router as notifications_router
+from app.api.routes_company_evaluator import router as company_evaluator_router
 from app.clients.polygon_client import PolygonClient
 from app.clients.tradier_client import TradierClient
 from app.config import get_settings
@@ -439,6 +440,7 @@ def create_app() -> FastAPI:
     app.include_router(dev_router)
     app.include_router(orchestrator_router)
     app.include_router(notifications_router)
+    app.include_router(company_evaluator_router)
     app.include_router(frontend_router)
 
     @app.exception_handler(UpstreamError)

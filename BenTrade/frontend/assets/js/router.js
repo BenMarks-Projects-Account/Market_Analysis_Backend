@@ -206,6 +206,7 @@
     "market/flows": { title: "Flows & Positioning", group: "Market Picture", subgroup: "Flows", description: "Positioning & flow dynamics" },
     "market/liquidity": { title: "Liquidity & Financial Conditions", group: "Market Picture", subgroup: "Liquidity", description: "Financial conditions & policy" },
     "notifications": { title: "Notifications", group: "Navigation", subgroup: "Alerts", description: "BUY/EXECUTE signal alerts" },
+    "company-evaluator": { title: "Company Evaluator", group: "Analysis", subgroup: "Fundamentals", description: "Ranked company evaluations from Machine 2" },
   };
 
   const routes = {
@@ -373,6 +374,11 @@
       view: "dashboards/notifications.html",
       init: () => window.BenTradePages?.initNotifications?.(document.getElementById('view')),
       title: routeMeta["notifications"].title
+    },
+    "company-evaluator": {
+      view: "dashboards/company_evaluator.html",
+      init: () => window.BenTradePages?.initCompanyEvaluator?.(document.getElementById('view')),
+      title: routeMeta["company-evaluator"].title
     }
   };
 

@@ -1,0 +1,29 @@
+<div class="company-evaluator-page" id="companyEvaluatorPage">
+  <!-- Header -->
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <div>
+      <h4 style="color:var(--accent-primary, #00e0c3); margin:0; font-weight:600; letter-spacing:0.04em;">
+        COMPANY EVALUATOR
+      </h4>
+      <small id="ce-status" style="color:rgba(224,224,224,0.4);">Loading...</small>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <select id="ce-sector-filter"
+        style="background:#0d1117; color:#e0e0e0; border:1px solid rgba(255,255,255,0.1);
+               border-radius:4px; padding:4px 8px; font-size:0.85rem;">
+        <option value="">All Sectors</option>
+      </select>
+      <button id="ce-refresh-btn" class="btn btn-sm btn-outline-primary">Refresh</button>
+      <button id="ce-crawl-btn" class="btn btn-sm btn-outline-secondary">Run Crawler</button>
+    </div>
+  </div>
+
+  <!-- Ranked Table -->
+  <div id="ce-table-container"></div>
+
+  <!-- Company Detail Drawer (hidden by default) -->
+  <div id="ce-detail-drawer" style="display:none; position:fixed; top:0; right:0; width:520px; height:100vh;
+       background:#0d1117; border-left:1px solid rgba(255,255,255,0.1); z-index:3000; overflow-y:auto;
+       box-shadow:-4px 0 20px rgba(0,0,0,0.5); padding:20px;">
+  </div>
+</div>

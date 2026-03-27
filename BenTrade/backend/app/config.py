@@ -71,6 +71,9 @@ class Settings(BaseModel):
     BEDROCK_MODEL_ID: str = _cfg("BEDROCK_MODEL_ID", default="us.amazon.nova-pro-v1:0")
     BEDROCK_TIMEOUT_SECONDS: float = float(os.getenv("BEDROCK_TIMEOUT_SECONDS", "120"))
 
+    # ── Company Evaluator (Machine 2 proxy) ──────────────────────
+    COMPANY_EVALUATOR_URL: str = _cfg("COMPANY_EVALUATOR_URL", default="http://192.168.1.143:8100")
+
     FRED_VIX_SERIES_ID: str = "VIXCLS"
 
     QUOTE_CACHE_TTL_SECONDS: int = 60
