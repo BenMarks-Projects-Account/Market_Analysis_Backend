@@ -612,10 +612,26 @@ class TradingService:
 
     async def submit(self, req: TradingSubmitRequest) -> OrderSubmitResponse:
         trace_id = req.trace_id or f"sub-{uuid.uuid4().hex[:12]}"
+        logger.info(
+            "event=submit_service_start trace_id=%s ticket_id=%s mode=%s",
+            trace_id, req.ticket_id, req.mode,
+        )
         ticket_raw = self.repository.get_ticket(req.ticket_id)
         if not ticket_raw:
+            logger.warning(
+                "event=submit_ticket_not_found trace_id=%s ticket_id=%s "
+                "stored_ticket_count=%d",
+                trace_id, req.ticket_id, len(self.repository._tickets),
+            )
             raise HTTPException(status_code=404, detail="Ticket not found")
 
+        logger.info(
+            "event=submit_ticket_found trace_id=%s ticket_id=%s "
+            "ticket_mode=%s underlying=%s strategy=%s",
+            trace_id, req.ticket_id,
+            ticket_raw.get("mode"), ticket_raw.get("underlying"),
+            ticket_raw.get("strategy"),
+        )
         ticket = OrderTicket.model_validate(ticket_raw)
         # In dev mode, live→paper override happens after this check,
         # so only reject mismatches when NOT in dev mode.

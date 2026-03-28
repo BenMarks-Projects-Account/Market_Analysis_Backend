@@ -324,6 +324,7 @@ def classify_candidate_event_risk(
     *,
     window_end: str | None = None,
     window_days: int | None = None,
+    symbol: str | None = None,
 ) -> dict[str, Any]:
     """Classify event risk for a single candidate's time window.
 
@@ -337,6 +338,10 @@ def classify_candidate_event_risk(
     window_days : int | None
         Fixed look-forward in calendar days.  Used for stock candidates
         (no expiration).
+    symbol : str | None
+        Candidate's ticker symbol.  When provided, company events are
+        filtered to only those whose ``related_symbols`` contain this
+        symbol.  Macro / market-wide events are always included.
 
     Returns
     -------
@@ -361,11 +366,20 @@ def classify_candidate_event_risk(
     else:
         return _unknown
 
-    # Collect high/medium importance events within the window
-    all_events = (
-        (event_context.get("upcoming_macro_events") or [])
-        + (event_context.get("upcoming_company_events") or [])
-    )
+    # Macro events always apply to every candidate.
+    macro_events = event_context.get("upcoming_macro_events") or []
+
+    # Company events are filtered by symbol when provided.
+    company_events = event_context.get("upcoming_company_events") or []
+    if symbol:
+        sym_upper = symbol.upper()
+        company_events = [
+            evt for evt in company_events
+            if sym_upper in {s.upper() for s in (evt.get("related_symbols") or [])}
+            or (evt.get("scope") or "") == "market_wide"
+        ]
+
+    all_events = macro_events + company_events
 
     events_in_window: list[dict[str, str]] = []
     for evt in all_events:

@@ -25,6 +25,11 @@
   var _optionsPollTimer = null;
   /** Full refresh chain running flag. */
   var _fullRefreshRunning = false;
+  /** Timestamp (ms) of last manual active-trade render from Full Refresh or Run Active.
+   *  Used to prevent orchestrator poll from overwriting recent manual renders. */
+  var _lastManualActiveRenderAt = 0;
+  /** Grace period (ms) after a manual render during which poll-based refreshes are suppressed. */
+  var _MANUAL_RENDER_GUARD_MS = 30000;
 
   /**
    * Stored event handler references — prevents listener stacking on re-render.
@@ -140,6 +145,128 @@
       case 'pass': return 'tmc-action-pass';
       default:     return 'tmc-action-unknown';
     }
+  }
+
+  /**
+   * Generate a human-readable explanation of what makes a trade profitable.
+   * Shared across options cards, active trade cards, and trade ticket.
+   *
+   * Accepts either a TMC normalised candidate, an active trade rec, or a
+   * TradeTicket model — field lookup is flexible across naming conventions.
+   */
+  function getTradeExplanation(trade) {
+    var strategy = (trade.strategy_id || trade.strategyId || trade.strategy || '').toLowerCase();
+    var symbol = trade.symbol || trade.underlying || '';
+    var legs = trade.legs || [];
+    var math = trade.math || {};
+    var breakeven = trade.breakevens || trade.breakeven || math.breakeven;
+    var shortStrike = trade.short_strike || trade.shortStrike
+      || (legs.filter(function(l){ return l.side==='short'||l.side==='sell'||l.side==='sell_to_open'; })[0]||{}).strike;
+    var longStrike = trade.long_strike || trade.longStrike
+      || (legs.filter(function(l){ return l.side==='long'||l.side==='buy'||l.side==='buy_to_open'; })[0]||{}).strike;
+    var underlyingPrice = trade.underlying_price || trade.underlyingPrice || trade.current_price;
+
+    function $(v) { return v != null ? '$' + Number(v).toFixed(0) : '?'; }
+
+    switch (strategy) {
+      case 'put_credit_spread':
+      case 'put_credit':
+        return 'Profits if ' + symbol + ' stays ABOVE ' + $(shortStrike) + ' at expiration. '
+          + 'Max profit if ' + symbol + ' closes above ' + $(shortStrike) + '. '
+          + 'Time decay works in your favor.';
+
+      case 'call_credit_spread':
+      case 'call_credit':
+        return 'Profits if ' + symbol + ' stays BELOW ' + $(shortStrike) + ' at expiration. '
+          + 'Max profit if ' + symbol + ' closes below ' + $(shortStrike) + '. '
+          + 'Time decay works in your favor.';
+
+      case 'iron_condor': {
+        var ps = legs.filter(function(l){ return (l.option_type||'').toLowerCase()==='put' && (l.side==='short'||l.side==='sell'||l.side==='sell_to_open'); })[0];
+        var cs = legs.filter(function(l){ return (l.option_type||'').toLowerCase()==='call' && (l.side==='short'||l.side==='sell'||l.side==='sell_to_open'); })[0];
+        var psStr = ps ? $(ps.strike) : '?';
+        var csStr = cs ? $(cs.strike) : '?';
+        return 'Profits if ' + symbol + ' stays between ' + psStr + ' and ' + csStr + ' at expiration. '
+          + 'A range-bound strategy \u2014 you want low volatility and time decay.';
+      }
+
+      case 'iron_butterfly': {
+        if (breakeven && Array.isArray(breakeven) && breakeven.length === 2) {
+          return 'Profits if ' + symbol + ' stays between ' + $(breakeven[0]) + ' and ' + $(breakeven[1]) + '. '
+            + 'Max profit if ' + symbol + ' closes exactly at ' + $(shortStrike) + '. '
+            + 'Profits shrink as price moves away from center.';
+        }
+        return 'Profits if ' + symbol + ' stays near ' + $(shortStrike) + '. Range-bound strategy with peaked payoff at center strike.';
+      }
+
+      case 'put_debit_spread':
+      case 'put_debit': {
+        var be = Array.isArray(breakeven) ? breakeven[0] : breakeven;
+        var parts = 'Profits if ' + symbol + ' drops' + (be != null ? ' below ' + $(be) + ' (breakeven)' : '') + '.';
+        if (underlyingPrice != null) parts += ' Currently at ' + $(underlyingPrice) + '.';
+        parts += ' Max profit if ' + symbol + ' closes below ' + $(longStrike) + '.';
+        return parts;
+      }
+
+      case 'call_debit_spread':
+      case 'call_debit': {
+        var be2 = Array.isArray(breakeven) ? breakeven[0] : breakeven;
+        var parts2 = 'Profits if ' + symbol + ' rises' + (be2 != null ? ' above ' + $(be2) + ' (breakeven)' : '') + '.';
+        if (underlyingPrice != null) parts2 += ' Currently at ' + $(underlyingPrice) + '.';
+        parts2 += ' Max profit if ' + symbol + ' closes above ' + $(longStrike) + '.';
+        return parts2;
+      }
+
+      case 'butterfly_debit': {
+        var centerLeg = legs.filter(function(l){ return l.side==='short'||l.side==='sell'||l.side==='sell_to_open'; })[0];
+        var center = centerLeg ? $(centerLeg.strike) : '?';
+        if (breakeven && Array.isArray(breakeven) && breakeven.length === 2) {
+          return 'Profits if ' + symbol + ' finishes between ' + $(breakeven[0]) + ' and ' + $(breakeven[1]) + '. '
+            + 'Max profit at exactly ' + center + '. '
+            + 'A precision bet on where ' + symbol + ' will land.';
+        }
+        return 'Profits if ' + symbol + ' finishes near ' + center + '. Precision strategy with peaked payoff.';
+      }
+
+      case 'calendar_call_spread':
+      case 'calendar_put_spread':
+        return 'Profits from time decay differential \u2014 near-term option decays faster than far-term. '
+          + 'Best if ' + symbol + ' stays near the strike price.';
+
+      case 'diagonal_call_spread':
+      case 'diagonal_put_spread':
+        return 'Combines directional bias with time decay advantage. '
+          + 'Near-term short option decays faster while far-term long retains value.';
+
+      case 'equity':
+      case 'equity_long':
+      case 'stock_pullback_swing':
+      case 'stock_mean_reversion':
+      case 'stock_momentum_breakout':
+      case 'stock_volatility_expansion':
+        return 'Profits if ' + symbol + ' price increases' + (underlyingPrice != null ? ' from current level of ' + $(underlyingPrice) : '') + '.';
+
+      default:
+        if (strategy) return 'Strategy: ' + strategy.replace(/_/g, ' ');
+        return '';
+    }
+  }
+  // Expose for TradeTicket and other modules
+  window.getTradeExplanation = getTradeExplanation;
+
+  /**
+   * Build the styled HTML block for the trade explanation.
+   * Returns empty string if no explanation is available.
+   */
+  function buildExplanationHtml(trade) {
+    var text = getTradeExplanation(trade);
+    if (!text) return '';
+    return '<div style="background:rgba(0,224,195,0.05);border:1px solid rgba(0,224,195,0.15);'
+      + 'border-radius:6px;padding:10px 12px;margin:8px 0;">'
+      + '<div style="color:#00e0c3;font-size:0.7rem;font-weight:600;text-transform:uppercase;'
+      + 'letter-spacing:0.03em;margin-bottom:4px;">HOW THIS TRADE PROFITS</div>'
+      + '<div style="color:rgba(224,224,224,0.8);font-size:0.82rem;line-height:1.5;">' + esc(text) + '</div>'
+      + '</div>';
   }
 
   /* -- DOM builders -------------------------------------------------- */
@@ -1407,6 +1534,7 @@
       + '</div></summary>'
       + '<div class="trade-body" style="flex:1 1 auto;">'
       + coreSection
+      + buildExplanationHtml(c)
       + legsSection
       + enrichment.body
       + '</div>'
@@ -1748,35 +1876,50 @@
       .then(function (data) {
         var elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         _activeRunning = false;
-        if (btn) { btn.textContent = 'Analyse Positions'; btn.disabled = false; }
-        console.log('[TMC] Active pipeline response (standalone):', {
+        if (btn) { btn.textContent = 'Analyze Positions'; btn.disabled = false; }
+        console.log('[TMC:DIAG] Active pipeline response (standalone):', {
           elapsed: elapsed + 's', ok: data.ok, keys: Object.keys(data),
           recCount: (data.recommendations || []).length,
         });
         if (data.ok === false) {
           showActiveError('Pipeline error: ' + ((data.error || {}).message || 'unknown'), data);
+          _lastManualActiveRenderAt = Date.now();
           return;
         }
         renderActiveResults(data);
+        _lastManualActiveRenderAt = Date.now();
       })
       .catch(function (err) {
         var elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         _activeRunning = false;
-        if (btn) { btn.textContent = 'Analyse Positions'; btn.disabled = false; }
-        console.error('[TMC] Active pipeline failed (standalone):', err, err.responseText || '');
+        if (btn) { btn.textContent = 'Analyze Positions'; btn.disabled = false; }
+        console.error('[TMC:DIAG] Active pipeline FAILED (standalone):', err, err.responseText || '');
         showActiveError('Request failed (' + elapsed + 's): ' + err.message, null);
+        _lastManualActiveRenderAt = Date.now();
       });
   }
 
-  function loadLatestActiveResults() {
-    console.log('[TMC] Loading latest active results…');
+  /**
+   * Load latest active results from the GET endpoint.
+   * @param {Object} [opts] - Options
+   * @param {boolean} [opts.force] - If true, bypass the manual render guard
+   */
+  function loadLatestActiveResults(opts) {
+    var force = opts && opts.force;
+    // Guard: don't overwrite a recent manual render (Full Refresh / Run Active button)
+    if (!force && _lastManualActiveRenderAt && (Date.now() - _lastManualActiveRenderAt < _MANUAL_RENDER_GUARD_MS)) {
+      console.log('[TMC:DIAG] loadLatestActiveResults SKIPPED — manual render guard active (' +
+        Math.round((Date.now() - _lastManualActiveRenderAt) / 1000) + 's ago)');
+      return;
+    }
+    console.log('[TMC:DIAG] loadLatestActiveResults — fetching GET /results', { force: !!force });
     fetch('/api/active-trade-pipeline/results')
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
       .then(function (data) {
-        console.log('[TMC] Latest active results:', { ok: data.ok, keys: Object.keys(data), recCount: (data.recommendations || []).length });
+        console.log('[TMC:DIAG] loadLatestActiveResults response:', { ok: data.ok, keys: Object.keys(data), recCount: (data.recommendations || []).length });
         if (data.ok === false) {
           // On initial page load this is expected — show non-alarming empty state
           var msg = (data.error || {}).message || 'No results available';
@@ -1786,13 +1929,14 @@
         renderActiveResults(data);
       })
       .catch(function (err) {
-        console.error('[TMC] Failed to load active results:', err);
+        console.error('[TMC:DIAG] loadLatestActiveResults FAILED:', err);
         showActiveEmpty('Failed to load results: ' + err.message);
       });
   }
 
   /** Show a non-error empty state (e.g. "no positions", "run the pipeline first"). */
   function showActiveEmpty(msg) {
+    console.log('[TMC:DIAG] showActiveEmpty called:', msg, new Error().stack.split('\n').slice(1, 3).join(' <- '));
     var grid = document.getElementById('tmcActiveTradeGrid');
     if (grid) {
       grid.innerHTML =
@@ -1810,6 +1954,7 @@
    * Used when the pipeline returns ok:false or an HTTP error.
    */
   function showActiveError(msg, responseData) {
+    console.error('[TMC:DIAG] showActiveError called:', msg, new Error().stack.split('\n').slice(1, 3).join(' <- '));
     var grid = document.getElementById('tmcActiveTradeGrid');
     if (grid) {
       var detailHtml = '';
@@ -1838,6 +1983,7 @@
    * Show an error state for the portfolio balance section.
    */
   function showBalanceError(msg, responseData) {
+    console.error('[TMC:DIAG] showBalanceError called:', msg, new Error().stack.split('\n').slice(1, 3).join(' <- '));
     var grid = document.getElementById('tmcPortfolioBalanceGrid');
     var section = document.getElementById('tmcPortfolioBalanceSection');
     if (section) section.style.display = '';
@@ -1869,10 +2015,17 @@
   var _activeExpandState  = {};
 
   function renderActiveResults(data) {
+    console.log('[TMC:DIAG] renderActiveResults called:', {
+      ok: data && data.ok, recCount: data && data.recommendations ? data.recommendations.length : 'N/A',
+      keys: data ? Object.keys(data) : [],
+    }, new Error().stack.split('\n').slice(1, 3).join(' <- '));
     var grid = document.getElementById('tmcActiveTradeGrid');
     var countEl = document.getElementById('tmcActiveCount');
 
-    if (!grid) return;
+    if (!grid) {
+      console.error('[TMC:DIAG] renderActiveResults ABORT — tmcActiveTradeGrid not found!');
+      return;
+    }
 
     // Guard: pipeline returned an error envelope
     if (data && data.ok === false) {
@@ -2134,17 +2287,45 @@
     }
 
     // ── POSITION SNAPSHOT section ──
+    // Entry price sign convention: positive = credit received, negative = debit paid
+    var entryVal = posSnap.avg_open_price;
+    var entryText = '--';
+    if (entryVal != null) {
+      var absEntry = Math.abs(Number(entryVal));
+      var entryTag = Number(entryVal) >= 0 ? ' (cr)' : ' (db)';
+      entryText = '$' + absEntry.toFixed(2) + entryTag;
+    }
+    // Current price follows same convention
+    var markVal = posSnap.mark_price;
+    var markText = '--';
+    if (markVal != null) {
+      var absMark = Math.abs(Number(markVal));
+      var markTag = Number(markVal) >= 0 ? ' (cr)' : ' (db)';
+      markText = '$' + absMark.toFixed(2) + markTag;
+    }
+    // Cost basis: show absolute value
+    var costVal = posSnap.cost_basis_total;
+    var costText = '--';
+    if (costVal != null) {
+      costText = '$' + Math.abs(Number(costVal)).toFixed(2);
+    }
+    // Market value: show absolute value
+    var mvVal = posSnap.market_value;
+    var mvText = '--';
+    if (mvVal != null) {
+      mvText = '$' + Math.abs(Number(mvVal)).toFixed(2);
+    }
     var snapItems = [
-      { label: 'Entry Price', value: posSnap.avg_open_price != null ? '$' + Number(posSnap.avg_open_price).toFixed(2) : '--' },
-      { label: 'Current Price', value: posSnap.mark_price != null ? '$' + Number(posSnap.mark_price).toFixed(2) : '--' },
+      { label: 'Entry Price', value: entryText },
+      { label: 'Current Price', value: markText },
       { label: 'Unrealized P&L', value: posSnap.unrealized_pnl != null ? '$' + Number(posSnap.unrealized_pnl).toFixed(2) : '--',
         cssClass: posSnap.unrealized_pnl != null ? (posSnap.unrealized_pnl >= 0 ? 'positive' : 'negative') : 'neutral' },
       { label: 'P&L %', value: posSnap.unrealized_pnl_pct != null ? (posSnap.unrealized_pnl_pct * 100).toFixed(1) + '%' : '--',
         cssClass: posSnap.unrealized_pnl_pct != null ? (posSnap.unrealized_pnl_pct >= 0 ? 'positive' : 'negative') : 'neutral' },
       { label: 'DTE', value: rec.dte != null ? rec.dte + 'd' : '--' },
       { label: 'Expiration', value: rec.expiration || posSnap.expiration || '--' },
-      { label: 'Cost Basis', value: posSnap.cost_basis_total != null ? '$' + Number(posSnap.cost_basis_total).toFixed(2) : '--' },
-      { label: 'Market Value', value: posSnap.market_value != null ? '$' + Number(posSnap.market_value).toFixed(2) : '--' },
+      { label: 'Cost Basis', value: costText },
+      { label: 'Market Value', value: mvText },
     ];
     var snapGrid = '<div class="metric-grid">' + snapItems.map(function (item) {
       return '<div class="metric"><div class="metric-label">' + esc(item.label) + '</div><div class="metric-value ' + (item.cssClass || 'neutral') + '">' + item.value + '</div></div>';
@@ -2156,8 +2337,8 @@
     if (legs.length > 0) {
       var legRows = '';
       legs.forEach(function (leg) {
-        var qty = leg.quantity || leg.qty || 0;
-        var side = qty < 0 ? 'SHORT' : 'LONG';
+        var legSide = (leg.side || '').toLowerCase();
+        var side = (legSide === 'sell' || legSide === 'short' || legSide === 'sell_to_open' || legSide === 'sell_to_close') ? 'SHORT' : 'LONG';
         var sideClass = side === 'SHORT' ? 'tmc-leg-short' : 'tmc-leg-long';
         var strike = leg.strike != null ? String(leg.strike) : '?';
         var optType = (leg.option_type || leg.type || '').toUpperCase();
@@ -2200,6 +2381,12 @@
       + snapGrid + legsHtml + greeksHtml
       + '</div>'
     );
+
+    // ── PROFITABILITY EXPLANATION section ──
+    var explanationBlock = buildExplanationHtml(rec);
+    if (explanationBlock) {
+      bodyParts.push(explanationBlock);
+    }
 
     // ── HEALTH ASSESSMENT section ──
     var healthScore = engineSummary.trade_health_score;
@@ -2560,110 +2747,146 @@
 
     var chainResults = {};
 
-    console.log('[TMC] Full Refresh started', { accountMode: accountMode, skipModel: skipModel });
+    console.log('[TMC:DIAG] ══════════════════════════════════════════════');
+    console.log('[TMC:DIAG] Full Refresh STARTED', { accountMode: accountMode, skipModel: skipModel, time: new Date().toISOString() });
 
     try {
-      // Stages 1-3: Run in PARALLEL (independent workflows)
+      // Stages 1-3: Run in PARALLEL, display results PROGRESSIVELY as each arrives.
+      // Previously Promise.allSettled blocked all display until the slowest (active trades)
+      // resolved - causing stock/options to appear stuck when active trades took 2+ min.
       _setRefreshStatus('Running Stock, Options & Active Trade analysis…', 1, 2);
 
-      var results = await Promise.allSettled([
-        // Stock scan
-        api.tmcRunStock()
-          .then(function (res) { chainResults.stockTrigger = res; return api.tmcGetLatestStock(); }),
-        // Options scan
-        api.tmcRunOptions()
-          .then(function (res) { chainResults.optionsTrigger = res; return api.tmcGetLatestOptions(); }),
-        // Active trades — handle HTTP errors explicitly
-        fetch('/api/active-trade-pipeline/run?account_mode=' +
-          encodeURIComponent(accountMode) + '&skip_model=' + (skipModel ? 'true' : 'false'),
-          { method: 'POST' }).then(function (r) {
-            if (!r.ok) {
-              return r.text().then(function (t) {
-                var err = new Error('HTTP ' + r.status);
-                err.responseText = t;
-                throw err;
-              });
-            }
-            return r.json();
-          }),
-      ]);
+      console.log('[TMC:DIAG] Dispatching 3 parallel promises (stock, options, active)…');
 
+      // -- Stock: trigger scan → fetch latest → display immediately --
+      var stockP = api.tmcRunStock()
+        .then(function (res) { chainResults.stockTrigger = res; return api.tmcGetLatestStock(); })
+        .then(function (val) {
+          chainResults.stockResults = val;
+          console.log('[TMC:DIAG] Stock ARRIVED — displaying now');
+          loadStockOpportunities();
+          return val;
+        })
+        .catch(function (err) {
+          console.warn('[TMC:DIAG] Stock scan REJECTED:', err);
+          return null;
+        });
+
+      // -- Options: trigger scan → fetch latest → display immediately --
+      var optionsP = api.tmcRunOptions()
+        .then(function (res) { chainResults.optionsTrigger = res; return api.tmcGetLatestOptions(); })
+        .then(function (val) {
+          chainResults.optionsResults = val;
+          console.log('[TMC:DIAG] Options ARRIVED — displaying now');
+          loadOptionsOpportunities();
+          return val;
+        })
+        .catch(function (err) {
+          console.warn('[TMC:DIAG] Options scan REJECTED:', err);
+          return null;
+        });
+
+      // -- Active trades: uses modelFetch (185s timeout matching backend model timeout) --
+      var activeP = api.runActiveTradesPipeline({
+          account_mode: accountMode,
+          skip_model: skipModel,
+        })
+        .then(function (data) {
+          chainResults.activeResults = data;
+          if (data && data.ok === false) {
+            var errMsg = (data.error || {}).message || 'Pipeline returned an error';
+            console.error('[TMC:DIAG] Active trade pipeline returned ok:false —', errMsg, data.error);
+            showActiveError(errMsg, data);
+          } else {
+            console.log('[TMC:DIAG] Active trade ARRIVED — displaying', (data.recommendations || []).length, 'recommendations');
+            try {
+              renderActiveResults(data);
+            } catch (renderErr) {
+              console.error('[TMC:DIAG] renderActiveResults THREW:', renderErr);
+              showActiveError('Render error: ' + renderErr.message, data);
+            }
+          }
+          _lastManualActiveRenderAt = Date.now();
+          return data;
+        })
+        .catch(function (err) {
+          if (err.name === 'AbortError') {
+            console.error('[TMC:DIAG] Active trade TIMED OUT (185s model timeout)');
+            showActiveError('Active trade analysis timed out — try "Analyze Positions" standalone', null);
+          } else {
+            console.error('[TMC:DIAG] Active trade promise REJECTED:', err);
+            showActiveError('Request failed: ' + (err.message || String(err)), null);
+          }
+          _lastManualActiveRenderAt = Date.now();
+          return null;
+        });
+
+      // Wait for all 3 to settle before proceeding to portfolio balance
+      var results = await Promise.allSettled([stockP, optionsP, activeP]);
       var stockResult   = results[0];
       var optionsResult = results[1];
       var activeResult  = results[2];
 
-      console.log('[TMC] Parallel stages complete:', {
+      console.log('[TMC:DIAG] Promise.allSettled resolved:', {
         elapsed: ((Date.now() - t0) / 1000).toFixed(1) + 's',
         stock: stockResult.status,
         options: optionsResult.status,
         active: activeResult.status,
-        activeOk: activeResult.status === 'fulfilled' ? activeResult.value.ok : 'N/A',
       });
 
-      // Display results from each settled promise
-      if (stockResult.status === 'fulfilled' && stockResult.value) {
-        chainResults.stockResults = stockResult.value;
-        loadStockOpportunities();
-      } else if (stockResult.status === 'rejected') {
-        console.warn('[TMC] Stock scan failed:', stockResult.reason);
-      }
-
-      if (optionsResult.status === 'fulfilled' && optionsResult.value) {
-        chainResults.optionsResults = optionsResult.value;
-        loadOptionsOpportunities();
-      } else if (optionsResult.status === 'rejected') {
-        console.warn('[TMC] Options scan failed:', optionsResult.reason);
-      }
-
-      // Active trades — check ok:false from pipeline error envelope
-      var activeOk = false;
-      if (activeResult.status === 'fulfilled' && activeResult.value) {
-        chainResults.activeResults = activeResult.value;
-        if (activeResult.value.ok === false) {
-          var errMsg = (activeResult.value.error || {}).message || 'Pipeline returned an error';
-          console.error('[TMC] Active trade pipeline error:', errMsg, activeResult.value.error);
-          showActiveError(errMsg, activeResult.value);
-        } else {
-          activeOk = true;
-          renderActiveResults(activeResult.value);
-        }
-      } else if (activeResult.status === 'rejected') {
-        var reason = activeResult.reason;
-        console.error('[TMC] Active trade analysis failed:', reason);
-        showActiveError('Request failed: ' + (reason.message || String(reason)), null);
-      }
+      // Results already displayed progressively above.
+      // Determine what we have for portfolio balance.
+      var activeOk = activeResult.status === 'fulfilled' && activeResult.value && activeResult.value.ok !== false;
 
       // Stage 4: Portfolio Balance (needs results from stages 1-3)
       _setRefreshStatus('Building portfolio balance…', 2, 2);
-      console.log('[TMC] Starting portfolio balance…', { activeOk: activeOk });
+      var balancePayload = {
+        account_mode: accountMode,
+        skip_model: true,
+        // Pass pre-computed results to avoid pipeline re-runs
+        active_trade_results: activeOk ? activeResult.value : { recommendations: [], ok: true, _provided: true },
+        stock_results: stockResult.status === 'fulfilled' && stockResult.value ? stockResult.value.data || null : null,
+        options_results: optionsResult.status === 'fulfilled' && optionsResult.value ? optionsResult.value.data || null : null,
+      };
+      console.log('[TMC:DIAG] Starting portfolio balance…', {
+        activeOk: activeOk,
+        hasStockResults: balancePayload.stock_results != null,
+        hasOptionsResults: balancePayload.options_results != null,
+        hasActiveResults: balancePayload.active_trade_results != null,
+      });
       try {
-        var balanceData = await api.tmcRunPortfolioBalance({
-          account_mode: accountMode,
-          skip_model: skipModel,
-          // Only pass active results if pipeline succeeded
-          active_trade_results: activeOk ? activeResult.value : null,
-          stock_results: stockResult.status === 'fulfilled' && stockResult.value ? stockResult.value.data || null : null,
-          options_results: optionsResult.status === 'fulfilled' && optionsResult.value ? optionsResult.value.data || null : null,
-        });
+        var balanceData = await api.tmcRunPortfolioBalance(balancePayload);
         chainResults.balanceResults = balanceData;
-        console.log('[TMC] Portfolio balance response:', {
-          ok: balanceData.ok, hasPlan: !!(balanceData && balanceData.rebalance_plan),
+        console.log('[TMC:DIAG] Portfolio balance response:', {
+          ok: balanceData.ok,
+          hasPlan: !!(balanceData && balanceData.rebalance_plan),
+          planKeys: balanceData && balanceData.rebalance_plan ? Object.keys(balanceData.rebalance_plan) : [],
           errors: balanceData.errors || [],
         });
-        displayPortfolioBalance(balanceData);
+        try {
+          displayPortfolioBalance(balanceData);
+          console.log('[TMC:DIAG] displayPortfolioBalance completed successfully');
+        } catch (displayErr) {
+          console.error('[TMC:DIAG] displayPortfolioBalance THREW:', displayErr);
+          showBalanceError('Render error: ' + displayErr.message, balanceData);
+        }
       } catch (balanceErr) {
-        console.error('[TMC] Portfolio balance failed:', balanceErr);
+        console.error('[TMC:DIAG] Portfolio balance request FAILED:', balanceErr);
         showBalanceError('Request failed: ' + (balanceErr.message || String(balanceErr)), balanceErr.payload || null);
       }
 
       var totalElapsed = ((Date.now() - t0) / 1000).toFixed(1);
       _setRefreshStatus('Complete (' + totalElapsed + 's)', null, null);
       setTimeout(function () { _setRefreshStatus(null); }, 4000);
-      console.log('[TMC] Full Refresh complete (' + totalElapsed + 's)', chainResults);
+      console.log('[TMC:DIAG] Full Refresh COMPLETE (' + totalElapsed + 's)');
+      console.log('[TMC:DIAG] ══════════════════════════════════════════════');
     } catch (err) {
-      console.error('[TMC] Full Refresh failed:', err);
+      console.error('[TMC:DIAG] Full Refresh OUTER CATCH — unexpected error:', err);
+      console.error('[TMC:DIAG] This means code between Promise.allSettled and portfolio balance threw!');
       _setRefreshStatus('Failed: ' + err.message, null, null);
       setTimeout(function () { _setRefreshStatus(null); }, 8000);
+      // Still try to show portfolio balance error so the section doesn't stay as default HTML
+      showBalanceError('Full Refresh failed before portfolio balance could run: ' + err.message, null);
     } finally {
       _setFullRefreshEnabled(false);
     }
@@ -2683,8 +2906,13 @@
     var t0 = Date.now();
     console.log('[TMC] Portfolio rebalance started (standalone)');
     try {
+      // When running standalone (not inside Full Refresh), we don't have
+      // chainResults.  Pass null — the backend fetches cached results or
+      // produces a basic rebalance plan from account data alone.
       var balanceData = await api.tmcRunPortfolioBalance({
         account_mode: _getAccountMode(),
+        skip_model: true,
+        active_trade_results: null,
       });
       var elapsed = ((Date.now() - t0) / 1000).toFixed(1);
       console.log('[TMC] Portfolio rebalance response (standalone):', {
@@ -2696,17 +2924,28 @@
     } catch (err) {
       var elapsed = ((Date.now() - t0) / 1000).toFixed(1);
       console.error('[TMC] Portfolio rebalance failed (standalone):', elapsed + 's', err);
-      showBalanceError('Request failed (' + elapsed + 's): ' + (err.message || String(err)), err.payload || null);
+      if (err.name === 'AbortError') {
+        showBalanceError('Portfolio balance timed out after ' + elapsed + 's — check server logs for PB_DEBUG', null);
+      } else {
+        showBalanceError('Request failed (' + elapsed + 's): ' + (err.message || String(err)), err.payload || null);
+      }
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = '▶ Run Rebalance'; }
     }
   }
 
   function displayPortfolioBalance(data) {
+    console.log('[TMC:DIAG] displayPortfolioBalance called:', {
+      ok: data && data.ok, hasPlan: !!(data && data.rebalance_plan),
+      errors: data && data.errors ? data.errors.length : 0,
+    });
     var section = document.getElementById('tmcPortfolioBalanceSection');
     var grid    = document.getElementById('tmcPortfolioBalanceGrid');
     var badge   = document.getElementById('tmcBalanceStatus');
-    if (!section || !grid) return;
+    if (!section || !grid) {
+      console.error('[TMC:DIAG] displayPortfolioBalance ABORT — missing DOM elements:', { section: !!section, grid: !!grid });
+      return;
+    }
     section.style.display = '';
 
     _lastBalanceResult = data;
@@ -3119,7 +3358,7 @@
       runActiveBtn.addEventListener('click', function () { runActivePipeline(); });
     }
     if (refreshActiveBtn) {
-      refreshActiveBtn.addEventListener('click', function () { loadLatestActiveResults(); });
+      refreshActiveBtn.addEventListener('click', function () { loadLatestActiveResults({ force: true }); });
     }
     if (runBalanceBtn) {
       runBalanceBtn.addEventListener('click', function () { runPortfolioRebalance(); });
@@ -3142,10 +3381,12 @@
           _orchLastCycle = status.last_cycle_completed;
           // Only refresh if not currently running a manual full refresh
           if (!_fullRefreshRunning) {
-            console.log('[TMC] Orchestrator cycle complete — refreshing displays');
+            console.log('[TMC:DIAG] Orchestrator cycle complete — refreshing displays (loadLatestActiveResults will check guard)');
             loadStockOpportunities();
             loadOptionsOpportunities();
-            loadLatestActiveResults();
+            loadLatestActiveResults();  // Guard will skip if within manual render window
+          } else {
+            console.log('[TMC:DIAG] Orchestrator cycle complete — SKIPPED refresh (Full Refresh running)');
           }
         }
       }).catch(function () {

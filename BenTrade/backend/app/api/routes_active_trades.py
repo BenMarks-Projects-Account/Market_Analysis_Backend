@@ -212,8 +212,17 @@ def _normalize_positions(raw_positions: list[dict[str, Any]], quote_map: dict[st
         )
         cost_basis_total = _to_float(row.get("cost_basis"))
         if avg_open_price is None and cost_basis_total is not None and quantity not in (None, 0):
-            # Derive per-share from total: avg_entry = cost_basis_total / qty
-            avg_open_price = round(cost_basis_total / abs(quantity), 4)
+            # Derive per-share from total: avg_entry = cost_basis_total / (qty × multiplier)
+            # For options, Tradier cost_basis includes the 100× contract multiplier,
+            # so divide by (qty × 100) to get the per-share price.
+            # Use abs() for both divisor AND result: avg_open_price must always be
+            # an unsigned per-share price.  Direction comes from the quantity sign.
+            # Tradier cost_basis is signed (negative=credit for shorts), so
+            # cost_basis / abs(qty * multiplier) can be negative — abs() fixes that.
+            divisor = abs(quantity)
+            if parsed_occ:  # option position — cost_basis includes 100× multiplier
+                divisor *= 100
+            avg_open_price = round(abs(cost_basis_total / divisor), 4)
 
         # --- Per-share mark/current price ---
         # Do NOT use market_value here — that is a total, not per-share.
@@ -495,6 +504,15 @@ def _build_active_trades(positions: list[dict[str, Any]], orders: list[dict[str,
                 if basis > 0:
                     unrealized_pct = unrealized / basis
 
+            # -- Multi-leg cost_basis_total and market_value --
+            # Formula: total dollars = per_share_net × quantity × 100
+            cost_basis_total = None
+            if avg_open_price is not None and quantity > 0:
+                cost_basis_total = round(avg_open_price * quantity * 100, 2)
+            market_value = None
+            if mark_price is not None and quantity > 0:
+                market_value = round(mark_price * quantity * 100, 2)
+
             # -- Determine strikes for trade_key --
             shorts = sorted(
                 [l for l in strat_legs if int(l.get("quantity") or 0) < 0],
@@ -568,6 +586,8 @@ def _build_active_trades(positions: list[dict[str, Any]], orders: list[dict[str,
                 "quantity": quantity,
                 "avg_open_price": avg_open_price,
                 "mark_price": mark_price,
+                "cost_basis_total": cost_basis_total,
+                "market_value": market_value,
                 "unrealized_pnl": unrealized,
                 "unrealized_pnl_pct": unrealized_pct,
                 "day_change": day_change,

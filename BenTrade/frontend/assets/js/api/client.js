@@ -426,6 +426,7 @@ window.BenTradeApi = (function(){
   }
 
   function tradingSubmit(payload){
+    console.log('[API:tradingSubmit] POST /api/trading/submit, keys:', Object.keys(payload || {}));
     return jsonFetch('/api/trading/submit', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -538,11 +539,15 @@ window.BenTradeApi = (function(){
     return jsonFetch('/api/tmc/workflows/options/summary');
   }
   function tmcRunPortfolioBalance(payload){
-    return modelFetch('/api/tmc/workflows/portfolio-balance/run', {
+    // Portfolio balance is deterministic computation — use 60s timeout, not 185s model timeout
+    var controller = new AbortController();
+    var timer = setTimeout(function() { controller.abort(); }, 60000);
+    return jsonFetch('/api/tmc/workflows/portfolio-balance/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload || {}),
-    });
+      signal: controller.signal,
+    }).finally(function() { clearTimeout(timer); });
   }
 
   /* ── Data Population ── */

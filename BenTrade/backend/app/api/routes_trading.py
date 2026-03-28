@@ -139,9 +139,24 @@ async def preview(payload: TradingPreviewRequest, request: Request) -> OrderPrev
 @router.post("/submit", response_model=OrderSubmitResponse)
 async def submit(payload: TradingSubmitRequest, request: Request) -> OrderSubmitResponse:
     trace_id = payload.trace_id or "unknown"
+    logger.info(
+        "event=submit_route_hit trace_id=%s ticket_id=%s mode=%s "
+        "idempotency_key=%s has_token=%s",
+        trace_id, payload.ticket_id, payload.mode,
+        payload.idempotency_key, bool(payload.confirmation_token),
+    )
     try:
-        return await request.app.state.trading_service.submit(payload)
-    except HTTPException:
+        result = await request.app.state.trading_service.submit(payload)
+        logger.info(
+            "event=submit_route_ok trace_id=%s status=%s broker_order_id=%s",
+            trace_id, result.status, result.broker_order_id,
+        )
+        return result
+    except HTTPException as exc:
+        logger.warning(
+            "event=submit_http_error trace_id=%s status=%s detail=%s",
+            trace_id, exc.status_code, exc.detail,
+        )
         raise
     except UpstreamError as exc:
         logger.exception(

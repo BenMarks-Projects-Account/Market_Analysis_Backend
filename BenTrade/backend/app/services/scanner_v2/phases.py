@@ -444,6 +444,49 @@ def phase_e_recomputed_math(
         if m.ev is not None and m.max_loss is not None and m.max_loss != 0:
             m.expected_ror = round(m.ev / abs(m.max_loss), 4)
 
+        # ── Managed EV (three-outcome model) ────────────────────
+        # Parallel computation — does NOT modify binary EV fields.
+        # Reads pop, max_profit, max_loss, net_credit/debit, width,
+        # dte, IV, underlying_price, strikes and computes managed
+        # EV fields (ev_managed, p_profit_target, p_stop_loss, etc.).
+        try:
+            from app.services.scanner_v2.managed_ev import (
+                compute_managed_ev,
+                get_iv_from_legs,
+                get_long_strike,
+                get_short_strike,
+                _classify_strategy,
+            )
+
+            strategy_class = _classify_strategy(cand.scanner_key)
+            managed_result = compute_managed_ev(
+                strategy_class=strategy_class,
+                pop=m.pop,
+                max_profit=m.max_profit,
+                max_loss=m.max_loss,
+                net_credit=m.net_credit,
+                net_debit=m.net_debit,
+                width=m.width,
+                dte=cand.dte,
+                iv=get_iv_from_legs(cand.legs, strategy_class),
+                underlying_price=cand.underlying_price,
+                short_strike=get_short_strike(cand.legs),
+                long_strike=get_long_strike(cand.legs),
+                scanner_key=cand.scanner_key,
+            )
+
+            # Merge managed EV fields into the math dataclass
+            for key, value in managed_result.items():
+                if hasattr(m, key):
+                    setattr(m, key, value)
+                else:
+                    m.notes[f"managed_{key}"] = str(value)
+        except Exception as exc:
+            _log.debug(
+                "event=managed_ev_error symbol=%s scanner_key=%s error=%s",
+                cand.symbol, cand.scanner_key, exc,
+            )
+
         builder.apply(cand.diagnostics)
 
     return candidates

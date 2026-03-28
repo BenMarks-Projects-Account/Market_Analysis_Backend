@@ -23,6 +23,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+import asyncio
+
 router = APIRouter(
     prefix="/api/active-trade-pipeline",
     tags=["active-trade-pipeline"],
@@ -102,23 +104,29 @@ async def run_pipeline(
         payload = await _build_active_payload(request, account_mode=account_mode)
     except Exception as exc:
         logger.error("[active_trade_pipeline] Failed to fetch active trades: %s", exc)
-        return {
+        error_result = {
             "ok": False,
+            "account_mode": account_mode,
             "error": {
                 "message": f"Failed to fetch active trades: {exc}",
                 "type": type(exc).__name__,
             },
         }
+        _store_result(error_result)
+        return error_result
 
     if not payload.get("ok"):
-        return {
+        error_result = {
             "ok": False,
+            "account_mode": account_mode,
             "error": payload.get("error") or {"message": "Failed to load positions"},
             "positions_payload": {
                 "account_mode": payload.get("account_mode"),
                 "source": payload.get("source"),
             },
         }
+        _store_result(error_result)
+        return error_result
 
     trades = payload.get("active_trades") or []
 
@@ -135,13 +143,16 @@ async def run_pipeline(
             missing.append("regime_service")
         if not base_data_service:
             missing.append("base_data_service")
-        return {
+        error_result = {
             "ok": False,
+            "account_mode": account_mode,
             "error": {
                 "message": f"Required services not available: {', '.join(missing)}",
                 "type": "ServiceUnavailable",
             },
         }
+        _store_result(error_result)
+        return error_result
 
     # ── 3. Run pipeline ─────────────────────────────────────────
     positions_metadata = {
@@ -151,26 +162,38 @@ async def run_pipeline(
     }
 
     try:
-        result = await run_active_trade_pipeline(
+        # Shield the pipeline from cancellation if the HTTP client disconnects
+        # (e.g. browser timeout). Matches stock/options workflow pattern.
+        task = asyncio.ensure_future(run_active_trade_pipeline(
             trades,
             monitor_service,
             regime_service,
             base_data_service,
             skip_model=skip_model,
             positions_metadata=positions_metadata,
-        )
+        ))
+        try:
+            result = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            logger.warning(
+                "Client disconnected during active trade pipeline — run continues in background"
+            )
+            raise
     except Exception as exc:
         logger.error(
             "[active_trade_pipeline] Pipeline execution failed: %s",
             exc, exc_info=True,
         )
-        return {
+        error_result = {
             "ok": False,
+            "account_mode": account_mode,
             "error": {
                 "message": f"Pipeline execution failed: {exc}",
                 "type": type(exc).__name__,
             },
         }
+        _store_result(error_result)
+        return error_result
 
     # ── 4. Store and return ─────────────────────────────────────
     result["ok"] = True

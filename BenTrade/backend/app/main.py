@@ -374,6 +374,7 @@ def create_app() -> FastAPI:
     )
     app.state.tmc_options_deps = build_tmc_options_deps(
         base_data_service=base_data_service,
+        finnhub_client=finnhub_client,
     )
 
     # -- Data Population service (MI scheduler) ----------------------------

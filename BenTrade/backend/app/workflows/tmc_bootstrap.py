@@ -12,6 +12,7 @@ Usage in app startup::
     )
     app.state.tmc_options_deps = build_tmc_options_deps(
         base_data_service=base_data_service,
+        finnhub_client=finnhub_client,
     )
 
 This module is the single place that constructs TMC workflow deps.
@@ -56,7 +57,7 @@ def build_tmc_stock_deps(*, stock_engine_service: Any, model_request_fn: Any = N
     return deps
 
 
-def build_tmc_options_deps(*, base_data_service: Any) -> Any:
+def build_tmc_options_deps(*, base_data_service: Any, finnhub_client: Any = None) -> Any:
     """Build the OptionsOpportunityDeps bundle for TMC options workflow execution.
 
     Parameters
@@ -64,6 +65,8 @@ def build_tmc_options_deps(*, base_data_service: Any) -> Any:
     base_data_service
         The ``BaseDataService`` instance that provides Tradier chain access.
         Used to construct the ``OptionsScannerService`` adapter.
+    finnhub_client
+        Optional ``FinnhubClient`` for per-symbol earnings awareness.
 
     Returns
     -------
@@ -74,7 +77,10 @@ def build_tmc_options_deps(*, base_data_service: Any) -> Any:
     from app.workflows.options_opportunity_runner import OptionsOpportunityDeps
 
     options_scanner_service = OptionsScannerService(base_data_service=base_data_service)
-    deps = OptionsOpportunityDeps(options_scanner_service=options_scanner_service)
+    deps = OptionsOpportunityDeps(
+        options_scanner_service=options_scanner_service,
+        finnhub_client=finnhub_client,
+    )
 
     # Log chain source class so operators can verify live vs mock/snapshot
     _chain_source_class = "unknown"

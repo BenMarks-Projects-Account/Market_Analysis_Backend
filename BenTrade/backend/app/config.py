@@ -99,6 +99,34 @@ class Settings(BaseModel):
     MAX_EXPIRATIONS_PER_SYMBOL: int = int(os.getenv("MAX_EXPIRATIONS_PER_SYMBOL", "6"))
     VALIDATION_MODE: bool = os.getenv("VALIDATION_MODE", "false").lower() == "true"
 
+    # ── Options scan universe ─────────────────────────────────────
+    # Comma-separated symbols. Override via OPTIONS_SCAN_SYMBOLS in .env.
+    OPTIONS_SCAN_SYMBOLS: str = _cfg(
+        "OPTIONS_SCAN_SYMBOLS",
+        default=(
+            # Index ETFs (baseline)
+            "SPY,QQQ,IWM,DIA,"
+            # Mega-cap Tech (highest options volume)
+            "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,AMD,"
+            # High-volume individual stocks
+            "NFLX,CRM,AVGO,ORCL,"
+            # Financials
+            "JPM,BAC,GS,"
+            # Healthcare
+            "UNH,JNJ,LLY,"
+            # Energy
+            "XOM,CVX,"
+            # Consumer / Industrials
+            "WMT,HD,CAT,BA,"
+            # Sector ETFs
+            "XLF,XLE,XLK"
+        ),
+    )
+
+    # ── Options model analysis limits ────────────────────────────
+    # How many top candidates to send to LLM for model analysis.
+    OPTIONS_MODEL_ANALYSIS_TOP_N: int = int(os.getenv("OPTIONS_MODEL_ANALYSIS_TOP_N", "20"))
+
     # -- Snapshot capture / replay ------------------------------------------
     SNAPSHOT_CAPTURE: bool = os.getenv("SNAPSHOT_CAPTURE", "0") == "1"
     SNAPSHOT_CAPTURE_SYMBOLS: str = os.getenv("SNAPSHOT_CAPTURE_SYMBOLS", "")

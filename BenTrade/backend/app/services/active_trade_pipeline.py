@@ -1190,6 +1190,9 @@ def normalize_recommendation(
         "symbol": packet.get("symbol"),
         "strategy": identity.get("strategy"),
         "strategy_id": identity.get("strategy_id"),
+        "short_strike": identity.get("short_strike"),
+        "long_strike": identity.get("long_strike"),
+        "legs": identity.get("legs") or [],
         "expiration": identity.get("expiration"),
         "dte": identity.get("dte"),
 
@@ -1579,6 +1582,17 @@ async def run_active_trade_pipeline(
     else:
         logger.debug("[active_trade_pipeline] No tradier_client — skipping Greeks refresh")
 
+    # ── Enrich trades with live pricing from chain data ──────────
+    # The greeks_map contains per-OCC mark_price/bid/ask from the live chain.
+    # Use this to compute net trade mark, P&L, and enrich leg dicts with
+    # bid/ask/delta before building reassessment packets.
+    if greeks_map:
+        enriched = _enrich_trades_from_chain_data(trades, greeks_map)
+        logger.info(
+            "[active_trade_pipeline] Trades enriched with chain pricing: %d/%d",
+            enriched, len(trades),
+        )
+
     # Build packets
     packets: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for trade in trades:
@@ -1921,6 +1935,119 @@ def _to_int(val: Any) -> int | None:
         return int(float(val))
     except (TypeError, ValueError):
         return None
+
+
+# =====================================================================
+#  Chain data enrichment — live pricing for option trades
+# =====================================================================
+
+def _enrich_trades_from_chain_data(
+    trades: list[dict[str, Any]],
+    greeks_map: dict[str, dict[str, Any]],
+) -> int:
+    """Enrich trade dicts in-place with live pricing from option chain data.
+
+    The greeks_map (from refresh_position_greeks) contains per-OCC-symbol
+    data including mark_price, bid, ask, delta, gamma, theta, vega, iv.
+
+    For each option trade:
+      1. Enriches leg dicts with bid, ask, delta from chain data.
+      2. Computes net trade mark_price from per-leg marks if missing.
+      3. Computes cost_basis_total, market_value, unrealized_pnl if missing.
+
+    Input/Output: trades list is mutated in-place.
+    Returns: count of trades enriched with at least one new field.
+    """
+    enriched_count = 0
+
+    for trade in trades:
+        legs = trade.get("legs") or []
+        if not legs:
+            continue
+
+        strategy = trade.get("strategy") or ""
+        is_equity = strategy == "equity"
+        if is_equity:
+            continue  # equity pricing uses stock quotes, not option chains
+
+        any_field_added = False
+
+        # ── Step 1: Enrich legs with chain data ──────────────────
+        all_legs_have_chain_mark = True
+        for leg in legs:
+            occ = leg.get("symbol") or ""
+            chain = greeks_map.get(occ)
+            if not chain:
+                all_legs_have_chain_mark = False
+                continue
+
+            # Add bid/ask/delta for frontend per-leg display
+            for field in ("bid", "ask", "delta", "gamma", "theta", "vega", "iv"):
+                if leg.get(field) is None and chain.get(field) is not None:
+                    leg[field] = chain[field]
+                    any_field_added = True
+
+            # Track per-leg chain mark for net trade computation
+            leg["_chain_mark"] = chain.get("mark_price")
+            if leg["_chain_mark"] is None:
+                all_legs_have_chain_mark = False
+
+        # ── Step 2: Compute net trade mark_price from chain ──────
+        # Uses same sign convention as _build_active_trades:
+        #   "sell" (short) legs contribute positively (received premium)
+        #   "buy"  (long)  legs contribute negatively (paid premium)
+        if trade.get("mark_price") is None and all_legs_have_chain_mark and legs:
+            net_mark = 0.0
+            for leg in legs:
+                chain_mark = leg.get("_chain_mark") or 0
+                side = leg.get("side", "buy")
+                if side == "sell":
+                    net_mark += chain_mark
+                else:
+                    net_mark -= chain_mark
+            trade["mark_price"] = round(net_mark, 4)
+            any_field_added = True
+
+        # ── Step 3: Derive missing aggregate fields ──────────────
+        quantity = _to_float(trade.get("quantity")) or 0
+        mark_price = _to_float(trade.get("mark_price"))
+        avg_open = _to_float(trade.get("avg_open_price"))
+        multiplier = 100  # standard option contract multiplier
+
+        # cost_basis_total: avg_open × qty × 100  (sign preserved)
+        if trade.get("cost_basis_total") is None and avg_open is not None and quantity > 0:
+            trade["cost_basis_total"] = round(avg_open * quantity * multiplier, 2)
+            any_field_added = True
+
+        # market_value: mark × qty × 100  (sign preserved)
+        if trade.get("market_value") is None and mark_price is not None and quantity > 0:
+            trade["market_value"] = round(mark_price * quantity * multiplier, 2)
+            any_field_added = True
+
+        # unrealized_pnl: matches _build_active_trades formula
+        # Formula: (avg_open_price − mark_price) × quantity × 100
+        if trade.get("unrealized_pnl") is None and mark_price is not None and avg_open is not None and quantity > 0:
+            trade["unrealized_pnl"] = round(
+                (avg_open - mark_price) * quantity * multiplier, 2,
+            )
+            any_field_added = True
+
+        # unrealized_pnl_pct: P&L / |cost_basis_total|
+        unrealized = _to_float(trade.get("unrealized_pnl"))
+        cost_basis = _to_float(trade.get("cost_basis_total"))
+        if trade.get("unrealized_pnl_pct") is None and unrealized is not None:
+            if cost_basis is not None and abs(cost_basis) > 0:
+                trade["unrealized_pnl_pct"] = unrealized / abs(cost_basis)
+                any_field_added = True
+
+        # ── Cleanup temporary fields ─────────────────────────────
+        for leg in legs:
+            leg.pop("_chain_mark", None)
+
+        if any_field_added:
+            enriched_count += 1
+
+    return enriched_count
 
 
 # =====================================================================

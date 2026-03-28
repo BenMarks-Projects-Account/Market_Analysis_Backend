@@ -174,6 +174,17 @@ def validate_trade_for_execution(trade: dict[str, Any]) -> dict[str, Any]:
         has_cashflow = (nc_cm is not None and nc_cm > 0) or \
                        (nd_cm is not None and nd_cm > 0)
     if not has_cashflow:
+        # OrderTicket shape: derive from limit_price + price_effect
+        # price_effect is "CREDIT" or "DEBIT"; limit_price is the per-spread premium
+        limit_price = _to_float(trade.get("limit_price"))
+        price_effect = str(trade.get("price_effect") or "").upper()
+        if limit_price is not None and limit_price > 0 and price_effect in ("CREDIT", "DEBIT"):
+            has_cashflow = True
+            if price_effect == "CREDIT":
+                net_credit = limit_price
+            else:
+                net_debit = limit_price
+    if not has_cashflow:
         blocking_errors.append("net_credit/net_debit not present or not positive")
 
     # Max loss
@@ -181,6 +192,13 @@ def validate_trade_for_execution(trade: dict[str, Any]) -> dict[str, Any]:
                _to_float(trade.get("max_loss_per_share")) or \
                _to_float((trade.get("computed") or {}).get("max_loss")) or \
                _to_float((trade.get("computed_metrics") or {}).get("max_loss"))
+    if max_loss is None or max_loss <= 0:
+        # OrderTicket shape: derive from estimated_max_loss.total or .per_spread
+        eml = trade.get("estimated_max_loss")
+        if isinstance(eml, dict):
+            max_loss = _to_float(eml.get("total")) or _to_float(eml.get("per_spread"))
+        elif hasattr(eml, "total"):
+            max_loss = _to_float(getattr(eml, "total", None)) or _to_float(getattr(eml, "per_spread", None))
     if max_loss is None or max_loss <= 0:
         blocking_errors.append(f"max_loss must be > 0 (got {max_loss!r})")
 

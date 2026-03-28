@@ -42,10 +42,17 @@ async def run_portfolio_balance_workflow(
     stages: dict[str, Any] = {}
     errors: list[str] = []
 
-    _log.info("event=pb_start run_id=%s account_mode=%s", run_id, account_mode)
+    _log.info(
+        "PB_DEBUG: === STARTING PORTFOLIO BALANCE === run_id=%s account_mode=%s "
+        "skip_model=%s has_stock=%s has_options=%s has_active=%s",
+        run_id, account_mode, skip_model,
+        stock_results is not None, options_results is not None,
+        active_trade_results is not None,
+    )
 
     # ─── STEP 1: Fetch account state ───
     stage_start = time.time()
+    _log.info("PB_DEBUG: Stage 1 — fetching account balance...")
     account_balance: dict = {}
     try:
         from app.trading.tradier_credentials import get_tradier_context
@@ -68,12 +75,14 @@ async def run_portfolio_balance_workflow(
             "duration_ms": _elapsed_ms(stage_start),
         }
     except Exception as exc:
-        _log.error("event=pb_account_failed error=%s", exc)
+        _log.error("PB_DEBUG: Stage 1 FAILED: %s", exc)
         errors.append(f"Account state fetch failed: {exc}")
         stages["account_state"] = {"status": "error", "error": str(exc)}
+    _log.info("PB_DEBUG: Stage 1 complete: %.1fs", time.time() - stage_start)
 
     # ─── STEP 2: Get regime label ───
     stage_start = time.time()
+    _log.info("PB_DEBUG: Stage 2 — fetching regime label...")
     regime_label: str | None = None
     try:
         regime_service = _resolve_regime_service(request)
@@ -89,9 +98,11 @@ async def run_portfolio_balance_workflow(
         "regime_label": regime_label,
         "duration_ms": _elapsed_ms(stage_start),
     }
+    _log.info("PB_DEBUG: Stage 2 complete: %.1fs regime=%s", time.time() - stage_start, regime_label)
 
     # ─── STEP 3: Build dynamic risk policy ───
     stage_start = time.time()
+    _log.info("PB_DEBUG: Stage 3 — building risk policy...")
     try:
         from app.services.risk_policy_service import build_dynamic_policy
         risk_policy = build_dynamic_policy(account_balance, regime_label)
@@ -104,11 +115,21 @@ async def run_portfolio_balance_workflow(
         "dynamic": risk_policy.get("dynamic", False),
         "duration_ms": _elapsed_ms(stage_start),
     }
+    _log.info("PB_DEBUG: Stage 3 complete: %.1fs", time.time() - stage_start)
 
-    # ─── STEP 4: Run active trade pipeline (if not provided) ───
+    # ─── STEP 4: Use active trade results (must be pre-computed) ───
+    # Portfolio balance is a deterministic computation on existing data.
+    # It should NEVER run the active trade pipeline — callers must pass
+    # pre-computed results or accept empty defaults.
     stage_start = time.time()
     if active_trade_results is None:
-        active_trade_results = await _run_active_trades(request, account_mode, skip_model)
+        _log.info("PB_DEBUG: Stage 4 — no active trade results provided, using empty defaults")
+        active_trade_results = {"recommendations": [], "ok": True, "_provided": False}
+    else:
+        _log.info(
+            "PB_DEBUG: Stage 4 — using provided active trade results (recs=%d)",
+            len(active_trade_results.get("recommendations", [])),
+        )
     # Defensive: ensure active_trade_results is always a dict
     if not isinstance(active_trade_results, dict):
         active_trade_results = {"recommendations": []}
@@ -117,12 +138,18 @@ async def run_portfolio_balance_workflow(
             f"Active trade analysis failed: {(active_trade_results.get('error') or {}).get('message', 'unknown')}"
         )
     stages["active_trades"] = {
-        "status": "provided" if active_trade_results.get("_provided") else "completed",
+        "status": "provided" if active_trade_results.get("_provided", True) else "empty",
         "count": len(active_trade_results.get("recommendations", [])),
         "duration_ms": _elapsed_ms(stage_start),
     }
+    _log.info(
+        "PB_DEBUG: Stage 4 complete: %.1fs recs=%d",
+        time.time() - stage_start,
+        len(active_trade_results.get("recommendations", [])),
+    )
 
     # ─── STEP 5: Get stock + options candidates (if not provided) ───
+    _log.info("PB_DEBUG: Stage 5 — extracting stock + options candidates...")
     stock_candidates: list = []
     options_candidates: list = []
 
@@ -159,17 +186,24 @@ async def run_portfolio_balance_workflow(
         "count": len(options_candidates),
         "duration_ms": _elapsed_ms(stage_start),
     }
+    _log.info(
+        "PB_DEBUG: Stage 5 complete: stocks=%d options=%d",
+        len(stock_candidates), len(options_candidates),
+    )
 
     # ─── STEP 6: Get current portfolio state ───
     stage_start = time.time()
+    _log.info("PB_DEBUG: Stage 6 — building portfolio state...")
     portfolio_greeks, concentration = _build_portfolio_state(active_trade_results, account_balance)
     stages["portfolio_state"] = {
         "status": "completed",
         "duration_ms": _elapsed_ms(stage_start),
     }
+    _log.info("PB_DEBUG: Stage 6 complete: %.1fs", time.time() - stage_start)
 
     # ─── STEP 7: Run portfolio balancer ───
     stage_start = time.time()
+    _log.info("PB_DEBUG: Stage 7 — running build_rebalance_plan...")
     rebalance_plan: dict | None = None
     _log.info(
         "PORTFOLIO_DEBUG build_rebalance_plan inputs: "
@@ -217,8 +251,15 @@ async def run_portfolio_balance_workflow(
         "status": "completed" if rebalance_plan else "error",
         "duration_ms": _elapsed_ms(stage_start),
     }
+    _log.info("PB_DEBUG: Stage 7 complete: %.1fs", time.time() - stage_start)
 
     duration_ms = _elapsed_ms(started)
+    _log.info(
+        "PB_DEBUG: === COMPLETE === run_id=%s duration=%.1fs stages=%s errors=%s",
+        run_id, duration_ms / 1000,
+        {k: v.get("duration_ms") for k, v in stages.items()},
+        errors or "none",
+    )
 
     # Final defensive guard — account_balance must be a dict for safe .get()
     if not isinstance(account_balance, dict):
@@ -268,64 +309,6 @@ def _resolve_regime_service(request: Any):
     if request and hasattr(request, "app"):
         return getattr(request.app.state, "regime_service", None)
     return None
-
-
-async def _run_active_trades(
-    request: Any,
-    account_mode: str,
-    skip_model: bool,
-) -> dict[str, Any]:
-    """Run active trade pipeline by delegating to the existing route logic."""
-    if not request or not hasattr(request, "app"):
-        _log.warning("event=pb_active_trades_skipped reason=no_request_context")
-        return {"recommendations": [], "ok": True}
-
-    try:
-        from app.api.routes_active_trades import _build_active_payload
-        from app.services.active_trade_pipeline import run_active_trade_pipeline
-
-        payload = await _build_active_payload(request, account_mode=account_mode)
-        if not payload.get("ok"):
-            return {
-                "recommendations": [],
-                "ok": False,
-                "error": payload.get("error", {"message": "Failed to load positions"}),
-            }
-
-        trades = payload.get("active_trades") or []
-        if not trades:
-            return {"recommendations": [], "ok": True}
-
-        monitor_service = getattr(request.app.state, "active_trade_monitor_service", None)
-        regime_service = getattr(request.app.state, "regime_service", None)
-        base_data_service = getattr(request.app.state, "base_data_service", None)
-
-        if not monitor_service or not regime_service or not base_data_service:
-            return {
-                "recommendations": [],
-                "ok": False,
-                "error": {"message": "Required services not available", "type": "ServiceUnavailable"},
-            }
-
-        result = await run_active_trade_pipeline(
-            trades,
-            monitor_service,
-            regime_service,
-            base_data_service,
-            skip_model=skip_model,
-            positions_metadata={
-                "source": "portfolio_balance_workflow",
-                "account_mode": account_mode,
-            },
-        )
-        return result
-    except Exception as exc:
-        _log.error("event=pb_active_trade_pipeline_error error=%s", exc, exc_info=True)
-        return {
-            "recommendations": [],
-            "ok": False,
-            "error": {"message": str(exc), "type": type(exc).__name__},
-        }
 
 
 def _build_portfolio_state(

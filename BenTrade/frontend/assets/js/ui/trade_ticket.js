@@ -116,6 +116,7 @@ window.BenTradeTradeTicket = (function () {
       _renderHeader(t) +
       '<div class="tt-body">' +
         _renderOrderSummary(t) +
+        _renderExplanation(t) +
         _renderLegs(t) +
         _renderRiskReward(t) +
         _renderPricing(t) +
@@ -171,6 +172,17 @@ window.BenTradeTradeTicket = (function () {
         _row('Expiration', _dash(t.expiration) + (t.dte != null ? ' (' + t.dte + ' DTE)' : '')) +
       '</div>' +
     '</div>';
+  }
+
+  /* ── Render: trade explanation ──────────────────────────────── */
+
+  function _renderExplanation(t) {
+    if (typeof window.getTradeExplanation !== 'function') return '';
+    var text = window.getTradeExplanation(t);
+    if (!text) return '';
+    return '<div style="background:rgba(0,224,195,0.05);border-left:3px solid #00e0c3;' +
+      'padding:8px 12px;margin:8px 0;font-size:0.82rem;color:rgba(224,224,224,0.8);line-height:1.5;">' +
+      text + '</div>';
   }
 
   /* ── Render: legs table ────────────────────────────────────── */
@@ -795,9 +807,10 @@ window.BenTradeTradeTicket = (function () {
   /* ── Submit flow ───────────────────────────────────────────── */
 
   async function _doSubmit() {
-    if (_loading) return;
+    console.log('[TradeTicket:Submit] === STARTING SUBMIT ===');
+    if (_loading) { console.log('[TradeTicket:Submit] Aborted — already loading'); return; }
     if (!_preview) {
-      console.error('[TradeTicket] _doSubmit called but _preview is null — cannot submit without a valid preview.');
+      console.error('[TradeTicket:Submit] _preview is null — cannot submit without a valid preview.');
       _showToast('No preview available — please preview the order first.', 'error');
       _step = 'review';
       _render();
@@ -806,6 +819,7 @@ window.BenTradeTradeTicket = (function () {
     _step = 'submitting';
     _loading = true;
     _submitResp = null;
+    _lastError = null;
     _render();
 
     try {
@@ -824,13 +838,14 @@ window.BenTradeTradeTicket = (function () {
         trace_id:           _traceId,
       };
 
-      console.info('[TradeTicket] Submit payload:', {
-        ticket_id: payload.ticket_id,
-        mode: payload.mode,
-        trace_id: payload.trace_id,
-      });
+      console.log('[TradeTicket:Submit] Payload:', JSON.stringify(payload, null, 2));
+      console.log('[TradeTicket:Submit] ticket_id:', payload.ticket_id);
+      console.log('[TradeTicket:Submit] confirmation_token:', payload.confirmation_token ? (payload.confirmation_token.substring(0, 30) + '…') : 'NULL');
+      console.log('[TradeTicket:Submit] idempotency_key:', payload.idempotency_key);
+      console.log('[TradeTicket:Submit] mode:', payload.mode);
 
       var resp = await api.tradingSubmit(payload);
+      console.log('[TradeTicket:Submit] Response received:', JSON.stringify(resp, null, 2));
       _submitResp = resp;
       var modeUsed = resp.account_mode_used ? resp.account_mode_used.toUpperCase() : _mode.toUpperCase();
 
@@ -840,6 +855,12 @@ window.BenTradeTradeTicket = (function () {
       var isDryRun = resp.dry_run === true || resp.status === 'DRY_RUN' || oid.indexOf('dryrun-') === 0;
       var isPaperSim = oid.indexOf('paper-') === 0;
       var isTradierReal = !isDryRun && !isPaperSim;
+
+      console.log('[TradeTicket:Submit] Classification:', {
+        broker_order_id: oid, status: resp.status,
+        isDryRun: isDryRun, isPaperSim: isPaperSim, isTradierReal: isTradierReal,
+        modeUsed: modeUsed,
+      });
 
       if (isDryRun) {
         // Dry-run: payload was logged, no broker order placed
@@ -865,9 +886,23 @@ window.BenTradeTradeTicket = (function () {
         return;
       }
     } catch (err) {
+      console.error('[TradeTicket:Submit] FAILED:', err);
+      console.error('[TradeTicket:Submit] Error message:', err.message);
+      console.error('[TradeTicket:Submit] Error status:', err.status);
+      console.error('[TradeTicket:Submit] Error detail:', err.detail);
+      console.error('[TradeTicket:Submit] Error endpoint:', err.endpoint);
+      console.error('[TradeTicket:Submit] Error bodySnippet:', err.bodySnippet);
+      console.error('[TradeTicket:Submit] Error payload:', err.payload);
       _step = 'error';
-      _showToast('Submit failed: ' + (err.message || 'Unknown error'), 'error');
-      console.error('[TradeTicket] Submit error:', err);
+      _lastError = {
+        message: err.message || 'Unknown error',
+        status: err.status || null,
+        detail: err.detail || null,
+        endpoint: err.endpoint || 'POST /api/trading/submit',
+        bodySnippet: err.bodySnippet || '',
+        payload: err.payload || null,
+      };
+      _showToast('Submit failed: ' + _lastError.message, 'error');
     } finally {
       _loading = false;
       _render();

@@ -55,7 +55,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.services.ranking import compute_rank_score
+from app.services.ranking import compute_rank_score, rank_candidates
 from app.workflows.architecture import FreshnessPolicy
 from app.workflows.artifact_strategy import (
     ManifestStageEntry,
@@ -108,8 +108,24 @@ STAGE_KEYS: tuple[str, ...] = (
 # After model analysis + filter, final output is MODEL_ANALYSIS_TOP_N_OUTPUT (10).
 DEFAULT_TOP_N: int = 30
 
-# Default symbol universe — index ETFs per BenTrade philosophy.
-DEFAULT_SYMBOLS: tuple[str, ...] = ("SPY", "QQQ", "IWM", "DIA")
+
+def _default_symbols() -> tuple[str, ...]:
+    """Resolve the default options scan universe from settings.
+
+    Uses ``Settings.OPTIONS_SCAN_SYMBOLS`` (comma-separated in .env).
+    Falls back to the 4 index ETFs if the setting is missing/empty.
+    """
+    try:
+        from app.config import get_settings
+        raw = get_settings().OPTIONS_SCAN_SYMBOLS
+        if raw:
+            return tuple(s.strip().upper() for s in raw.split(",") if s.strip())
+    except Exception:
+        pass
+    return ("SPY", "QQQ", "IWM", "DIA")
+
+
+DEFAULT_SYMBOLS: tuple[str, ...] = _default_symbols()
 
 # All V2 scanner keys across all implemented families.
 ALL_V2_SCANNER_KEYS: tuple[str, ...] = (
@@ -129,6 +145,78 @@ ALL_V2_SCANNER_KEYS: tuple[str, ...] = (
     "diagonal_call_spread",
     "diagonal_put_spread",
 )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# EARNINGS PROXIMITY HELPER
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def _fetch_earnings_for_symbols(
+    finnhub_client: Any,
+    symbols: list[str] | tuple[str, ...],
+    max_dte: int = 60,
+) -> list[dict[str, Any]]:
+    """Fetch upcoming earnings dates for the scanned symbols.
+
+    Returns a list of company-event dicts suitable for passing to
+    ``build_event_context(company_events=...)``.
+
+    Inputs:
+        finnhub_client – FinnhubClient instance (must have get_earnings_calendar).
+        symbols – list of ticker symbols to check.
+        max_dte – look-forward window in calendar days.
+
+    Output: list of dicts with keys:
+        event_name, event_type, event_time, related_symbols, importance.
+    """
+    import asyncio
+    from datetime import date, timedelta
+
+    if finnhub_client is None:
+        return []
+
+    today = date.today()
+    from_str = today.isoformat()
+    to_str = (today + timedelta(days=max_dte)).isoformat()
+
+    company_events: list[dict[str, Any]] = []
+
+    async def _fetch_one(sym: str) -> list[dict[str, Any]]:
+        try:
+            entries = await finnhub_client.get_earnings_calendar(sym, from_str, to_str)
+            results: list[dict[str, Any]] = []
+            for entry in entries:
+                earn_date = entry.get("date")
+                if not earn_date:
+                    continue
+                results.append({
+                    "event_name": f"{sym} Earnings",
+                    "event_type": "earnings",
+                    "event_time": earn_date,
+                    "related_symbols": [sym],
+                    "importance": "high",
+                })
+            return results
+        except Exception as exc:
+            logger.debug("earnings_fetch_failed symbol=%s error=%s", sym, exc)
+            return []
+
+    # Fetch concurrently with bounded concurrency to respect rate limits.
+    sem = asyncio.Semaphore(5)
+
+    async def _bounded(sym: str) -> list[dict[str, Any]]:
+        async with sem:
+            return await _fetch_one(sym)
+
+    tasks = [_bounded(s) for s in symbols]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for r in results:
+        if isinstance(r, list):
+            company_events.extend(r)
+
+    return company_events
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -193,6 +281,10 @@ class OptionsOpportunityDeps:
     """
 
     options_scanner_service: Any
+    # Optional: FinnhubClient for per-symbol earnings awareness.
+    # When provided, enables earnings proximity detection for individual
+    # stocks in the expanded universe.  Gracefully degrades if None.
+    finnhub_client: Any = None
 
 
 @dataclass
@@ -641,6 +733,27 @@ async def run_options_opportunity(
             result.completed_at = _now_iso()
             return result
 
+        # ── Pre-enrichment: fetch per-symbol earnings ────────────────
+        # Individual stocks (unlike index ETFs) have earnings events
+        # that dramatically affect options pricing.  Fetch earnings
+        # dates for the scanned symbols so event_risk classification
+        # can flag candidates with expiration through earnings.
+        try:
+            company_events = await _fetch_earnings_for_symbols(
+                deps.finnhub_client,
+                config.symbols,
+                max_dte=90,
+            )
+            stage_data["company_events"] = company_events
+            if company_events:
+                logger.info(
+                    "[options_opportunity] Fetched %d earnings events for %d symbols",
+                    len(company_events), len(config.symbols),
+                )
+        except Exception as exc:
+            logger.warning("[options_opportunity] earnings_fetch_failed: %s", exc)
+            stage_data["company_events"] = None
+
         # ── Stage 4: enrich_evaluate ─────────────────────────────────
         dbg.stage_start("enrich_evaluate", {
             "input_count": len(stage_data.get("validated_candidates", [])),
@@ -763,6 +876,14 @@ async def run_options_opportunity(
         "enriched_candidates": len(stage_data.get("enriched_candidates", [])),
     })
     dbg.close(status=result.status, warnings=warnings)
+
+    # ── Ranking audit diagnostic ─────────────────────────────────
+    # Write a comprehensive audit file for ranking validation after
+    # every run, regardless of success/failure.
+    consumer_summary = stage_data.get("consumer_summary") or {}
+    regime_label = consumer_summary.get("market_state", "NEUTRAL")
+    ranked_for_audit = stage_data.get("enriched_candidates", [])
+    _write_ranking_audit(ranked_for_audit, regime_label, run_id, config.data_dir)
 
     return result
 
@@ -1080,9 +1201,12 @@ def _stage_enrich_evaluate(
         # Load event calendar context once for the run, then classify
         # each candidate based on its expiration window.
         try:
-            event_context = build_event_context()
+            company_events = stage_data.get("company_events")
+            event_context = build_event_context(
+                company_events=company_events if company_events else None,
+            )
         except Exception as exc:
-            _log.warning("event=event_calendar_unavailable error=%s", exc)
+            logger.warning("event=event_calendar_unavailable error=%s", exc)
             event_context = None
 
         for cand in enriched:
@@ -1090,6 +1214,7 @@ def _stage_enrich_evaluate(
                 er = classify_candidate_event_risk(
                     event_context,
                     window_end=cand.get("expiration"),
+                    symbol=cand.get("symbol"),
                 )
                 cand["event_risk"] = er["event_risk"]
                 cand["event_details"] = er["event_details"]
@@ -1192,121 +1317,28 @@ def _stage_enrich_evaluate(
         # Preserve full credible count for downstream quality reporting.
         stage_data["credible_count"] = len(credible)
 
-        # ── Strategy-diverse ranking ─────────────────────────────
-        # Without per-key budgets, raw EV ranking lets deep-ITM debit
-        # spreads (EV in thousands) crowd out credit spreads (EV in
-        # tens) despite credit spreads being BenTrade's core income
-        # strategy.  We allocate slots per scanner_key so every active
-        # strategy type gets representation in the top-N.
-        #
-        # Calendar/diagonal candidates have EV=None, so they use a
-        # separate capital-efficiency ranking.
-        _CALENDAR_SLOTS = min(5, config.top_n // 6)  # ~17% of slots, 5 for top_n=30
-        _EV_TOTAL_SLOTS = config.top_n - _CALENDAR_SLOTS
-
-        # Partition into EV-trackable vs calendar buckets.
-        ev_by_key: dict[str, list[dict[str, Any]]] = {}
-        calendar_candidates: list[dict[str, Any]] = []
-
-        for c in credible:
-            math = c.get("math") or {}
-            family = c.get("family_key", "")
-            key = c.get("scanner_key", "unknown")
-
-            if math.get("ev") is not None:
-                ev_by_key.setdefault(key, []).append(c)
-            elif family == "calendars":
-                calendar_candidates.append(c)
-            else:
-                ev_by_key.setdefault(key, []).append(c)
-
-        # Sort each scanner_key bucket by composite rank score.
-        for bucket in ev_by_key.values():
-            for c in bucket:
-                c["rank_score"] = round(_compute_candidate_rank(c), 4)
-            bucket.sort(
-                key=lambda c: (-c.get("rank_score", 0), c.get("symbol", "")),
-            )
-
-        # Allocate EV slots: floor(total / num_keys) per key, minimum 2.
-        # Remainder goes to keys with the most credible candidates.
-        active_keys = [k for k in ev_by_key if ev_by_key[k]]
-        num_keys = len(active_keys)
-
-        if num_keys > 0:
-            base_per_key = max(_EV_TOTAL_SLOTS // num_keys, 2)
-            # Cap per-key so we don't exceed total when few keys exist
-            if base_per_key * num_keys > _EV_TOTAL_SLOTS:
-                base_per_key = _EV_TOTAL_SLOTS // num_keys
-
-            key_quotas = {k: base_per_key for k in active_keys}
-            remainder = _EV_TOTAL_SLOTS - sum(key_quotas.values())
-
-            # Distribute remainder to keys with most candidates
-            keys_by_depth = sorted(
-                active_keys, key=lambda k: len(ev_by_key[k]), reverse=True,
-            )
-            for k in keys_by_depth:
-                if remainder <= 0:
-                    break
-                key_quotas[k] += 1
-                remainder -= 1
-        else:
-            key_quotas = {}
-
-        # Select top candidates per key within quota.
-        ev_selected: list[dict[str, Any]] = []
-        overflow: list[dict[str, Any]] = []
-        for key in active_keys:
-            quota = key_quotas.get(key, 0)
-            bucket = ev_by_key[key]
-            ev_selected.extend(bucket[:quota])
-            overflow.extend(bucket[quota:])
-
-        # Fill any remaining slots from overflow (best cross-key rank).
-        remaining_slots = _EV_TOTAL_SLOTS - len(ev_selected)
-        if remaining_slots > 0:
-            overflow.sort(
-                key=lambda c: (-c.get("rank_score", 0), c.get("symbol", "")),
-            )
-            ev_selected.extend(overflow[:remaining_slots])
-
-        # Re-sort selected EV candidates by composite rank for final ordering.
-        ev_selected.sort(
-            key=lambda c: (-c.get("rank_score", 0), c.get("symbol", "")),
-        )
-
-        # Rank calendar candidates by capital efficiency (net_debit / max_loss).
-        calendar_candidates.sort(
-            key=lambda c: (
-                _safe_float((c.get("math") or {}).get("net_debit", 0))
-                / max(_safe_float((c.get("math") or {}).get("max_loss", 1)), 0.01),
-                c.get("symbol", ""),
-            ),
-        )
-
-        cal_selected = calendar_candidates[:_CALENDAR_SLOTS]
-        selected_credible = ev_selected + cal_selected
-
-        # Assign rank and track label.
-        cal_set = set(id(c) for c in cal_selected)
-        for i, cand in enumerate(selected_credible, start=1):
-            cand["rank"] = i
-            cand["ranking_track"] = "calendar" if id(cand) in cal_set else "ev"
+        # ── Strategy-aware ranking ─────────────────────────────────
+        # Score each candidate using strategy-appropriate criteria
+        # (income vs directional vs calendar) on a universal composite
+        # scale.  No hardcoded slot allocation — the best trades for
+        # the current conditions naturally rise to the top.
+        regime_label = consumer_summary.get("market_state", "NEUTRAL") if consumer_summary else "NEUTRAL"
+        ranked = rank_candidates(credible, regime_label=regime_label)
+        selected_credible = ranked[:config.top_n]
 
         stage_data["enriched_candidates"] = selected_credible
 
         # Log per-key allocation for traceability.
         key_selected_counts = {}
-        for c in ev_selected:
+        for c in selected_credible:
             k = c.get("scanner_key", "unknown")
             key_selected_counts[k] = key_selected_counts.get(k, 0) + 1
 
         logger.info(
-            "event=enrich_complete ev_selected=%d cal_selected=%d "
-            "total_enriched=%d key_quotas=%s key_selected=%s",
-            len(ev_selected), len(cal_selected), len(selected_credible),
-            key_quotas, key_selected_counts,
+            "event=enrich_complete selected=%d "
+            "total_credible=%d regime=%s key_selected=%s",
+            len(selected_credible), len(credible),
+            regime_label, key_selected_counts,
         )
 
         return StageOutcome(
@@ -1327,7 +1359,16 @@ def _stage_enrich_evaluate(
 
 
 # ── Options model analysis constants ────────────────────────────────
-MODEL_ANALYSIS_TOP_N_INPUT = 15   # Send top 15 to model analysis
+def _model_analysis_top_n() -> int:
+    """Resolve model analysis input count from settings."""
+    try:
+        from app.config import get_settings
+        return get_settings().OPTIONS_MODEL_ANALYSIS_TOP_N
+    except Exception:
+        return 20
+
+
+MODEL_ANALYSIS_TOP_N_INPUT = _model_analysis_top_n()  # default 20 (was 15)
 MODEL_ANALYSIS_TOP_N_OUTPUT = 10  # Keep top 10 after model filter
 
 
@@ -2117,3 +2158,269 @@ def _write_stage_artifact(
         atomic_write_json(path, base)
     except Exception as exc:
         logger.warning("Failed to write stage artifact %s: %s", stage_key, exc)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# RANKING AUDIT DIAGNOSTIC
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _write_ranking_audit(
+    ranked_candidates: list[dict[str, Any]],
+    regime_label: str,
+    run_id: str,
+    results_dir: Path,
+) -> None:
+    """Write a comprehensive audit file for ranking validation.
+
+    Written after every options workflow run.  Contains strategy
+    distribution, component scores, POP distributions, and red flags.
+    """
+    import shutil
+
+    try:
+        audit: dict[str, Any] = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "run_id": run_id,
+            "regime_label": regime_label,
+
+            # === SECTION 1: Strategy Distribution ===
+            "strategy_distribution": {
+                "total_candidates_ranked": len(ranked_candidates),
+                "by_strategy_class": {},
+                "by_scanner_key": {},
+            },
+
+            # === SECTION 2: Top 30 Candidates (sent to model) ===
+            "top_30_summary": [],
+
+            # === SECTION 3: Top 10 Final Output ===
+            "top_10_final": [],
+
+            # === SECTION 4: Scoring Validation ===
+            "scoring_validation": {
+                "income_candidates_in_top_10": 0,
+                "directional_candidates_in_top_10": 0,
+                "calendar_candidates_in_top_10": 0,
+                "score_range_top_10": {"min": None, "max": None},
+                "score_range_all": {"min": None, "max": None},
+                "highest_income_score": None,
+                "highest_directional_score": None,
+                "highest_income_candidate": None,
+                "highest_directional_candidate": None,
+            },
+
+            # === SECTION 5: Component Score Distributions ===
+            "component_distributions": {
+                "income": {"probability": [], "edge": [], "structure": [], "market_fit": [], "execution": []},
+                "directional": {"probability": [], "edge": [], "structure": [], "market_fit": [], "execution": []},
+            },
+
+            # === SECTION 6: POP Distribution ===
+            "pop_distribution": {
+                "income_pops": [],
+                "directional_pops": [],
+                "income_avg_pop": None,
+                "directional_avg_pop": None,
+            },
+
+            # === SECTION 7: Red Flags ===
+            "red_flags": [],
+        }
+
+        # ── Populate strategy distribution ───────────────────────
+        for cand in ranked_candidates:
+            sc = cand.get("strategy_class", "unknown")
+            sk = cand.get("scanner_key", "unknown")
+            dist = audit["strategy_distribution"]
+            dist["by_strategy_class"][sc] = dist["by_strategy_class"].get(sc, 0) + 1
+            dist["by_scanner_key"][sk] = dist["by_scanner_key"].get(sk, 0) + 1
+
+        # ── Populate top 30 summary ──────────────────────────────
+        for cand in ranked_candidates[:30]:
+            ranking = cand.get("ranking", {})
+            components = ranking.get("components", {})
+            math = cand.get("math") or {}
+
+            entry = {
+                "rank": cand.get("rank"),
+                "symbol": cand.get("symbol"),
+                "scanner_key": cand.get("scanner_key"),
+                "strategy_class": cand.get("strategy_class"),
+                "composite_score": cand.get("composite_score"),
+                "pop": math.get("pop"),
+                "pop_source": math.get("pop_source"),
+                "ev": math.get("ev"),
+                "ror": math.get("ror"),
+                "expected_ror": math.get("expected_ror"),
+                "net_credit": math.get("net_credit"),
+                "net_debit": math.get("net_debit"),
+                "width": math.get("width"),
+                "dte": cand.get("dte"),
+                "underlying_price": cand.get("underlying_price"),
+                "breakeven": math.get("breakeven"),
+                "ev_managed": math.get("ev_managed"),
+                "managed_expected_ror": math.get("managed_expected_ror"),
+                "p_profit_target": math.get("p_profit_target"),
+                "p_stop_loss": math.get("p_stop_loss"),
+                "model_recommendation": cand.get("model_recommendation"),
+                "model_score": cand.get("model_score"),
+                "event_risk": cand.get("event_risk"),
+                "components": {
+                    k: {"score": v.get("score"), "weight": v.get("weight")}
+                    for k, v in components.items()
+                } if components else {},
+            }
+            audit["top_30_summary"].append(entry)
+
+            if cand.get("rank", 999) <= 10:
+                audit["top_10_final"].append(entry)
+
+        # ── Scoring validation ───────────────────────────────────
+        top_10 = ranked_candidates[:10]
+        all_scores = [c.get("composite_score", 0) for c in ranked_candidates if c.get("composite_score")]
+        top_10_scores = [c.get("composite_score", 0) for c in top_10 if c.get("composite_score")]
+
+        sv = audit["scoring_validation"]
+        for c in top_10:
+            sc = c.get("strategy_class", "unknown")
+            if sc == "income":
+                sv["income_candidates_in_top_10"] += 1
+            elif sc == "directional":
+                sv["directional_candidates_in_top_10"] += 1
+            elif sc == "calendar":
+                sv["calendar_candidates_in_top_10"] += 1
+
+        if top_10_scores:
+            sv["score_range_top_10"] = {
+                "min": round(min(top_10_scores), 2),
+                "max": round(max(top_10_scores), 2),
+            }
+        if all_scores:
+            sv["score_range_all"] = {
+                "min": round(min(all_scores), 2),
+                "max": round(max(all_scores), 2),
+            }
+
+        # Highest by class
+        income_cands = [c for c in ranked_candidates if c.get("strategy_class") == "income"]
+        directional_cands = [c for c in ranked_candidates if c.get("strategy_class") == "directional"]
+
+        if income_cands:
+            best = max(income_cands, key=lambda c: c.get("composite_score", 0))
+            sv["highest_income_score"] = best.get("composite_score")
+            sv["highest_income_candidate"] = (
+                f"{best.get('symbol')}|{best.get('scanner_key')}"
+                f"|pop={best.get('math', {}).get('pop')}"
+            )
+
+        if directional_cands:
+            best = max(directional_cands, key=lambda c: c.get("composite_score", 0))
+            sv["highest_directional_score"] = best.get("composite_score")
+            sv["highest_directional_candidate"] = (
+                f"{best.get('symbol')}|{best.get('scanner_key')}"
+                f"|pop={best.get('math', {}).get('pop')}"
+            )
+
+        # ── Component distributions (top 30) ─────────────────────
+        for cand in ranked_candidates[:30]:
+            sc = cand.get("strategy_class", "unknown")
+            ranking = cand.get("ranking", {})
+            components = ranking.get("components", {})
+
+            if sc in ("income", "directional"):
+                for comp_name, comp_data in components.items():
+                    bucket = audit["component_distributions"][sc].get(comp_name)
+                    if bucket is not None:
+                        raw = comp_data.get("score")
+                        bucket.append(round(raw, 1) if raw is not None else None)
+
+        # ── POP distribution (top 100) ───────────────────────────
+        for cand in ranked_candidates[:100]:
+            pop = (cand.get("math") or {}).get("pop")
+            if pop is not None:
+                sc = cand.get("strategy_class")
+                if sc == "income":
+                    audit["pop_distribution"]["income_pops"].append(round(pop, 4))
+                elif sc == "directional":
+                    audit["pop_distribution"]["directional_pops"].append(round(pop, 4))
+
+        inc_pops = audit["pop_distribution"]["income_pops"]
+        dir_pops = audit["pop_distribution"]["directional_pops"]
+        if inc_pops:
+            audit["pop_distribution"]["income_avg_pop"] = round(sum(inc_pops) / len(inc_pops), 4)
+        if dir_pops:
+            audit["pop_distribution"]["directional_avg_pop"] = round(sum(dir_pops) / len(dir_pops), 4)
+
+        # ── Red flags ────────────────────────────────────────────
+        flags = audit["red_flags"]
+
+        if sv["income_candidates_in_top_10"] == 0 and income_cands:
+            flags.append(
+                "NO income strategies in top 10 — ranking may still be biased toward directional"
+            )
+        if sv["directional_candidates_in_top_10"] == 0 and regime_label in ("RISK_ON", "RISK_OFF") and directional_cands:
+            flags.append(
+                "NO directional strategies in top 10 during trending regime — "
+                "market_fit scoring may be miscalibrated"
+            )
+        if all_scores and (max(all_scores) - min(all_scores)) < 10:
+            flags.append(
+                f"Score compression: all scores within "
+                f"{max(all_scores) - min(all_scores):.1f} points — "
+                f"normalization ranges may be too tight"
+            )
+        if inc_pops and max(inc_pops) < 0.55:
+            flags.append(
+                "No income candidates with POP > 55% — scanner may not be "
+                "finding good credit spreads"
+            )
+        if top_10 and all(c.get("model_recommendation") == "PASS" for c in top_10):
+            flags.append(
+                "ALL top 10 candidates got PASS from model — model threshold "
+                "may be too strict or candidates genuinely weak"
+            )
+
+        # Event contamination check
+        for cand in ranked_candidates[:10]:
+            events = cand.get("event_details") or []
+            symbol = cand.get("symbol")
+            for evt in events:
+                # event_details entries from classify_candidate_event_risk
+                # have keys: event, date, importance, category
+                evt_name = evt.get("event", "")
+                if (
+                    evt.get("category") == "earnings"
+                    and symbol
+                    and symbol.upper() not in evt_name.upper()
+                ):
+                    flags.append(
+                        f"Event contamination: {symbol} shows '{evt_name}' — "
+                        f"event filtering may not be working"
+                    )
+                    break
+            else:
+                continue
+            break
+
+        # ── Write file ───────────────────────────────────────────
+        audit_dir = results_dir / "diagnostics"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+
+        ts_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        filepath = audit_dir / f"ranking_audit_{ts_str}.json"
+        latest_path = audit_dir / "ranking_audit_latest.json"
+
+        import json as _json
+        with open(filepath, "w", encoding="utf-8") as f:
+            _json.dump(audit, f, indent=2, default=str)
+
+        shutil.copy2(filepath, latest_path)
+
+        logger.info(
+            "event=ranking_audit_written path=%s red_flags=%d",
+            filepath, len(flags),
+        )
+
+    except Exception as exc:
+        logger.error("event=ranking_audit_failed error=%s", exc)

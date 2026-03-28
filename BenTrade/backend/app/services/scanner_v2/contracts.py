@@ -149,6 +149,18 @@ class V2RecomputedMath:
     breakeven: list[float] = field(default_factory=list)
     """Breakeven price(s).  Some strategies have multiple."""
 
+    # ── Managed EV (three-outcome model) ────────────────────────
+    ev_managed: float | None = None          # managed EV per-contract ($)
+    ev_managed_per_day: float | None = None  # ev_managed / DTE
+    managed_profit_target: float | None = None  # $ amount of profit target
+    managed_stop_loss: float | None = None   # $ amount of stop loss (positive = loss)
+    p_profit_target: float | None = None     # probability of hitting profit target
+    p_stop_loss: float | None = None         # probability of hitting stop loss
+    p_expiration: float | None = None        # probability of reaching expiration
+    management_policy_used: dict | None = None  # the policy that was applied
+    ev_model: str | None = None              # "three_outcome_v1"
+    managed_expected_ror: float | None = None  # ev_managed / max_loss
+
     notes: dict[str, str] = field(default_factory=dict)
     """Per-field computation notes / flags.
 

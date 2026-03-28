@@ -532,14 +532,28 @@ async def run_portfolio_balance(
         params.active_trade_results is not None,
     )
 
-    result = await run_portfolio_balance_workflow(
-        request=request,
-        account_mode=params.account_mode,
-        stock_results=params.stock_results,
-        options_results=params.options_results,
-        active_trade_results=params.active_trade_results,
-        skip_model=params.skip_model,
-    )
+    try:
+        result = await asyncio.wait_for(
+            run_portfolio_balance_workflow(
+                request=request,
+                account_mode=params.account_mode,
+                stock_results=params.stock_results,
+                options_results=params.options_results,
+                active_trade_results=params.active_trade_results,
+                skip_model=params.skip_model,
+            ),
+            timeout=60.0,
+        )
+    except asyncio.TimeoutError:
+        logger.error("[TMC_PORTFOLIO_BALANCE] TIMEOUT — exceeded 60 seconds")
+        return JSONResponse(
+            status_code=504,
+            content={
+                "ok": False,
+                "error": "Portfolio balance timed out after 60 seconds",
+                "suggestion": "Check server logs for PB_DEBUG messages to see which stage hung",
+            },
+        )
 
     logger.info(
         "[TMC_PORTFOLIO_BALANCE] OK — run_id=%s ok=%s duration_ms=%s",
@@ -549,3 +563,34 @@ async def run_portfolio_balance(
     )
 
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# DIAGNOSTICS
+# ═══════════════════════════════════════════════════════════════════════
+
+
+@router.get("/diagnostics/ranking-audit")
+async def get_ranking_audit(request: Request) -> JSONResponse:
+    """Return the latest ranking audit file.
+
+    Written automatically at the end of every options workflow run.
+    Contains strategy distribution, component scores, POP distributions,
+    scoring validation, and red flags.
+    """
+    data_dir = Path(_get_data_dir(request))
+    audit_path = data_dir / "diagnostics" / "ranking_audit_latest.json"
+
+    if not audit_path.exists():
+        return JSONResponse(
+            status_code=404,
+            content={"error": "No ranking audit available — run options workflow first"},
+        )
+
+    try:
+        with open(audit_path, encoding="utf-8") as f:
+            data = json.load(f)
+        return JSONResponse(content=data)
+    except Exception as exc:
+        logger.error("Failed to read ranking audit: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to read ranking audit") from exc
