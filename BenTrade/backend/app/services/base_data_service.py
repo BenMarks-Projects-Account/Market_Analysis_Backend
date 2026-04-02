@@ -460,6 +460,22 @@ class BaseDataService:
             if value is not None:
                 return value
 
+        logger.info("event=underlying_fallback symbol=%s source=polygon_snapshot", normalized_symbol)
+        # Fallback 1: Polygon snapshot (15-min delayed, unlimited calls)
+        if self.polygon_client is not None and self._source_configured("polygon"):
+            try:
+                snap = await self.polygon_client.get_snapshot(normalized_symbol)
+                if snap:
+                    for field in ("price", "last", "close"):
+                        value = self._to_float(snap.get(field))
+                        if value is not None:
+                            self._mark_success("polygon", http_status=200, message="snapshot fallback ok")
+                            return value
+            except Exception as exc:
+                self._mark_failure("polygon", exc)
+                logger.debug("event=polygon_snapshot_fallback_failed symbol=%s error=%s", normalized_symbol, exc)
+
+        # Fallback 2: Finnhub quote (legacy, kept for resilience)
         logger.info("event=underlying_fallback symbol=%s source=finnhub", normalized_symbol)
         try:
             fb = await self.finnhub_client.get_quote(normalized_symbol)

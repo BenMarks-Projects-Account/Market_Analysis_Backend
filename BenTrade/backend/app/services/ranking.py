@@ -176,8 +176,11 @@ INCOME_STRATEGIES = frozenset({
     "put_credit_spread", "call_credit_spread",
     "iron_condor", "iron_butterfly",
 })
+BUTTERFLY_STRATEGIES = frozenset({
+    "butterfly_debit", "iron_butterfly",
+})
 DIRECTIONAL_STRATEGIES = frozenset({
-    "put_debit", "call_debit", "butterfly_debit",
+    "put_debit", "call_debit",
 })
 CALENDAR_STRATEGIES = frozenset({
     "calendar_call_spread", "calendar_put_spread",
@@ -186,9 +189,11 @@ CALENDAR_STRATEGIES = frozenset({
 
 
 def classify_strategy(scanner_key: str) -> str:
-    """Classify strategy into income, directional, or calendar."""
+    """Classify strategy into income, butterfly, directional, or calendar."""
     if scanner_key in INCOME_STRATEGIES:
         return "income"
+    if scanner_key in BUTTERFLY_STRATEGIES:
+        return "butterfly"
     if scanner_key in DIRECTIONAL_STRATEGIES:
         return "directional"
     if scanner_key in CALENDAR_STRATEGIES:
@@ -283,6 +288,34 @@ SCORING_PROFILES: dict[str, dict[str, Any]] = {
         "credit_to_width_range": None,
         "dte_ideal": (21, 60),
     },
+    "butterfly": {
+        # Weights — structure matters more for butterflies
+        "edge_weight": 0.30,
+        "pop_weight": 0.20,
+        "structure_weight": 0.25,
+        "market_fit_weight": 0.15,
+        "execution_weight": 0.10,
+
+        # POP band — butterflies have low POP by nature
+        "pop_ideal_low": 0.15,
+        "pop_ideal_high": 0.45,
+        "pop_below_penalty": 200.0,
+        "pop_above_penalty": 150.0,
+
+        # Edge — use managed EV but with butterfly adjustments
+        "use_managed_ev": True,
+        "managed_ror_positive_scale": 200.0,
+        "managed_ror_negative_scale": 150.0,
+        "managed_ev_base_score": 30.0,
+
+        # Structure
+        "dte_ideal": (14, 45),
+
+        # Legacy fallback
+        "pop_range": (0.15, 0.45),
+        "ev_to_risk_range": (0.05, 0.40),
+        "credit_to_width_range": None,
+    },
     "unknown": {
         "edge_weight": 0.25,
         "pop_weight": 0.20,
@@ -359,6 +392,7 @@ def _compute_edge_score(
     legs: list[dict[str, Any]],
     strategy_class: str,
     profile: dict[str, Any],
+    underlying_price: float | None = None,
 ) -> float:
     """Score edge quality. Uses managed EV when available, falls back to legacy."""
     use_managed = profile.get("use_managed_ev", False)
@@ -376,11 +410,31 @@ def _compute_edge_score(
         if ev_managed < 0:
             # Negative managed EV: score 0-30 range
             neg_scale = profile.get("managed_ror_negative_scale", 300.0)
-            return max(0.0, base_score + managed_ror * neg_scale)
+            raw = max(0.0, base_score + managed_ror * neg_scale)
         else:
             # Positive managed EV: score 30-100 range
             pos_scale = profile.get("managed_ror_positive_scale", 700.0)
-            return min(100.0, base_score + managed_ror * pos_scale)
+            raw = min(100.0, base_score + managed_ror * pos_scale)
+
+        # Width normalization: penalize extreme payoff asymmetry.
+        # Ideal width range: ≤3% of underlying → no penalty.
+        # Derived field: width_factor = f(width / underlying_price)
+        width = safe_float(m.get("width"))
+        up = underlying_price if underlying_price and underlying_price > 0 else None
+        if width and up:
+            width_pct = width / up
+            if width_pct <= 0.03:
+                width_factor = 1.0
+            elif width_pct <= 0.05:
+                # Linear: 3% → 1.0, 5% → 0.85
+                width_factor = 1.0 - (width_pct - 0.03) * 7.5
+            else:
+                # Stronger: 5% → 0.85, 10% → 0.60
+                width_factor = 0.85 - (width_pct - 0.05) * 5.0
+            width_factor = max(0.50, min(1.0, width_factor))
+            raw *= width_factor
+
+        return raw
 
     return _compute_edge_score_legacy(m, legs, strategy_class, profile)
 
@@ -505,6 +559,9 @@ _REGIME_FIT: dict[tuple[str, str], float] = {
     ("calendar", "NEUTRAL"): 80,
     ("calendar", "RISK_ON"): 60,
     ("calendar", "RISK_OFF"): 50,
+    ("butterfly", "NEUTRAL"): 70,
+    ("butterfly", "RISK_ON"): 45,
+    ("butterfly", "RISK_OFF"): 45,
 }
 
 
@@ -591,7 +648,10 @@ def score_candidate(candidate: dict[str, Any], regime_label: str = "NEUTRAL") ->
     prob_score = _compute_pop_band_score(pop, profile)
 
     # === Component 2: Edge Quality ===
-    edge_score = _compute_edge_score(m, legs, strategy_class, profile)
+    edge_score = _compute_edge_score(
+        m, legs, strategy_class, profile,
+        underlying_price=safe_float(candidate.get("underlying_price")),
+    )
 
     # === Component 3: Structure Quality ===
     structure_score = _compute_structure_score(candidate, m, legs, strategy_class, profile)

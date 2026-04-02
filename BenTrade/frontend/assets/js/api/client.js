@@ -70,6 +70,15 @@ window.BenTradeApi = (function(){
     return jsonFetch(url, opts).finally(function() { clearTimeout(timer); });
   }
 
+  /** jsonFetch with a short timeout for fast data-reading endpoints (10s default). */
+  function timedFetch(url, options, timeoutMs) {
+    var ms = timeoutMs || 10000;
+    var controller = new AbortController();
+    var timer = setTimeout(function() { controller.abort(); }, ms);
+    var opts = Object.assign({}, options || {}, { signal: controller.signal });
+    return jsonFetch(url, opts).finally(function() { clearTimeout(timer); });
+  }
+
   function listReports(){
     return jsonFetch('/api/reports');
   }
@@ -527,10 +536,10 @@ window.BenTradeApi = (function(){
     });
   }
   function tmcGetLatestStock(){
-    return jsonFetch('/api/tmc/workflows/stock/latest?_t=' + Date.now());
+    return timedFetch('/api/tmc/workflows/stock/latest?_t=' + Date.now(), {}, 10000);
   }
   function tmcGetLatestOptions(){
-    return jsonFetch('/api/tmc/workflows/options/latest?_t=' + Date.now());
+    return timedFetch('/api/tmc/workflows/options/latest?_t=' + Date.now(), {}, 10000);
   }
   function tmcGetStockSummary(){
     return jsonFetch('/api/tmc/workflows/stock/summary?_t=' + Date.now());
@@ -560,7 +569,7 @@ window.BenTradeApi = (function(){
 
   /* ── Orchestrator (continuous MI → TMC loop) ── */
   function getOrchestratorStatus(){
-    return jsonFetch('/api/orchestrator/status');
+    return timedFetch('/api/orchestrator/status', {}, 5000);
   }
   function startOrchestrator(accountMode){
     return jsonFetch('/api/orchestrator/start?account_mode=' + encodeURIComponent(accountMode || 'paper'), { method: 'POST' });

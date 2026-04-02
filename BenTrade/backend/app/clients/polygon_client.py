@@ -1,13 +1,15 @@
-"""Polygon.io client – price-history (OHLC) and last-price snapshot.
+"""Polygon.io client – price-history (OHLC), snapshots, and technical indicators.
 
-Replaces Yahoo Finance as the primary source for daily close data used by
-SMA / RSI / realized-vol / regime calculations.
+Primary source for daily close data used by SMA / RSI / realized-vol / regime
+calculations, and now also the primary source for bulk quote snapshots
+(15-min delayed, Stocks Starter plan) and pre-computed technical indicators.
 
 Uses the same httpx.AsyncClient + TTLCache pattern as the other clients.
 
 Rate-limit resilience
 ---------------------
-* An ``asyncio.Semaphore`` caps concurrent in-flight requests (default 5).
+* An ``asyncio.Semaphore`` caps concurrent in-flight requests (default 15,
+  safe on the unlimited-calls Stocks Starter plan).
 * HTTP 429 responses trigger exponential back-off with jitter (up to 4
   retries, max 8 s delay).  ``Retry-After`` headers are respected.
 * A session-level in-memory de-dupe dict prevents duplicate requests for
@@ -31,7 +33,8 @@ from app.utils.http import UpstreamError
 logger = logging.getLogger(__name__)
 
 # -- Rate-limit defaults (not user-configurable, keep simple) --
-_MAX_CONCURRENT = 5
+# Paid Stocks Starter plan: unlimited calls, so higher concurrency is safe.
+_MAX_CONCURRENT = 15
 _MAX_RETRIES = 4
 _BASE_DELAY = 0.5        # seconds
 _MAX_DELAY = 8.0          # seconds
@@ -359,3 +362,200 @@ class PolygonClient:
             except (KeyError, TypeError, ValueError):
                 continue
         return bars
+
+    # ------------------------------------------------------------------
+    # Snapshot — 15-min delayed quote (Stocks Starter plan)
+    # ------------------------------------------------------------------
+
+    async def get_snapshot(self, ticker: str) -> dict[str, Any]:
+        """15-min delayed quote snapshot for a single ticker.
+
+        Returns a dict with keys: price, open, high, low, close, volume,
+        prev_close, change, change_pct, updated, source.
+        Returns ``{}`` on failure.
+        """
+        ticker = str(ticker).upper().strip()
+        if not ticker:
+            return {}
+
+        cache_key = f"polygon:snapshot:{ticker}"
+
+        async def _load() -> dict[str, Any]:
+            url = (
+                f"{self.settings.POLYGON_BASE_URL}"
+                f"/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}"
+            )
+            params: dict[str, Any] = {"apiKey": self.settings.POLYGON_API_KEY}
+            payload = await self._request_with_retry("GET", url, params=params)
+            return self._parse_snapshot(payload)
+
+        return await self.cache.get_or_set(cache_key, self.settings.QUOTE_CACHE_TTL_SECONDS, _load)
+
+    async def get_snapshots(self, tickers: list[str]) -> dict[str, dict[str, Any]]:
+        """Batch snapshot for multiple tickers.
+
+        Returns ``{TICKER: {price, open, high, low, ...}, ...}``.
+        Tickers with no data are omitted from the result.
+        """
+        normalized = sorted({str(t).upper().strip() for t in tickers if str(t).strip()})
+        if not normalized:
+            return {}
+
+        cache_key = f"polygon:snapshots:{','.join(normalized)}"
+
+        async def _load() -> dict[str, dict[str, Any]]:
+            url = (
+                f"{self.settings.POLYGON_BASE_URL}"
+                f"/v2/snapshot/locale/us/markets/stocks/tickers"
+            )
+            params: dict[str, Any] = {
+                "tickers": ",".join(normalized),
+                "apiKey": self.settings.POLYGON_API_KEY,
+            }
+            payload = await self._request_with_retry("GET", url, params=params)
+            result: dict[str, dict[str, Any]] = {}
+            for item in payload.get("tickers") or []:
+                parsed = self._parse_snapshot_item(item)
+                sym = parsed.get("symbol")
+                if sym and parsed.get("price") is not None:
+                    result[sym] = parsed
+            return result
+
+        return await self.cache.get_or_set(cache_key, self.settings.QUOTE_CACHE_TTL_SECONDS, _load)
+
+    @staticmethod
+    def _parse_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
+        """Parse a single-ticker snapshot response."""
+        ticker_data = payload.get("ticker")
+        if not ticker_data:
+            return {}
+        return PolygonClient._parse_snapshot_item(ticker_data)
+
+    @staticmethod
+    def _parse_snapshot_item(item: dict[str, Any]) -> dict[str, Any]:
+        """Parse one ticker entry from a snapshot response.
+
+        Input fields: ticker, day{o,h,l,c,v}, prevDay{c}, todaysChange, todaysChangePerc, updated
+        Output: normalized dict with price, open, high, low, close, volume,
+                prev_close, change, change_pct, symbol, source.
+        """
+        day = item.get("day") or {}
+        prev = item.get("prevDay") or {}
+        try:
+            price = float(day.get("c") or 0) or None
+        except (TypeError, ValueError):
+            price = None
+
+        return {
+            "symbol": str(item.get("ticker", "")).upper(),
+            "price": price,
+            "last": price,
+            "open": _safe_num(day.get("o")),
+            "high": _safe_num(day.get("h")),
+            "low": _safe_num(day.get("l")),
+            "close": price,
+            "volume": _safe_num(day.get("v")),
+            "prev_close": _safe_num(prev.get("c")),
+            "change": _safe_num(item.get("todaysChange")),
+            "change_percentage": _safe_num(item.get("todaysChangePerc")),
+            "updated": item.get("updated"),
+            "source": "polygon",
+        }
+
+    # ------------------------------------------------------------------
+    # Technical indicators (Stocks Starter plan)
+    # ------------------------------------------------------------------
+
+    async def get_rsi(
+        self, symbol: str, *, timespan: str = "day", window: int = 14, limit: int = 1,
+    ) -> dict[str, Any]:
+        """Fetch RSI from Polygon ``/v1/indicators/rsi/{symbol}``.
+
+        Returns ``{"value": float, "timestamp": str}`` or ``{}``.
+        """
+        return await self._fetch_indicator("rsi", symbol, timespan=timespan, window=window, limit=limit)
+
+    async def get_sma(
+        self, symbol: str, *, timespan: str = "day", window: int = 50, limit: int = 1,
+    ) -> dict[str, Any]:
+        """Fetch SMA from Polygon ``/v1/indicators/sma/{symbol}``."""
+        return await self._fetch_indicator("sma", symbol, timespan=timespan, window=window, limit=limit)
+
+    async def get_ema(
+        self, symbol: str, *, timespan: str = "day", window: int = 20, limit: int = 1,
+    ) -> dict[str, Any]:
+        """Fetch EMA from Polygon ``/v1/indicators/ema/{symbol}``."""
+        return await self._fetch_indicator("ema", symbol, timespan=timespan, window=window, limit=limit)
+
+    async def get_macd(
+        self, symbol: str, *, timespan: str = "day", limit: int = 1,
+    ) -> dict[str, Any]:
+        """Fetch MACD from Polygon ``/v1/indicators/macd/{symbol}``.
+
+        Returns ``{"value": float, "signal": float, "histogram": float, "timestamp": str}``
+        or ``{}``.
+        """
+        return await self._fetch_indicator("macd", symbol, timespan=timespan, limit=limit)
+
+    async def _fetch_indicator(
+        self, indicator: str, symbol: str, *, timespan: str = "day",
+        window: int | None = None, limit: int = 1,
+    ) -> dict[str, Any]:
+        """Shared implementation for technical indicator endpoints."""
+        symbol = str(symbol).upper().strip()
+        if not symbol:
+            return {}
+
+        params: dict[str, Any] = {
+            "timespan": timespan,
+            "limit": limit,
+            "apiKey": self.settings.POLYGON_API_KEY,
+        }
+        if window is not None:
+            params["window"] = window
+
+        cache_key = f"polygon:{indicator}:{symbol}:{timespan}:{window}:{limit}"
+
+        async def _load() -> dict[str, Any]:
+            url = f"{self.settings.POLYGON_BASE_URL}/v1/indicators/{indicator}/{symbol}"
+            payload = await self._request_with_retry("GET", url, params=params)
+            values = (payload.get("results") or {}).get("values") or []
+            if not values:
+                return {}
+            latest = values[0]
+            if indicator == "macd":
+                return {
+                    "value": _safe_num(latest.get("value")),
+                    "signal": _safe_num(latest.get("signal")),
+                    "histogram": _safe_num(latest.get("histogram")),
+                    "timestamp": str(latest.get("timestamp", "")),
+                }
+            return {
+                "value": _safe_num(latest.get("value")),
+                "timestamp": str(latest.get("timestamp", "")),
+            }
+
+        return await self.cache.get_or_set(cache_key, self.settings.CANDLES_CACHE_TTL_SECONDS, _load)
+
+    # ------------------------------------------------------------------
+    # Full OHLCV bars (alias matching Tradier get_daily_bars interface)
+    # ------------------------------------------------------------------
+
+    async def get_daily_bars(
+        self, ticker: str, start_date: str, end_date: str,
+    ) -> list[dict[str, Any]]:
+        """Return full OHLCV daily bars, compatible with Tradier ``get_daily_bars`` shape.
+
+        Returns ``[{"date", "open", "high", "low", "close", "volume"}, ...]``.
+        """
+        return await self.get_aggregates_ohlc(ticker, start_date=start_date, end_date=end_date)
+
+
+def _safe_num(value: Any) -> float | None:
+    """Coerce to float, returning None on failure."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

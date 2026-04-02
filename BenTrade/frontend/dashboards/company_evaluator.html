@@ -1,6 +1,123 @@
+<style>
+/* ── Company Evaluator Analysis Panel Styles ── */
+.ce-analysis-header { cursor:pointer; transition:background 0.15s ease; }
+.ce-analysis-header:hover { background:rgba(255,255,255,0.04) !important; }
+.ce-analysis-header td { padding:0 !important; }
+.ce-analysis-header .ce-ah-inner {
+  display:flex; align-items:center; gap:12px; padding:8px 16px; font-size:13px;
+}
+.ce-ah-chevron { color:rgba(255,255,255,0.3); font-size:10px; width:16px; flex-shrink:0; transition:transform 0.2s ease; }
+.ce-ah-chevron.open { transform:rotate(90deg); }
+.ce-ah-label { font-weight:500; color:rgba(255,255,255,0.7); min-width:170px; }
+.ce-ah-summary { color:rgba(255,255,255,0.5); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ce-ah-age { color:rgba(255,255,255,0.25); font-size:11px; flex-shrink:0; }
+
+/* Expanded content wrapper — animated via max-height */
+.ce-analysis-content td { padding:0 !important; }
+.ce-ac-wrapper {
+  overflow:hidden; max-height:0; transition:max-height 0.35s ease;
+}
+.ce-ac-wrapper.open { max-height:2000px; }
+.ce-ac-inner { padding:16px 24px 20px; border-top:1px solid rgba(255,255,255,0.04); }
+
+/* Dual column layout for entry point */
+.ce-dual-col { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+.ce-col { background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:8px; padding:16px; }
+.ce-col-header { font-size:11px; letter-spacing:1.5px; color:rgba(255,255,255,0.3); margin-bottom:12px; font-weight:500; text-transform:uppercase; }
+
+/* Score bars */
+.ce-score-row { display:flex; align-items:center; gap:8px; margin:6px 0; }
+.ce-score-lbl { font-size:12px; color:rgba(255,255,255,0.5); min-width:70px; }
+.ce-score-track { flex:1; height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden; }
+.ce-score-fill { height:100%; border-radius:3px; transition:width 0.5s ease; }
+.ce-score-val { font-size:13px; font-weight:500; min-width:30px; text-align:right; }
+
+/* Price levels grid */
+.ce-price-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:4px; margin:16px 0; padding:12px; background:rgba(255,255,255,0.02); border-radius:6px; border:1px solid rgba(255,255,255,0.04); }
+.ce-price-lbl { font-size:10px; color:rgba(255,255,255,0.3); text-transform:uppercase; letter-spacing:0.5px; }
+.ce-price-val { font-size:15px; font-weight:500; }
+
+/* Signals */
+.ce-signal { font-size:13px; margin:4px 0; line-height:1.5; }
+.ce-signal-wt { opacity:0.4; font-size:11px; margin-left:4px; }
+
+/* Rec badges */
+.ce-rec-badge { display:inline-block; padding:4px 14px; border-radius:6px; font-size:13px; font-weight:500; }
+.ce-rec-enter { background:#065f46; border:1px solid #059669; color:#34d399; }
+.ce-rec-wait { background:#78350f; border:1px solid #d97706; color:#fbbf24; }
+.ce-rec-avoid { background:#7f1d1d; border:1px solid #dc2626; color:#f87171; }
+
+/* Comps tables side by side */
+.ce-comps-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-top:16px; }
+
+/* Panel action buttons */
+.ce-panel-actions { display:flex; gap:12px; margin-top:16px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.04); }
+.ce-btn-buy { padding:5px 16px; border-radius:5px; font-size:13px; font-weight:600; cursor:pointer; background:rgba(0,200,83,0.15); color:#00c853; border:1px solid rgba(0,200,83,0.3); }
+.ce-btn-buy:hover { background:rgba(0,200,83,0.25); }
+.ce-btn-buy.muted { background:rgba(255,255,255,0.04); color:rgba(224,224,224,0.4); border-color:rgba(255,255,255,0.08); }
+.ce-btn-refresh { padding:5px 12px; border-radius:5px; font-size:12px; cursor:pointer; background:rgba(255,255,255,0.04); color:rgba(224,224,224,0.5); border:1px solid rgba(255,255,255,0.08); margin-left:auto; }
+.ce-btn-refresh:hover { background:rgba(255,255,255,0.08); color:rgba(224,224,224,0.7); }
+
+/* DCF-specific styles */
+.dcf-headline { display:flex; gap:24px; font-size:16px; margin-bottom:4px; color:rgba(255,255,255,0.85); }
+.dcf-iv strong { font-size:20px; }
+.dcf-verdict { font-size:15px; font-weight:500; margin:4px 0; }
+.dcf-confidence { font-size:12px; color:rgba(255,255,255,0.4); margin-bottom:10px; }
+.dcf-ev-breakdown { margin-top:10px; }
+.ev-bar-row { display:flex; align-items:center; gap:8px; margin:6px 0; }
+.ev-bar-label { font-size:12px; color:rgba(255,255,255,0.5); min-width:100px; }
+.ev-bar-track { flex:1; height:8px; background:rgba(255,255,255,0.06); border-radius:4px; overflow:hidden; }
+.ev-bar-fill { height:100%; border-radius:4px; transition:width 0.5s ease; }
+.ev-bar-value { font-size:12px; color:rgba(255,255,255,0.5); min-width:110px; text-align:right; }
+
+.sensitivity-table { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+.sensitivity-table th { padding:6px 12px; color:rgba(255,255,255,0.4); font-weight:400; font-size:11px; text-align:center; }
+.sensitivity-table td { padding:6px 12px; text-align:center; border-bottom:1px solid rgba(255,255,255,0.04); }
+.sensitivity-base-row { background:rgba(255,255,255,0.03); }
+.sensitivity-legend { font-size:11px; color:rgba(255,255,255,0.3); margin-top:8px; text-align:center; }
+
+.projections-table { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+.projections-table th { text-align:left; padding:6px 10px; color:rgba(255,255,255,0.4); font-size:11px; font-weight:400; }
+.projections-table td { padding:6px 10px; border-bottom:1px solid rgba(255,255,255,0.04); color:rgba(255,255,255,0.7); }
+
+.dcf-assumptions-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.dcf-assumptions-grid .dcf-assum-row { display:flex; justify-content:space-between; font-size:13px; padding:3px 0; }
+.dcf-assumptions-grid .dcf-assum-lbl { color:rgba(255,255,255,0.45); }
+.dcf-assumptions-grid .dcf-assum-val { color:rgba(255,255,255,0.8); font-weight:500; }
+
+.dcf-caveats li { font-size:12px; color:rgba(255,255,255,0.4); margin:4px 0; line-height:1.4; }
+
+/* EVA/ROIC-specific styles */
+.spread-visual { padding:16px; margin:12px 0; }
+.spread-row { display:flex; align-items:center; gap:12px; margin:8px 0; }
+.spread-label { font-size:13px; font-weight:500; color:rgba(255,255,255,0.6); min-width:50px; }
+.spread-bar-track { flex:1; height:8px; background:rgba(255,255,255,0.06); border-radius:4px; overflow:hidden; }
+.spread-bar-fill { height:100%; border-radius:4px; transition:width 0.5s ease; }
+.spread-value { font-size:16px; font-weight:600; min-width:60px; text-align:right; }
+.spread-center { text-align:center; margin:4px 0; }
+.spread-badge { display:inline-block; padding:2px 12px; border:1px solid; border-radius:12px; font-size:13px; font-weight:500; }
+
+.return-bar-row { display:grid; grid-template-columns:50px 60px 1fr; align-items:center; gap:8px; margin:6px 0; }
+.return-label { font-size:12px; color:rgba(255,255,255,0.5); }
+.return-value { font-size:13px; font-weight:500; text-align:right; }
+.return-bar-track { height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden; }
+.return-bar-fill { height:100%; border-radius:3px; }
+
+.eva-grade-badge { display:inline-block; padding:3px 10px; border-radius:4px; font-size:12px; font-weight:500; }
+.eva-headline { font-size:14px; color:rgba(255,255,255,0.7); margin:6px 0; }
+.eva-annual { font-size:13px; color:rgba(255,255,255,0.6); margin:4px 0; }
+.eva-cap-structure-row { display:flex; justify-content:space-between; font-size:13px; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.03); }
+.eva-cap-structure-row .cap-label { color:rgba(255,255,255,0.5); }
+.eva-cap-structure-row .cap-val { color:rgba(255,255,255,0.8); font-weight:500; }
+.eva-valuation-note { font-size:12px; color:rgba(255,255,255,0.4); margin-top:6px; line-height:1.5; font-style:italic; }
+.eva-quality-signal { font-size:13px; margin:4px 0; line-height:1.5; }
+
+/* Responsive: stack columns on narrow screens */
+@media (max-width:900px) { .ce-dual-col, .ce-comps-grid { grid-template-columns:1fr; } }
+</style>
 <div class="company-evaluator-page" id="companyEvaluatorPage">
   <!-- Header -->
-  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
     <div>
       <h4 style="color:var(--accent-primary, #00e0c3); margin:0; font-weight:600; letter-spacing:0.04em;">
         COMPANY EVALUATOR
@@ -8,14 +125,77 @@
       <small id="ce-status" style="color:rgba(224,224,224,0.4);">Loading...</small>
     </div>
     <div style="display:flex; gap:8px; align-items:center;">
-      <select id="ce-sector-filter"
-        style="background:#0d1117; color:#e0e0e0; border:1px solid rgba(255,255,255,0.1);
-               border-radius:4px; padding:4px 8px; font-size:0.85rem;">
-        <option value="">All Sectors</option>
-      </select>
+      <!-- Connection toggle -->
+      <div id="ce-connection-toggle" style="display:inline-flex; align-items:center; gap:6px;
+           background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1);
+           border-radius:4px; padding:3px 8px; font-size:0.8rem;">
+        <span style="color:rgba(224,224,224,0.5); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.04em;">Connection:</span>
+        <label style="cursor:pointer; display:inline-flex; align-items:center; gap:3px; color:#e0e0e0;">
+          <input type="radio" name="ce-conn-mode" value="local" style="accent-color:#00e0c3;"> Local
+        </label>
+        <label style="cursor:pointer; display:inline-flex; align-items:center; gap:3px; color:#e0e0e0;">
+          <input type="radio" name="ce-conn-mode" value="remote" style="accent-color:#00e0c3;"> Remote
+        </label>
+      </div>
+      <span id="ce-conn-url" style="color:rgba(224,224,224,0.3); font-size:0.72rem; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
       <button id="ce-refresh-btn" class="btn btn-sm btn-outline-primary">Refresh</button>
       <button id="ce-crawl-btn" class="btn btn-sm btn-outline-secondary">Run Crawler</button>
     </div>
+  </div>
+
+  <!-- Filter Bar -->
+  <div id="ce-filter-bar" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px;
+       padding:10px 12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06);
+       border-radius:6px;">
+    <select id="ce-sector-filter"
+      style="background:#0d1117; color:#e0e0e0; border:1px solid rgba(255,255,255,0.1);
+             border-radius:4px; padding:4px 8px; font-size:0.82rem;">
+      <option value="">All Sectors</option>
+    </select>
+    <select id="ce-mcap-filter"
+      style="background:#0d1117; color:#e0e0e0; border:1px solid rgba(255,255,255,0.1);
+             border-radius:4px; padding:4px 8px; font-size:0.82rem;">
+      <option value="">All Market Caps</option>
+      <option value="mega">Mega ($200B+)</option>
+      <option value="large">Large ($10B–$200B)</option>
+      <option value="mid">Mid ($2B–$10B)</option>
+      <option value="small">Small ($300M–$2B)</option>
+      <option value="micro">Micro (&lt;$300M)</option>
+    </select>
+    <select id="ce-rating-filter"
+      style="background:#0d1117; color:#e0e0e0; border:1px solid rgba(255,255,255,0.1);
+             border-radius:4px; padding:4px 8px; font-size:0.82rem;">
+      <option value="">All Ratings</option>
+      <option value="STRONG_BUY">Strong Buy</option>
+      <option value="BUY">Buy</option>
+      <option value="HOLD">Hold</option>
+      <option value="SELL">Sell</option>
+      <option value="STRONG_SELL">Strong Sell</option>
+    </select>
+    <select id="ce-tier-filter"
+      style="background:#0d1117; color:#e0e0e0; border:1px solid rgba(255,255,255,0.1);
+             border-radius:4px; padding:4px 8px; font-size:0.82rem;">
+      <option value="">All Tiers</option>
+    </select>
+    <select id="ce-score-filter"
+      style="background:#0d1117; color:#e0e0e0; border:1px solid rgba(255,255,255,0.1);
+             border-radius:4px; padding:4px 8px; font-size:0.82rem;">
+      <option value="">Any Score</option>
+      <option value="80">80+ (Strong)</option>
+      <option value="70">70–80 (Good)</option>
+      <option value="60">60–70 (Average)</option>
+      <option value="0">Below 60 (Weak)</option>
+    </select>
+    <div style="position:relative; display:inline-flex; align-items:center;">
+      <input id="ce-search-input" type="text" placeholder="Search symbol or name…"
+        style="background:#0d1117; color:#e0e0e0; border:1px solid rgba(255,255,255,0.1);
+               border-radius:4px; padding:4px 28px 4px 8px; font-size:0.82rem; width:180px;">
+      <span style="position:absolute; right:8px; color:rgba(224,224,224,0.3); font-size:0.78rem; pointer-events:none;">&#128269;</span>
+    </div>
+    <button id="ce-reset-filters" style="background:none; border:1px solid rgba(255,255,255,0.1);
+            border-radius:4px; padding:4px 10px; color:rgba(224,224,224,0.5); font-size:0.78rem;
+            cursor:pointer;" title="Reset all filters">&#x21bb; Reset</button>
+    <span id="ce-filter-count" style="color:rgba(224,224,224,0.4); font-size:0.78rem; margin-left:auto;"></span>
   </div>
 
   <!-- Ranked Table -->

@@ -28,8 +28,12 @@
   /** Timestamp (ms) of last manual active-trade render from Full Refresh or Run Active.
    *  Used to prevent orchestrator poll from overwriting recent manual renders. */
   var _lastManualActiveRenderAt = 0;
-  /** Grace period (ms) after a manual render during which poll-based refreshes are suppressed. */
-  var _MANUAL_RENDER_GUARD_MS = 30000;
+  /** Flag-based guard: true while a manual refresh (Full Refresh or Run Active) is in progress.
+   *  Prevents orchestrator poll from overwriting results before the refresh completes. */
+  var _manualRefreshInProgress = false;
+  /** Grace period (ms) after a manual render during which poll-based refreshes are suppressed.
+   *  Backup guard in case flag is not cleared (belt and suspenders). */
+  var _MANUAL_RENDER_GUARD_MS = 300000;
 
   /**
    * Stored event handler references — prevents listener stacking on re-render.
@@ -38,6 +42,18 @@
   var _stockGridClickHandler   = null;
   var _optionsGridClickHandler = null;
   var _activeGridClickHandler  = null;
+
+  /** Cached generated_at timestamps for periodic freshness refresh. */
+  var _stockGeneratedAt  = null;
+  var _optionsGeneratedAt = null;
+  var _activeGeneratedAt  = null;
+  /** Periodic freshness-label refresh timer. */
+  var _freshnessTimer = null;
+
+  /** Cached last-loaded response data for instant re-render on SPA navigation. */
+  var _cachedStockResp   = null;
+  var _cachedOptionsResp = null;
+  var _cachedActiveData  = null;
 
   /* -- API ref -------------------------------------------------------- */
   var api = window.BenTradeApi;
@@ -136,6 +152,39 @@
     } catch (_) {
       el.textContent = '';
     }
+  }
+
+  /* -- Refreshing badge helpers (Fix 2 — stale data indicator) ------- */
+
+  /**
+   * Show a subtle "↻ Refreshing…" badge next to a section's freshness indicator.
+   * @param {string} section - 'stock' | 'options' | 'active'
+   */
+  function _showRefreshingBadge(section) {
+    var ids = {
+      stock:   'tmcStockFreshness',
+      options: 'tmcOptionsFreshness',
+      active:  'tmcActiveTimestamp',
+    };
+    var parentEl = document.getElementById(ids[section]);
+    if (!parentEl) return;
+    // Avoid duplicates
+    var existing = parentEl.parentNode.querySelector('.tmc-refreshing-badge');
+    if (existing) return;
+    var badge = document.createElement('span');
+    badge.className = 'tmc-refreshing-badge';
+    badge.id = 'tmcRefreshing-' + section;
+    badge.textContent = '↻ Refreshing\u2026';
+    parentEl.insertAdjacentElement('afterend', badge);
+  }
+
+  /**
+   * Remove the refreshing badge for a section.
+   * @param {string} section - 'stock' | 'options' | 'active'
+   */
+  function _removeRefreshingBadge(section) {
+    var badge = document.getElementById('tmcRefreshing-' + section);
+    if (badge) badge.remove();
   }
 
   function actionClass(action) {
@@ -483,6 +532,11 @@
     var qualEl   = document.getElementById('tmcStockQuality');
     var freshEl  = document.getElementById('tmcStockFreshness');
 
+    // Show loading state if grid has no rendered cards yet
+    if (grid && !grid.querySelector('.trade-card')) {
+      grid.innerHTML = '<div class="tmc-section-loading">Loading stock opportunities…</div>';
+    }
+
     api.tmcGetLatestStock()
       .then(function (resp) {
         // Track run_id for freshness detection
@@ -497,11 +551,14 @@
 
         // Update batch status and freshness indicators
         var data = resp.data;
-        updateFreshness(freshEl, data ? data.generated_at : null);
+        _stockGeneratedAt = data ? data.generated_at : null;
+        updateFreshness(freshEl, _stockGeneratedAt);
 
         var result = handleWorkflowResponse(resp, grid, countEl, qualEl, null, 'stock');
         if (!result) return;
+        _cachedStockResp = resp;
         renderStockCandidates(grid, result.candidates, result.data);
+        _removeRefreshingBadge('stock');
       })
       .catch(function (err) {
         console.error('[TMC] Failed to load stock opportunities:', err);
@@ -1310,12 +1367,15 @@
 
         // Update batch status and freshness indicators
         var data = resp.data;
+        _optionsGeneratedAt = data ? data.generated_at : null;
         updateBatchStatusBadge(batchEl, data ? data.batch_status : null);
-        updateFreshness(freshEl, data ? data.generated_at : null);
+        updateFreshness(freshEl, _optionsGeneratedAt);
 
         var result = handleWorkflowResponse(resp, grid, countEl, qualEl, statusEl, 'options');
         if (!result) return;
+        _cachedOptionsResp = resp;
         renderOptionsCandidates(grid, result.candidates, result.data);
+        _removeRefreshingBadge('options');
       })
       .catch(function (err) {
         console.error('[TMC] Failed to load options opportunities:', err);
@@ -1848,6 +1908,7 @@
   function runActivePipeline() {
     if (_activeRunning) return;
     _activeRunning = true;
+    _manualRefreshInProgress = true;
 
     var btn = document.getElementById('tmcRunActiveBtn');
     if (btn) { btn.textContent = 'Running...'; btn.disabled = true; }
@@ -1884,10 +1945,12 @@
         if (data.ok === false) {
           showActiveError('Pipeline error: ' + ((data.error || {}).message || 'unknown'), data);
           _lastManualActiveRenderAt = Date.now();
+          _manualRefreshInProgress = false;
           return;
         }
         renderActiveResults(data);
         _lastManualActiveRenderAt = Date.now();
+        _manualRefreshInProgress = false;
       })
       .catch(function (err) {
         var elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -1896,6 +1959,7 @@
         console.error('[TMC:DIAG] Active pipeline FAILED (standalone):', err, err.responseText || '');
         showActiveError('Request failed (' + elapsed + 's): ' + err.message, null);
         _lastManualActiveRenderAt = Date.now();
+        _manualRefreshInProgress = false;
       });
   }
 
@@ -1906,15 +1970,28 @@
    */
   function loadLatestActiveResults(opts) {
     var force = opts && opts.force;
-    // Guard: don't overwrite a recent manual render (Full Refresh / Run Active button)
+    // Guard: don't overwrite while a manual refresh is in progress (flag-based, primary)
+    if (!force && _manualRefreshInProgress) {
+      console.log('[TMC:DIAG] loadLatestActiveResults SKIPPED — manual refresh in progress (flag guard)');
+      return;
+    }
+    // Backup time-based guard (belt and suspenders)
     if (!force && _lastManualActiveRenderAt && (Date.now() - _lastManualActiveRenderAt < _MANUAL_RENDER_GUARD_MS)) {
       console.log('[TMC:DIAG] loadLatestActiveResults SKIPPED — manual render guard active (' +
         Math.round((Date.now() - _lastManualActiveRenderAt) / 1000) + 's ago)');
       return;
     }
     console.log('[TMC:DIAG] loadLatestActiveResults — fetching GET /results', { force: !!force });
-    fetch('/api/active-trade-pipeline/results')
+    // Show loading state if grid has no rendered cards yet
+    var activeGrid = document.getElementById('tmcActiveTradeGrid');
+    if (activeGrid && !activeGrid.querySelector('.trade-card')) {
+      activeGrid.innerHTML = '<div class="tmc-section-loading">Loading active trades…</div>';
+    }
+    var _activeAbort = new AbortController();
+    var _activeTimer = setTimeout(function () { _activeAbort.abort(); }, 10000);
+    fetch('/api/active-trade-pipeline/results', { signal: _activeAbort.signal })
       .then(function (r) {
+        clearTimeout(_activeTimer);
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
@@ -1929,6 +2006,12 @@
         renderActiveResults(data);
       })
       .catch(function (err) {
+        clearTimeout(_activeTimer);
+        if (err.name === 'AbortError') {
+          console.warn('[TMC:DIAG] loadLatestActiveResults TIMEOUT (10s)');
+          showActiveEmpty('Backend busy — try again in a moment');
+          return;
+        }
         console.error('[TMC:DIAG] loadLatestActiveResults FAILED:', err);
         showActiveEmpty('Failed to load results: ' + err.message);
       });
@@ -2035,6 +2118,10 @@
       return;
     }
 
+    // Cache for instant re-render on SPA navigation
+    _cachedActiveData = data;
+    _removeRefreshingBadge('active');
+
     var recs = data.recommendations || [];
 
     if (recs.length === 0) {
@@ -2055,9 +2142,8 @@
 
     var tsEl = document.getElementById('tmcActiveTimestamp');
     if (tsEl) {
-      var ts = data.generated_at || data.timestamp;
-      var display = ts ? new Date(ts).toLocaleTimeString() : new Date().toLocaleTimeString();
-      tsEl.textContent = 'Last updated: ' + display;
+      _activeGeneratedAt = data.generated_at || data.timestamp || new Date().toISOString();
+      updateFreshness(tsEl, _activeGeneratedAt);
     }
 
     _activeRenderedRows = sorted.slice();
@@ -2738,6 +2824,7 @@
   async function handleFullRefresh() {
     if (_fullRefreshRunning) return;
     _setFullRefreshEnabled(true);
+    _manualRefreshInProgress = true;
 
     var skipModel = false;
     var cb = document.getElementById('tmcSkipModel');
@@ -2888,6 +2975,7 @@
       // Still try to show portfolio balance error so the section doesn't stay as default HTML
       showBalanceError('Full Refresh failed before portfolio balance could run: ' + err.message, null);
     } finally {
+      _manualRefreshInProgress = false;
       _setFullRefreshEnabled(false);
     }
   }
@@ -3364,11 +3452,53 @@
       runBalanceBtn.addEventListener('click', function () { runPortfolioRebalance(); });
     }
 
-    // Load latest workflow outputs on page entry
+    // ── Render cached data immediately (instant re-display on SPA nav) ──
+    if (_cachedStockResp) {
+      try {
+        var stockGrid = document.getElementById('tmcStockGrid');
+        var stockCountEl = document.getElementById('tmcStockCount');
+        var stockQualEl = document.getElementById('tmcStockQuality');
+        var stockFreshEl = document.getElementById('tmcStockFreshness');
+        updateFreshness(stockFreshEl, _stockGeneratedAt);
+        var sr = handleWorkflowResponse(_cachedStockResp, stockGrid, stockCountEl, stockQualEl, null, 'stock');
+        if (sr) renderStockCandidates(stockGrid, sr.candidates, sr.data);
+        _showRefreshingBadge('stock');
+      } catch (_e) { console.warn('[TMC] Cached stock render failed:', _e); }
+    }
+    if (_cachedOptionsResp) {
+      try {
+        var optGrid = document.getElementById('tmcOptionsGrid');
+        var optCountEl = document.getElementById('tmcOptionsCount');
+        var optQualEl = document.getElementById('tmcOptionsQuality');
+        var optStatusEl = document.getElementById('tmcOptionsStatus');
+        var optBatchEl = document.getElementById('tmcOptionsBatchStatus');
+        var optFreshEl = document.getElementById('tmcOptionsFreshness');
+        updateFreshness(optFreshEl, _optionsGeneratedAt);
+        updateBatchStatusBadge(optBatchEl, _cachedOptionsResp.data ? _cachedOptionsResp.data.batch_status : null);
+        var or = handleWorkflowResponse(_cachedOptionsResp, optGrid, optCountEl, optQualEl, optStatusEl, 'options');
+        if (or) renderOptionsCandidates(optGrid, or.candidates, or.data);
+        _showRefreshingBadge('options');
+      } catch (_e) { console.warn('[TMC] Cached options render failed:', _e); }
+    }
+    if (_cachedActiveData) {
+      try {
+        renderActiveResults(_cachedActiveData);
+        _showRefreshingBadge('active');
+      } catch (_e) { console.warn('[TMC] Cached active render failed:', _e); }
+    }
+
+    // Load latest workflow outputs on page entry (background refresh)
     loadStockOpportunities();
     loadOptionsOpportunities();
     loadLatestActiveResults();
     if (_lastBalanceResult) displayPortfolioBalance(_lastBalanceResult);
+
+    // ── Periodic freshness-label refresh (every 15s) ──
+    _freshnessTimer = setInterval(function () {
+      if (_stockGeneratedAt) updateFreshness(document.getElementById('tmcStockFreshness'), _stockGeneratedAt);
+      if (_optionsGeneratedAt) updateFreshness(document.getElementById('tmcOptionsFreshness'), _optionsGeneratedAt);
+      if (_activeGeneratedAt) updateFreshness(document.getElementById('tmcActiveTimestamp'), _activeGeneratedAt);
+    }, 15000);
 
     // ── Orchestrator status indicator + auto-refresh ──
     var _orchLastCycle = null;
@@ -3399,6 +3529,7 @@
     window.BenTradeActiveViewCleanup = function () {
       if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
       if (_orchPollTimer) { clearInterval(_orchPollTimer); _orchPollTimer = null; }
+      if (_freshnessTimer) { clearInterval(_freshnessTimer); _freshnessTimer = null; }
       _stopStockCompletionPoll();
       _stopOptionsCompletionPoll();
       _activeRunning = false;

@@ -302,7 +302,10 @@ def create_app() -> FastAPI:
     )
     app.state.news_sentiment_service = news_sentiment_service
 
-    breadth_data_provider = BreadthDataProvider(tradier_client=tradier_client)
+    breadth_data_provider = BreadthDataProvider(
+        tradier_client=tradier_client,
+        polygon_client=polygon_client,
+    )
     breadth_service = BreadthService(
         data_provider=breadth_data_provider,
         cache=cache,

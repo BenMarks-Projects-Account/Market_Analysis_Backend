@@ -253,7 +253,7 @@ async def get_latest_stock_opportunities(
     Cache-Control: no-store ensures the browser always hits the backend.
     """
     data_dir = _get_data_dir(request)
-    model = load_latest_stock_output(data_dir)
+    model = await asyncio.to_thread(load_latest_stock_output, data_dir)
 
     if model is None:
         logger.debug("[TMC] stock/latest -> no_output (no pointer or output.json)")
@@ -288,7 +288,7 @@ async def get_latest_options_opportunities(
     Cache-Control: no-store ensures the browser always hits the backend.
     """
     data_dir = _get_data_dir(request)
-    model = load_latest_options_output(data_dir)
+    model = await asyncio.to_thread(load_latest_options_output, data_dir)
 
     if model is None:
         logger.debug("[TMC] options/latest -> no_output")

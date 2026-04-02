@@ -54,8 +54,17 @@ _log = logging.getLogger("bentrade.scanner_v2.families.vertical_spreads")
 _DEFAULT_GENERATION_CAP = 50_000
 
 # Maximum allowable width between strikes in dollars.
-# Filters out impractically wide spreads at construction time.
-_DEFAULT_MAX_WIDTH = 50.0
+# Used as absolute ceiling; dynamic cap based on underlying price
+# is computed at construction time (see MAX_WIDTH_PCT).
+_DEFAULT_MAX_WIDTH = 30.0
+
+# Max spread width as percentage of underlying price.
+# SPY at $560: 3% = $16.80 max width.  Applied in construct_candidates
+# alongside the absolute ceiling above.
+_DEFAULT_MAX_WIDTH_PCT = 0.03
+
+# Absolute floor — never cap narrower than this.
+_DEFAULT_MIN_WIDTH_ABS = 1.0
 
 # Minimum spread width in dollars.
 # Skips narrow spreads (e.g. $1-wide SPY) that yield marginal credit.
@@ -149,8 +158,17 @@ class VerticalSpreadsV2Scanner(BaseV2Scanner):
         short_is_higher: bool = config["short_is_higher"]
 
         generation_cap = int(context.get("generation_cap", _DEFAULT_GENERATION_CAP))
-        max_width = float(context.get("max_width", _DEFAULT_MAX_WIDTH))
+        max_width_abs = float(context.get("max_width", _DEFAULT_MAX_WIDTH))
+        max_width_pct = float(context.get("max_width_pct", _DEFAULT_MAX_WIDTH_PCT))
         min_width = float(context.get("min_width", _DEFAULT_MIN_WIDTH))
+
+        # Dynamic width cap: percentage of underlying, clamped to absolute bounds.
+        # Derived field: max_width = clamp(underlying × pct, MIN_WIDTH_ABS, max_width_abs)
+        if underlying_price and underlying_price > 0:
+            max_width = min(underlying_price * max_width_pct, max_width_abs)
+            max_width = max(max_width, _DEFAULT_MIN_WIDTH_ABS)
+        else:
+            max_width = max_width_abs
         short_delta_min = float(context.get("short_delta_min", _DEFAULT_SHORT_DELTA_MIN))
         short_delta_max = float(context.get("short_delta_max", _DEFAULT_SHORT_DELTA_MAX))
 

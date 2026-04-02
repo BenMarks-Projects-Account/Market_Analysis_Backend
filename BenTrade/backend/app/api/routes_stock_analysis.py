@@ -333,10 +333,13 @@ async def get_batch_quotes(
 
         out[sym] = {
             "last": last,
+            "bid": _safe_float(q.get("bid")),
+            "ask": _safe_float(q.get("ask")),
             "prevclose": prevclose,
             "open": opn,
             "change": change,
             "change_pct": change_pct,
+            "volume": q.get("volume"),
         }
 
     return {"quotes": out, "as_of": datetime.now(timezone.utc).isoformat()}

@@ -1892,6 +1892,37 @@ span.sr-status-skipped { background: rgba(170,210,224,0.04); color: rgba(170,210
 .tmc-empty-text {
   font-size: 13px;
 }
+/* ── Section loading indicator ─────────────────────────────────────────── */
+.tmc-section-loading {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 36px 20px;
+  color: var(--muted, #93a7b6);
+  font-size: 13px;
+  opacity: 0.7;
+}
+.tmc-section-loading::before {
+  content: '';
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(0,234,255,0.2);
+  border-top-color: var(--cyan, #00eaff);
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: -2px;
+  animation: tmc-spin 0.7s linear infinite;
+}
+@keyframes tmc-spin { to { transform: rotate(360deg); } }
+/* ── Refreshing badge (stale data indicator) ───────────────────────────── */
+.tmc-refreshing-badge {
+  font-size: 10px;
+  color: var(--cyan, #00eaff);
+  opacity: 0.7;
+  margin-left: 8px;
+  animation: tmc-pulse-refresh 1.5s ease-in-out infinite;
+}
+@keyframes tmc-pulse-refresh { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
 
 /* ── Active Trade Pipeline ──────────────────────────────────────────────── */
 .tmc-active-controls {

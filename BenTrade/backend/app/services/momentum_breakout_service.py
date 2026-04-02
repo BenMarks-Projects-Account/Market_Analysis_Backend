@@ -230,22 +230,35 @@ class MomentumBreakoutService:
     ) -> dict[str, Any] | None:
         """Fetch data, compute metrics, apply filters, score, and build trade shape."""
 
-        # -- Fetch OHLCV bars from Tradier --
-        data_source = "tradier"
+        # -- Fetch OHLCV bars: Polygon primary, Tradier fallback --
+        data_source = "polygon"
         end_date = datetime.now(timezone.utc).date()
         start_date = end_date - timedelta(days=cfg["lookback_days"])
 
         bars: list[dict[str, Any]] = []
-        try:
-            bars = await self.bds.tradier_client.get_daily_bars(
-                symbol,
-                start_date=start_date.isoformat(),
-                end_date=end_date.isoformat(),
-            )
-        except Exception as exc:
-            logger.warning("event=breakout_bars_fail symbol=%s error=%s", symbol, exc)
+        if self.bds.polygon_client is not None:
+            try:
+                bars = await self.bds.polygon_client.get_daily_bars(
+                    symbol,
+                    start_date=start_date.isoformat(),
+                    end_date=end_date.isoformat(),
+                )
+            except Exception as exc:
+                logger.warning("event=breakout_bars_fail symbol=%s source=polygon error=%s", symbol, exc)
 
-        # Fallback to BaseDataService history (close-only)
+        # Fallback 1: Tradier full OHLCV bars
+        if not bars:
+            data_source = "tradier"
+            try:
+                bars = await self.bds.tradier_client.get_daily_bars(
+                    symbol,
+                    start_date=start_date.isoformat(),
+                    end_date=end_date.isoformat(),
+                )
+            except Exception as exc:
+                logger.warning("event=breakout_bars_fail symbol=%s source=tradier error=%s", symbol, exc)
+
+        # Fallback 2: BaseDataService history (close-only)
         if not bars:
             data_source = "fallback"
             try:

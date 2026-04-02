@@ -33,8 +33,11 @@ _INCOME_KEYS = frozenset({
     "put_credit_spread", "call_credit_spread",
     "iron_condor", "iron_butterfly",
 })
+_BUTTERFLY_KEYS = frozenset({
+    "butterfly_debit", "iron_butterfly",
+})
 _DIRECTIONAL_KEYS = frozenset({
-    "put_debit", "call_debit", "butterfly_debit",
+    "put_debit", "call_debit",
 })
 _CALENDAR_KEYS = frozenset({
     "calendar_call_spread", "calendar_put_spread",
@@ -45,6 +48,8 @@ _CALENDAR_KEYS = frozenset({
 def _classify_strategy(scanner_key: str) -> str:
     if scanner_key in _INCOME_KEYS:
         return "income"
+    if scanner_key in _BUTTERFLY_KEYS:
+        return "butterfly"
     if scanner_key in _DIRECTIONAL_KEYS:
         return "directional"
     if scanner_key in _CALENDAR_KEYS:
@@ -65,6 +70,12 @@ DEFAULT_MANAGEMENT_POLICIES: dict[str, dict | None] = {
         "profit_target_pct": 0.75,      # close at 75% of max profit
         "stop_loss_multiplier": 1.0,    # cut at 1× debit paid (100% loss)
         "stop_loss_basis": "debit",     # "debit" or "width"
+        "min_dte_to_manage": 5,
+    },
+    "butterfly": {
+        "profit_target_pct": 0.50,      # 50% — butterflies rarely reach 75%
+        "stop_loss_multiplier": 1.0,    # cut at 1× debit (standard)
+        "stop_loss_basis": "debit",
         "min_dte_to_manage": 5,
     },
     "calendar": None,   # max_profit is None — no managed EV yet
@@ -199,6 +210,92 @@ def _directional_profit_target_probability(
     p_target = pop * target_difficulty * dte_factor * iv_factor
 
     return min(0.80, max(0.05, p_target))
+
+
+# ── Butterfly profit target probability ──────────────────────────────────
+
+def _butterfly_profit_target_probability(
+    pop: float,
+    profit_target_pct: float,
+    dte: int,
+    iv: float | None,
+) -> float:
+    """Butterfly profit target probability.
+
+    Butterflies profit from price PINNING near the center strike.
+    This is harder to achieve than directional movement — the price
+    must move to the right zone AND stay there.
+
+    The existing butterfly POP already accounts for the range
+    probability (breakeven_range_lognormal). The profit target
+    probability is lower than POP because you need the spread to
+    reach a specific value level, not just be profitable.
+    """
+    # Butterflies have lower profit target hit rates than verticals
+    # because the profit zone is narrow
+    target_difficulty = max(0.05, 1.00 - 1.40 * profit_target_pct)
+    # At 50% target: 0.30, at 75% target: -0.05 → clamped to 0.05
+
+    # DTE helps — more time for price to visit the zone
+    dte_factor = min(1.10, 0.80 + 0.20 * min(1.0, dte / 30.0))
+
+    # High IV hurts butterflies (more movement = less pinning)
+    iv_penalty = max(0.70, min(1.0, 0.25 / max(iv or 0.25, 0.10)))
+
+    p_target = pop * target_difficulty * dte_factor * iv_penalty
+    return min(0.50, max(0.02, p_target))
+
+
+# ── Directional stop loss probability (POP-based) ─────────────────
+
+def _directional_stop_loss_probability(
+    pop: float,
+    profit_target_pct: float,
+    dte: int,
+    iv: float | None,
+) -> float:
+    """POP-based stop loss probability for directional trades.
+
+    Debit spreads lose value from BOTH adverse price movement AND
+    theta decay.  Touch probability only captures the price component.
+    This model captures both by anchoring to (1 - POP).
+
+    Key insight: (1 - POP) is the probability of being unprofitable
+    at expiration.  Most of those losing trades will trigger the stop
+    loss BEFORE expiration because theta accelerates the loss.
+
+    Args:
+        pop: probability of profit (0-1)
+        profit_target_pct: used to avoid double-counting with p_target
+        dte: days to expiration
+        iv: implied volatility
+
+    Returns:
+        Raw (unconditioned) stop loss probability
+    """
+    # Base: (1 - POP) = probability of loss at expiration
+    base_loss_prob = 1.0 - pop
+
+    # Theta factor: shorter DTE → theta hits harder → more stops triggered early
+    # At 30 DTE (reference): 75% of losing trades hit stop before expiry
+    # At 14 DTE: 85% (theta accelerates in final 2 weeks)
+    # At 45 DTE: 65% (more time for recovery before theta kicks in)
+    if dte <= 14:
+        theta_factor = 0.85
+    elif dte <= 30:
+        # Linear interpolation: 14→0.85, 30→0.75
+        theta_factor = 0.85 - (dte - 14) * (0.10 / 16)
+    elif dte <= 60:
+        # Linear interpolation: 30→0.75, 60→0.60
+        theta_factor = 0.75 - (dte - 30) * (0.15 / 30)
+    else:
+        theta_factor = 0.60
+
+    # IV adjustment: higher IV → bigger moves → slightly more stops
+    iv_adj = min(1.1, max(0.9, (iv or 0.25) / 0.25))
+
+    p_stop = base_loss_prob * theta_factor * iv_adj
+    return min(0.85, max(0.05, p_stop))
 
 
 # ── Helpers for leg extraction ──────────────────────────────────────
@@ -431,6 +528,23 @@ def compute_managed_ev(
         # target fires the trade is closed.
         p_stop = p_stop_raw * (1.0 - p_target)
 
+    elif strategy_class == "butterfly":
+        # ── Butterfly: pin-probability model ─────────────────────
+        # Butterflies profit from price pinning near the center
+        # strike.  Lower profit target (50%) because the triangular
+        # payoff means even best-case realised profit is ~50% of max.
+        p_target = _butterfly_profit_target_probability(
+            pop, profit_target_pct, dte, iv,
+        )
+
+        # Stop loss — reuse POP-based directional model (debit-based)
+        p_stop_raw = _directional_stop_loss_probability(
+            pop, profit_target_pct, dte, iv,
+        )
+
+        # Race-to-barrier conditioning
+        p_stop = p_stop_raw * (1.0 - p_target)
+
     else:
         # ── Directional: POP-based model for profit target ───────
         # Touching the target price doesn't mean the spread is
@@ -440,16 +554,13 @@ def compute_managed_ev(
             pop, profit_target_pct, dte, iv,
         )
 
-        # Stop loss IS a price event — touch probability is correct
-        p_stop_raw = _touch_probability(
-            stop_loss_price, underlying_price, t_years, iv,
+        # Stop loss — POP-based model capturing theta + price decay.
+        # Debit spread stop losses are TIME+PRICE events: theta erodes
+        # spread value even without adverse price movement, so pure
+        # touch probability underestimates stop-loss frequency.
+        p_stop_raw = _directional_stop_loss_probability(
+            pop, profit_target_pct, dte, iv,
         )
-        if p_stop_raw is None:
-            return _null_result(
-                f"touch probability returned None for stop: "
-                f"stop_price={stop_loss_price}",
-                policy,
-            )
 
         # Race-to-barrier conditioning
         p_stop = p_stop_raw * (1.0 - p_target)

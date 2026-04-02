@@ -28,6 +28,7 @@ _VALID_STOCK_STRATEGIES = frozenset([
     "stock_momentum_breakout",
     "stock_mean_reversion",
     "stock_volatility_expansion",
+    "company_evaluator_buy",
 ])
 
 _SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9.\-]{0,7}$")

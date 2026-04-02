@@ -160,6 +160,7 @@ class V2RecomputedMath:
     management_policy_used: dict | None = None  # the policy that was applied
     ev_model: str | None = None              # "three_outcome_v1"
     managed_expected_ror: float | None = None  # ev_managed / max_loss
+    managed_ev_note: str | None = None       # reason when managed EV is null
 
     notes: dict[str, str] = field(default_factory=dict)
     """Per-field computation notes / flags.

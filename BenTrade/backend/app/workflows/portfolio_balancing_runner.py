@@ -271,7 +271,7 @@ async def run_portfolio_balance_workflow(
         "account_mode": account_mode,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "duration_ms": duration_ms,
-        "account_equity": account_balance.get("equity"),
+        "account_equity": account_balance.get("equity") or account_balance.get("total_equity"),
         "regime_label": regime_label,
         "rebalance_plan": rebalance_plan,
         "active_trade_summary": {
@@ -344,7 +344,7 @@ def _build_portfolio_state(
                 {"by_underlying": {"items": []}},
             )
 
-        equity = float(account_balance.get("equity") or 0) or None
+        equity = float(account_balance.get("equity") or account_balance.get("total_equity") or 0) or None
         exposure = build_portfolio_exposure(positions, account_equity=equity)
 
         greeks_section = exposure.get("greeks_exposure", {})

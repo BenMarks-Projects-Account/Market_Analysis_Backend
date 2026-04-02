@@ -108,6 +108,43 @@ STAGE_KEYS: tuple[str, ...] = (
 # After model analysis + filter, final output is MODEL_ANALYSIS_TOP_N_OUTPUT (10).
 DEFAULT_TOP_N: int = 30
 
+# Per-strategy diversity cap: no single scanner_key can fill more than
+# this many slots in the top-N output.  With 8-10 possible scanner_keys,
+# a cap of 8 allows ~27% of the top 30 for a dominant strategy while
+# guaranteeing at least 22 slots for other strategies.
+MAX_PER_STRATEGY: int = 8
+
+
+def _apply_strategy_cap(
+    ranked_candidates: list[dict[str, Any]],
+    top_n: int,
+    max_per_strategy: int = 8,
+) -> list[dict[str, Any]]:
+    """Select top_n candidates with a per-strategy diversity cap.
+
+    Walks the ranked list top-down. For each candidate, checks if
+    its scanner_key has already filled its cap. If so, skips to the
+    next candidate. This ensures no single strategy type monopolizes
+    the output while preserving the overall ranking order.
+    """
+    selected: list[dict[str, Any]] = []
+    strategy_counts: dict[str, int] = {}
+
+    for candidate in ranked_candidates:
+        if len(selected) >= top_n:
+            break
+
+        scanner_key = candidate.get("scanner_key", "unknown")
+        current_count = strategy_counts.get(scanner_key, 0)
+
+        if current_count >= max_per_strategy:
+            continue
+
+        selected.append(candidate)
+        strategy_counts[scanner_key] = current_count + 1
+
+    return selected
+
 
 def _default_symbols() -> tuple[str, ...]:
     """Resolve the default options scan universe from settings.
@@ -486,6 +523,18 @@ def _extract_compact_candidate(cand: dict[str, Any]) -> dict[str, Any]:
             "expected_ror": math.get("expected_ror"),   # ev / |max_loss|
             "kelly": math.get("kelly"),
             "breakeven": math.get("breakeven", []),
+            # Managed EV (three-outcome model) from Phase E
+            "ev_managed": math.get("ev_managed"),
+            "ev_managed_per_day": math.get("ev_managed_per_day"),
+            "managed_profit_target": math.get("managed_profit_target"),
+            "managed_stop_loss": math.get("managed_stop_loss"),
+            "p_profit_target": math.get("p_profit_target"),
+            "p_stop_loss": math.get("p_stop_loss"),
+            "p_expiration": math.get("p_expiration"),
+            "management_policy_used": math.get("management_policy_used"),
+            "ev_model": math.get("ev_model"),
+            "managed_expected_ror": math.get("managed_expected_ror"),
+            "managed_ev_note": math.get("managed_ev_note"),
         },
         # Validation summaries — preserves pass/warn/fail reasoning
         "structural_validation": {
@@ -1324,7 +1373,7 @@ def _stage_enrich_evaluate(
         # the current conditions naturally rise to the top.
         regime_label = consumer_summary.get("market_state", "NEUTRAL") if consumer_summary else "NEUTRAL"
         ranked = rank_candidates(credible, regime_label=regime_label)
-        selected_credible = ranked[:config.top_n]
+        selected_credible = _apply_strategy_cap(ranked, config.top_n, max_per_strategy=MAX_PER_STRATEGY)
 
         stage_data["enriched_candidates"] = selected_credible
 
