@@ -1,6 +1,8 @@
 import logging
+import time
 from datetime import datetime, timezone
 
+import httpx
 from fastapi import APIRouter, Request
 
 from app.models.schemas import HealthResponse
@@ -8,6 +10,15 @@ from app.models.schemas import HealthResponse
 logger = logging.getLogger("bentrade.routes_health")
 
 router = APIRouter(prefix="/api/health", tags=["health"])
+
+# ── Health probe timeout (seconds) — applies to each API canary call ───
+_HEALTH_PROBE_TIMEOUT_S = 3.0
+
+# ── /sources response-level cache ──────────────────────────────────────
+# Prevents rapid navigations from firing redundant external probes.
+_sources_cache: dict | None = None
+_sources_cache_time: float = 0.0
+_SOURCES_CACHE_TTL_S = 30  # return cached result for 30s
 
 
 @router.get("", response_model=HealthResponse)
@@ -17,8 +28,8 @@ async def health(request: Request) -> HealthResponse:
     polygon_ok = await request.app.state.polygon_client.health()
     fred_ok = await request.app.state.fred_client.health()
 
-    from app.services.model_health_service import check_model_health
-    model_health = check_model_health()
+    from app.services.model_health_service import check_model_health_async
+    model_health = await check_model_health_async()
 
     upstream = {
         "tradier": "ok" if tradier_ok else "down",
@@ -32,6 +43,13 @@ async def health(request: Request) -> HealthResponse:
 
 @router.get("/sources")
 async def sources_health(request: Request) -> dict:
+    global _sources_cache, _sources_cache_time
+
+    # Return cached response if fresh (prevents rapid-nav probe storms)
+    now = time.monotonic()
+    if _sources_cache is not None and (now - _sources_cache_time) < _SOURCES_CACHE_TTL_S:
+        return _sources_cache
+
     try:
         await request.app.state.base_data_service.refresh_source_health_probe()
     except Exception:
@@ -76,10 +94,10 @@ async def sources_health(request: Request) -> dict:
             }
         )
 
-    # ── Model Endpoint health ──────────────────────────────────────
-    from app.services.model_health_service import check_model_health
+    # ── Model Endpoint health (non-blocking — runs in thread) ─────
+    from app.services.model_health_service import check_model_health_async
 
-    model_health = check_model_health()
+    model_health = await check_model_health_async()
 
     model_status_mapped = "ok" if model_health["status"] == "healthy" else "down"
     logger.info(
@@ -112,7 +130,50 @@ async def sources_health(request: Request) -> dict:
         }
     )
 
-    return {
+    # ── FMP health (via Company Evaluator admin endpoint) ──────────
+    from app.api.routes_company_evaluator import _base_url as _ce_base_url
+
+    fmp_status = "down"
+    fmp_notes: list[str] = []
+    fmp_latency: int | None = None
+    try:
+        _fmp_start = time.monotonic()
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            fmp_resp = await client.get(f"{_ce_base_url()}/api/admin/fmp-status")
+        fmp_latency = int((time.monotonic() - _fmp_start) * 1000)
+        if fmp_resp.status_code == 200:
+            fmp_data = fmp_resp.json()
+            if fmp_data.get("enabled"):
+                fmp_status = "ok"
+                calls = fmp_data.get("calls_today")
+                limit = fmp_data.get("rate_limit_per_day")
+                if calls is not None and limit is not None:
+                    fmp_notes.append(f"{calls}/{limit} calls")
+            else:
+                fmp_status = "degraded"
+                fmp_notes.append("disabled")
+        else:
+            fmp_notes.append(f"HTTP {fmp_resp.status_code}")
+    except Exception as exc:
+        fmp_notes.append(str(exc)[:80])
+
+    sources.append(
+        {
+            "name": "FMP",
+            "status": fmp_status,
+            "latency_ms": fmp_latency,
+            "last_ok": now_iso if fmp_status == "ok" else None,
+            "notes": fmp_notes,
+        }
+    )
+
+    result = {
         "as_of": now_iso,
         "sources": sources,
     }
+
+    # Update cache
+    _sources_cache = result
+    _sources_cache_time = time.monotonic()
+
+    return result

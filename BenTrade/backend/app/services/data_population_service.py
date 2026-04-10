@@ -86,6 +86,8 @@ class DataPopulationService:
         self._status = PopulationStatus()
         self._lock = asyncio.Lock()
         self._loop_task: asyncio.Task | None = None
+        self._initial_task: asyncio.Task | None = None
+        self._trigger_task: asyncio.Task | None = None
         self._stopped = False
 
     @property
@@ -101,7 +103,8 @@ class DataPopulationService:
         automatically — call ``start_legacy_loop()`` if you need it.
         """
         self._stopped = False
-        asyncio.create_task(self._run_once())
+        self._initial_task = asyncio.create_task(self._run_once())
+        self._initial_task.add_done_callback(self._task_done)
         logger.info("event=data_population_initial_run_started")
 
     async def start_legacy_loop(self) -> None:
@@ -129,8 +132,16 @@ class DataPopulationService:
         if self._status.phase in ("market_data", "model_analysis"):
             logger.info("event=data_population_trigger_skipped reason=already_running")
             return self._status
-        asyncio.create_task(self._run_once())
+        self._trigger_task = asyncio.create_task(self._run_once())
+        self._trigger_task.add_done_callback(self._task_done)
         return self._status
+
+    def _task_done(self, task: asyncio.Task) -> None:
+        """Log if a background task exits unexpectedly."""
+        if task.cancelled():
+            logger.info("Background task cancelled")
+        elif task.exception():
+            logger.error("Background task crashed: %s", task.exception())
 
     @staticmethod
     def _cycle_interval() -> int:

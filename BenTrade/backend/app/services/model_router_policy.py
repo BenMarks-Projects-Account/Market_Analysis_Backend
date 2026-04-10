@@ -118,40 +118,111 @@ class ProviderCircuitBreaker:
 
     Cooldown progression: base × 2^(failures - threshold), capped at max.
     Default: 30s → 60s → 120s → 240s → 300s cap.
+
+    Failure weighting:
+        Hard failures (connection error, DNS) count as 1.0.
+        Soft failures (timeouts) count as 0.5 — the provider is up but
+        overwhelmed, not down.  This means 6 timeouts are needed to trip
+        the circuit instead of 3 connection errors.
+
+    Time decay:
+        Failure weight decays toward zero over ``decay_window_s`` seconds
+        of quiet (no new failures).  This allows providers to naturally
+        recover after a burst of load without waiting for the full
+        circuit-open/half-open cycle.
     """
+
+    # Failure weight constants
+    HARD_FAILURE_WEIGHT: float = 1.0
+    SOFT_FAILURE_WEIGHT: float = 0.5
 
     def __init__(
         self,
         failure_threshold: int = 3,
         base_cooldown: float = 30.0,
         max_cooldown: float = 300.0,
+        decay_window_s: float = 120.0,
     ) -> None:
         self._lock = _threading.Lock()
-        self._failures: dict[str, int] = {}
+        self._failure_weight: dict[str, float] = {}
+        self._last_failure_time: dict[str, float] = {}
         self._open_until: dict[str, float] = {}
         self._threshold = failure_threshold
         self._base = base_cooldown
         self._max = max_cooldown
+        self._decay_window = decay_window_s
+        # Legacy alias for external access (admin endpoints, etc.)
+        self._failures = self._failure_weight
+
+    def _decayed_weight(self, provider_id: str, now: float) -> float:
+        """Return the effective failure weight after time decay.
+
+        Linearly decays from last recorded weight to zero over
+        ``_decay_window`` seconds since the last failure.
+        Only applies decay when at least 1 second has elapsed to
+        avoid float precision issues during rapid-fire calls.
+        """
+        raw = self._failure_weight.get(provider_id, 0.0)
+        if raw <= 0:
+            return 0.0
+        last = self._last_failure_time.get(provider_id, now)
+        elapsed = now - last
+        if elapsed >= self._decay_window:
+            return 0.0
+        if elapsed < 1.0:
+            return raw
+        decay_fraction = elapsed / self._decay_window
+        return raw * (1.0 - decay_fraction)
 
     def record_success(self, provider_id: str) -> None:
         """Reset failure count and close the circuit."""
         with self._lock:
-            self._failures.pop(provider_id, None)
+            old_weight = self._failure_weight.pop(provider_id, 0.0)
+            was_open = provider_id in self._open_until
+            self._last_failure_time.pop(provider_id, None)
             self._open_until.pop(provider_id, None)
+            if old_weight > 0 or was_open:
+                logger.info(
+                    "event=circuit_closed provider=%s old_weight=%.1f was_open=%s",
+                    provider_id, old_weight, was_open,
+                )
 
-    def record_failure(self, provider_id: str) -> float | None:
-        """Increment failure count; open circuit if threshold exceeded.
+    def record_failure(
+        self,
+        provider_id: str,
+        *,
+        is_timeout: bool = False,
+    ) -> float | None:
+        """Record a failure and possibly open the circuit.
+
+        Args:
+            provider_id: Provider that failed.
+            is_timeout: If True, counts at half weight (provider overwhelmed,
+                        not down).
 
         Returns the cooldown duration in seconds if the circuit just
         opened, or ``None`` if the circuit is still closed.
         """
+        weight = self.SOFT_FAILURE_WEIGHT if is_timeout else self.HARD_FAILURE_WEIGHT
+
         with self._lock:
-            count = self._failures.get(provider_id, 0) + 1
-            self._failures[provider_id] = count
-            if count >= self._threshold:
-                exp = min(count - self._threshold, 5)
+            now = _time.time()
+            # Apply time decay to existing weight before adding new failure
+            effective = self._decayed_weight(provider_id, now) + weight
+            self._failure_weight[provider_id] = effective
+            self._last_failure_time[provider_id] = now
+
+            if effective >= self._threshold:
+                # Compute cooldown based on how far over threshold
+                excess = effective - self._threshold
+                exp = min(int(excess), 5)
                 cooldown = min(self._base * (2 ** exp), self._max)
-                self._open_until[provider_id] = _time.time() + cooldown
+                self._open_until[provider_id] = now + cooldown
+                logger.warning(
+                    "event=circuit_opened provider=%s cooldown_s=%.0f "
+                    "failure_weight=%.1f threshold=%d is_timeout=%s",
+                    provider_id, cooldown, effective, self._threshold, is_timeout,
+                )
                 return cooldown
             return None
 
@@ -166,6 +237,12 @@ class ProviderCircuitBreaker:
         with self._lock:
             deadline = self._open_until.get(provider_id)
             if deadline is None:
+                # Also check time decay: if enough time passed since last
+                # failure, silently clear accumulated weight
+                now = _time.time()
+                if self._decayed_weight(provider_id, now) <= 0:
+                    self._failure_weight.pop(provider_id, None)
+                    self._last_failure_time.pop(provider_id, None)
                 return False
             if _time.time() >= deadline:
                 # Half-open: clear deadline so one probe attempt is allowed
@@ -176,12 +253,15 @@ class ProviderCircuitBreaker:
     def status(self, provider_id: str) -> dict:
         """Return circuit breaker status for a provider (admin API)."""
         with self._lock:
-            failures = self._failures.get(provider_id, 0)
-            deadline = self._open_until.get(provider_id)
             now = _time.time()
+            raw_weight = self._failure_weight.get(provider_id, 0.0)
+            effective_weight = self._decayed_weight(provider_id, now)
+            deadline = self._open_until.get(provider_id)
             is_open = deadline is not None and now < deadline
             return {
-                "consecutive_failures": failures,
+                "consecutive_failures": round(effective_weight, 1),
+                "failure_weight": round(effective_weight, 1),
+                "raw_weight": round(raw_weight, 1),
                 "circuit_open": is_open,
                 "cooldown_remaining_s": round(max(0, (deadline or 0) - now), 1) if is_open else 0,
             }
@@ -190,11 +270,15 @@ class ProviderCircuitBreaker:
         """Reset circuit state.  If *provider_id* is None, reset all."""
         with self._lock:
             if provider_id is None:
-                self._failures.clear()
+                self._failure_weight.clear()
+                self._last_failure_time.clear()
                 self._open_until.clear()
+                logger.info("event=circuit_reset_all")
             else:
-                self._failures.pop(provider_id, None)
+                self._failure_weight.pop(provider_id, None)
+                self._last_failure_time.pop(provider_id, None)
                 self._open_until.pop(provider_id, None)
+                logger.info("event=circuit_reset provider=%s", provider_id)
 
 
 # Module-level singleton — lives for the process lifetime.
@@ -637,6 +721,19 @@ def route_and_execute(
         pid: probes[pid].state for pid in candidate_order if pid in probes
     }
 
+    # -- Log provider status summary for diagnostics -------------------------
+    for pid in candidate_order:
+        cb_status = cb.status(pid)
+        probe_state = provider_states.get(pid, "no_probe")
+        circuit_open = cb_status.get("circuit_open", False)
+        weight = cb_status.get("failure_weight", 0)
+        logger.info(
+            "event=provider_status provider=%s probe_state=%s "
+            "circuit_open=%s failure_weight=%.1f cooldown_s=%.0f",
+            pid, probe_state, circuit_open, weight,
+            cb_status.get("cooldown_remaining_s", 0),
+        )
+
     # -- Walk candidates and dispatch ----------------------------------------
     attempted_providers: list[str] = []
     selected_provider: str | None = None
@@ -785,12 +882,8 @@ def route_and_execute(
                 })
 
                 retryable = should_attempt_next_provider(result)
-                cooldown = cb.record_failure(pid)
-                if cooldown:
-                    logger.warning(
-                        "event=circuit_opened provider=%s cooldown_s=%.0f failures=%d",
-                        pid, cooldown, cb._failures.get(pid, 0),
-                    )
+                is_timeout = result.error_code == "timeout"
+                cooldown = cb.record_failure(pid, is_timeout=is_timeout)
                 emit_provider_failed(
                     request_id, pid, result.error_code, retryable=retryable,
                 )

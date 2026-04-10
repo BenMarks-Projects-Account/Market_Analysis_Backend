@@ -499,6 +499,12 @@ def create_app() -> FastAPI:
 
     @app.on_event("shutdown")
     async def _shutdown() -> None:
+        from app.workflows.continuous_workflow_orchestrator import get_orchestrator
+        try:
+            orchestrator = get_orchestrator()
+            await orchestrator.stop()
+        except RuntimeError:
+            pass  # orchestrator was never initialised
         await app.state.data_population_service.stop()
         await app.state.http_client.aclose()
 

@@ -308,18 +308,18 @@
                 <span class="nav-item-sub">Market overview command center</span>
               </span>
             </a>
-            <a class="nav-link" href="#/active-trade-pipeline" data-route="active-trade-pipeline">
-              <span class="nav-dot"></span>
-              <span class="nav-item-text">
-                <span class="nav-item-title">Active Trade Pipeline</span>
-                <span class="nav-item-sub">Position reassessment workflow</span>
-              </span>
-            </a>
             <a class="nav-link" href="#/trade-management" data-route="trade-management">
               <span class="nav-dot"></span>
               <span class="nav-item-text">
                 <span class="nav-item-title">Trade Management Center</span>
                 <span class="nav-item-sub">Candidate review + execution</span>
+              </span>
+            </a>
+            <a class="nav-link" href="#/company-evaluator" data-route="company-evaluator">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Company Evaluator</span>
+                <span class="nav-item-sub">Ranked fundamental evaluations</span>
               </span>
             </a>
             <a class="nav-link" href="#/notifications" data-route="notifications">
@@ -330,11 +330,42 @@
               </span>
               <span id="nav-notif-badge" class="badge bg-danger ms-1" style="display:none; font-size:0.7rem;">0</span>
             </a>
-            <a class="nav-link" href="#/company-evaluator" data-route="company-evaluator">
+          </section>
+
+          <section class="nav-group" aria-label="Trading">
+            <div class="nav-group-header">Trading</div>
+            <div class="nav-group-desc">Execution &amp; Monitoring</div>
+            <a class="nav-link" href="#/active-trade" data-route="active-trade">
               <span class="nav-dot"></span>
               <span class="nav-item-text">
-                <span class="nav-item-title">Company Evaluator</span>
-                <span class="nav-item-sub">Ranked fundamental evaluations</span>
+                <span class="nav-item-title">Active Trades</span>
+                <span class="nav-item-sub">Trading → Broker positions/orders</span>
+              </span>
+            </a>
+            <a class="nav-link" href="#/trade-testing" data-route="trade-testing">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Trade Testing Workbench</span>
+                <span class="nav-item-sub">Trading → What-if lab + scenarios</span>
+              </span>
+            </a>
+          </section>
+
+          <section class="nav-group" aria-label="Risk">
+            <div class="nav-group-header">Risk</div>
+            <div class="nav-group-desc">Institutional controls</div>
+            <a class="nav-link" href="#/risk-capital" data-route="risk-capital">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Risk &amp; Capital</span>
+                <span class="nav-item-sub">Risk → Policies + limits</span>
+              </span>
+            </a>
+            <a class="nav-link" href="#/portfolio-risk" data-route="portfolio-risk">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Portfolio Risk Matrix</span>
+                <span class="nav-item-sub">Risk → Greeks + scenarios</span>
               </span>
             </a>
           </section>
@@ -473,44 +504,6 @@
               <span class="nav-item-text">
                 <span class="nav-item-title">Income (Covered Call / CSP)</span>
                 <span class="nav-item-sub">Analysis → Options → Income</span>
-              </span>
-            </a>
-          </section>
-
-          <section class="nav-group" aria-label="Trading">
-            <div class="nav-group-header">Trading</div>
-            <div class="nav-group-desc">Execution &amp; Monitoring</div>
-            <a class="nav-link" href="#/active-trade" data-route="active-trade">
-              <span class="nav-dot"></span>
-              <span class="nav-item-text">
-                <span class="nav-item-title">Active Trades</span>
-                <span class="nav-item-sub">Trading → Broker positions/orders</span>
-              </span>
-            </a>
-            <a class="nav-link" href="#/trade-testing" data-route="trade-testing">
-              <span class="nav-dot"></span>
-              <span class="nav-item-text">
-                <span class="nav-item-title">Trade Testing Workbench</span>
-                <span class="nav-item-sub">Trading → What-if lab + scenarios</span>
-              </span>
-            </a>
-          </section>
-
-          <section class="nav-group" aria-label="Risk">
-            <div class="nav-group-header">Risk</div>
-            <div class="nav-group-desc">Institutional controls</div>
-            <a class="nav-link" href="#/risk-capital" data-route="risk-capital">
-              <span class="nav-dot"></span>
-              <span class="nav-item-text">
-                <span class="nav-item-title">Risk &amp; Capital</span>
-                <span class="nav-item-sub">Risk → Policies + limits</span>
-              </span>
-            </a>
-            <a class="nav-link" href="#/portfolio-risk" data-route="portfolio-risk">
-              <span class="nav-dot"></span>
-              <span class="nav-item-text">
-                <span class="nav-item-title">Portfolio Risk Matrix</span>
-                <span class="nav-item-sub">Risk → Greeks + scenarios</span>
               </span>
             </a>
           </section>
@@ -836,8 +829,7 @@
   <script src="assets/js/pages/flows_positioning.js?v=20260311a"></script>
   <script src="assets/js/pages/liquidity_conditions.js?v=20260311a"></script>
   <script src="assets/js/pages/scanner_review.js?v=20260312a"></script>
-  <script src="assets/js/pages/active_trade_pipeline.js?v=20260312a"></script>
-  <script src="assets/js/pages/trade_management_center.js?v=20260311a"></script>
+  <script src="assets/js/pages/trade_management_center.js?v=20260403a"></script>
   <script src="assets/js/pages/notifications.js?v=20260326a"></script>
   <script src="assets/js/pages/company_evaluator.js?v=20260326a"></script>
   <script src="assets/js/app.js?v=20260217a"></script>

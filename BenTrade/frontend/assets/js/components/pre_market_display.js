@@ -116,11 +116,11 @@
     _intelTimer = setInterval(_loadBriefing, 60000);
     _indexTimer = setInterval(function(){
       if(!_indexSvg) return;
-      Promise.all(['es','nq','rty','ym'].map(function(sym){ return _fetchBars(sym, '5m', 1); }))
-        .then(function(indexBars){
+      Promise.all(['es','nq','rty','ym'].map(function(sym){ return _fetchBars(sym, '5m', 2); }))
+        .then(function(indexResults){
           var labels = ['ES','NQ','RTY','YM'];
           var colors = [_CT.index.es, _CT.index.nq, _CT.index.rty, _CT.index.ym];
-          var lines = indexBars.map(function(bars, idx){ return { label: labels[idx], color: colors[idx], data: _normalizePct(bars) }; }).filter(function(l){ return l.data.length > 0; });
+          var lines = indexResults.map(function(res, idx){ return { label: labels[idx], color: colors[idx], data: _normalizePct(res.bars, res.prior_close) }; }).filter(function(l){ return l.data.length > 0; });
           _renderLineChart(_indexSvg, lines, { yLabel: '% Change', showMarketOpen: true });
         }).catch(function(){});
     }, 60000);
@@ -272,18 +272,21 @@
   function _fetchBars(instrument, timeframe, days){
     return fetch('/api/pre-market/bars/' + encodeURIComponent(instrument) + '?timeframe=' + encodeURIComponent(timeframe) + '&days=' + days)
       .then(function(res){
-        if(!res.ok) return [];
-        return res.json().then(function(data){ return Array.isArray(data.bars) ? data.bars : []; });
+        if(!res.ok) return { bars: [], prior_close: null };
+        return res.json().then(function(data){
+          return { bars: Array.isArray(data.bars) ? data.bars : [], prior_close: data.prior_close || null };
+        });
       })
       .catch(function(e){
         console.warn('[PreMarket] bars fetch failed for ' + instrument + ':', e && e.message || e);
-        return [];
+        return { bars: [], prior_close: null };
       });
   }
 
-  function _normalizePct(bars){
+  function _normalizePct(bars, priorClose){
     if(!bars.length) return [];
-    var baseline = bars[0].close;
+    // Use prior session close as baseline when available; fall back to first bar
+    var baseline = (priorClose && priorClose !== 0) ? priorClose : bars[0].close;
     if(!baseline || baseline === 0) return [];
     return bars.map(function(b){
       return { timestamp: b.timestamp || b.date, value: ((b.close - baseline) / baseline) * 100 };
@@ -379,6 +382,16 @@
 
     var yFor = function(v){ return margin.top + (1 - ((v - minV) / span)) * plotH; };
 
+    // Global time axis — position all data by timestamp, not array index
+    var allTimes = allData.map(function(d){ return new Date(d.timestamp).getTime(); }).filter(function(t){ return !isNaN(t); });
+    var minTime = Math.min.apply(null, allTimes);
+    var maxTime = Math.max.apply(null, allTimes);
+    var timeSpan = Math.max(maxTime - minTime, 1);
+    var xForTime = function(ts){
+      var t = typeof ts === 'number' ? ts : new Date(ts).getTime();
+      return margin.left + ((t - minTime) / timeSpan) * plotW;
+    };
+
     // Y grid + labels
     var yTicks = [0, 0.25, 0.5, 0.75, 1].map(function(r){
       var v = maxV - span * r;
@@ -398,13 +411,12 @@
       zeroLine = '<line x1="' + margin.left + '" y1="' + zy.toFixed(1) + '" x2="' + (width - margin.right) + '" y2="' + zy.toFixed(1) + '" stroke="' + _CT.zeroLine + '" stroke-width="0.8" stroke-dasharray="4,3" shape-rendering="crispEdges"/>';
     }
 
-    // Build line paths per series
+    // Build line paths per series — x positioned by timestamp
     var linesSvg = '';
     var legendItems = [];
     lines.forEach(function(series){
       if(!series.data.length) return;
-      var xFor = function(i){ return margin.left + (i / Math.max(series.data.length - 1, 1)) * plotW; };
-      var pts = series.data.map(function(d, i){ return { x: xFor(i), y: yFor(d.value) }; });
+      var pts = series.data.map(function(d){ return { x: xForTime(d.timestamp), y: yFor(d.value) }; });
 
       // Catmull-Rom smooth curve
       var path;
@@ -434,19 +446,25 @@
       legendItems.push(series);
     });
 
-    // X labels (first/last timestamp)
+    // X labels — evenly spaced from time range (~6-hour intervals for 48h)
     var xLabels = '';
-    if(allData.length > 1){
-      var firstTs = allData[0].timestamp;
-      var lastTs = allData[allData.length - 1].timestamp;
-      var fmtTs = function(ts){
-        if(!ts) return '';
-        var d = new Date(ts);
-        return isNaN(d.getTime()) ? String(ts).slice(0, 10) : (d.getMonth() + 1) + '/' + d.getDate() + ' ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+    if(timeSpan > 1){
+      var fmtTime = function(ms){
+        var d = new Date(ms);
+        return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
       };
       var yBase = height - margin.bottom + 14;
-      xLabels = '<text x="' + margin.left + '" y="' + yBase + '" fill="' + _CT.xLabel + '" font-size="8.5" font-family="var(--font-body)">' + fmtTs(firstTs) + '</text>';
-      xLabels += '<text x="' + (width - margin.right) + '" y="' + yBase + '" text-anchor="end" fill="' + _CT.xLabel + '" font-size="8.5" font-family="var(--font-body)">' + fmtTs(lastTs) + '</text>';
+      // Choose step: ~6h for 48h, ~3h for 24h, ~1h for <12h
+      var hoursInWindow = timeSpan / 3600000;
+      var stepHours = hoursInWindow > 36 ? 6 : hoursInWindow > 16 ? 3 : 1;
+      var stepMs = stepHours * 3600000;
+      // Snap first label to the nearest stepHours boundary
+      var firstLabel = Math.ceil(minTime / stepMs) * stepMs;
+      for(var labelTime = firstLabel; labelTime <= maxTime; labelTime += stepMs){
+        var lx = xForTime(labelTime);
+        if(lx < margin.left + 10 || lx > width - margin.right - 10) continue;
+        xLabels += '<text x="' + lx.toFixed(1) + '" y="' + yBase + '" text-anchor="middle" fill="' + _CT.xLabel + '" font-size="8.5" font-family="var(--font-body)">' + fmtTime(labelTime) + '</text>';
+      }
     }
 
     // Legend row at top
@@ -457,35 +475,50 @@
       legendSvg += '<text x="' + (lx + 18) + '" y="15" fill="' + _CT.legendText + '" font-size="9" font-family="var(--font-body)">' + _esc(s.label) + '</text>';
     });
 
-    // Market open + close vertical lines for 24h charts
-    var marketOpenLine = '';
-    var marketCloseLine = '';
-    if(opts && opts.showMarketOpen && lines[0] && lines[0].data.length){
-      var series0 = lines[0].data;
-      for(var mi = 0; mi < series0.length; mi++){
-        var ts = series0[mi].timestamp;
-        if(!ts) continue;
-        var dd = new Date(ts);
-        if(isNaN(dd.getTime())) continue;
-        var utcH = dd.getUTCHours();
-        var utcM = dd.getUTCMinutes();
-        // Market open: 9:30 AM ET = 14:30 UTC (EST) or 13:30 UTC (EDT)
-        if(!marketOpenLine && ((utcH === 14 && utcM === 30) || (utcH === 13 && utcM === 30))){
-          var moX = margin.left + (mi / Math.max(series0.length - 1, 1)) * plotW;
-          marketOpenLine = '<line x1="' + moX.toFixed(1) + '" y1="' + margin.top + '" x2="' + moX.toFixed(1) + '" y2="' + (height - margin.bottom) + '" stroke="rgba(255,199,88,0.4)" stroke-width="1" stroke-dasharray="5,3"/>';
-          marketOpenLine += '<text x="' + (moX + 3).toFixed(1) + '" y="' + (margin.top + 10) + '" fill="rgba(255,199,88,0.6)" font-size="8" font-family="var(--font-body)">Open 9:30</text>';
+    // Market open + close vertical lines — positioned by exact timestamp
+    var marketLines = '';
+    if(opts && opts.showMarketOpen){
+      // Determine ET offset: EDT (Mar-Nov) = UTC-4, EST (Nov-Mar) = UTC-5
+      // Check DST for the midpoint of the visible window
+      var midDate = new Date((minTime + maxTime) / 2);
+      var jan = new Date(midDate.getFullYear(), 0, 1);
+      var jul = new Date(midDate.getFullYear(), 6, 1);
+      // getTimezoneOffset is inverted: more negative = further ahead of UTC
+      // US Eastern: EST=-5 (offset=300), EDT=-4 (offset=240)
+      // We compute based on the data, not the browser timezone
+      // April is EDT (UTC-4), so market open = 13:30 UTC, close = 20:00 UTC
+      var etOffsetHours = (midDate.getMonth() >= 2 && midDate.getMonth() <= 10) ? 4 : 5;
+
+      // Iterate calendar days in the visible window
+      var dayStart = new Date(minTime);
+      dayStart.setUTCHours(0, 0, 0, 0);
+      var dayEnd = new Date(maxTime);
+      dayEnd.setUTCHours(23, 59, 59, 999);
+
+      for(var dd = new Date(dayStart); dd <= dayEnd; dd.setUTCDate(dd.getUTCDate() + 1)){
+        var dow = dd.getUTCDay();
+        if(dow === 0 || dow === 6) continue; // skip weekends
+
+        // Market open: 9:30 AM ET in UTC
+        var openMs = Date.UTC(dd.getUTCFullYear(), dd.getUTCMonth(), dd.getUTCDate(), 9 + etOffsetHours, 30);
+        // Market close: 4:00 PM ET in UTC
+        var closeMs = Date.UTC(dd.getUTCFullYear(), dd.getUTCMonth(), dd.getUTCDate(), 16 + etOffsetHours, 0);
+
+        if(openMs >= minTime && openMs <= maxTime){
+          var ox = xForTime(openMs);
+          marketLines += '<line x1="' + ox.toFixed(1) + '" y1="' + margin.top + '" x2="' + ox.toFixed(1) + '" y2="' + (height - margin.bottom) + '" stroke="rgba(255,199,88,0.4)" stroke-width="1" stroke-dasharray="5,3"/>';
+          marketLines += '<text x="' + (ox + 3).toFixed(1) + '" y="' + (margin.top + 10) + '" fill="rgba(255,199,88,0.6)" font-size="8" font-family="var(--font-body)">Open</text>';
         }
-        // Market close: 4:00 PM ET = 21:00 UTC (EST) or 20:00 UTC (EDT)
-        if(!marketCloseLine && ((utcH === 21 && utcM === 0) || (utcH === 20 && utcM === 0))){
-          var mcX = margin.left + (mi / Math.max(series0.length - 1, 1)) * plotW;
-          marketCloseLine = '<line x1="' + mcX.toFixed(1) + '" y1="' + margin.top + '" x2="' + mcX.toFixed(1) + '" y2="' + (height - margin.bottom) + '" stroke="rgba(255,23,68,0.4)" stroke-width="1" stroke-dasharray="5,3"/>';
-          marketCloseLine += '<text x="' + (mcX + 3).toFixed(1) + '" y="' + (margin.top + 10) + '" fill="rgba(255,23,68,0.6)" font-size="8" font-family="var(--font-body)">Close 4:00</text>';
+        if(closeMs >= minTime && closeMs <= maxTime){
+          var cx = xForTime(closeMs);
+          marketLines += '<line x1="' + cx.toFixed(1) + '" y1="' + margin.top + '" x2="' + cx.toFixed(1) + '" y2="' + (height - margin.bottom) + '" stroke="rgba(255,23,68,0.4)" stroke-width="1" stroke-dasharray="5,3"/>';
+          marketLines += '<text x="' + (cx + 3).toFixed(1) + '" y="' + (margin.top + 10) + '" fill="rgba(255,23,68,0.6)" font-size="8" font-family="var(--font-body)">Close</text>';
         }
       }
     }
 
     svgEl.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
-    svgEl.innerHTML = yGrid + zeroLine + marketOpenLine + marketCloseLine +
+    svgEl.innerHTML = yGrid + zeroLine + marketLines +
       '<line x1="' + margin.left + '" y1="' + margin.top + '" x2="' + margin.left + '" y2="' + (height - margin.bottom) + '" stroke="' + _CT.axis + '" stroke-width="1" shape-rendering="crispEdges"/>' +
       '<line x1="' + margin.left + '" y1="' + (height - margin.bottom) + '" x2="' + (width - margin.right) + '" y2="' + (height - margin.bottom) + '" stroke="' + _CT.axis + '" stroke-width="1" shape-rendering="crispEdges"/>' +
       yLabels + xLabels + legendSvg + linesSvg;
@@ -813,19 +846,24 @@
     if(!_chartsEl) return Promise.resolve();
 
     return Promise.all([
-      Promise.all(['es','nq','rty','ym'].map(function(sym){ return _fetchBars(sym, '5m', 1); })),
+      Promise.all(['es','nq','rty','ym'].map(function(sym){ return _fetchBars(sym, '5m', 2); })),
       _fetchBars('vix', '1h', 14),
       Promise.all(['cl','dx','zn'].map(function(sym){ return _fetchBars(sym, '1d', 14); })),
       _fetchBars('es', '1d', 14),
       fetch('/api/pre-market/vix-term-structure').then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; }),
     ]).then(function(results){
-      var indexBars  = results[0];
-      var vixBars    = results[1];
-      var macroBars  = results[2];
-      var gapBars    = results[3];
-      var termStruct = results[4];
+      var indexResults = results[0];
+      var vixResult    = results[1];
+      var macroResults = results[2];
+      var gapResult    = results[3];
+      var termStruct   = results[4];
 
-      var hasAnyData = [indexBars, [vixBars], macroBars, [gapBars]].some(function(arr){
+      // Unwrap bars from {bars, prior_close} envelopes for non-index charts
+      var vixBars   = vixResult.bars;
+      var macroBars = macroResults.map(function(r){ return r.bars; });
+      var gapBars   = gapResult.bars;
+
+      var hasAnyData = [indexResults.map(function(r){ return r.bars; }), [vixBars], macroBars, [gapBars]].some(function(arr){
         return arr.some(function(b){ return b && b.length > 0; });
       });
 
@@ -837,11 +875,11 @@
       if(_chartsEl) _chartsEl.style.display = '';
       if(_emptyEl) _emptyEl.style.display = 'none';
 
-      // Chart 1: Index Futures normalized to % change
+      // Chart 1: Index Futures normalized to % change (48h continuous)
       var indexLabels = ['ES','NQ','RTY','YM'];
       var indexColors = [_CT.index.es, _CT.index.nq, _CT.index.rty, _CT.index.ym];
-      var indexLines = indexBars.map(function(bars, idx){
-        return { label: indexLabels[idx], color: indexColors[idx], data: _normalizePct(bars) };
+      var indexLines = indexResults.map(function(res, idx){
+        return { label: indexLabels[idx], color: indexColors[idx], data: _normalizePct(res.bars, res.prior_close) };
       }).filter(function(l){ return l.data.length > 0; });
       _renderLineChart(_indexSvg, indexLines, { yLabel: '% Change', showMarketOpen: true });
 

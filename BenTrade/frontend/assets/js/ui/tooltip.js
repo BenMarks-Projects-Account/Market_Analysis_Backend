@@ -423,7 +423,9 @@ window.BenTradeUI.Tooltip = (function(){
 
   function bindAll(rootEl){
     const root = rootEl || document;
-    root.querySelectorAll('[data-metric], .metric-label, .statLabel, .detail-label, th').forEach(bindTarget);
+    root.querySelectorAll('[data-metric], .metric-label, .statLabel, .detail-label, th[data-metric]').forEach(el => {
+      bindTarget(el);
+    });
   }
 
   function attachMetricTooltips(rootEl){

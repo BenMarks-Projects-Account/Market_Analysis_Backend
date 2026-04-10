@@ -221,8 +221,10 @@ SCORING_PROFILES: dict[str, dict[str, Any]] = {
         "pop_above_penalty": 150.0,
 
         # Edge — managed EV parameters
+        # Income ROR range ~5-25%. Scale 280 → saturates at ~25% ROR.
+        # 5% → 44, 10% → 58, 15% → 72, 25% → 100.
         "use_managed_ev": True,
-        "managed_ror_positive_scale": 700.0,
+        "managed_ror_positive_scale": 280.0,
         "managed_ror_negative_scale": 300.0,
         "managed_ev_base_score": 30.0,
 
@@ -237,11 +239,11 @@ SCORING_PROFILES: dict[str, dict[str, Any]] = {
         "credit_to_width_range": (0.05, 0.30),
     },
     "directional": {
-        # Weights
-        "edge_weight": 0.35,
+        # Weights — increased market_fit for regime sensitivity
+        "edge_weight": 0.30,
         "pop_weight": 0.20,
         "structure_weight": 0.20,
-        "market_fit_weight": 0.15,
+        "market_fit_weight": 0.20,
         "execution_weight": 0.10,
 
         # POP band
@@ -251,8 +253,10 @@ SCORING_PROFILES: dict[str, dict[str, Any]] = {
         "pop_above_penalty": 150.0,
 
         # Edge — managed EV
+        # Directional ROR range ~30-100%. Scale 70 → saturates at ~100% ROR.
+        # 30% → 51, 50% → 65, 70% → 79, 100% → 100.
         "use_managed_ev": True,
-        "managed_ror_positive_scale": 140.0,
+        "managed_ror_positive_scale": 70.0,
         "managed_ror_negative_scale": 150.0,
         "managed_ev_base_score": 30.0,
 
@@ -371,6 +375,13 @@ def _compute_pop_band_score(
     above_penalty = profile.get("pop_above_penalty", 150.0)
 
     if ideal_low <= pop <= ideal_high:
+        # Parabolic peak: 100 at midpoint, 90 at band edges.
+        # Provides discrimination inside the band instead of flat 100.
+        midpoint = (ideal_low + ideal_high) / 2.0
+        half_width = (ideal_high - ideal_low) / 2.0
+        if half_width > 0:
+            distance = abs(pop - midpoint) / half_width
+            return 100.0 - (distance ** 2) * 10.0
         return 100.0
 
     band_width = ideal_high - ideal_low
@@ -583,9 +594,9 @@ def _compute_market_fit(
     base = _REGIME_FIT.get((strategy_class, regime), 60.0)
 
     if alignment == "aligned":
-        base = min(100.0, base + 10)
+        base = min(100.0, base + 15)
     elif alignment == "misaligned":
-        base = max(0.0, base - 15)
+        base = max(0.0, base - 30)
 
     event_risk = candidate.get("event_risk", "unknown")
     if event_risk == "high":

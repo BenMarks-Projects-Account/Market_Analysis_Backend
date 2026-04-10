@@ -10,6 +10,8 @@ Endpoints (mounted under /api/admin prefix):
     POST /routing/refresh-config    — reload config from env (Step 14)
     POST /routing/refresh-providers — live-probe all providers (Step 14)
     POST /routing/refresh-runtime   — full coherent refresh (Step 14)
+    POST /routing/circuit-breaker/reset  — reset circuit breaker (one or all)
+    GET  /routing/circuit-breaker/status — circuit breaker status for all providers
 
 Steps 13–17 — Distributed Model Routing / UI visibility + runtime control
                + control-plane hardening + health semantics + execution mode.
@@ -236,14 +238,17 @@ async def post_refresh_providers():
     """Live-probe all registered providers and return updated statuses.
 
     This refreshes provider health state without changing config or gate.
+    Also resets circuit breaker state so probed providers get a clean slate.
     """
     remaining = _check_cooldown("refresh-providers")
     if remaining is not None:
         return _cooldown_response(remaining)
 
     from app.services.model_provider_registry import get_registry
-    logger.info("[control] operator requested provider refresh")
+    from app.services.model_router_policy import get_circuit_breaker
+    logger.info("[control] operator requested provider refresh (+ circuit breaker reset)")
     _record_call("refresh-providers")
+    get_circuit_breaker().reset()
     registry = get_registry()
     statuses = registry.all_statuses(refresh=True)
     return {
@@ -279,3 +284,68 @@ async def post_refresh_runtime():
     _record_call("refresh-runtime")
     result = refresh_routing_runtime()
     return {"action": "runtime_refreshed", "result": result}
+
+
+# ---------------------------------------------------------------------------
+# Circuit breaker reset
+# ---------------------------------------------------------------------------
+
+@router.post("/circuit-breaker/reset")
+async def post_circuit_breaker_reset(request: Request):
+    """Reset circuit breaker state for one or all providers.
+
+    Body (optional):
+        { "provider_id": "openai" }  — reset a single provider
+        {} or omitted               — reset ALL providers
+
+    Returns the circuit breaker status after reset.
+    """
+    remaining = _check_cooldown("circuit-breaker-reset")
+    if remaining is not None:
+        return _cooldown_response(remaining)
+
+    from app.services.model_router_policy import get_circuit_breaker
+    from app.services.model_provider_registry import get_registry
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    cb = get_circuit_breaker()
+    provider_id = body.get("provider_id") if isinstance(body, dict) else None
+
+    if provider_id:
+        logger.info("[control] operator reset circuit breaker for provider=%s", provider_id)
+        cb.reset(provider_id)
+    else:
+        logger.info("[control] operator reset ALL circuit breakers")
+        cb.reset()
+
+    _record_call("circuit-breaker-reset")
+
+    # Return updated status for all providers
+    registry = get_registry()
+    statuses = registry.all_statuses(refresh=False)
+    result = {}
+    for s in statuses:
+        result[s.provider_id] = cb.status(s.provider_id)
+
+    return {"action": "circuit_breaker_reset", "provider_id": provider_id or "ALL", "statuses": result}
+
+
+@router.get("/circuit-breaker/status")
+async def get_circuit_breaker_status():
+    """Return circuit breaker status for all registered providers."""
+    from app.services.model_router_policy import get_circuit_breaker
+    from app.services.model_provider_registry import get_registry
+
+    cb = get_circuit_breaker()
+    registry = get_registry()
+    statuses = registry.all_statuses(refresh=False)
+    result = {}
+    for s in statuses:
+        result[s.provider_id] = cb.status(s.provider_id)
+
+    return {"statuses": result}

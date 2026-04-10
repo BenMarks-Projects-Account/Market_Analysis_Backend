@@ -112,12 +112,200 @@
 .eva-valuation-note { font-size:12px; color:rgba(255,255,255,0.4); margin-top:6px; line-height:1.5; font-style:italic; }
 .eva-quality-signal { font-size:13px; margin:4px 0; line-height:1.5; }
 
+/* Price inline row */
+.ce-price-row td { padding:4px 16px 6px; border-bottom:1px solid rgba(255,255,255,0.04); background:rgba(255,255,255,0.01); }
+.ce-price-display { display:flex; align-items:center; gap:12px; font-size:14px; }
+.ce-price-label { color:rgba(255,255,255,0.4); font-size:12px; }
+.ce-price-val { font-size:18px; font-weight:600; color:rgba(255,255,255,0.9); }
+.ce-price-change { font-size:13px; font-weight:500; }
+.ce-price-volume { color:rgba(255,255,255,0.3); font-size:12px; margin-left:8px; }
+.ce-price-error { color:#f87171; font-size:13px; }
+
 /* Responsive: stack columns on narrow screens */
 @media (max-width:900px) { .ce-dual-col, .ce-comps-grid { grid-template-columns:1fr; } }
+
+/* Pagination controls */
+.ce-paging {
+  display:flex; align-items:center; gap:6px; padding:12px 10px 8px; flex-wrap:wrap;
+}
+.ce-paging-btn {
+  padding:4px 10px; border-radius:4px; font-size:12px; font-weight:500; cursor:pointer;
+  background:rgba(255,255,255,0.04); color:rgba(224,224,224,0.6); border:1px solid rgba(255,255,255,0.08);
+  transition:background 0.15s, color 0.15s;
+}
+.ce-paging-btn:hover:not([disabled]):not(.active) { background:rgba(255,255,255,0.08); color:rgba(224,224,224,0.9); }
+.ce-paging-btn.active { background:rgba(0,234,255,0.15); color:#00eaff; border-color:rgba(0,234,255,0.3); pointer-events:none; }
+.ce-paging-btn[disabled] { opacity:0.3; cursor:default; }
+.ce-paging-ellipsis { color:rgba(224,224,224,0.25); font-size:12px; padding:0 2px; }
+.ce-paging-info { margin-left:12px; font-size:11px; color:#506878; }
+
+/* ── Filter bar (compact horizontal toolbar) ── */
+.ce-filter-bar {
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding:8px 14px; margin-bottom:10px;
+  background:rgba(10,25,35,0.6); border:1px solid rgba(80,120,150,0.12); border-radius:8px;
+}
+.ce-filter-group {
+  display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+}
+.ce-filter-compact {
+  background:rgba(15,35,50,0.9);
+  border:1px solid rgba(80,120,150,0.2);
+  color:#90b0c8;
+  font-size:12px; font-weight:500;
+  padding:6px 28px 6px 10px !important;
+  border-radius:6px !important; cursor:pointer; outline:none;
+  appearance:none; -webkit-appearance:none; -moz-appearance:none;
+  width:auto !important; min-width:0; max-width:180px;
+  flex:0 1 auto;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2360889c' fill='none' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E") !important;
+  background-repeat:no-repeat !important; background-position:right 8px center !important;
+  background-size:auto !important;
+  position:static !important;
+  padding-right:28px !important;
+  transition:all 0.15s ease;
+}
+.ce-filter-compact:hover { border-color:rgba(80,160,180,0.35); color:#b0d0e0; }
+.ce-filter-compact:focus { border-color:rgba(80,180,150,0.4); box-shadow:0 0 6px rgba(80,180,150,0.12); }
+.ce-filter-compact.ce-filter-active {
+  border-color:rgba(80,200,160,0.4); color:#60d8a0;
+  background-color:rgba(80,200,160,0.06);
+}
+.ce-filter-compact option { background:#0a1a28; color:#b0c8d8; padding:4px 8px; }
+
+/* Clear filters button */
+.ce-filter-clear {
+  background:transparent; border:1px solid rgba(240,100,100,0.25);
+  color:#e08080; font-size:11px; font-weight:500;
+  padding:5px 10px; border-radius:6px; cursor:pointer;
+  transition:all 0.15s ease; white-space:nowrap;
+}
+.ce-filter-clear:hover {
+  background:rgba(240,100,100,0.08); border-color:rgba(240,100,100,0.4); color:#f09090;
+}
+
+/* Filter actions area (clear + count) */
+.ce-filter-actions {
+  display:flex; align-items:center; gap:8px; white-space:nowrap;
+}
+
+/* Results count in filter bar */
+.ce-filter-results-count {
+  color:#60889c; font-size:11px; font-weight:500; white-space:nowrap;
+  padding:0 4px; letter-spacing:0.3px;
+}
+.ce-filter-results-count span { color:#90c8b0; font-weight:700; }
+
+/* Filter search area */
+.ce-filter-search { flex-shrink:0; }
+.ce-filter-search .ce-search-input {
+  background:rgba(15,35,50,0.9); border:1px solid rgba(80,120,150,0.2);
+  color:#d0e0e8; font-size:12px;
+  padding:6px 12px 6px 30px; border-radius:6px; outline:none;
+  width:180px; transition:all 0.15s ease;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2360889c' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+  background-repeat:no-repeat; background-position:10px center;
+}
+.ce-filter-search .ce-search-input::placeholder { color:#506878; font-size:12px; }
+.ce-filter-search .ce-search-input:focus {
+  border-color:rgba(80,180,150,0.4); box-shadow:0 0 8px rgba(80,180,150,0.12); width:220px;
+}
+
+/* Responsive: wrap filters on smaller screens */
+@media (max-width:1200px) {
+  .ce-filter-bar { flex-wrap:wrap; }
+  .ce-filter-search { width:100%; margin-top:4px; }
+  .ce-filter-search .ce-search-input { width:100%; }
+}
+@media (max-width:800px) {
+  .ce-filter-group { width:100%; }
+  .ce-filter-compact { flex:1; min-width:100px; }
+}
+
+/* Completeness badge dot */
+.ce-completeness-high { background:#50c878; box-shadow:0 0 4px rgba(80,200,120,0.4); }
+.ce-completeness-medium { background:#f0c060; box-shadow:0 0 4px rgba(240,192,96,0.4); }
+.ce-completeness-low { background:#f06060; box-shadow:0 0 4px rgba(240,96,96,0.4); }
+.ce-completeness-unknown { background:#506070; }
+
+/* Smart Money panel */
+.ce-sm-btn.has-data { border-color:rgba(80,200,120,0.3); }
+@media (max-width: 900px) {
+  .ce-analysis-content[data-type="smart-money"] > div > div[style*="grid-template-columns"] { grid-template-columns:1fr !important; }
+}
+
+/* Breakout score column */
+.ce-breakout-cell { text-align:center; min-width:70px; }
+.ce-breakout-score { font-weight:600; font-size:13px; padding:2px 6px; border-radius:3px; }
+.ce-breakout-high { color:#50e890; background:rgba(80,232,144,0.12); }
+.ce-breakout-medium { color:#80c8f0; background:rgba(128,200,240,0.10); }
+.ce-breakout-low { color:#a0b0c0; }
+.ce-breakout-minimal { color:#607080; }
+.ce-breakout-na { color:#405060; font-size:12px; }
+.ce-breakout-col {} /* placeholder for responsive */
+@media (max-width: 1000px) {
+  .ce-breakout-cell, .ce-breakout-col { display:none; }
+}
+
+/* legacy search-row / btn-reset removed — merged into .ce-filter-bar */
+.ce-filter-count { color:#7090a8; font-size:0.78rem; margin-left:auto; }
+
+.ce-actions-row {
+  display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px;
+}
+.ce-add-stock-group {
+  display:flex; align-items:center; gap:6px;
+}
+.ce-add-stock-input {
+  background:rgba(15,35,50,0.9); color:#d0e0e8; border:1px solid rgba(80,120,150,0.2);
+  border-radius:6px; padding:6px 10px; font-size:12px; width:140px; text-transform:uppercase;
+  transition:border-color 0.15s ease;
+}
+.ce-add-stock-input:focus { border-color:rgba(80,180,150,0.4); outline:none; }
+.ce-btn-add {
+  background:rgba(0,224,195,0.12); color:#00e0c3; border:1px solid rgba(0,224,195,0.25);
+  border-radius:4px; padding:5px 14px; font-size:0.82rem; font-weight:600; cursor:pointer;
+  white-space:nowrap;
+}
+.ce-btn-add:hover { background:rgba(0,224,195,0.22); }
+.ce-btn-add:disabled { opacity:0.4; cursor:default; }
+.ce-add-status { font-size:0.78rem; margin-left:4px; transition:color 0.15s; }
+.ce-add-status.success { color:#00c853; }
+.ce-add-status.info { color:#ffc107; }
+.ce-add-status.error { color:#f87171; }
+.ce-btn-action {
+  padding:5px 14px; border-radius:4px; font-size:0.82rem; font-weight:500; cursor:pointer;
+  background:rgba(20,40,55,0.6); color:#90b0c8; border:1px solid rgba(80,120,150,0.2);
+  transition:background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.ce-btn-action:hover { background:rgba(30,60,80,0.8); color:#c0d8e8; border-color:rgba(80,120,150,0.35); }
+.ce-btn-crawl { color:#607890; }
+
+/* ── Visual Polish: Action buttons ── */
+.ce-action-btn:hover {
+  background:rgba(30,60,80,0.9) !important;
+  border-color:rgba(100,160,200,0.45) !important;
+  color:#c0d8e8 !important;
+  box-shadow:0 0 8px rgba(80,140,180,0.15);
+}
+.ce-action-btn:active {
+  background:rgba(40,70,90,0.95) !important;
+  transform:scale(0.97);
+}
+.ce-buy-btn:hover {
+  background:rgba(40,100,60,0.7) !important;
+  border-color:rgba(80,200,120,0.5) !important;
+  color:#80e8a0 !important;
+  box-shadow:0 0 10px rgba(80,200,120,0.15);
+}
+
+/* ── Visual Polish: Row transitions ── */
+.ce-row { transition:background 0.15s ease; }
+.ce-row td { transition:color 0.15s ease; }
 </style>
 <div class="company-evaluator-page" id="companyEvaluatorPage">
-  <!-- Header -->
-  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+  <!-- Row 1: Title + Connection + Status -->
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
     <div>
       <h4 style="color:var(--accent-primary, #00e0c3); margin:0; font-weight:600; letter-spacing:0.04em;">
         COMPANY EVALUATOR
@@ -125,7 +313,6 @@
       <small id="ce-status" style="color:rgba(224,224,224,0.4);">Loading...</small>
     </div>
     <div style="display:flex; gap:8px; align-items:center;">
-      <!-- Connection toggle -->
       <div id="ce-connection-toggle" style="display:inline-flex; align-items:center; gap:6px;
            background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1);
            border-radius:4px; padding:3px 8px; font-size:0.8rem;">
@@ -138,64 +325,77 @@
         </label>
       </div>
       <span id="ce-conn-url" style="color:rgba(224,224,224,0.3); font-size:0.72rem; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
-      <button id="ce-refresh-btn" class="btn btn-sm btn-outline-primary">Refresh</button>
-      <button id="ce-crawl-btn" class="btn btn-sm btn-outline-secondary">Run Crawler</button>
     </div>
   </div>
 
-  <!-- Filter Bar -->
-  <div id="ce-filter-bar" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px;
-       padding:10px 12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06);
-       border-radius:6px;">
-    <select id="ce-sector-filter"
-      style="background:#0d1117; color:#e0e0e0; border:1px solid rgba(255,255,255,0.1);
-             border-radius:4px; padding:4px 8px; font-size:0.82rem;">
-      <option value="">All Sectors</option>
-    </select>
-    <select id="ce-mcap-filter"
-      style="background:#0d1117; color:#e0e0e0; border:1px solid rgba(255,255,255,0.1);
-             border-radius:4px; padding:4px 8px; font-size:0.82rem;">
-      <option value="">All Market Caps</option>
-      <option value="mega">Mega ($200B+)</option>
-      <option value="large">Large ($10B–$200B)</option>
-      <option value="mid">Mid ($2B–$10B)</option>
-      <option value="small">Small ($300M–$2B)</option>
-      <option value="micro">Micro (&lt;$300M)</option>
-    </select>
-    <select id="ce-rating-filter"
-      style="background:#0d1117; color:#e0e0e0; border:1px solid rgba(255,255,255,0.1);
-             border-radius:4px; padding:4px 8px; font-size:0.82rem;">
-      <option value="">All Ratings</option>
-      <option value="STRONG_BUY">Strong Buy</option>
-      <option value="BUY">Buy</option>
-      <option value="HOLD">Hold</option>
-      <option value="SELL">Sell</option>
-      <option value="STRONG_SELL">Strong Sell</option>
-    </select>
-    <select id="ce-tier-filter"
-      style="background:#0d1117; color:#e0e0e0; border:1px solid rgba(255,255,255,0.1);
-             border-radius:4px; padding:4px 8px; font-size:0.82rem;">
-      <option value="">All Tiers</option>
-    </select>
-    <select id="ce-score-filter"
-      style="background:#0d1117; color:#e0e0e0; border:1px solid rgba(255,255,255,0.1);
-             border-radius:4px; padding:4px 8px; font-size:0.82rem;">
-      <option value="">Any Score</option>
-      <option value="80">80+ (Strong)</option>
-      <option value="70">70–80 (Good)</option>
-      <option value="60">60–70 (Average)</option>
-      <option value="0">Below 60 (Weak)</option>
-    </select>
-    <div style="position:relative; display:inline-flex; align-items:center;">
-      <input id="ce-search-input" type="text" placeholder="Search symbol or name…"
-        style="background:#0d1117; color:#e0e0e0; border:1px solid rgba(255,255,255,0.1);
-               border-radius:4px; padding:4px 28px 4px 8px; font-size:0.82rem; width:180px;">
-      <span style="position:absolute; right:8px; color:rgba(224,224,224,0.3); font-size:0.78rem; pointer-events:none;">&#128269;</span>
+  <!-- Filter bar: compact horizontal toolbar -->
+  <div class="ce-filter-bar">
+    <div class="ce-filter-group">
+      <select id="ce-sector-filter" class="ce-filter-compact">
+        <option value="">All Sectors</option>
+      </select>
+      <select id="ce-mcap-filter" class="ce-filter-compact">
+        <option value="">Mkt Cap</option>
+        <option value="mega">Mega ($200B+)</option>
+        <option value="large">Large ($10B–$200B)</option>
+        <option value="mid">Mid ($2B–$10B)</option>
+        <option value="small">Small ($300M–$2B)</option>
+        <option value="micro">Micro (&lt;$300M)</option>
+      </select>
+      <select id="ce-rating-filter" class="ce-filter-compact">
+        <option value="">Rating</option>
+        <option value="STRONG_BUY">Strong Buy</option>
+        <option value="BUY">Buy</option>
+        <option value="HOLD">Hold</option>
+        <option value="SELL">Sell</option>
+        <option value="STRONG_SELL">Strong Sell</option>
+      </select>
+      <select id="ce-tier-filter" class="ce-filter-compact">
+        <option value="">Tier</option>
+      </select>
+      <select id="ce-score-filter" class="ce-filter-compact">
+        <option value="">Score</option>
+        <option value="80">80+ (Strong)</option>
+        <option value="70">70–80 (Good)</option>
+        <option value="60">60–70 (Average)</option>
+        <option value="0">Below 60 (Weak)</option>
+      </select>
+      <select id="ce-completeness-filter" class="ce-filter-compact">
+        <option value="">Completeness</option>
+        <option value="high">High (≥80%)</option>
+        <option value="medium">Medium (50–80%)</option>
+        <option value="low">Low (&lt;50%)</option>
+      </select>
+      <select id="ce-breakout-filter" class="ce-filter-compact">
+        <option value="">Breakout</option>
+        <option value="eligible">Eligible Only</option>
+        <option value="high">High (≥70)</option>
+        <option value="medium">Medium (50–70)</option>
+        <option value="low">Low (30–50)</option>
+        <option value="any">Any Score (&gt;0)</option>
+      </select>
     </div>
-    <button id="ce-reset-filters" style="background:none; border:1px solid rgba(255,255,255,0.1);
-            border-radius:4px; padding:4px 10px; color:rgba(224,224,224,0.5); font-size:0.78rem;
-            cursor:pointer;" title="Reset all filters">&#x21bb; Reset</button>
-    <span id="ce-filter-count" style="color:rgba(224,224,224,0.4); font-size:0.78rem; margin-left:auto;"></span>
+    <div class="ce-filter-actions">
+      <button id="ce-clear-filters" class="ce-filter-clear" style="display:none;">&#x2715; Clear</button>
+      <span id="ce-filter-count" class="ce-filter-results-count"></span>
+    </div>
+    <div class="ce-filter-search">
+      <input id="ce-search-input" type="text" placeholder="Search symbol or name…" class="ce-search-input">
+    </div>
+  </div>
+
+  <!-- Row 4: Add Stock + Action buttons -->
+  <div class="ce-actions-row">
+    <div class="ce-add-stock-group">
+      <span style="color:rgba(224,224,224,0.35); font-size:0.85rem;">&#x2795;</span>
+      <input id="ce-add-stock-input" type="text" placeholder="Add stock symbol…" maxlength="10" class="ce-add-stock-input">
+      <button id="ce-add-stock-btn" class="ce-btn-add">Add</button>
+      <span id="ce-add-stock-status" class="ce-add-status"></span>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button id="ce-refresh-btn" class="ce-btn-action">Refresh</button>
+      <button id="ce-crawl-btn" class="ce-btn-action ce-btn-crawl">Run Crawler</button>
+    </div>
   </div>
 
   <!-- Ranked Table -->

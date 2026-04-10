@@ -41,6 +41,9 @@ window.BenTradeTradeTicket = (function () {
   var _submitResp = null;  // last submit response (for order ID display)
   var _lastError = null;   // last error object { message, status, detail, endpoint, bodySnippet }
   var _submitIdempotencyKey = null; // stable per-preview idempotency key (prevents duplicate orders)
+  var _riskValidation = null;       // cached risk validation response from POST /api/risk/validate
+  var _riskOverrideAcknowledged = false; // user clicked "Proceed anyway"
+  var _riskValidationPending = false;    // validation request in flight
 
   /* ── Helpers ───────────────────────────────────────────────── */
 
@@ -119,6 +122,7 @@ window.BenTradeTradeTicket = (function () {
         _renderExplanation(t) +
         _renderLegs(t) +
         _renderRiskReward(t) +
+        _renderRiskValidation() +
         _renderPricing(t) +
         _renderPayloadPreview(t) +
         _renderSafetyPanel(execEnabled, dryRun, env) +
@@ -239,6 +243,116 @@ window.BenTradeTradeTicket = (function () {
         _row('Expected Value', _money(t.ev)) +
         _row('Return on Risk', _num(t.ror, 2)) +
       '</div>' +
+    '</div>';
+  }
+
+  /* ── Risk validation: async fetch ──────────────────────────── */
+
+  async function _doRiskValidation() {
+    if (!_ticket || !_ticket.underlying || _ticket.maxLoss == null) {
+      _riskValidation = null;
+      return;
+    }
+    _riskValidationPending = true;
+    _render();
+
+    try {
+      _riskValidation = await api.riskValidate({
+        symbol: _ticket.underlying,
+        scanner_key: _ticket.strategyId || '',
+        max_loss_per_contract: Math.abs(_ticket.maxLoss),
+        quantity: _ticket.quantity || 1,
+        account_mode: _mode
+      });
+    } catch (e) {
+      console.warn('[TradeTicket] Risk validation failed:', e);
+      _riskValidation = null;
+    } finally {
+      _riskValidationPending = false;
+      _render();
+    }
+  }
+
+  /* ── Render: risk validation section ───────────────────────── */
+
+  function _renderRiskValidation() {
+    if (_step !== 'review') return '';
+
+    if (_riskValidationPending) {
+      return '<div class="tt-section tt-risk-validation">' +
+        '<div class="tt-section-title">Risk Validation</div>' +
+        '<div class="tt-risk-loading"><span class="tt-spinner"></span> Checking risk limits\u2026</div>' +
+      '</div>';
+    }
+
+    if (!_riskValidation) {
+      return '<div class="tt-section tt-risk-validation">' +
+        '<div class="tt-section-title">Risk Validation</div>' +
+        '<div class="tt-risk-unavailable">Risk validation unavailable</div>' +
+      '</div>';
+    }
+
+    var v = _riskValidation;
+    var labels = {
+      'per_trade_risk': 'Per-trade risk',
+      'per_underlying': 'Underlying concentration',
+      'total_portfolio': 'Portfolio risk',
+      'directional_concentration': 'Directional balance',
+      'account_reserve': 'Account reserve'
+    };
+
+    var checksHtml = '';
+    for (var i = 0; i < v.risk_checks.length; i++) {
+      var chk = v.risk_checks[i];
+      var passed = chk.status === 'PASS';
+      var icon = passed ? '\u2705' : '\u274C';
+      var pctVal = chk.pct_of_limit;
+      var pctColor = pctVal > 100 ? '#f87171' : pctVal > 80 ? '#fbbf24' : 'rgba(255,255,255,0.5)';
+
+      checksHtml += '<div class="tt-risk-check ' + (passed ? 'pass' : 'fail') + '">' +
+        '<span class="tt-risk-icon">' + icon + '</span>' +
+        '<span class="tt-risk-label">' + (labels[chk.check] || chk.check) + '</span>' +
+        '<span class="tt-risk-pct" style="color:' + pctColor + '">' +
+          (pctVal != null ? pctVal.toFixed(0) + '%' : '') +
+        '</span>' +
+        (chk.message ? '<div class="tt-risk-message">' + chk.message + '</div>' : '') +
+      '</div>';
+    }
+
+    var warningsHtml = '';
+    if (v.warnings && v.warnings.length > 0) {
+      for (var w = 0; w < v.warnings.length; w++) {
+        warningsHtml += '<div class="tt-risk-warning">\u26A0\uFE0F ' + v.warnings[w] + '</div>';
+      }
+    }
+
+    var overrideHtml = '';
+    if (!v.approved && !_riskOverrideAcknowledged) {
+      overrideHtml = '<div class="tt-risk-override">' +
+        '<div class="tt-risk-override-msg">' +
+          'Trade exceeds risk limits. ' +
+          (v.suggested_max_quantity ? 'Suggested: ' + v.suggested_max_quantity + ' contracts.' : '') +
+        '</div>';
+      if (v.suggested_max_quantity && v.suggested_max_quantity > 0) {
+        overrideHtml += '<button class="tt-btn-reduce" data-action="risk-reduce" data-qty="' + v.suggested_max_quantity + '">' +
+          'Reduce to ' + v.suggested_max_quantity + ' contracts' +
+        '</button>';
+      }
+      overrideHtml += '<button class="tt-btn-override" data-action="risk-override">' +
+        'Proceed anyway (override)' +
+      '</button></div>';
+    }
+
+    var sectionClass = v.approved ? 'tt-risk-approved' :
+      (_riskOverrideAcknowledged ? 'tt-risk-overridden' : 'tt-risk-warning-state');
+    var headerLabel = v.approved ? 'RISK VALIDATION \u2014 APPROVED' :
+      (_riskOverrideAcknowledged ? 'RISK VALIDATION \u2014 OVERRIDE ACTIVE' : 'RISK VALIDATION \u2014 REVIEW REQUIRED');
+
+    return '<div class="tt-section tt-risk-validation ' + sectionClass + '">' +
+      '<div class="tt-section-title tt-risk-header">' + headerLabel + '</div>' +
+      '<div class="tt-risk-checks">' + checksHtml + '</div>' +
+      warningsHtml +
+      overrideHtml +
     '</div>';
   }
 
@@ -561,9 +675,19 @@ window.BenTradeTradeTicket = (function () {
       _step, _mode, execEnabled, actuallyValid, val.errors.join('; '));
 
     if (_step === 'review') {
-      confirmLabel    = 'Preview Order';
-      confirmDisabled = !actuallyValid;
-      confirmTitle    = !actuallyValid ? val.errors.join(' ') : '';
+      if (_riskValidation && !_riskValidation.approved && !_riskOverrideAcknowledged) {
+        confirmLabel    = 'Risk Check Failed \u2014 Review Above';
+        confirmDisabled = true;
+        confirmTitle    = 'Risk checks failed. Use Override above or reduce quantity.';
+      } else if (_riskOverrideAcknowledged && _riskValidation && !_riskValidation.approved) {
+        confirmLabel    = 'Preview Order (Risk Override)';
+        confirmDisabled = !actuallyValid;
+        confirmTitle    = '';
+      } else {
+        confirmLabel    = 'Preview Order';
+        confirmDisabled = !actuallyValid;
+        confirmTitle    = !actuallyValid ? val.errors.join(' ') : '';
+      }
     } else if (_step === 'warning') {
       // Soft risk warnings — offer override
       confirmLabel    = 'Override & Continue';
@@ -622,11 +746,17 @@ window.BenTradeTradeTicket = (function () {
       '</div>';
     }
 
+    // Risk validation visual state for confirm button
+    var confirmExtraCls = '';
+    if (_step === 'review' && _riskValidation && !_riskValidation.approved) {
+      confirmExtraCls = _riskOverrideAcknowledged ? ' tt-btn-risk-override' : ' tt-btn-risk-blocked';
+    }
+
     return '<div class="tt-footer">' +
       warnList +
       '<div class="tt-footer-actions">' +
         '<button class="tt-btn tt-btn-cancel" data-action="close">Cancel</button>' +
-        '<button class="tt-btn tt-btn-confirm" data-action="confirm"' +
+        '<button class="tt-btn tt-btn-confirm' + confirmExtraCls + '" data-action="confirm"' +
           (confirmDisabled ? ' disabled' : '') +
           (confirmTitle ? ' title="' + confirmTitle + '"' : '') +
         '>' + confirmLabel + '</button>' +
@@ -669,6 +799,8 @@ window.BenTradeTradeTicket = (function () {
     if (qtyInput) {
       qtyInput.addEventListener('change', function () {
         _ticket.quantity = Math.max(1, parseInt(this.value, 10) || 1);
+        _riskOverrideAcknowledged = false;
+        _doRiskValidation();
       });
     }
 
@@ -698,6 +830,30 @@ window.BenTradeTradeTicket = (function () {
     if (modeSelect) {
       modeSelect.addEventListener('change', function () {
         _mode = this.value;
+        _riskOverrideAcknowledged = false;
+        _doRiskValidation();
+        _render();
+      });
+    }
+
+    // Risk validation: reduce to suggested quantity
+    var reduceBtn = _el.querySelector('[data-action="risk-reduce"]');
+    if (reduceBtn) {
+      reduceBtn.addEventListener('click', function () {
+        var sugQty = parseInt(this.getAttribute('data-qty'), 10);
+        if (sugQty > 0 && _ticket) {
+          _ticket.quantity = sugQty;
+          _riskOverrideAcknowledged = false;
+          _doRiskValidation();
+        }
+      });
+    }
+
+    // Risk validation: acknowledge override
+    var overrideBtn = _el.querySelector('[data-action="risk-override"]');
+    if (overrideBtn) {
+      overrideBtn.addEventListener('click', function () {
+        _riskOverrideAcknowledged = true;
         _render();
       });
     }
@@ -1014,6 +1170,9 @@ window.BenTradeTradeTicket = (function () {
     _submitResp = null;
     _lastError = null;
     _submitIdempotencyKey = null;
+    _riskValidation = null;
+    _riskOverrideAcknowledged = false;
+    _riskValidationPending = false;
     // Generate trace_id on frontend when opening modal
     _traceId = 'ttk-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
 
@@ -1059,6 +1218,9 @@ window.BenTradeTradeTicket = (function () {
     _render();
     el.style.display = 'flex';
 
+    // Fire-and-forget risk validation (re-renders when complete)
+    _doRiskValidation();
+
     // Dim + disable the background app shell
     var shell = document.querySelector('.shell');
     if (shell) shell.classList.add('modal-open');
@@ -1084,6 +1246,9 @@ window.BenTradeTradeTicket = (function () {
     _submitResp = null;
     _lastError = null;
     _submitIdempotencyKey = null;
+    _riskValidation = null;
+    _riskOverrideAcknowledged = false;
+    _riskValidationPending = false;
 
     // Restore background app shell
     var shell = document.querySelector('.shell');

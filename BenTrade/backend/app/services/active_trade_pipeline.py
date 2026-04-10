@@ -750,7 +750,7 @@ def _default_model_executor(
         source_key = get_model_source()
 
         raw_api_response = model_request(
-            messages_payload, timeout=120, retries=1,
+            messages_payload, timeout=60, retries=1,
         )
         latency_ms = int((time.monotonic() - t0) * 1000)
     except Exception as exc:
@@ -814,7 +814,7 @@ def _default_model_executor(
             "temperature": 0.0,
         }
         try:
-            retry_response = model_request(retry_payload, timeout=120, retries=1)
+            retry_response = model_request(retry_payload, timeout=60, retries=1)
             retry_choices = retry_response.get("choices", [])
             retry_text = ""
             if retry_choices and isinstance(retry_choices[0], dict):
@@ -881,7 +881,7 @@ def _routed_model_executor(
             task_type="active_trade_reassessment",
             messages=messages,
             system_prompt=_ACTIVE_TRADE_SYSTEM_PROMPT,
-            timeout=120.0,
+            timeout=60.0,
             max_tokens=1200,
             temperature=0.0,
             metadata={"symbol": symbol, "trade_key": payload.get("trade_key")},
@@ -939,7 +939,7 @@ def _routed_model_executor(
                 task_type="active_trade_reassessment_fix",
                 messages=fix_messages,
                 system_prompt=_ACTIVE_TRADE_SYSTEM_PROMPT,
-                timeout=120.0,
+                timeout=60.0,
                 max_tokens=1200,
                 temperature=0.0,
                 metadata={"symbol": symbol, "trade_key": payload.get("trade_key"), "fix_attempt": True},

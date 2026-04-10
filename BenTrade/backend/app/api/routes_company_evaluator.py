@@ -12,6 +12,15 @@ router = APIRouter(prefix="/api/company-evaluator", tags=["company-evaluator"])
 
 _TIMEOUT = 30
 
+# Catch both immediate TCP refusal and connection timeouts (e.g. firewall drops)
+_CE_CONNECT_ERRORS = (httpx.ConnectError, httpx.TimeoutException)
+
+
+def _unavailable_detail() -> str:
+    """503 detail that includes the target URL for debuggability."""
+    return f"Company Evaluator service unavailable at {_base_url()}"
+
+
 # ── Connection mode config ─────────────────────────────────────────────
 COMPANY_EVALUATOR_CONFIG: dict = {
     "local": {
@@ -26,7 +35,7 @@ COMPANY_EVALUATOR_CONFIG: dict = {
     },
 }
 
-_evaluator_connection_mode: str = "local"
+_evaluator_connection_mode: str = "remote"
 
 
 def _get_evaluator_url() -> str:
@@ -102,8 +111,8 @@ async def get_ranked_companies(
             if resp.status_code != 200:
                 raise HTTPException(resp.status_code, detail="Evaluator service error")
             return resp.json()
-    except httpx.ConnectError:
-        raise HTTPException(503, detail="Company Evaluator service unavailable (Machine 2 not reachable)")
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
     except HTTPException:
         raise
     except Exception as exc:
@@ -120,8 +129,8 @@ async def get_company_detail(symbol: str):
             if resp.status_code != 200:
                 raise HTTPException(resp.status_code, detail="Company not found or service error")
             return resp.json()
-    except httpx.ConnectError:
-        raise HTTPException(503, detail="Company Evaluator service unavailable")
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
     except HTTPException:
         raise
     except Exception as exc:
@@ -140,8 +149,8 @@ async def get_evaluator_status():
                 "service_healthy": health.status_code == 200,
                 "pipeline": resp.json() if resp.status_code == 200 else None,
             }
-    except httpx.ConnectError:
-        return {"service_healthy": False, "pipeline": None, "error": "Machine 2 not reachable"}
+    except _CE_CONNECT_ERRORS:
+        return {"service_healthy": False, "pipeline": None, "error": f"Not reachable at {_base_url()}"}
     except Exception as exc:
         return {"service_healthy": False, "error": str(exc)}
 
@@ -153,8 +162,8 @@ async def trigger_evaluation(symbol: str):
         async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.post(f"{_base_url()}/api/pipeline/evaluate/{symbol.upper()}")
             return resp.json()
-    except httpx.ConnectError:
-        raise HTTPException(503, detail="Company Evaluator service unavailable")
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
     except Exception as exc:
         _log.error("event=evaluator_proxy_failed error=%s", exc)
         raise HTTPException(500, detail=str(exc))
@@ -175,8 +184,8 @@ async def entry_point_analyze(body: dict):
             if resp.status_code != 200:
                 raise HTTPException(resp.status_code, detail=resp.text[:300])
             return resp.json()
-    except httpx.ConnectError:
-        raise HTTPException(503, detail="Company Evaluator service unavailable")
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
     except HTTPException:
         raise
     except Exception as exc:
@@ -194,8 +203,249 @@ async def trigger_crawl(full_universe: bool = True):
                 params={"full_universe": full_universe},
             )
             return resp.json()
-    except httpx.ConnectError:
-        raise HTTPException(503, detail="Company Evaluator service unavailable")
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
     except Exception as exc:
         _log.error("event=evaluator_proxy_failed error=%s", exc)
         raise HTTPException(500, detail=str(exc))
+
+
+# ── Proxy routes for valuation / quote / universe (remote-safe) ────────
+
+@router.get("/entry-point/analysis/{symbol}")
+async def get_entry_point_analysis(symbol: str):
+    """Proxy: Get cached entry-point analysis for a symbol."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(f"{_base_url()}/api/entry-point/analysis/{symbol.upper()}")
+            if resp.status_code != 200:
+                raise HTTPException(resp.status_code, detail=resp.text[:300])
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=entry_point_get_proxy_failed symbol=%s error=%s", symbol, exc)
+        raise HTTPException(500, detail=str(exc))
+
+
+@router.get("/quote/{symbol}")
+async def get_quote(symbol: str):
+    """Proxy: Get price quote for a symbol."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(f"{_base_url()}/api/quote/{symbol.upper()}")
+            if resp.status_code != 200:
+                raise HTTPException(resp.status_code, detail=resp.text[:300])
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=quote_proxy_failed symbol=%s error=%s", symbol, exc)
+        raise HTTPException(500, detail=str(exc))
+
+
+@router.get("/valuation/dcf/{symbol}")
+async def get_dcf_cached(symbol: str):
+    """Proxy: Get cached DCF analysis."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(f"{_base_url()}/api/valuation/dcf/{symbol.upper()}")
+            if resp.status_code != 200:
+                raise HTTPException(resp.status_code, detail=resp.text[:300])
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=dcf_get_proxy_failed symbol=%s error=%s", symbol, exc)
+        raise HTTPException(500, detail=str(exc))
+
+
+@router.post("/valuation/dcf")
+async def run_dcf(body: dict):
+    """Proxy: Run DCF analysis for a symbol."""
+    symbol = (body.get("symbol") or "").strip().upper()
+    if not symbol:
+        raise HTTPException(400, detail="symbol is required")
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{_base_url()}/api/valuation/dcf",
+                json={"symbol": symbol},
+            )
+            if resp.status_code != 200:
+                raise HTTPException(resp.status_code, detail=resp.text[:300])
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=dcf_post_proxy_failed symbol=%s error=%s", symbol, exc)
+        raise HTTPException(500, detail=str(exc))
+
+
+@router.get("/valuation/eva/{symbol}")
+async def get_eva_cached(symbol: str):
+    """Proxy: Get cached EVA/ROIC analysis."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(f"{_base_url()}/api/valuation/eva/{symbol.upper()}")
+            if resp.status_code != 200:
+                raise HTTPException(resp.status_code, detail=resp.text[:300])
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=eva_get_proxy_failed symbol=%s error=%s", symbol, exc)
+        raise HTTPException(500, detail=str(exc))
+
+
+@router.post("/valuation/eva")
+async def run_eva(body: dict):
+    """Proxy: Run EVA/ROIC analysis for a symbol."""
+    symbol = (body.get("symbol") or "").strip().upper()
+    if not symbol:
+        raise HTTPException(400, detail="symbol is required")
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{_base_url()}/api/valuation/eva",
+                json={"symbol": symbol},
+            )
+            if resp.status_code != 200:
+                raise HTTPException(resp.status_code, detail=resp.text[:300])
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=eva_post_proxy_failed symbol=%s error=%s", symbol, exc)
+        raise HTTPException(500, detail=str(exc))
+
+
+@router.get("/valuation/comps/{symbol}")
+async def get_comps_cached(symbol: str):
+    """Proxy: Get cached comparable company analysis."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(f"{_base_url()}/api/valuation/comps/{symbol.upper()}")
+            if resp.status_code != 200:
+                raise HTTPException(resp.status_code, detail=resp.text[:300])
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=comps_get_proxy_failed symbol=%s error=%s", symbol, exc)
+        raise HTTPException(500, detail=str(exc))
+
+
+@router.post("/valuation/comps")
+async def run_comps(body: dict):
+    """Proxy: Run comparable company analysis for a symbol."""
+    symbol = (body.get("symbol") or "").strip().upper()
+    if not symbol:
+        raise HTTPException(400, detail="symbol is required")
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{_base_url()}/api/valuation/comps",
+                json={"symbol": symbol},
+            )
+            if resp.status_code != 200:
+                raise HTTPException(resp.status_code, detail=resp.text[:300])
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=comps_post_proxy_failed symbol=%s error=%s", symbol, exc)
+        raise HTTPException(500, detail=str(exc))
+
+
+@router.get("/analyses/status")
+async def get_analyses_status():
+    """Proxy: Get bulk analysis status (which symbols have cached analyses)."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(f"{_base_url()}/api/analyses/status")
+            if resp.status_code != 200:
+                return {}
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        return {}
+    except Exception:
+        return {}
+
+
+@router.post("/universe/add")
+async def add_to_universe(body: dict):
+    """Proxy: Add a stock to the evaluator universe."""
+    symbol = (body.get("symbol") or "").strip().upper()
+    if not symbol:
+        raise HTTPException(400, detail="symbol is required")
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.post(
+                f"{_base_url()}/api/universe/add",
+                json={"symbol": symbol},
+            )
+            if resp.status_code != 200:
+                raise HTTPException(resp.status_code, detail=resp.text[:300])
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=universe_add_proxy_failed symbol=%s error=%s", symbol, exc)
+        raise HTTPException(500, detail=str(exc))
+
+
+@router.get("/companies/{symbol}/raw")
+async def get_company_raw(symbol: str):
+    """Proxy: Get raw data inspector payload for a company evaluation."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(f"{_base_url()}/api/companies/{symbol.upper()}/raw")
+            if resp.status_code == 404:
+                raise HTTPException(404, detail=f"No evaluation found for {symbol.upper()}")
+            if resp.status_code != 200:
+                raise HTTPException(resp.status_code, detail=resp.text[:300])
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=raw_data_proxy_failed symbol=%s error=%s", symbol, exc)
+        raise HTTPException(500, detail=str(exc))
+
+
+@router.get("/admin/fmp-status")
+async def proxy_fmp_status():
+    """Proxy: Get FMP data source status from the evaluator service."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{_base_url()}/api/admin/fmp-status")
+            if resp.status_code != 200:
+                raise HTTPException(resp.status_code, detail="FMP status unavailable")
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=fmp_status_proxy_failed error=%s", exc)
+        raise HTTPException(503, detail="FMP status unavailable")

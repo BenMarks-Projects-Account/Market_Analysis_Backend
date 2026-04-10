@@ -7,10 +7,14 @@
     <p class="tmc-banner-subtitle">Workflow-driven candidate review and execution</p>
   </div>
 
+  <!-- ── Risk Utilization Bar ────────────────────────────────── -->
+  <div id="tmcRiskBar" class="tmc-risk-bar-container" style="display:none;"></div>
+
   <!-- ── Workflow trigger bar ────────────────────────────────── -->
   <div class="tmc-control-bar">
     <div class="tmc-control-left">
       <button id="tmcFullRefreshBtn" class="btn tmc-btn tmc-btn-primary tmc-workflow-btn" title="Run all workflows: Stock → Options → Active Trades → Portfolio Balance">⟳ Full Refresh</button>
+      <button id="tmcResetProvidersBtn" class="btn tmc-btn tmc-workflow-btn" title="Reset circuit breakers on all model providers — use when models are disqualified" style="color:var(--accent-amber,#f5a623);">⚡ Reset Providers</button>
       <button id="tmcRunStock" class="btn tmc-btn tmc-workflow-btn" title="Run stock opportunity workflow">▶ Run Stock</button>
       <button id="tmcRefreshBtn" class="btn tmc-btn tmc-workflow-btn" title="Load latest results">↻ Refresh</button>
       <span id="tmcRefreshStatus" class="tmc-refresh-status" style="display:none;"></span>

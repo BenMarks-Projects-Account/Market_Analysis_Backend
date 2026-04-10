@@ -46,7 +46,11 @@ async def get_bars(
     """Historical bars for a single futures/index instrument."""
     client = request.app.state.futures_client
     bars = await client.get_bars(instrument, timeframe=timeframe, days=days)
-    return {"instrument": instrument, "timeframe": timeframe, "days": days, "bars": bars}
+    # Include prior session close for baseline normalisation (e.g. 48h charts)
+    snap = await client.get_snapshot(instrument)
+    prior_close = snap.get("prev_close") if snap else None
+    return {"instrument": instrument, "timeframe": timeframe, "days": days,
+            "bars": bars, "prior_close": prior_close}
 
 
 @router.get("/vix-term-structure")

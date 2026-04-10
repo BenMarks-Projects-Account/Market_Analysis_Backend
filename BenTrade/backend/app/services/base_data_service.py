@@ -71,6 +71,8 @@ class BaseDataService:
             return bool(api_key)
         return False
 
+    _HEALTH_PROBE_TIMEOUT_S = 3.0  # per-probe hard ceiling
+
     async def refresh_source_health_probe(self) -> None:
         async def _probe(source: str, fn):
             if not self._source_configured(source):
@@ -78,11 +80,13 @@ class BaseDataService:
                 self._source_health[source]["message"] = "not configured"
                 return
             try:
-                ok = await fn()
+                ok = await asyncio.wait_for(fn(), timeout=self._HEALTH_PROBE_TIMEOUT_S)
                 if ok:
                     self._mark_success(source, http_status=200, message="healthy")
                 else:
                     self._mark_failure(source, UpstreamError("health check failed", details={"status_code": 503}))
+            except asyncio.TimeoutError:
+                self._mark_failure(source, UpstreamError("health probe timed out", details={"status_code": 504}))
             except Exception as exc:
                 self._mark_failure(source, exc)
 

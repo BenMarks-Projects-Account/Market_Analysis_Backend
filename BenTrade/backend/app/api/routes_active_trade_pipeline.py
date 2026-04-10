@@ -7,10 +7,13 @@ Endpoints
         Query params: account_mode (live|paper), skip_model (bool)
 
     GET  /api/active-trade-pipeline/results
-        Get the most recent pipeline run result.
+        Get the most recent pipeline run result, enriched with management levels.
 
     GET  /api/active-trade-pipeline/results/{run_id}
         Get a specific pipeline run result by ID.
+
+    GET  /api/active-trade-pipeline/runs
+        List all stored runs (summary only).
 
 All endpoints follow the BenTrade error-propagation pattern:
 upstream errors are preserved, not masked.
@@ -19,6 +22,7 @@ upstream errors are preserved, not masked.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -36,12 +40,23 @@ logger = logging.getLogger("bentrade.routes_active_trade_pipeline")
 _MAX_STORED_RUNS = 10
 _run_results: list[dict[str, Any]] = []
 
+# ── Enrichment cache ───────────────────────────────────────────
+# Caches enriched results for 30s to avoid re-computing on rapid polling.
+_enriched_cache: dict[str, dict[str, Any]] = {}
+_enriched_cache_ts: dict[str, float] = {}
+_CACHE_TTL_SEC = 30.0
+
 
 def _store_result(result: dict[str, Any]) -> None:
     """Store pipeline result, evicting oldest if at capacity."""
     _run_results.append(result)
     while len(_run_results) > _MAX_STORED_RUNS:
         _run_results.pop(0)
+    # Invalidate enrichment cache for this run
+    run_id = result.get("run_id")
+    if run_id and run_id in _enriched_cache:
+        del _enriched_cache[run_id]
+        _enriched_cache_ts.pop(run_id, None)
 
 
 def _get_latest() -> dict[str, Any] | None:
@@ -55,6 +70,47 @@ def _get_by_id(run_id: str) -> dict[str, Any] | None:
         if r.get("run_id") == run_id:
             return r
     return None
+
+
+def _enrich_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Enrich a pipeline result with management-level data.
+
+    Uses a 30-second cache to avoid recomputing on rapid polling.
+    Returns a new dict with enriched recommendations and portfolio summary.
+    """
+    from app.services.position_management import (
+        build_portfolio_summary,
+        enrich_all_recommendations,
+    )
+
+    run_id = result.get("run_id") or ""
+
+    # Check cache
+    now = time.monotonic()
+    cached = _enriched_cache.get(run_id)
+    if cached and (now - _enriched_cache_ts.get(run_id, 0)) < _CACHE_TTL_SEC:
+        return cached
+
+    # Enrich
+    recs = result.get("recommendations") or []
+    if not recs:
+        # Nothing to enrich — return as-is with empty portfolio summary
+        enriched = dict(result)
+        enriched["portfolio_summary"] = build_portfolio_summary([])
+        return enriched
+
+    enriched_recs = enrich_all_recommendations(recs)
+    portfolio_summary = build_portfolio_summary(enriched_recs)
+
+    enriched = dict(result)
+    enriched["recommendations"] = enriched_recs
+    enriched["portfolio_summary"] = portfolio_summary
+
+    # Cache
+    _enriched_cache[run_id] = enriched
+    _enriched_cache_ts[run_id] = now
+
+    return enriched
 
 
 @router.post("/run")
@@ -205,26 +261,26 @@ async def run_pipeline(
 
 @router.get("/results")
 async def get_latest_results() -> dict[str, Any]:
-    """Get the most recent Active Trade Pipeline result."""
+    """Get the most recent Active Trade Pipeline result, enriched with management levels."""
     latest = _get_latest()
     if latest is None:
         return {
             "ok": False,
             "error": {"message": "No pipeline results available. Run the pipeline first."},
         }
-    return latest
+    return _enrich_result(latest)
 
 
 @router.get("/results/{run_id}")
 async def get_results_by_id(run_id: str) -> dict[str, Any]:
-    """Get a specific Active Trade Pipeline result by run ID."""
+    """Get a specific Active Trade Pipeline result by run ID, enriched with management levels."""
     result = _get_by_id(run_id)
     if result is None:
         return {
             "ok": False,
             "error": {"message": f"Run {run_id} not found"},
         }
-    return result
+    return _enrich_result(result)
 
 
 @router.get("/runs")

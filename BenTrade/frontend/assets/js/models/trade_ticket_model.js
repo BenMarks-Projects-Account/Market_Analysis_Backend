@@ -321,7 +321,7 @@ window.BenTradeTradeTicketModel = (function () {
       underlying:      symbol,
       strategyId:      strategyId,
       strategyLabel:   strategyLabel,
-      quantity:        1,
+      quantity:        Math.max(1, parseInt(raw.quantity, 10) || 1),
       orderType:       'limit',
       tif:             'day',
       limitPrice:      limitPrice,

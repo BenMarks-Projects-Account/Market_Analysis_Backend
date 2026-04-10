@@ -306,8 +306,16 @@
   /**
    * Build the styled HTML block for the trade explanation.
    * Returns empty string if no explanation is available.
+   *
+   * For options strategies with sufficient data, renders the full
+   * trade education + management guide.  Falls back to the simple
+   * one-line explanation for stocks and edge cases.
    */
   function buildExplanationHtml(trade) {
+    var guide = buildTradeGuide(trade);
+    if (guide) return renderTradeGuide(guide);
+
+    // Fallback: simple one-liner
     var text = getTradeExplanation(trade);
     if (!text) return '';
     return '<div style="background:rgba(0,224,195,0.05);border:1px solid rgba(0,224,195,0.15);'
@@ -316,6 +324,670 @@
       + 'letter-spacing:0.03em;margin-bottom:4px;">HOW THIS TRADE PROFITS</div>'
       + '<div style="color:rgba(224,224,224,0.8);font-size:0.82rem;line-height:1.5;">' + esc(text) + '</div>'
       + '</div>';
+  }
+
+  /* ── Trade Education + Management Guide builders ─────────────── */
+
+  /**
+   * Route to the correct strategy guide builder based on strategy_id.
+   * Returns null if no structured guide can be built (falls back to
+   * the simple one-liner in buildExplanationHtml).
+   */
+  function buildTradeGuide(trade) {
+    var strategy = (trade.strategy_id || trade.strategyId || trade.strategy || '').toLowerCase();
+    switch (strategy) {
+      case 'put_credit_spread':
+      case 'put_credit':
+      case 'call_credit_spread':
+      case 'call_credit':
+        return _buildCreditSpreadGuide(trade, strategy);
+      case 'put_debit_spread':
+      case 'put_debit':
+      case 'call_debit_spread':
+      case 'call_debit':
+        return _buildDebitSpreadGuide(trade, strategy);
+      case 'iron_condor':
+        return _buildIronCondorGuide(trade);
+      case 'iron_butterfly':
+        return _buildIronButterflyGuide(trade);
+      case 'butterfly_debit':
+        return _buildButterflyGuide(trade);
+      case 'calendar_call_spread':
+      case 'calendar_put_spread':
+        return _buildCalendarGuide(trade, strategy);
+      case 'diagonal_call_spread':
+      case 'diagonal_put_spread':
+        return _buildDiagonalGuide(trade, strategy);
+      default:
+        return null;
+    }
+  }
+
+  /** Extract common fields from a trade for guide builders. */
+  function _guideFields(trade) {
+    var legs = trade.legs || [];
+    var math = trade.math || {};
+    var shortLegs = legs.filter(function(l) { return l.side === 'short' || l.side === 'sell' || l.side === 'sell_to_open'; });
+    var longLegs  = legs.filter(function(l) { return l.side === 'long'  || l.side === 'buy'  || l.side === 'buy_to_open'; });
+    return {
+      symbol: trade.symbol || trade.underlying || '???',
+      legs: legs,
+      shortLegs: shortLegs,
+      longLegs: longLegs,
+      credit: math.net_credit != null ? Number(math.net_credit) : (trade.credit != null ? Number(trade.credit) : null),
+      debit: math.net_debit != null ? Number(math.net_debit) : (trade.debit != null ? Number(trade.debit) : null),
+      maxProfit: math.max_profit != null ? Number(math.max_profit) : (trade.maxProfit != null ? Number(trade.maxProfit) : null),
+      maxLoss: math.max_loss != null ? Number(math.max_loss) : (trade.maxLoss != null ? Number(trade.maxLoss) : null),
+      width: math.width != null ? Number(math.width) : (trade.width != null ? Number(trade.width) : null),
+      breakeven: trade.breakevens || trade.breakeven || math.breakeven || [],
+      dte: trade.dte != null ? Number(trade.dte) : null,
+      pop: math.pop != null ? Number(math.pop) : (trade.pop != null ? Number(trade.pop) : null),
+      underlyingPrice: trade.underlying_price || trade.underlyingPrice || trade.current_price || null,
+    };
+  }
+
+  function _$(v) { return v != null ? '$' + Number(v).toFixed(2) : '?'; }
+  function _$0(v) { return v != null ? '$' + Number(v).toFixed(0) : '?'; }
+
+  function _buildCreditSpreadGuide(trade, strategy) {
+    var f = _guideFields(trade);
+    var isPut = strategy.indexOf('put') >= 0;
+    var direction = isPut ? 'above' : 'below';
+    var dangerDirection = isPut ? 'drops toward' : 'rises toward';
+
+    var shortStrike = null, longStrike = null;
+    f.shortLegs.forEach(function(l) { shortStrike = l.strike; });
+    f.longLegs.forEach(function(l) { longStrike = l.strike; });
+
+    var credit = f.credit;
+    var width = f.width || (shortStrike != null && longStrike != null ? Math.abs(shortStrike - longStrike) : null);
+    var maxProfit = f.maxProfit;
+    var maxLoss = f.maxLoss != null ? Math.abs(f.maxLoss) : (width != null && credit != null ? (width - credit) * 100 : null);
+    if (maxProfit == null && credit != null) maxProfit = credit * 100;
+
+    var breakeven = null;
+    if (Array.isArray(f.breakeven) && f.breakeven.length > 0) breakeven = f.breakeven[0];
+    else if (typeof f.breakeven === 'number') breakeven = f.breakeven;
+    else if (shortStrike != null && credit != null) breakeven = isPut ? shortStrike - credit : shortStrike + credit;
+
+    var profitTarget50 = credit != null ? credit * 0.50 : null;
+    var stopLossVal = credit != null ? credit * 2.0 : null;
+    var dte = f.dte || 14;
+    var timeExit = Math.max(7, Math.round(dte * 0.25));
+
+    var keyLevels = [];
+    keyLevels.push({ label: 'Max profit zone', value: f.symbol + ' ' + direction + ' ' + _$0(shortStrike), color: 'green' });
+    if (breakeven != null) keyLevels.push({ label: 'Breakeven', value: _$(breakeven), color: 'yellow' });
+    keyLevels.push({ label: 'Max loss zone', value: f.symbol + ' ' + (isPut ? 'below' : 'above') + ' ' + _$0(longStrike), color: 'red' });
+    keyLevels.push({ label: 'Short strike', value: _$0(shortStrike), color: 'white' });
+
+    return {
+      title: 'HOW THIS TRADE WORKS',
+      profitLoss: 'This is an INCOME trade. '
+        + (credit != null ? 'You collect ' + _$(credit) + ' per share' + (maxProfit != null ? ' (' + _$0(maxProfit) + ' per contract)' : '') + ' upfront. ' : '')
+        + 'You keep this premium if ' + f.symbol + ' stays ' + direction + ' ' + _$0(shortStrike) + ' through expiration.',
+      keyLevels: keyLevels,
+      managementPlan: [
+        {
+          label: 'Take profit at 50%',
+          detail: credit != null && profitTarget50 != null
+            ? 'When the spread can be bought back for ' + _$(profitTarget50) + ', keeping '
+              + _$(credit - profitTarget50) + ' profit (' + _$0((credit - profitTarget50) * 100)
+              + ' per contract). This typically happens ' + Math.round(dte * 0.5) + '\u2013' + Math.round(dte * 0.7) + ' days in if '
+              + f.symbol + ' stays ' + direction + ' the short strike.'
+            : 'When the spread loses half its value, buy it back and lock in profit.',
+        },
+        {
+          label: 'Stop loss at 2\u00D7 credit',
+          detail: stopLossVal != null
+            ? 'If the spread reaches ' + _$(stopLossVal) + ', close the trade. '
+              + 'Your loss: ' + _$0((stopLossVal - credit) * 100) + ' per contract. '
+              + (maxLoss != null ? 'This protects against the ' + _$0(maxLoss) + ' max loss.' : '')
+            : 'If the spread doubles in value against you, close it to limit damage.',
+        },
+        {
+          label: 'Close by ' + timeExit + ' DTE',
+          detail: 'If the trade hasn\u2019t hit profit target or stop loss by '
+            + timeExit + ' days to expiration, consider closing. '
+            + 'Gamma risk accelerates in the final week \u2014 small price moves cause big P&L swings.',
+        },
+      ],
+      watchFor: [
+        { signal: f.symbol + ' ' + dangerDirection + ' ' + _$0(shortStrike), meaning: 'Your short strike is being tested. The trade is at risk.', action: 'Watch closely. If it breaks through, your stop loss should trigger.', type: 'danger' },
+        { signal: 'VIX spike / market volatility increase', meaning: 'Higher IV inflates the spread value even if price hasn\u2019t moved. Paper losses may appear.', action: 'Don\u2019t panic. If the price level is still safe, IV expansion is temporary.', type: 'caution' },
+        { signal: 'Earnings or major event within the DTE window', meaning: 'Binary events can cause overnight gaps through your strikes.', action: 'Consider closing before the event if the trade is profitable.', type: 'caution' },
+        { signal: f.symbol + ' moving AWAY from ' + _$0(shortStrike), meaning: 'The trade is working. Time decay is accelerating your profit.', action: 'Let it run toward the 50% profit target.', type: 'positive' },
+      ],
+      thetaBehavior: 'Time decay works in your favor. Each day ' + f.symbol + ' stays ' + direction
+        + ' ' + _$0(shortStrike) + ', the spread loses value (which is what you want \u2014 you sold it). '
+        + 'Theta is slow in the first ~' + Math.round(dte * 0.3) + ' days, then accelerates. '
+        + 'The fastest decay is in the final 7\u201310 days, which is also when gamma risk peaks \u2014 '
+        + 'hence the ' + timeExit + ' DTE exit rule.',
+    };
+  }
+
+  function _buildDebitSpreadGuide(trade, strategy) {
+    var f = _guideFields(trade);
+    var isPut = strategy.indexOf('put') >= 0;
+    var direction = isPut ? 'down' : 'up';
+    var targetDirection = isPut ? 'below' : 'above';
+    var wrongDirection = isPut ? 'up' : 'down';
+
+    var longStrike = null, shortStrike = null;
+    f.longLegs.forEach(function(l) { longStrike = l.strike; });
+    f.shortLegs.forEach(function(l) { shortStrike = l.strike; });
+
+    var debit = f.debit;
+    var width = f.width || (longStrike != null && shortStrike != null ? Math.abs(longStrike - shortStrike) : null);
+    var maxLoss = f.maxLoss != null ? Math.abs(f.maxLoss) : (debit != null ? debit * 100 : null);
+    var maxProfit = f.maxProfit || (width != null && debit != null ? (width - debit) * 100 : null);
+
+    var breakeven = null;
+    if (Array.isArray(f.breakeven) && f.breakeven.length > 0) breakeven = f.breakeven[0];
+    else if (typeof f.breakeven === 'number') breakeven = f.breakeven;
+    else if (longStrike != null && debit != null) breakeven = isPut ? longStrike - debit : longStrike + debit;
+
+    var profitTarget75 = debit != null && width != null ? debit + (width - debit) * 0.75 : null;
+    var dte = f.dte || 14;
+    var reassessDte = Math.max(5, Math.round(dte * 0.3));
+
+    var keyLevels = [];
+    keyLevels.push({ label: 'Need price ' + direction, value: f.symbol + ' must move ' + direction, color: 'cyan' });
+    if (breakeven != null) keyLevels.push({ label: 'Breakeven', value: _$(breakeven), color: 'yellow' });
+    keyLevels.push({ label: 'Max profit zone', value: targetDirection + ' ' + _$0(shortStrike), color: 'green' });
+
+    return {
+      title: 'HOW THIS TRADE WORKS',
+      profitLoss: 'This is a DIRECTIONAL trade. '
+        + (debit != null ? 'You paid ' + _$(debit) + ' per share (' + _$0(maxLoss) + ' per contract) ' : '')
+        + 'for the right to profit if ' + f.symbol + ' moves ' + direction + '. '
+        + (maxProfit != null ? 'Max profit of ' + _$0(maxProfit) + ' if ' + f.symbol + ' closes ' + targetDirection + ' ' + _$0(shortStrike) + ' at expiration.' : ''),
+      keyLevels: keyLevels,
+      managementPlan: [
+        {
+          label: 'Take profit at 75%',
+          detail: profitTarget75 != null
+            ? 'When the spread reaches ' + _$(profitTarget75) + ' (75% of max width), sell to close. '
+              + 'Profit: ' + _$0((profitTarget75 - debit) * 100) + ' per contract. '
+              + 'Don\u2019t hold for max profit \u2014 it requires a perfect pin at expiration.'
+            : 'When the spread reaches 75% of the width, take profit. Don\u2019t wait for max.',
+        },
+        {
+          label: 'Cut losses early',
+          detail: 'If ' + f.symbol + ' moves decisively ' + wrongDirection + ' (wrong direction), close the trade. '
+            + (maxLoss != null ? 'Your max loss is the ' + _$0(maxLoss) + ' debit \u2014 don\u2019t let it all expire worthless if the thesis is clearly wrong.' : ''),
+        },
+        {
+          label: 'Reassess at ' + reassessDte + ' DTE',
+          detail: 'Directional trades lose value rapidly as expiration approaches. '
+            + 'If ' + f.symbol + ' hasn\u2019t moved ' + direction + ' meaningfully by ' + reassessDte + ' DTE, close for whatever remains.',
+        },
+      ],
+      watchFor: [
+        { signal: f.symbol + ' moving ' + direction + ' toward breakeven', meaning: 'Your thesis is playing out. The trade is working.', action: 'Hold toward the 75% profit target.', type: 'positive' },
+        { signal: f.symbol + ' moving ' + wrongDirection + ' (wrong direction)', meaning: 'Your directional thesis is wrong or early.', action: 'If the move is decisive, cut the loss. Don\u2019t hope.', type: 'danger' },
+        { signal: 'IV crush after an event (earnings, Fed)', meaning: 'Even if price moves your way, IV dropping can reduce spread value.', action: 'Debit spreads are partially protected (long and short legs offset), but be aware.', type: 'caution' },
+      ],
+      thetaBehavior: 'Time decay works AGAINST this trade. Every day without ' + f.symbol
+        + ' moving ' + direction + ', the spread loses value. Take the 75% profit quickly and don\u2019t hold hoping for max gain. The clock is your enemy.',
+    };
+  }
+
+  function _buildIronCondorGuide(trade) {
+    var f = _guideFields(trade);
+    var shortPut = null, shortCall = null, longPut = null, longCall = null;
+    f.legs.forEach(function(l) {
+      var type = (l.option_type || '').toLowerCase();
+      var isShort = l.side === 'short' || l.side === 'sell' || l.side === 'sell_to_open';
+      if (type === 'put'  && isShort) shortPut  = l.strike;
+      if (type === 'call' && isShort) shortCall = l.strike;
+      if (type === 'put'  && !isShort) longPut  = l.strike;
+      if (type === 'call' && !isShort) longCall = l.strike;
+    });
+
+    var credit = f.credit;
+    var dte = f.dte || 14;
+    var timeExit = Math.max(7, Math.round(dte * 0.25));
+
+    var keyLevels = [];
+    keyLevels.push({ label: 'Max profit zone', value: _$0(shortPut) + ' \u2013 ' + _$0(shortCall), color: 'green' });
+    if (Array.isArray(f.breakeven) && f.breakeven.length === 2) {
+      keyLevels.push({ label: 'Lower breakeven', value: _$(f.breakeven[0]), color: 'yellow' });
+      keyLevels.push({ label: 'Upper breakeven', value: _$(f.breakeven[1]), color: 'yellow' });
+    }
+    keyLevels.push({ label: 'Put side max loss', value: 'below ' + _$0(longPut), color: 'red' });
+    keyLevels.push({ label: 'Call side max loss', value: 'above ' + _$0(longCall), color: 'red' });
+
+    return {
+      title: 'HOW THIS TRADE WORKS',
+      profitLoss: 'This is a NEUTRAL / RANGE trade. You collected premium by selling both a call spread above and a put spread below. '
+        + 'You profit if ' + f.symbol + ' stays between ' + _$0(shortPut) + ' and ' + _$0(shortCall) + ' through expiration.'
+        + (f.maxProfit != null ? ' Max profit: ' + _$0(f.maxProfit) + '.' : '')
+        + (f.maxLoss != null ? ' Max loss: ' + _$0(Math.abs(f.maxLoss)) + '.' : ''),
+      keyLevels: keyLevels,
+      managementPlan: [
+        { label: 'Take profit at 50%', detail: 'When you can buy the entire condor back for 50% of what you sold it for, close the whole position.' },
+        { label: 'Stop loss at 2\u00D7 credit', detail: 'If the condor value doubles, close the whole position. Don\u2019t try to manage just one side.' },
+        {
+          label: 'Do NOT leg out of one side',
+          detail: 'If one side is tested, close the ENTIRE condor \u2014 not just the losing side. Closing one side turns a defined-risk trade into an undefined-risk naked spread.',
+        },
+        { label: 'Close by ' + timeExit + ' DTE', detail: 'Gamma risk accelerates in the final week. Close before then if profit target not met.' },
+      ],
+      watchFor: [
+        { signal: f.symbol + ' approaching either short strike', meaning: 'One side of the condor is at risk.', action: 'If price breaks through a short strike, close the full condor.', type: 'danger' },
+        { signal: f.symbol + ' staying in the middle of the range', meaning: 'Perfect scenario. Both sides decay simultaneously.', action: 'Let theta do its work. Target 50% profit.', type: 'positive' },
+        { signal: 'Sudden VIX spike', meaning: 'Both sides inflate \u2014 paper losses appear even if price hasn\u2019t moved.', action: 'If price is still in the range, this is usually temporary.', type: 'caution' },
+      ],
+      thetaBehavior: 'Time decay is your best friend in an iron condor. Both the call side and put side lose value simultaneously. '
+        + 'Theta accelerates as expiration approaches, but gamma risk also increases \u2014 if ' + f.symbol
+        + ' breaks out of the range late in the trade, losses mount quickly.',
+    };
+  }
+
+  function _buildIronButterflyGuide(trade) {
+    var f = _guideFields(trade);
+    var shortStrike = null;
+    f.legs.forEach(function(l) {
+      if (l.side === 'short' || l.side === 'sell' || l.side === 'sell_to_open') shortStrike = l.strike;
+    });
+
+    var keyLevels = [];
+    keyLevels.push({ label: 'Max profit at', value: _$0(shortStrike), color: 'green' });
+    if (Array.isArray(f.breakeven) && f.breakeven.length === 2) {
+      keyLevels.push({ label: 'Lower breakeven', value: _$(f.breakeven[0]), color: 'yellow' });
+      keyLevels.push({ label: 'Upper breakeven', value: _$(f.breakeven[1]), color: 'yellow' });
+    }
+
+    return {
+      title: 'HOW THIS TRADE WORKS',
+      profitLoss: 'This is a NEUTRAL / PINNING trade. Max profit if ' + f.symbol + ' closes exactly at '
+        + _$0(shortStrike) + '. Profits shrink as price moves away from center. '
+        + (f.maxProfit != null ? 'Max profit: ' + _$0(f.maxProfit) + '. ' : '')
+        + (f.maxLoss != null ? 'Max loss: ' + _$0(Math.abs(f.maxLoss)) + '.' : ''),
+      keyLevels: keyLevels,
+      managementPlan: [
+        { label: 'Take profit at 25\u201350%', detail: 'Iron butterflies rarely reach max (requires exact pin). Take 25\u201350% of max and move on.' },
+        { label: 'Stop loss at 2\u00D7 debit/credit', detail: 'If the position moves strongly against you, close for damage control.' },
+      ],
+      watchFor: [
+        { signal: f.symbol + ' pinning near ' + _$0(shortStrike), meaning: 'The ideal scenario \u2014 maximum premium capture.', action: 'Watch for profit target.', type: 'positive' },
+        { signal: f.symbol + ' breaking away from center', meaning: 'Profit zone is narrow. The trade loses value fast.', action: 'Be ready to close if breakeven is threatened.', type: 'danger' },
+      ],
+      thetaBehavior: 'Complex theta profile. Near expiration, if price is at the center strike, theta accelerates in your favor dramatically. '
+        + 'If price is away from center, theta works against the position as the wings decay unevenly.',
+    };
+  }
+
+  function _buildButterflyGuide(trade) {
+    var f = _guideFields(trade);
+    var centerStrike = null;
+    f.legs.forEach(function(l) {
+      if (l.side === 'short' || l.side === 'sell' || l.side === 'sell_to_open') centerStrike = l.strike;
+    });
+
+    var keyLevels = [];
+    keyLevels.push({ label: 'Max profit at', value: _$0(centerStrike), color: 'green' });
+    if (Array.isArray(f.breakeven) && f.breakeven.length === 2) {
+      keyLevels.push({ label: 'Lower breakeven', value: _$(f.breakeven[0]), color: 'yellow' });
+      keyLevels.push({ label: 'Upper breakeven', value: _$(f.breakeven[1]), color: 'yellow' });
+    }
+
+    return {
+      title: 'HOW THIS TRADE WORKS',
+      profitLoss: 'This is a PINNING trade. You profit most if ' + f.symbol + ' closes near '
+        + _$0(centerStrike) + ' at expiration. Low cost, low probability, but high reward relative to debit paid.'
+        + (f.maxProfit != null ? ' Max profit: ' + _$0(f.maxProfit) + '.' : '')
+        + (f.maxLoss != null ? ' Risk: ' + _$0(Math.abs(f.maxLoss)) + ' (debit paid).' : ''),
+      keyLevels: keyLevels,
+      managementPlan: [
+        { label: 'Take profit at 50%', detail: 'Butterflies rarely reach max profit (requires exact pin). Take 50% of max and move on \u2014 this is a win.' },
+        { label: 'Stop loss at 1\u00D7 debit', detail: 'If the butterfly is clearly not going to work (price far from center with time running out), close for whatever value remains.' },
+        { label: 'Reassess at 5 DTE', detail: 'If price is far from ' + _$0(centerStrike) + ' with < 5 DTE, close for salvage value rather than letting it expire worthless.' },
+      ],
+      watchFor: [
+        { signal: f.symbol + ' near ' + _$0(centerStrike) + ' with declining IV', meaning: 'Perfect conditions \u2014 price is pinning and vol is dropping.', action: 'This is the dream scenario. Watch for 50% profit.', type: 'positive' },
+        { signal: f.symbol + ' far from ' + _$0(centerStrike), meaning: 'The pin thesis isn\u2019t working.', action: 'If significant time remains, hold \u2014 stock could return. If < 5 DTE, close for salvage.', type: 'danger' },
+      ],
+      thetaBehavior: 'Complex theta. Early on, theta is minimal. Near expiration AND near the center strike, theta accelerates dramatically in your favor. '
+        + 'But if price is away from center, theta works against you as the wings decay.',
+    };
+  }
+
+  function _buildCalendarGuide(trade, strategy) {
+    var f = _guideFields(trade);
+    var isPut = strategy.indexOf('put') >= 0;
+    var strike = null;
+    if (f.legs.length > 0) strike = f.legs[0].strike;
+
+    return {
+      title: 'HOW THIS TRADE WORKS',
+      profitLoss: 'This is a TIME DECAY trade. You profit from the near-term option decaying faster than the far-term option. '
+        + 'Best if ' + f.symbol + ' stays near ' + _$0(strike) + '. '
+        + (f.maxLoss != null ? 'Risk limited to ' + _$0(Math.abs(f.maxLoss)) + ' (net debit paid).' : ''),
+      keyLevels: [
+        { label: 'Sweet spot', value: f.symbol + ' near ' + _$0(strike), color: 'green' },
+      ],
+      managementPlan: [
+        { label: 'Take profit at 25\u201350%', detail: 'Calendar spreads have modest profit potential. Take gains when the near-term option has decayed significantly.' },
+        { label: 'Close before near-term expiration', detail: 'Close the entire spread before the short leg expires. Don\u2019t let it expire and leave a naked long option.' },
+      ],
+      watchFor: [
+        { signal: f.symbol + ' staying near ' + _$0(strike), meaning: 'Ideal \u2014 both options are at ATM, but the short decays faster.', action: 'Hold and let the time differential work.', type: 'positive' },
+        { signal: f.symbol + ' moving far from ' + _$0(strike), meaning: 'Both options lose extrinsic value, reducing the spread\u2019s value.', action: 'Consider closing if the move is large.', type: 'danger' },
+        { signal: 'IV increase', meaning: 'Benefits the far-term option more than the near-term, expanding spread value.', action: 'This is a tailwind for calendars.', type: 'positive' },
+      ],
+      thetaBehavior: 'The near-term short option decays faster than the far-term long option \u2014 this differential IS your profit. '
+        + 'Works best when ' + f.symbol + ' stays near the strike and implied volatility is stable or rising.',
+    };
+  }
+
+  function _buildDiagonalGuide(trade, strategy) {
+    var f = _guideFields(trade);
+    var isPut = strategy.indexOf('put') >= 0;
+    var direction = isPut ? 'down' : 'up';
+    var shortStrike = null, longStrike = null;
+    f.shortLegs.forEach(function(l) { shortStrike = l.strike; });
+    f.longLegs.forEach(function(l) { longStrike = l.strike; });
+
+    return {
+      title: 'HOW THIS TRADE WORKS',
+      profitLoss: 'This is a DIRECTIONAL + TIME DECAY trade. Combines a directional bias ' + direction
+        + ' with a time decay advantage. The near-term short at ' + _$0(shortStrike)
+        + ' decays faster while the far-term long at ' + _$0(longStrike) + ' retains value.'
+        + (f.maxLoss != null ? ' Risk limited to ' + _$0(Math.abs(f.maxLoss)) + '.' : ''),
+      keyLevels: [
+        { label: 'Short strike (near-term)', value: _$0(shortStrike), color: 'yellow' },
+        { label: 'Long strike (far-term)', value: _$0(longStrike), color: 'cyan' },
+      ],
+      managementPlan: [
+        { label: 'Take profit at 25\u201350%', detail: 'Diagonals have moderate profit potential. Take gains when available.' },
+        { label: 'Close before short expiration', detail: 'Close the entire spread before the near-term short expires to avoid naked long exposure.' },
+        { label: 'Roll the short leg', detail: 'If the short leg expires worthless (ideal), consider selling a new near-term option against the remaining long.' },
+      ],
+      watchFor: [
+        { signal: f.symbol + ' moving ' + direction + ' toward short strike', meaning: 'Directional thesis working and short leg captures premium.', action: 'Ideal scenario. Monitor for profit target.', type: 'positive' },
+        { signal: f.symbol + ' blowing through the short strike', meaning: 'The short leg is deep ITM, reducing or eliminating the time decay edge.', action: 'Consider closing or rolling the short leg to a further strike.', type: 'danger' },
+      ],
+      thetaBehavior: 'The near-term short option decays faster, which is your income engine. '
+        + 'The far-term long gives directional exposure and protection. Works best when the move is gradual, not explosive.',
+    };
+  }
+
+  /** Render a structured guide object into HTML. */
+  function renderTradeGuide(guide) {
+    var html = '<div class="trade-guide">';
+    html += '<div class="guide-header">' + esc(guide.title) + '</div>';
+    html += '<div class="guide-profit-loss">' + esc(guide.profitLoss) + '</div>';
+
+    // Key levels
+    if (guide.keyLevels && guide.keyLevels.length > 0) {
+      html += '<div class="guide-section"><div class="guide-section-title">KEY LEVELS</div>';
+      guide.keyLevels.forEach(function(l) {
+        var borderColor = l.color === 'green' ? '#4ade80' : l.color === 'red' ? '#f87171' : l.color === 'yellow' ? '#fbbf24' : l.color === 'cyan' ? '#22d3ee' : '#94a3b8';
+        html += '<div class="guide-level" style="border-left:3px solid ' + borderColor + ';">'
+          + '<span class="level-label">' + esc(l.label) + ':</span> '
+          + '<span class="level-value">' + esc(l.value) + '</span></div>';
+      });
+      html += '</div>';
+    }
+
+    // Management plan
+    if (guide.managementPlan && guide.managementPlan.length > 0) {
+      html += '<div class="guide-section"><div class="guide-section-title">MANAGEMENT PLAN</div>';
+      guide.managementPlan.forEach(function(m) {
+        html += '<div class="guide-mgmt-item"><div class="mgmt-label">' + esc(m.label) + '</div>'
+          + '<div class="mgmt-detail">' + esc(m.detail) + '</div></div>';
+      });
+      html += '</div>';
+    }
+
+    // What to watch for
+    if (guide.watchFor && guide.watchFor.length > 0) {
+      html += '<div class="guide-section"><div class="guide-section-title">WHAT TO WATCH FOR</div>';
+      guide.watchFor.forEach(function(w) {
+        var icon = w.type === 'positive' ? '\u2705' : w.type === 'danger' ? '\u26A0\uFE0F' : '\uD83D\uDC41\uFE0F';
+        html += '<div class="guide-watch ' + esc(w.type) + '">'
+          + '<div class="watch-signal">' + icon + ' ' + esc(w.signal) + '</div>'
+          + '<div class="watch-meaning">' + esc(w.meaning) + '</div>'
+          + '<div class="watch-action"><strong>Action:</strong> ' + esc(w.action) + '</div>'
+          + '</div>';
+      });
+      html += '</div>';
+    }
+
+    // Theta behavior
+    if (guide.thetaBehavior) {
+      html += '<div class="guide-section"><div class="guide-section-title">TIME DECAY</div>'
+        + '<div class="guide-theta">' + esc(guide.thetaBehavior) + '</div></div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  /* ── Position Sizing Display (lazy-load-on-expand) ──────── */
+
+  /** Cache: tradeKey → { sizing, symbol, maxLoss } */
+  var _sizingCache = {};
+
+  /**
+   * Build a sizing container div inside the card body.
+   * Returns empty string if the trade has no max loss.
+   * The container starts empty — populated on first expand via toggle listener.
+   */
+  function _buildSizingPlaceholder(trade, idx) {
+    var maxLoss = _extractMaxLossPerContract(trade);
+    if (maxLoss == null || maxLoss <= 0) return '';
+    var tradeKey = trade._tradeKey || '';
+    var id = 'sizing-' + idx + '-' + (trade.symbol || '').replace(/[^a-zA-Z0-9]/g, '');
+    return '<div id="' + id + '" class="sizing-placeholder" '
+      + 'data-symbol="' + esc(trade.symbol || '') + '" '
+      + 'data-scanner-key="' + esc(trade.strategyId || trade.strategy || '') + '" '
+      + 'data-max-loss="' + maxLoss + '" '
+      + 'data-trade-key="' + esc(tradeKey) + '" '
+      + 'data-sizing-state="idle">'
+      + '</div>';
+  }
+
+  /**
+   * Extract per-contract max loss from a trade object.
+   * Input: trade object (normalized candidate).
+   * Formula: math.max_loss or maxLoss, or (width - credit) * 100, or debit * 100
+   */
+  function _extractMaxLossPerContract(trade) {
+    var math = trade.math || {};
+    if (math.max_loss != null) return Math.abs(Number(math.max_loss));
+    if (trade.maxLoss != null) return Math.abs(Number(trade.maxLoss));
+    var credit = trade.credit != null ? Number(trade.credit) : null;
+    var debit = trade.debit != null ? Number(trade.debit) : null;
+    var width = trade.width != null ? Number(trade.width) : null;
+    if (width != null && credit != null) return Math.abs(width - credit) * 100;
+    if (debit != null) return Math.abs(debit) * 100;
+    return null;
+  }
+
+  /**
+   * Lazy-load sizing for a single card when its <details> is expanded.
+   * Called from the toggle event listener. Skips if already loaded or in-flight.
+   */
+  function _loadSizingForCard(detailsEl) {
+    var card = detailsEl.closest('.trade-card');
+    if (!card) return;
+    var el = card.querySelector('.sizing-placeholder');
+    if (!el) return;
+
+    var state = el.getAttribute('data-sizing-state');
+    if (state === 'loaded' || state === 'loading') return;
+
+    var symbol = el.getAttribute('data-symbol');
+    var scannerKey = el.getAttribute('data-scanner-key');
+    var maxLoss = parseFloat(el.getAttribute('data-max-loss'));
+    var tradeKey = el.getAttribute('data-trade-key') || '';
+    if (!symbol || !maxLoss || maxLoss <= 0) return;
+
+    // Check cache first
+    if (_sizingCache[tradeKey] && _sizingCache[tradeKey].sizing) {
+      el.setAttribute('data-sizing-state', 'loaded');
+      el.innerHTML = _renderSizingResult(_sizingCache[tradeKey].sizing, symbol, maxLoss);
+      return;
+    }
+
+    if (!api || !api.getRiskSize) return;
+    el.setAttribute('data-sizing-state', 'loading');
+    el.innerHTML = '<div class="sizing-loading">Calculating position size\u2026</div>';
+
+    api.getRiskSize({
+      symbol: symbol,
+      scanner_key: scannerKey || '',
+      max_loss_per_contract: maxLoss,
+      account_mode: _getAccountMode(),
+    }).then(function(resp) {
+      if (!resp || !resp.ok || !resp.sizing) {
+        var errMsg = (resp && resp.error) || 'Sizing unavailable';
+        el.innerHTML = '<div class="sizing-error">' + esc(errMsg) + '</div>';
+        el.setAttribute('data-sizing-state', 'loaded');
+        return;
+      }
+      _sizingCache[tradeKey] = { sizing: resp.sizing, symbol: symbol, maxLoss: maxLoss };
+      el.setAttribute('data-sizing-state', 'loaded');
+      el.innerHTML = _renderSizingResult(resp.sizing, symbol, maxLoss);
+    }).catch(function(err) {
+      console.warn('[TMC] Sizing fetch failed for ' + symbol, err);
+      el.innerHTML = '<div class="sizing-error">Sizing unavailable</div>';
+      el.setAttribute('data-sizing-state', 'idle');
+    });
+  }
+
+  /** Get current account mode from the TMC UI (default "paper"). */
+  function _getAccountMode() {
+    var sel = document.getElementById('tmcAccountMode')
+           || document.getElementById('accountModeSelect');
+    if (sel && sel.value) return sel.value;
+    return 'paper';
+  }
+
+  /**
+   * Render the position sizing result — two-column layout.
+   * Left: big contract number. Right: detail rows.
+   */
+  function _renderSizingResult(sizing, symbol, maxLoss) {
+    if (sizing.blocked) {
+      return '<div class="sizing-result sizing-blocked">'
+        + '<div class="sizing-label">POSITION SIZE</div>'
+        + '<div class="sizing-blocked-msg">\u26D4 ' + esc(sizing.block_reason || 'Blocked') + '</div>'
+        + '</div>';
+    }
+
+    var suggested = sizing.suggested_contracts || 0;
+    var totalRisk = sizing.total_risk || 0;
+    var riskPct = sizing.risk_pct_of_equity || 0;
+    var binding = sizing.binding_constraint || '';
+    var bindingLabel = _bindingConstraintLabel(binding);
+    var maxLossFmt = maxLoss ? '$' + maxLoss.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) : '—';
+
+    var html = '<div class="sizing-result">';
+    html += '<div class="sizing-label">POSITION SIZE</div>';
+    html += '<div class="sizing-columns">';
+
+    // Left: big contract number
+    html += '<div class="sizing-contracts">';
+    html += '<span class="sizing-qty">' + suggested + '</span>';
+    html += '<span class="sizing-unit">contract' + (suggested !== 1 ? 's' : '') + '</span>';
+    html += '</div>';
+
+    // Right: detail rows
+    html += '<div class="sizing-details">';
+    html += '<div class="sizing-row"><span class="sizing-row-label">Risk / contract</span><span class="sizing-row-value">' + maxLossFmt + '</span></div>';
+    html += '<div class="sizing-row"><span class="sizing-row-label">Total risk</span><span class="sizing-row-value">$' + totalRisk.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) + '</span></div>';
+    html += '<div class="sizing-row"><span class="sizing-row-label">% of equity</span><span class="sizing-row-value">' + riskPct.toFixed(1) + '%</span></div>';
+    html += '<div class="sizing-row"><span class="sizing-row-label">Sized by</span><span class="sizing-row-value">' + esc(bindingLabel) + '</span></div>';
+    html += '</div>';
+
+    html += '</div>'; // .sizing-columns
+
+    // Warnings
+    if (sizing.warnings && sizing.warnings.length > 0) {
+      html += '<div class="sizing-warnings">';
+      sizing.warnings.forEach(function(w) {
+        html += '<div class="sizing-warn">\u26A0\uFE0F ' + esc(w) + '</div>';
+      });
+      html += '</div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  function _bindingConstraintLabel(binding) {
+    var map = {
+      per_trade: 'Per-trade limit',
+      per_underlying: 'Per-underlying limit',
+      total_portfolio: 'Total portfolio risk',
+      account_reserve: 'Account reserve',
+      directional: 'Directional concentration',
+    };
+    return map[binding] || binding || 'Unknown';
+  }
+
+  /** Get cached sizing for a trade key (used by execution pre-fill). */
+  function _getCachedSizing(tradeKey) {
+    return _sizingCache[tradeKey] || null;
+  }
+
+  /** Clear sizing cache (e.g. when account mode changes). */
+  function _clearSizingCache() {
+    _sizingCache = {};
+    document.querySelectorAll('.sizing-placeholder').forEach(function(el) {
+      el.setAttribute('data-sizing-state', 'idle');
+      el.innerHTML = '';
+    });
+  }
+
+  /* ── Risk State Bar ─────────────────────────────────────── */
+
+  /** Load portfolio risk state and render the utilization bar in TMC header. */
+  function _loadRiskStateBar() {
+    if (!api || !api.getRiskState) return;
+    api.getRiskState(_getAccountMode()).then(function(resp) {
+      if (!resp || !resp.ok) return;
+      _renderRiskBar(resp);
+    }).catch(function(err) {
+      console.warn('[TMC] Risk state fetch failed', err);
+    });
+  }
+
+  /** Render the risk utilization bar into the TMC banner area. */
+  function _renderRiskBar(state) {
+    var container = document.getElementById('tmcRiskBar');
+    if (!container) return;
+
+    var equity = state.equity || 0;
+    var committed = state.committed_risk || 0;
+    var available = state.available_risk_budget || 0;
+    var positions = state.open_position_count || 0;
+    var utilPct = equity > 0 ? Math.min(100, (committed / equity) * 100) : 0;
+
+    // Color: green < 50%, yellow 50-75%, red > 75%
+    var barColor = utilPct < 50 ? '#10b981' : utilPct < 75 ? '#f59e0b' : '#ef4444';
+
+    var html = '<div class="risk-bar">';
+    html += '<div class="risk-bar-label">';
+    html += '<span>Risk Budget</span>';
+    html += '<span>' + utilPct.toFixed(0) + '% used \u00b7 ' + positions + ' position' + (positions !== 1 ? 's' : '') + '</span>';
+    html += '</div>';
+    html += '<div class="risk-bar-track">';
+    html += '<div class="risk-bar-fill" style="width:' + utilPct.toFixed(1) + '%;background:' + barColor + ';"></div>';
+    html += '</div>';
+    html += '<div class="risk-bar-detail">';
+    html += '<span>Committed: $' + committed.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) + '</span>';
+    html += '<span>Available: $' + available.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) + '</span>';
+    html += '<span>Equity: $' + equity.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) + '</span>';
+    html += '</div>';
+    html += '</div>';
+
+    container.innerHTML = html;
+    container.style.display = '';
   }
 
   /* -- DOM builders -------------------------------------------------- */
@@ -1435,13 +2107,24 @@
     };
     grid.addEventListener('click', _optionsGridClickHandler);
 
-    // Wire expand state persistence
+    // Wire expand state persistence + lazy sizing load
     grid.querySelectorAll('details.trade-card-collapse').forEach(function (details) {
       details.addEventListener('toggle', function () {
         var tk = details.dataset.tradeKey || '';
         if (tk) _optionsExpandState[tk] = details.open;
+        // Lazy-load sizing when card expands
+        if (details.open) {
+          _loadSizingForCard(details);
+        }
       });
+      // Load sizing for cards that start already expanded
+      if (details.open) {
+        _loadSizingForCard(details);
+      }
     });
+
+    // Load risk state bar on render
+    _loadRiskStateBar();
   }
 
   /**
@@ -1482,6 +2165,7 @@
     var symbol = c.symbol || '???';
     var strategyLabel = c.strategy ? c.strategy.replace(/_/g, ' ').replace(/\b\w/g, function (ch) { return ch.toUpperCase(); }) : '--';
     var tradeKey = _buildOptionsTradeKey(c);
+    c._tradeKey = tradeKey;
 
     // ── Score badge (model_score preferred, fallback to rank) ──
     var scoreVal = c.modelScore != null ? c.modelScore : null;
@@ -1595,6 +2279,7 @@
       + '<div class="trade-body" style="flex:1 1 auto;">'
       + coreSection
       + buildExplanationHtml(c)
+      + _buildSizingPlaceholder(c, idx)
       + legsSection
       + enrichment.body
       + '</div>'
@@ -1799,6 +2484,12 @@
         showToast('Cannot execute: trade has no leg data', 'warning');
       }
       return;
+    }
+
+    // Pre-fill quantity from cached sizing result
+    var cached = _getCachedSizing(tradeKey);
+    if (cached && cached.sizing && !cached.sizing.blocked && cached.sizing.suggested_contracts > 0) {
+      rawCandidate.quantity = cached.sizing.suggested_contracts;
     }
 
     // Open the TradeTicket modal — it handles normalize, validate, preview, submit
@@ -2030,6 +2721,8 @@
     }
     var count = document.getElementById('tmcActiveCount');
     if (count) { count.textContent = '--'; count.className = 'tmc-count-badge tmc-count-muted'; }
+    var ps = document.getElementById('tmcPortfolioSummary');
+    if (ps) ps.remove();
   }
 
   /**
@@ -2038,6 +2731,8 @@
    */
   function showActiveError(msg, responseData) {
     console.error('[TMC:DIAG] showActiveError called:', msg, new Error().stack.split('\n').slice(1, 3).join(' <- '));
+    var ps = document.getElementById('tmcPortfolioSummary');
+    if (ps) ps.remove();
     var grid = document.getElementById('tmcActiveTradeGrid');
     if (grid) {
       var detailHtml = '';
@@ -2097,6 +2792,118 @@
   var _activeRenderedRows = [];
   var _activeExpandState  = {};
 
+  // ── Management display helpers ──────────────────────────────
+
+  var _mgmtStatusStyles = {
+    'AT_TARGET':  { bg: '#065f46', border: '#059669', color: '#34d399', icon: '\uD83C\uDFAF', label: 'AT TARGET' },
+    'ON_TRACK':   { bg: '#064e3b', border: '#10b981', color: '#6ee7b7', icon: '\u2705', label: 'ON TRACK' },
+    'NEUTRAL':    { bg: '#374151', border: '#6b7280', color: '#9ca3af', icon: '\u23F3', label: 'NEUTRAL' },
+    'IN_DANGER':  { bg: '#78350f', border: '#d97706', color: '#fbbf24', icon: '\u26A0\uFE0F', label: 'IN DANGER' },
+    'AT_STOP':    { bg: '#7f1d1d', border: '#dc2626', color: '#f87171', icon: '\uD83D\uDED1', label: 'AT STOP' },
+    'TIME_DECAY': { bg: '#4c1d95', border: '#7c3aed', color: '#a78bfa', icon: '\u23F1\uFE0F', label: 'GAMMA ZONE' },
+    'EXPIRED':    { bg: '#1f2937', border: '#4b5563', color: '#9ca3af', icon: '\uD83D\uDCC5', label: 'EXPIRED' },
+  };
+
+  function renderStatusBadge(status) {
+    var s = _mgmtStatusStyles[status] || _mgmtStatusStyles['NEUTRAL'];
+    return '<span class="mgmt-status-badge" style="background:' + s.bg + ';border:1px solid ' + s.border + ';color:' + s.color + ';padding:3px 10px;border-radius:4px;font-size:12px;font-weight:500;white-space:nowrap;">' + s.icon + ' ' + s.label + '</span>';
+  }
+
+  function renderPnlProgressBar(pos) {
+    var profitPct = pos.profit_progress_pct || 0;
+    var lossPct = pos.loss_progress_pct || 0;
+    var totalPnl = pos.total_pnl;
+    if (totalPnl == null) totalPnl = ((pos.position_snapshot || {}).unrealized_pnl) || 0;
+
+    // Position marker: 0% = stop, 50% = entry, 100% = target
+    var barPosition;
+    if (totalPnl >= 0) {
+      barPosition = 50 + (profitPct / 100 * 50);
+    } else {
+      barPosition = 50 - (lossPct / 100 * 50);
+    }
+    barPosition = Math.max(2, Math.min(98, barPosition));
+
+    var pnlColor = totalPnl >= 0 ? '#4ade80' : '#f87171';
+
+    // Dollar labels
+    var stopDollar = '';
+    var targetDollar = '';
+    var maxLoss = pos.max_loss_per_unit;
+    var maxProfit = pos.max_profit_per_unit;
+    var qty = ((pos.position_snapshot || {}).quantity) || 1;
+    var mult = pos.strategy_class === 'equity' ? 1 : 100;
+    if (maxLoss != null) stopDollar = '-$' + Math.abs(maxLoss * qty * mult).toFixed(0);
+    if (maxProfit != null) targetDollar = '+$' + Math.abs(maxProfit * qty * mult).toFixed(0);
+
+    var pnlDollar = (totalPnl >= 0 ? '+' : '') + '$' + totalPnl.toFixed(0);
+
+    return '<div class="pnl-bar-container">'
+      + '<div class="pnl-bar-labels"><span class="pnl-stop-label">STOP</span><span class="pnl-entry-label">entry</span><span class="pnl-target-label">TARGET</span></div>'
+      + '<div class="pnl-bar-track">'
+      + '<div class="pnl-bar-stop-zone"></div>'
+      + '<div class="pnl-bar-profit-zone"></div>'
+      + '<div class="pnl-bar-entry-line"></div>'
+      + '<div class="pnl-bar-marker" style="left:' + barPosition + '%;background:' + pnlColor + ';"></div>'
+      + '</div>'
+      + '<div class="pnl-bar-values">'
+      + '<span style="color:#f87171;">' + esc(stopDollar) + '</span>'
+      + '<span style="color:rgba(255,255,255,0.3);">$0</span>'
+      + '<span style="color:rgba(255,255,255,0.7);">' + esc(pnlDollar) + '</span>'
+      + '<span style="color:#4ade80;">' + esc(targetDollar) + '</span>'
+      + '</div>'
+      + '</div>';
+  }
+
+  function renderActionSuggestion(action) {
+    if (!action || !action.message) return '';
+    var urgStyles = {
+      'high':   { bg: 'rgba(248,113,113,0.08)', border: '#f87171', icon: '\uD83D\uDD34' },
+      'medium': { bg: 'rgba(251,191,36,0.08)',  border: '#fbbf24', icon: '\uD83D\uDFE1' },
+      'low':    { bg: 'rgba(74,222,128,0.05)',   border: '#4ade80', icon: '\uD83D\uDFE2' },
+    };
+    var s = urgStyles[action.urgency] || urgStyles['low'];
+    return '<div class="action-suggestion" style="background:' + s.bg + ';border-left:3px solid ' + s.border + ';padding:8px 12px;margin:8px 0;border-radius:0 4px 4px 0;">'
+      + '<span>' + s.icon + '</span>'
+      + '<span class="action-text">' + esc(action.message) + '</span>'
+      + '</div>';
+  }
+
+  function renderPortfolioSummary(summary) {
+    if (!summary || !summary.total_positions) return '';
+    var pnlColor = summary.total_pnl >= 0 ? '#4ade80' : '#f87171';
+    var pnlSign = summary.total_pnl >= 0 ? '+' : '';
+    var html = '<div class="portfolio-summary">'
+      + '<div class="summary-item"><span class="summary-label">Positions</span><span class="summary-value">' + summary.total_positions + '</span></div>'
+      + '<div class="summary-item"><span class="summary-label">Total P&amp;L</span><span class="summary-value" style="color:' + pnlColor + ';">' + pnlSign + '$' + (summary.total_pnl || 0).toFixed(0) + '</span></div>'
+      + '<div class="summary-item"><span class="summary-label">W / L</span><span class="summary-value">' + (summary.winning || 0) + ' / ' + (summary.losing || 0) + '</span></div>'
+      + '<div class="summary-item"><span class="summary-label">Actions Needed</span><span class="summary-value" style="color:' + (summary.actions_needed > 0 ? '#fbbf24' : '#4ade80') + ';">' + (summary.actions_needed || 0) + '</span></div>';
+    if (summary.positions_at_target > 0) {
+      html += '<div class="summary-alert">\uD83C\uDFAF ' + summary.positions_at_target + ' position(s) at profit target \u2014 close to lock in gains</div>';
+    }
+    if (summary.positions_at_stop > 0) {
+      html += '<div class="summary-alert danger">\uD83D\uDED1 ' + summary.positions_at_stop + ' position(s) at stop loss \u2014 close to limit losses</div>';
+    }
+    return html + '</div>';
+  }
+
+  var _mgmtUrgencyOrder = {
+    'AT_STOP': 0, 'AT_TARGET': 1, 'TIME_DECAY': 2, 'IN_DANGER': 3,
+    'EXPIRED': 4, 'ON_TRACK': 5, 'NEUTRAL': 6,
+  };
+
+  function sortByManagementUrgency(positions) {
+    return positions.slice().sort(function (a, b) {
+      var ua = _mgmtUrgencyOrder[a.management_status] != null ? _mgmtUrgencyOrder[a.management_status] : 99;
+      var ub = _mgmtUrgencyOrder[b.management_status] != null ? _mgmtUrgencyOrder[b.management_status] : 99;
+      if (ua !== ub) return ua - ub;
+      // Tiebreaker: engine urgency, then conviction
+      var eua = a.urgency || 0, eub = b.urgency || 0;
+      if (eua !== eub) return eub - eua;
+      return (b.conviction || 0) - (a.conviction || 0);
+    });
+  }
+
   function renderActiveResults(data) {
     console.log('[TMC:DIAG] renderActiveResults called:', {
       ok: data && data.ok, recCount: data && data.recommendations ? data.recommendations.length : 'N/A',
@@ -2134,6 +2941,11 @@
       if (ua !== ub) return ub - ua;
       return (b.conviction || 0) - (a.conviction || 0);
     });
+
+    // If management enrichment is present, prefer management-aware sort
+    if (recs[0] && recs[0].management_status) {
+      sorted = sortByManagementUrgency(recs);
+    }
 
     if (countEl) {
       countEl.textContent = String(sorted.length);
@@ -2219,6 +3031,16 @@
     grid.insertAdjacentHTML('beforebegin',
       '<div id="tmcActiveRunMeta">' + metaHtml + '</div>'
     );
+
+    // Portfolio management summary (from backend enrichment)
+    var oldPortSummary = document.getElementById('tmcPortfolioSummary');
+    if (oldPortSummary) oldPortSummary.remove();
+    var portfolioSummary = data.portfolio_summary;
+    if (portfolioSummary) {
+      grid.insertAdjacentHTML('beforebegin',
+        '<div id="tmcPortfolioSummary">' + renderPortfolioSummary(portfolioSummary) + '</div>'
+      );
+    }
   }
 
   /**
@@ -2299,6 +3121,17 @@
     subtitleParts.push('<span style="color:' + pnlColor + ';">' + pnlText + pnlPctText + '</span>');
     var subtitleText = subtitleParts.join(' \u00B7 ');
 
+    // ── Management status badge (from enrichment) ──
+    var mgmtStatus = rec.management_status;
+    var mgmtBadge = mgmtStatus ? renderStatusBadge(mgmtStatus) : '';
+    var mgmtAction = rec.suggested_action;
+
+    // ── Management subtitle addition ──
+    var mgmtSubtitlePart = '';
+    if (mgmtStatus && rec.profit_progress_pct != null) {
+      mgmtSubtitlePart = ' ' + (_mgmtStatusStyles[mgmtStatus] || _mgmtStatusStyles['NEUTRAL']).icon + ' ' + Math.round(rec.profit_progress_pct) + '% toward target';
+    }
+
     // ── Chevron SVG ──
     var chevronSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
 
@@ -2311,7 +3144,8 @@
 
     // ── Action buttons (always visible) ──
     var tradeKeyAttr = ' data-trade-key="' + esc(tradeKey) + '"';
-    var isActionable = recommendation === 'CLOSE' || recommendation === 'URGENT_REVIEW' || recommendation === 'REDUCE';
+    var mgmtSuggestsClose = mgmtAction && mgmtAction.action === 'CLOSE';
+    var isActionable = recommendation === 'CLOSE' || recommendation === 'URGENT_REVIEW' || recommendation === 'REDUCE' || mgmtSuggestsClose;
     var actionsHtml = enrichment.warnings
       + '<div class="trade-actions">'
       + '<div class="actions-row">';
@@ -2333,8 +3167,8 @@
       + '<summary class="trade-summary"><div class="trade-header trade-header-click">'
       + '<div class="trade-header-left"><span class="chev">' + chevronSvg + '</span></div>'
       + '<div class="trade-header-center">'
-      + '<div class="trade-type" style="display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap;">' + symbolBadge + ' ' + dteBadge + ' <span style="font-size:11px;color:var(--muted);">Active Position</span> ' + recBadge + '</div>'
-      + '<div class="trade-subtitle">' + subtitleText + '</div>'
+      + '<div class="trade-type" style="display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap;">' + symbolBadge + ' ' + dteBadge + ' <span style="font-size:11px;color:var(--muted);">Active Position</span> ' + recBadge + ' ' + mgmtBadge + '</div>'
+      + '<div class="trade-subtitle">' + subtitleText + (mgmtSubtitlePart ? ' <span style="font-size:11px;color:rgba(255,255,255,0.5);">' + mgmtSubtitlePart + '</span>' : '') + '</div>'
       + '</div>'
       + '<div class="trade-header-right">' + healthBadge + '</div>'
       + '</div></summary>'
@@ -2370,6 +3204,50 @@
         + '\u26A0 Analysis degraded: ' + esc(degradedReasons.slice(0, 3).join(', '))
         + '</div>'
       );
+    }
+
+    // ── MANAGEMENT STATUS section (from enrichment) ──
+    if (rec.management_status) {
+      var mgmtHtml = '<div class="section section-management" style="margin-bottom:8px;padding:8px 10px;border-radius:6px;">';
+      // P&L progress bar
+      if (rec.profit_target_value != null || rec.stop_loss_value != null) {
+        mgmtHtml += renderPnlProgressBar(rec);
+      }
+      // Management details
+      var mgmtDetails = [];
+      if (rec.position_snapshot && rec.position_snapshot.avg_open_price != null) {
+        var entryLabel = rec.strategy_class === 'equity' ? 'Entry' : (rec.strategy_class === 'income' ? 'Credit' : 'Debit');
+        mgmtDetails.push(entryLabel + ': $' + Math.abs(rec.position_snapshot.avg_open_price).toFixed(2));
+      }
+      if (rec.position_snapshot && rec.position_snapshot.mark_price != null) {
+        mgmtDetails.push('Current: $' + Math.abs(rec.position_snapshot.mark_price).toFixed(2));
+      }
+      if (rec.profit_target_value != null) {
+        mgmtDetails.push('Target: $' + rec.profit_target_value.toFixed(2));
+      }
+      if (rec.stop_loss_value != null) {
+        mgmtDetails.push('Stop: $' + rec.stop_loss_value.toFixed(2));
+      }
+      if (rec.days_held != null) {
+        mgmtDetails.push('Held: ' + rec.days_held + ' days');
+      }
+      if (rec.management_policy) {
+        var targetPctLabel = Math.round(rec.management_policy.profit_target_pct * 100) + '% profit target';
+        mgmtDetails.push(targetPctLabel);
+      }
+      if (mgmtDetails.length > 0) {
+        mgmtHtml += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;font-size:11px;color:rgba(255,255,255,0.55);">';
+        mgmtDetails.forEach(function (d) {
+          mgmtHtml += '<span style="padding:2px 6px;background:rgba(255,255,255,0.04);border-radius:3px;">' + esc(d) + '</span>';
+        });
+        mgmtHtml += '</div>';
+      }
+      // Action suggestion
+      if (rec.suggested_action) {
+        mgmtHtml += renderActionSuggestion(rec.suggested_action);
+      }
+      mgmtHtml += '</div>';
+      bodyParts.push(mgmtHtml);
     }
 
     // ── POSITION SNAPSHOT section ──
@@ -3423,6 +4301,32 @@
       fullRefreshBtn.addEventListener('click', function () { handleFullRefresh(); });
     }
 
+    // Reset Model Providers (circuit breaker)
+    var resetProvidersBtn = document.getElementById('tmcResetProvidersBtn');
+    if (resetProvidersBtn) {
+      resetProvidersBtn.addEventListener('click', function () {
+        resetProvidersBtn.disabled = true;
+        resetProvidersBtn.textContent = '⚡ Resetting…';
+        api.resetCircuitBreaker()
+          .then(function (res) {
+            console.log('[TMC] Circuit breaker reset:', res);
+            resetProvidersBtn.textContent = '✓ Providers Reset';
+            setTimeout(function () {
+              resetProvidersBtn.textContent = '⚡ Reset Providers';
+              resetProvidersBtn.disabled = false;
+            }, 3000);
+          })
+          .catch(function (err) {
+            console.error('[TMC] Circuit breaker reset failed:', err);
+            resetProvidersBtn.textContent = '✗ Reset Failed';
+            setTimeout(function () {
+              resetProvidersBtn.textContent = '⚡ Reset Providers';
+              resetProvidersBtn.disabled = false;
+            }, 3000);
+          });
+      });
+    }
+
     // Account mode toggle
     var accountToggle = document.getElementById('tmcAccountToggle');
     if (accountToggle) {
@@ -3549,7 +4453,17 @@
     'tmc_portfolio_balance': 'Portfolio Balance',
     'delay': 'Delay',
     'error_cooldown': 'Error (retrying)',
+    'market_closed': 'Market Closed',
   };
+
+  function _formatNextOpen(isoStr) {
+    if (!isoStr) return '';
+    try {
+      var d = new Date(isoStr);
+      var opts = { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York', timeZoneName: 'short' };
+      return d.toLocaleString('en-US', opts);
+    } catch (e) { return ''; }
+  }
 
   function _updateOrchestratorIndicator(status) {
     var el = document.getElementById('orchestratorStatus');
@@ -3559,6 +4473,17 @@
     var paused = status.paused;
     var stage = status.current_stage || 'idle';
     var cycle = status.cycle_count || 0;
+    var marketOpen = status.market_open;
+
+    // Market-closed display takes priority when orchestrator is running
+    if (running && !paused && marketOpen === false) {
+      var nextEvt = status.next_market_event || {};
+      var nextLabel = nextEvt.event === 'open' ? _formatNextOpen(nextEvt.time) : '';
+      var nextText = nextLabel ? ' (next open: ' + nextLabel + ')' : '';
+      el.innerHTML = '<span style="color:#ffd600; font-size: 0.9em;">●</span> ' +
+        '<small class="text-muted">⏸ Paused — market closed' + nextText + '</small>';
+      return;
+    }
 
     var color = running ? (paused ? '#ffd600' : '#00c853') : '#ff1744';
     var label = _ORCH_STAGE_LABELS[stage] || stage;

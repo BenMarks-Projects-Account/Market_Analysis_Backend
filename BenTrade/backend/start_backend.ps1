@@ -82,4 +82,7 @@ if ($LASTEXITCODE -ne 0) {
 Stop-StaleBackendProcesses -Port 5000
 
 Write-Host "Starting FastAPI app (uvicorn app.main:app) on port 5000..."
-python -m uvicorn app.main:app --host 127.0.0.1 --port 5000
+# Relax error preference so Python stderr logging doesn't trigger
+# PowerShell's NativeCommandError and kill the server process.
+$ErrorActionPreference = 'Continue'
+python -m uvicorn app.main:app --host 127.0.0.1 --port 5000 2>&1 | Tee-Object -FilePath backend.log

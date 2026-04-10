@@ -18,6 +18,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+from app.utils.market_hours import is_market_open, market_status, next_market_event, _to_et
+
 _log = logging.getLogger("bentrade.orchestrator")
 
 
@@ -41,6 +43,7 @@ class ContinuousWorkflowOrchestrator:
 
     @property
     def status(self) -> dict[str, Any]:
+        mkt_open = is_market_open()
         return {
             "running": self._running,
             "paused": self._paused,
@@ -50,6 +53,9 @@ class ContinuousWorkflowOrchestrator:
             "last_cycle_completed": self._last_cycle_completed,
             "last_cycle_duration_ms": self._last_cycle_duration_ms,
             "account_mode": self._account_mode,
+            "market_open": mkt_open,
+            "market_status": market_status(),
+            "next_market_event": next_market_event(),
         }
 
     # ── Controls ─────────────────────────────────────────────────
@@ -129,13 +135,22 @@ class ContinuousWorkflowOrchestrator:
                 if not self._running:
                     break
 
-                # ─── STAGE 2: TMC Full Refresh ───
-                self._current_stage = "tmc_stock_options_active"
-                _log.info("event=stage_tmc_start cycle=%d", self._cycle_count)
+                # ─── STAGE 2: TMC Full Refresh (market hours only) ───
+                if is_market_open():
+                    self._current_stage = "tmc_stock_options_active"
+                    _log.info("event=stage_tmc_start cycle=%d", self._cycle_count)
 
-                tmc_result = await self._run_tmc_full_refresh()
+                    tmc_result = await self._run_tmc_full_refresh()
 
-                _log.info("event=stage_tmc_complete cycle=%d", self._cycle_count)
+                    _log.info("event=stage_tmc_complete cycle=%d", self._cycle_count)
+                else:
+                    now_et = _to_et()
+                    _log.info(
+                        "event=tmc_skipped_market_closed cycle=%d time=%s",
+                        self._cycle_count,
+                        now_et.strftime("%A %I:%M %p ET"),
+                    )
+                    self._current_stage = "market_closed"
 
                 if not self._running:
                     break
@@ -153,9 +168,17 @@ class ContinuousWorkflowOrchestrator:
                 )
 
                 # ─── Delay before next cycle ───
-                if self._delay_seconds > 0:
+                # When market is closed, both stages complete instantly;
+                # use a longer sleep to avoid a tight CPU spin.
+                if not is_market_open():
+                    self._current_stage = "market_closed"
+                    await asyncio.sleep(60)  # check once per minute outside hours
+                elif self._delay_seconds > 0:
                     self._current_stage = "delay"
                     await asyncio.sleep(self._delay_seconds)
+                else:
+                    # Minimum yield to prevent tight spin even during market hours
+                    await asyncio.sleep(1)
 
             except asyncio.CancelledError:
                 _log.info("event=cycle_cancelled cycle=%d", self._cycle_count)
@@ -228,12 +251,9 @@ class ContinuousWorkflowOrchestrator:
         options_res = gathered[1] if not isinstance(gathered[1], BaseException) else None
         active_res = gathered[2] if not isinstance(gathered[2], BaseException) else None
 
-        if isinstance(gathered[0], BaseException):
-            _log.error("event=stock_workflow_failed error=%s", gathered[0])
-        if isinstance(gathered[1], BaseException):
-            _log.error("event=options_workflow_failed error=%s", gathered[1])
-        if isinstance(gathered[2], BaseException):
-            _log.error("event=active_trades_failed error=%s", gathered[2])
+        for i, (label, res) in enumerate([("stock", gathered[0]), ("options", gathered[1]), ("active_trades", gathered[2])]):
+            if isinstance(res, BaseException):
+                _log.error("event=%s_workflow_failed error=%s", label, res)
 
         results["stock"] = _safe_summary(stock_res)
         results["options"] = _safe_summary(options_res)
@@ -338,6 +358,7 @@ class ContinuousWorkflowOrchestrator:
     async def _run_active_trades(self, account_mode: str) -> dict[str, Any] | None:
         """Run active trade pipeline using the same pattern as the API route."""
         from app.api.routes_active_trades import _build_active_payload
+        from app.api.routes_active_trade_pipeline import _store_result as _store_pipeline_result
         from app.services.active_trade_pipeline import run_active_trade_pipeline
 
         # _build_active_payload expects request.app.state — create a shim
@@ -376,6 +397,11 @@ class ContinuousWorkflowOrchestrator:
                 "positions_fetched": len(trades),
             },
         )
+        # Store result so GET /api/active-trade-pipeline/results can find it
+        # (mirrors what the POST /run API route does).
+        result.setdefault("ok", True)
+        result.setdefault("account_mode", account_mode)
+        _store_pipeline_result(result)
         return result
 
     async def _run_portfolio_balance(

@@ -1,6 +1,7 @@
 window.BenTradeSourceHealth = (function(){
-  const SOURCE_ORDER = ['Finnhub', 'Yahoo', 'Tradier', 'FRED'];
+  const SOURCE_ORDER = ['FMP', 'Finnhub', 'Yahoo', 'Tradier', 'FRED', 'Polygon'];
   const AI_MODEL_LABEL = 'AI Model';
+  const FMP_LABEL = 'FMP';
 
   function escapeHtml(value){
     return String(value ?? '')
@@ -77,7 +78,7 @@ window.BenTradeSourceHealth = (function(){
     const modelEntry = sources.find((item) => String(item?.name || '').trim() === AI_MODEL_LABEL);
     const extras = sources.filter((item) => {
       const name = String(item?.name || '').trim();
-      return !SOURCE_ORDER.includes(name) && name !== AI_MODEL_LABEL;
+      return !SOURCE_ORDER.includes(name) && name !== AI_MODEL_LABEL && name !== FMP_LABEL;
     });
     const all = [...(modelEntry ? [modelEntry] : []), ...ordered, ...extras];
 
@@ -218,6 +219,8 @@ window.BenTradeSourceHealthStore = (function(){
     if(window.BenTradeDebug) console.log('[source-health-store] cache reset');
   }
 
+  var FETCH_TIMEOUT_MS = 5000;  // abort health check after 5s
+
   async function fetchSourceHealth(options){
     const opts = options || {};
     const force = Boolean(opts.force);
@@ -230,6 +233,7 @@ window.BenTradeSourceHealthStore = (function(){
       render(state.payload);
       return state.payload;
     }
+    // Debounce: if a request is already in flight, reuse it instead of stacking
     if(state.inflight){
       const payload = await state.inflight;
       render(payload);
@@ -237,14 +241,22 @@ window.BenTradeSourceHealthStore = (function(){
     }
 
     state.inflight = (async () => {
-      const res = await fetch('/api/health/sources', { cache: 'no-store' });
-      if(!res.ok){
-        throw new Error(`Source health request failed (${res.status})`);
+      var controller = new AbortController();
+      var timeoutId = setTimeout(function(){ controller.abort(); }, FETCH_TIMEOUT_MS);
+      try{
+        const res = await fetch('/api/health/sources', { cache: 'no-store', signal: controller.signal });
+        clearTimeout(timeoutId);
+        if(!res.ok){
+          throw new Error('Source health request failed (' + res.status + ')');
+        }
+        const payload = await res.json().catch(() => ({}));
+        state.payload = payload;
+        state.fetchedAt = Date.now();
+        return payload;
+      }catch(fetchErr){
+        clearTimeout(timeoutId);
+        throw fetchErr;
       }
-      const payload = await res.json().catch(() => ({}));
-      state.payload = payload;
-      state.fetchedAt = Date.now();
-      return payload;
     })();
 
     try{
@@ -262,7 +274,11 @@ window.BenTradeSourceHealthStore = (function(){
     }catch(err){
       // Fail CLOSED: do NOT fall back to stale data — show unknown state.
       // Old behaviour returned last cached payload which could be an old GREEN.
-      if(window.BenTradeDebug) console.warn('[source-health-store] fetch failed, clearing stale state', err);
+      if(err?.name === 'AbortError'){
+        console.warn('[source-health-store] health check timed out (' + FETCH_TIMEOUT_MS + 'ms)');
+      } else if(window.BenTradeDebug){
+        console.warn('[source-health-store] fetch failed, clearing stale state', err);
+      }
       if(isStale()){
         state.payload = null;
         state.fetchedAt = 0;

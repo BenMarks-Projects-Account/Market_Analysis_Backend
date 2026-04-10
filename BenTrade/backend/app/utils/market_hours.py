@@ -113,6 +113,33 @@ def market_status(ts: _dt.datetime | None = None) -> str:
     return "closed"
 
 
+def next_market_event(ts: _dt.datetime | None = None) -> dict[str, str]:
+    """Return the next market open or close event relative to *ts* (or now).
+
+    Returns ``{"event": "close", "time": <iso>}`` during regular session,
+    or ``{"event": "open", "time": <iso>}`` otherwise.
+    """
+    et = _to_et(ts)
+    if is_market_open(et):
+        close_time = et.replace(hour=_CLOSE.hour, minute=_CLOSE.minute, second=0, microsecond=0)
+        return {"event": "close", "time": close_time.isoformat()}
+
+    # Find next open: advance to next trading day if past open time today
+    candidate = et
+    t = candidate.time()
+    # If before open on a trading day, next open is today
+    if is_trading_day(candidate) and t < _OPEN:
+        open_time = candidate.replace(hour=_OPEN.hour, minute=_OPEN.minute, second=0, microsecond=0)
+        return {"event": "open", "time": open_time.isoformat()}
+
+    # Otherwise walk forward to next trading day
+    candidate += _dt.timedelta(days=1)
+    while candidate.weekday() >= 5 or candidate.date() in _FIXED_HOLIDAYS:
+        candidate += _dt.timedelta(days=1)
+    open_time = candidate.replace(hour=_OPEN.hour, minute=_OPEN.minute, second=0, microsecond=0)
+    return {"event": "open", "time": open_time.isoformat()}
+
+
 def last_close_date(ts: _dt.datetime | None = None) -> _dt.date:
     """Most recent completed regular-session date.
 

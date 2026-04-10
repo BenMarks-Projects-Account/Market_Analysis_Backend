@@ -33,6 +33,7 @@ Safety:
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any
 
@@ -43,6 +44,36 @@ from app.services.model_routing_contract import (
     ExecutionStatus,
     ExecutionTrace,
 )
+
+# ---------------------------------------------------------------------------
+# Global model request throttle
+# ---------------------------------------------------------------------------
+# Limits the total number of concurrent model calls across ALL providers.
+# This sits OUTSIDE the router — it does not change internal routing or
+# provider selection.  It prevents bursts from overwhelming LM Studio.
+#
+# Default: 4 (2 LM Studio × ~2 concurrent each).
+# Override via ROUTING_GLOBAL_CONCURRENCY env var.
+#
+# This is a threading.Semaphore (not asyncio) because execute_routed_model
+# is called synchronously from thread pool executors.
+
+_GLOBAL_MODEL_CONCURRENCY: int = 4
+
+def _load_global_concurrency() -> int:
+    """Load global concurrency from environment (once at module init)."""
+    import os
+    val = os.environ.get("ROUTING_GLOBAL_CONCURRENCY")
+    if val is not None:
+        try:
+            return max(1, int(val))
+        except (ValueError, TypeError):
+            pass
+    return _GLOBAL_MODEL_CONCURRENCY
+
+_global_model_semaphore = threading.Semaphore(_load_global_concurrency())
+_global_model_in_flight = 0
+_global_model_lock = threading.Lock()
 
 logger = logging.getLogger("bentrade.routing.integration")
 
@@ -265,7 +296,34 @@ def execute_routed_model(
         task_type, mode, use_premium,
     )
 
-    provider_result, trace = route_and_execute(request, timeout=timeout)
+    # ── Global throttle — limit total concurrent model calls ─────
+    global _global_model_in_flight
+    acquired = _global_model_semaphore.acquire(timeout=180)
+    if not acquired:
+        logger.error(
+            "[integration] global throttle timeout (180s) — task_type=%s mode=%s",
+            task_type, mode,
+        )
+        raise RuntimeError(
+            f"Global model throttle timeout — all {_GLOBAL_MODEL_CONCURRENCY} "
+            f"slots busy for 180s (task_type={task_type})"
+        )
+
+    with _global_model_lock:
+        _global_model_in_flight += 1
+        current_in_flight = _global_model_in_flight
+
+    logger.info(
+        "[integration] global_throttle: acquired slot (%d/%d in-flight) task=%s",
+        current_in_flight, _load_global_concurrency(), task_type,
+    )
+
+    try:
+        provider_result, trace = route_and_execute(request, timeout=timeout)
+    finally:
+        _global_model_semaphore.release()
+        with _global_model_lock:
+            _global_model_in_flight -= 1
 
     legacy = adapt_to_legacy(provider_result, trace)
 

@@ -1907,6 +1907,118 @@
             transition: opacity 0.3s ease;
         }
 
+        /* ── Risk Validation Section ─────────────────── */
+        .tt-risk-validation{
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 6px;
+            padding: 12px;
+            margin: 8px 0;
+        }
+        .tt-risk-approved{
+            border-color: rgba(74, 222, 128, 0.2);
+        }
+        .tt-risk-warning-state{
+            border-color: rgba(251, 191, 36, 0.3);
+            background: rgba(251, 191, 36, 0.03);
+        }
+        .tt-risk-overridden{
+            border-color: rgba(248, 113, 113, 0.25);
+            background: rgba(248, 113, 113, 0.03);
+        }
+        .tt-risk-header{
+            font-size: 11px;
+            letter-spacing: 1px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        .tt-risk-approved .tt-risk-header{ color: #4ade80; }
+        .tt-risk-warning-state .tt-risk-header{ color: #fbbf24; }
+        .tt-risk-overridden .tt-risk-header{ color: #f87171; }
+
+        .tt-risk-check{
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 4px 0;
+            font-size: 13px;
+        }
+        .tt-risk-icon{ font-size: 14px; min-width: 20px; }
+        .tt-risk-label{ color: rgba(255, 255, 255, 0.7); flex: 1; }
+        .tt-risk-pct{ font-size: 12px; min-width: 40px; text-align: right; }
+        .tt-risk-message{
+            width: 100%;
+            font-size: 11px;
+            color: #f87171;
+            padding-left: 28px;
+            margin-top: 2px;
+        }
+
+        .tt-risk-warning{
+            font-size: 12px;
+            color: #fbbf24;
+            padding: 4px 0;
+            margin-top: 4px;
+        }
+
+        .tt-risk-override{
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .tt-risk-override-msg{
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.7);
+            margin-bottom: 8px;
+        }
+        .tt-btn-reduce{
+            background: #065f46;
+            border: 1px solid #059669;
+            color: #34d399;
+            padding: 6px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 8px;
+            font-size: 13px;
+        }
+        .tt-btn-reduce:hover{ background: #047857; }
+        .tt-btn-override{
+            background: rgba(248, 113, 113, 0.1);
+            border: 1px solid rgba(248, 113, 113, 0.3);
+            color: #f87171;
+            padding: 6px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .tt-btn-override:hover{ background: rgba(248, 113, 113, 0.18); }
+        .tt-risk-loading{
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 13px;
+            padding: 4px 0;
+        }
+        .tt-risk-unavailable{
+            color: rgba(255, 255, 255, 0.35);
+            font-size: 12px;
+            font-style: italic;
+            padding: 4px 0;
+        }
+
+        /* Risk validation states for footer confirm button */
+        .tt-btn-risk-blocked{
+            background: #78350f !important;
+            border-color: #d97706 !important;
+            color: #fbbf24 !important;
+        }
+        .tt-btn-risk-override{
+            background: rgba(185, 28, 28, 0.6) !important;
+            border-color: #f87171 !important;
+            color: #fecaca !important;
+        }
+        .tt-btn-risk-override:hover:not(:disabled){
+            background: rgba(185, 28, 28, 0.8) !important;
+        }
+
     
         /* --- QWEN model analysis layout: label left, value right --- */
         .model-grid{
@@ -8877,4 +8989,330 @@ a.at-symbol-link:hover{
     background: transparent;
     border-radius:10px;
     padding:4px 18px;
+}
+
+/* ── Trade Education Guide ────────────────────────────── */
+.trade-guide{
+    background:rgba(0,224,195,0.04);
+    border:1px solid rgba(0,224,195,0.12);
+    border-radius:8px;
+    padding:14px 16px;
+    margin:10px 0;
+    font-size:0.82rem;
+    line-height:1.55;
+    color:rgba(224,224,224,0.85);
+}
+.guide-header{
+    color:#00e0c3;
+    font-size:0.7rem;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.04em;
+    margin-bottom:8px;
+}
+.guide-profit-loss{
+    margin-bottom:12px;
+    color:rgba(224,224,224,0.9);
+    line-height:1.55;
+}
+.guide-section{
+    margin-top:12px;
+    padding-top:10px;
+    border-top:1px solid rgba(255,255,255,0.06);
+}
+.guide-section-title{
+    font-size:0.68rem;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:0.04em;
+    color:#00e0c3;
+    margin-bottom:6px;
+}
+/* Key levels */
+.guide-level{
+    padding:3px 0 3px 10px;
+    margin:3px 0;
+    font-size:0.8rem;
+}
+.level-label{ color:rgba(200,200,200,0.7); }
+.level-value{ color:#e0e0e0; font-weight:500; }
+
+/* Management plan */
+.guide-mgmt-item{
+    margin:6px 0;
+    padding:6px 10px;
+    background:rgba(255,255,255,0.03);
+    border-radius:5px;
+}
+.mgmt-label{
+    font-weight:600;
+    font-size:0.78rem;
+    color:#e0e0e0;
+    margin-bottom:2px;
+}
+.mgmt-detail{
+    font-size:0.78rem;
+    color:rgba(200,200,200,0.75);
+    line-height:1.5;
+}
+
+/* Watch-for signals */
+.guide-watch{
+    margin:6px 0;
+    padding:6px 10px;
+    border-radius:5px;
+    border-left:3px solid rgba(148,163,184,0.3);
+}
+.guide-watch.positive{ border-left-color:#4ade80; background:rgba(74,222,128,0.04); }
+.guide-watch.danger{   border-left-color:#f87171; background:rgba(248,113,113,0.04); }
+.guide-watch.caution{  border-left-color:#fbbf24; background:rgba(251,191,36,0.04); }
+.watch-signal{
+    font-weight:600;
+    font-size:0.78rem;
+    color:#e0e0e0;
+    margin-bottom:2px;
+}
+.watch-meaning{
+    font-size:0.76rem;
+    color:rgba(200,200,200,0.7);
+    line-height:1.45;
+}
+.watch-action{
+    font-size:0.76rem;
+    color:rgba(200,200,200,0.8);
+    margin-top:2px;
+    line-height:1.45;
+}
+
+/* Theta behavior */
+.guide-theta{
+    font-size:0.8rem;
+    color:rgba(200,200,200,0.8);
+    line-height:1.55;
+}
+
+/* ── Position Sizing Display (two-column layout) ─────────── */
+.sizing-placeholder{
+    margin:8px 0;
+}
+.sizing-loading{
+    font-size:0.75rem;
+    color:rgba(200,200,200,0.4);
+    padding:6px 10px;
+    font-style:italic;
+}
+.sizing-error{
+    font-size:0.75rem;
+    color:rgba(248,113,113,0.6);
+    padding:4px 10px;
+}
+.sizing-result{
+    background:rgba(59,130,246,0.06);
+    border:1px solid rgba(59,130,246,0.15);
+    border-radius:8px;
+    padding:10px 14px;
+    margin:8px 0;
+}
+.sizing-result.sizing-blocked{
+    border-color:rgba(248,113,113,0.3);
+    background:rgba(248,113,113,0.04);
+}
+.sizing-label{
+    font-size:0.68rem;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.04em;
+    color:#3b82f6;
+    margin-bottom:6px;
+}
+.sizing-blocked .sizing-label{ color:#f87171; }
+.sizing-blocked-msg{
+    font-size:0.82rem;
+    color:rgba(248,113,113,0.8);
+    line-height:1.4;
+}
+.sizing-columns{
+    display:flex;
+    align-items:flex-start;
+    gap:16px;
+}
+.sizing-contracts{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    min-width:64px;
+}
+.sizing-qty{
+    font-size:1.8rem;
+    font-weight:700;
+    color:#e0e0e0;
+    line-height:1;
+}
+.sizing-unit{
+    font-size:0.72rem;
+    color:rgba(200,200,200,0.6);
+    margin-top:2px;
+}
+.sizing-details{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+}
+.sizing-row{
+    display:flex;
+    justify-content:space-between;
+    font-size:0.78rem;
+    line-height:1.3;
+}
+.sizing-row-label{
+    color:rgba(200,200,200,0.5);
+}
+.sizing-row-value{
+    color:rgba(200,200,200,0.85);
+    font-weight:500;
+}
+.sizing-warnings{
+    margin-top:6px;
+    border-top:1px solid rgba(255,255,255,0.06);
+    padding-top:5px;
+}
+.sizing-warn{
+    font-size:0.74rem;
+    color:rgba(251,191,36,0.8);
+    line-height:1.4;
+}
+
+/* ── Risk Utilization Bar ────────────────────────────────── */
+.tmc-risk-bar-container{
+    margin:0 0 8px 0;
+    padding:0 4px;
+}
+.risk-bar{
+    background:rgba(15,23,42,0.6);
+    border:1px solid rgba(255,255,255,0.06);
+    border-radius:8px;
+    padding:10px 14px;
+}
+.risk-bar-label{
+    display:flex;
+    justify-content:space-between;
+    font-size:0.76rem;
+    color:rgba(200,200,200,0.7);
+    margin-bottom:5px;
+}
+.risk-bar-track{
+    height:6px;
+    background:rgba(255,255,255,0.06);
+    border-radius:3px;
+    overflow:hidden;
+    margin-bottom:5px;
+}
+.risk-bar-fill{
+    height:100%;
+    border-radius:3px;
+    transition:width 0.4s ease;
+}
+.risk-bar-detail{
+    display:flex;
+    justify-content:space-between;
+    font-size:0.7rem;
+    color:rgba(200,200,200,0.45);
+}
+
+/* ── Active Trade Management ─────────────────────────────── */
+
+.portfolio-summary {
+    display: flex;
+    gap: 24px;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.summary-item { text-align: center; }
+.summary-label {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.35);
+    text-transform: uppercase;
+}
+.summary-value {
+    font-size: 18px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+}
+.summary-alert {
+    width: 100%;
+    font-size: 12px;
+    color: #fbbf24;
+    padding: 4px 0;
+}
+.summary-alert.danger { color: #f87171; }
+
+.pnl-bar-container { margin: 12px 0; }
+.pnl-bar-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.3);
+    margin-bottom: 4px;
+}
+.pnl-bar-track {
+    position: relative;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 4px;
+    overflow: visible;
+}
+.pnl-bar-stop-zone {
+    position: absolute;
+    left: 0; top: 0;
+    width: 50%; height: 100%;
+    background: rgba(248, 113, 113, 0.08);
+    border-radius: 4px 0 0 4px;
+}
+.pnl-bar-profit-zone {
+    position: absolute;
+    left: 50%; top: 0;
+    width: 50%; height: 100%;
+    background: rgba(74, 222, 128, 0.08);
+    border-radius: 0 4px 4px 0;
+}
+.pnl-bar-entry-line {
+    position: absolute;
+    left: 50%; top: -2px; bottom: -2px;
+    width: 1px;
+    background: rgba(255, 255, 255, 0.2);
+}
+.pnl-bar-marker {
+    position: absolute;
+    top: -3px;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    transform: translateX(-50%);
+    border: 2px solid rgba(0, 0, 0, 0.5);
+}
+.pnl-bar-values {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    margin-top: 4px;
+}
+
+.action-suggestion { display: flex; align-items: flex-start; gap: 6px; }
+.action-text {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.mgmt-status-badge { display: inline-flex; align-items: center; gap: 4px; }
+
+.section-management {
+    background: rgba(255, 255, 255, 0.015);
+    border: 1px solid rgba(255, 255, 255, 0.06);
 }

@@ -14,6 +14,7 @@ from app.utils.market_hours import (
     is_trading_day,
     last_close_date,
     market_status,
+    next_market_event,
 )
 
 ET = ZoneInfo("America/New_York")
@@ -191,3 +192,41 @@ class TestHolidayCalendar:
         for year in (2024, 2025, 2026):
             count = sum(1 for d in _FIXED_HOLIDAYS if d.year == year)
             assert count >= 9, f"Year {year} has only {count} holidays"
+
+
+# ── next_market_event ────────────────────────────────────────────────────
+class TestNextMarketEvent:
+    def test_during_session_returns_close(self):
+        evt = next_market_event(_et(2025, 6, 11, 12, 0))
+        assert evt["event"] == "close"
+        assert "16:00" in evt["time"]
+
+    def test_after_close_returns_next_open(self):
+        evt = next_market_event(_et(2025, 6, 11, 17, 0))
+        assert evt["event"] == "open"
+        # Next trading day is Thursday June 12
+        assert "2025-06-12" in evt["time"]
+        assert "09:30" in evt["time"]
+
+    def test_before_open_same_day_returns_open(self):
+        evt = next_market_event(_et(2025, 6, 11, 8, 0))
+        assert evt["event"] == "open"
+        assert "2025-06-11" in evt["time"]
+        assert "09:30" in evt["time"]
+
+    def test_friday_after_close_returns_monday(self):
+        evt = next_market_event(_et(2025, 6, 13, 17, 0))
+        assert evt["event"] == "open"
+        assert "2025-06-16" in evt["time"]
+
+    def test_saturday_returns_monday(self):
+        evt = next_market_event(_et(2025, 6, 14, 12, 0))
+        assert evt["event"] == "open"
+        assert "2025-06-16" in evt["time"]
+
+    def test_holiday_eve_after_close_skips_holiday(self):
+        # July 3 2025 (Thursday) after close; July 4 is a holiday (Friday)
+        evt = next_market_event(_et(2025, 7, 3, 17, 0))
+        assert evt["event"] == "open"
+        # Next trading day should be Monday July 7
+        assert "2025-07-07" in evt["time"]

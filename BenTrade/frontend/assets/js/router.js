@@ -183,7 +183,6 @@
     "calendar": { title: "Calendar Spread Analysis", group: "Analysis", subgroup: "Options", description: "Vol/term structure" },
     "income": { title: "Income Strategies", group: "Analysis", subgroup: "Options", description: "Income" },
     "active-trade": { title: "Active Trade Dashboard", group: "Trading", subgroup: "Execution & Monitoring", description: "Broker positions/orders" },
-    "active-trade-pipeline": { title: "Active Trade Pipeline", group: "Trading", subgroup: "Execution & Monitoring", description: "Position reassessment workflow" },
     "trade-testing": { title: "Trade Testing Workbench", group: "Trading", subgroup: "Execution & Monitoring", description: "What-if lab + scenarios" },
     "trade-management": { title: "Trade Management Center", group: "Trading", subgroup: "Execution & Monitoring", description: "Candidate review + execution" },
     "stock-analysis": { title: "Stock Analysis Dashboard", group: "Analysis", subgroup: "Equities", description: "Stock analysis" },
@@ -259,11 +258,6 @@
       view: "dashboards/active_trades.html",
       init: () => window.BenTradePages?.initActiveTrades?.(document.getElementById('view')),
       title: routeMeta["active-trade"].title
-    },
-    "active-trade-pipeline": {
-      view: "dashboards/active_trade_pipeline.html",
-      init: () => window.BenTradePages?.initActiveTradesPipeline?.(document.getElementById('view')),
-      title: routeMeta["active-trade-pipeline"].title
     },
     "trade-testing": {
       view: "dashboards/trade_workbench.html",
@@ -441,7 +435,7 @@
       window.BenTradeActiveViewCleanup = (typeof cleanup === 'function') ? cleanup : null;
     } catch(e){ console.error(e); }
     try{
-      await window.BenTradeSourceHealthStore?.fetchSourceHealth?.({ force: true });
+      window.BenTradeSourceHealthStore?.fetchSourceHealth?.({ force: true })?.catch?.(function(e){ console.error(e); });
     } catch(e){
       console.error(e);
     }

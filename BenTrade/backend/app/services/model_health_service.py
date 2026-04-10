@@ -12,6 +12,7 @@ succeeds.  No optimistic defaults, no stale fallback on errors.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timezone
@@ -192,3 +193,12 @@ def check_model_health(*, force: bool = False) -> dict[str, Any]:
     _cached_at = time.monotonic()
     _cached_source_key = source_key
     return result
+
+
+async def check_model_health_async(*, force: bool = False) -> dict[str, Any]:
+    """Non-blocking wrapper — runs the synchronous probe in a thread.
+
+    Use this from async endpoints to avoid blocking the event loop
+    during the up-to-3-second HTTP probe.
+    """
+    return await asyncio.to_thread(check_model_health, force=force)

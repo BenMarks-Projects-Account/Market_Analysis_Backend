@@ -389,6 +389,27 @@ window.BenTradeApi = (function(){
     return jsonFetch('/api/risk/snapshot');
   }
 
+  function getRiskSize(payload){
+    return jsonFetch('/api/risk/size', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  function getRiskState(accountMode){
+    var mode = encodeURIComponent(String(accountMode || 'paper'));
+    return jsonFetch('/api/risk/state?account_mode=' + mode);
+  }
+
+  function riskValidate(payload){
+    return jsonFetch('/api/risk/validate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
   function listStrategyReports(strategyId){
     const key = encodeURIComponent(String(strategyId || ''));
     return jsonFetch(`/api/strategies/${key}/reports`);
@@ -571,6 +592,19 @@ window.BenTradeApi = (function(){
   function getOrchestratorStatus(){
     return timedFetch('/api/orchestrator/status', {}, 5000);
   }
+
+  /* ── Circuit Breaker (model provider recovery) ── */
+  function resetCircuitBreaker(providerId){
+    var body = providerId ? { provider_id: providerId } : {};
+    return jsonFetch('/api/admin/routing/circuit-breaker/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+  function getCircuitBreakerStatus(){
+    return jsonFetch('/api/admin/routing/circuit-breaker/status');
+  }
   function startOrchestrator(accountMode){
     return jsonFetch('/api/orchestrator/start?account_mode=' + encodeURIComponent(accountMode || 'paper'), { method: 'POST' });
   }
@@ -642,6 +676,9 @@ window.BenTradeApi = (function(){
     getRiskPolicy,
     updateRiskPolicy,
     getRiskSnapshot,
+    getRiskSize,
+    getRiskState,
+    riskValidate,
     listStrategyReports,
     getStrategyReport,
     generateStrategyReport,
@@ -682,6 +719,8 @@ window.BenTradeApi = (function(){
     resumeOrchestrator,
     setOrchestratorDelay,
     contextualChat,
+    resetCircuitBreaker,
+    getCircuitBreakerStatus,
     MODEL_TIMEOUT_MS: MODEL_TIMEOUT_MS,
     modelFetch: modelFetch,
   };
