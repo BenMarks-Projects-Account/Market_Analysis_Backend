@@ -5719,11 +5719,15 @@ a.at-symbol-link:hover{
 }
 
 /* Risk / macro tiles in scoreboard */
-.home-risk-tiles,
-.home-macro-tiles{
+.home-risk-tiles{
     display:grid;
     gap:10px;
     grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.home-macro-tiles{
+    display:grid;
+    gap:10px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 /* ── Market regime factor bars — REMOVED (legacy) ── */
@@ -5995,36 +5999,6 @@ a.at-symbol-link:hover{
     margin-bottom:8px;
     padding-bottom:6px;
     border-bottom:1px solid rgba(0,234,255,0.06);
-}
-
-/* ── Sector context metadata chips ── */
-.home-sector-context-chips{
-    display:flex;
-    flex-wrap:wrap;
-    gap:6px;
-    margin-bottom:8px;
-}
-.home-sector-ctx-chip{
-    font-size:10px;
-    font-weight:600;
-    border-radius:4px;
-    padding:2px 8px;
-    white-space:nowrap;
-}
-.home-sector-ctx-chip.bullish{
-    color:#7ef7b8;
-    background:rgba(126,247,184,0.08);
-    border:1px solid rgba(126,247,184,0.20);
-}
-.home-sector-ctx-chip.neutral{
-    color:var(--cyan);
-    background:rgba(0,234,255,0.06);
-    border:1px solid rgba(0,234,255,0.15);
-}
-.home-sector-ctx-chip.riskoff{
-    color:#ff6b6b;
-    background:rgba(255,107,107,0.08);
-    border:1px solid rgba(255,107,107,0.20);
 }
 
 /* ── Freshness tags (live / eod) ── */
@@ -6417,6 +6391,39 @@ a.at-symbol-link:hover{
     background:rgba(255,255,255,0.01);
 }
 
+/* ── Equity Curve Summary (backend data) ── */
+.home-equity-summary{
+    display:flex;
+    align-items:center;
+    gap:24px;
+    height:auto;
+    padding:8px 12px;
+    border:none;
+    border-radius:0;
+    background:transparent;
+    color:inherit;
+    font-size:inherit;
+    justify-content:flex-start;
+}
+.equity-stat{
+    display:flex;
+    align-items:baseline;
+    gap:6px;
+}
+.equity-stat-label{
+    font-size:10px;
+    text-transform:uppercase;
+    letter-spacing:0.8px;
+    color:rgba(120,160,184,0.8);
+    font-weight:600;
+}
+.equity-stat-value{
+    font-size:16px;
+    font-weight:700;
+    font-variant-numeric:tabular-nums;
+    color:rgba(215,251,255,0.95);
+}
+
 /* ── Nested inner cards (subtler border) ── */
 .home-nested-card{
     border-color: rgba(0,234,255,0.10);
@@ -6679,49 +6686,6 @@ a.at-symbol-link:hover{
 }
 @media (max-width:720px){
     .home-chart-grid-2x2{ grid-template-columns:1fr; }
-}
-
-.home-sector-bars{
-    display:grid;
-    gap:8px;
-}
-
-/* ── Signal Hub — REMOVED (replaced by expanded Sector Performance) ── */
-
-.home-sector-row{
-    display:grid;
-    grid-template-columns: minmax(100px, 160px) minmax(0, 1fr) 56px;
-    align-items:center;
-    gap:10px;
-}
-
-.home-sector-label,
-.home-sector-pct{
-    font-size:12px;
-    color:var(--text);
-}
-
-.home-sector-track{
-    height:10px;
-    border-radius:999px;
-    border:1px solid rgba(0,234,255,0.20);
-    background: rgba(255,255,255,0.03);
-    overflow:hidden;
-}
-
-.home-sector-fill{
-    height:100%;
-    border-radius:999px;
-}
-
-.home-sector-fill.positive{
-    background: linear-gradient(90deg, rgba(126,247,184,0.78), rgba(0,234,255,0.62));
-    box-shadow: 0 0 14px rgba(126,247,184,0.25);
-}
-
-.home-sector-fill.negative{
-    background: linear-gradient(90deg, rgba(255,126,166,0.78), rgba(255,79,102,0.66));
-    box-shadow: 0 0 14px rgba(255,126,166,0.25);
 }
 
 .home-opportunities{
@@ -6988,9 +6952,11 @@ a.at-symbol-link:hover{
         max-width: 100%;
     }
     .home-regime-strip,
-    .home-risk-tiles,
-    .home-macro-tiles{
+    .home-risk-tiles{
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .home-macro-tiles{
+        grid-template-columns: repeat(3, minmax(0, 1fr));
     }
     .home-session-strip{
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -8630,6 +8596,381 @@ a.at-symbol-link:hover{
     cursor:pointer;
     transition:background 0.15s, border-color 0.15s;
 }
+
+/* ═══ Calendar & News Panels (home dashboard) ═══ */
+.home-calendar-panel,
+.home-news-panel{
+    margin-bottom:0;
+}
+.home-calendar-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+}
+@media(max-width:900px){
+    .home-calendar-grid{ grid-template-columns:1fr; }
+}
+.home-calendar-sub{
+    background:rgba(15,30,40,0.6);
+    border:1px solid rgba(80,120,150,0.15);
+    border-radius:6px;
+    padding:12px;
+}
+.home-calendar-sub-header{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    color:#80a8c0;
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    font-weight:600;
+    margin-bottom:10px;
+    padding-bottom:8px;
+    border-bottom:1px solid rgba(80,120,150,0.12);
+}
+.home-calendar-icon{ font-size:14px; }
+.home-calendar-count{
+    margin-left:auto;
+    background:rgba(80,200,160,0.15);
+    color:#60d8a0;
+    padding:2px 8px;
+    border-radius:10px;
+    font-size:10px;
+}
+.home-calendar-content{
+    max-height:260px;
+    overflow-y:auto;
+}
+.home-cal-event{
+    display:grid;
+    grid-template-columns:56px 1fr auto;
+    gap:8px;
+    padding:6px 0;
+    border-bottom:1px solid rgba(80,120,150,0.08);
+    font-size:12px;
+    align-items:start;
+}
+.home-cal-event:last-child{ border-bottom:none; }
+.home-cal-time{
+    color:#607890;
+    font-weight:500;
+    font-size:11px;
+}
+.home-cal-name{ color:#c0d8e8; }
+.home-cal-impact{
+    font-size:10px;
+    padding:1px 6px;
+    border-radius:8px;
+    white-space:nowrap;
+}
+.home-cal-impact-high{
+    background:rgba(240,100,100,0.15);
+    color:#ff8080;
+}
+.home-cal-impact-medium{
+    background:rgba(240,192,80,0.15);
+    color:#f0c060;
+}
+.home-cal-impact-low{
+    background:rgba(80,120,150,0.15);
+    color:#80a0b0;
+}
+.home-cal-values{
+    color:#90b0c8;
+    font-size:11px;
+    grid-column:2 / 4;
+    padding-left:4px;
+}
+.home-earn-row{
+    display:grid;
+    grid-template-columns:56px 42px 1fr auto;
+    gap:8px;
+    padding:5px 0;
+    border-bottom:1px solid rgba(80,120,150,0.08);
+    font-size:12px;
+    align-items:center;
+}
+.home-earn-row:last-child{ border-bottom:none; }
+.home-earn-sym{
+    color:#ffffff;
+    font-weight:700;
+    font-size:13px;
+}
+.home-earn-hour{
+    font-size:9px;
+    padding:2px 5px;
+    border-radius:3px;
+    text-align:center;
+    font-weight:600;
+}
+.home-earn-hour-bmo{ background:rgba(80,180,240,0.15); color:#80c8f0; }
+.home-earn-hour-amc{ background:rgba(180,100,240,0.15); color:#c080f0; }
+.home-earn-hour-dmh{ background:rgba(80,120,150,0.15); color:#90b0c8; }
+.home-earn-eps{
+    color:#80a8c0;
+    font-size:11px;
+    text-align:right;
+}
+/* News */
+.home-news-feed{
+    max-height:380px;
+    overflow-y:auto;
+}
+.home-news-item{
+    display:flex;
+    gap:12px;
+    padding:10px 0;
+    border-bottom:1px solid rgba(80,120,150,0.08);
+    cursor:pointer;
+    transition:background 0.15s ease;
+}
+.home-news-item:hover{ background:rgba(80,120,150,0.04); }
+.home-news-item:last-child{ border-bottom:none; }
+.home-news-img{
+    width:60px;
+    height:60px;
+    border-radius:4px;
+    object-fit:cover;
+    flex-shrink:0;
+    background:rgba(80,120,150,0.1);
+}
+.home-news-body{ flex:1; min-width:0; }
+.home-news-headline{
+    color:#d0e0e8;
+    font-size:13px;
+    font-weight:500;
+    line-height:1.3;
+    margin-bottom:4px;
+    display:-webkit-box;
+    -webkit-line-clamp:2;
+    -webkit-box-orient:vertical;
+    overflow:hidden;
+}
+.home-news-meta{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    font-size:10px;
+    color:#607890;
+    text-transform:uppercase;
+    letter-spacing:0.3px;
+}
+.home-news-source{ font-weight:600; color:#80a0b8; }
+.home-news-time{ color:#506878; }
+.home-news-related{ color:#60c890; font-weight:600; }
+.home-cal-empty,
+.home-news-empty{
+    text-align:center;
+    color:#506878;
+    font-size:12px;
+    padding:20px;
+}
+
+/* ═══ Phase 2: FMP Market Intelligence ═══ */
+
+/* Movers grid (3-col) */
+.movers-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:12px;
+}
+@media(max-width:1100px){
+    .movers-grid{ grid-template-columns:1fr; }
+}
+.movers-panel{
+    background:rgba(15,30,40,0.6);
+    border:1px solid rgba(80,120,150,0.15);
+    border-radius:6px;
+    padding:10px 12px;
+}
+.movers-panel-title{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    font-weight:700;
+    margin-bottom:8px;
+    padding-bottom:6px;
+    border-bottom:1px solid rgba(80,120,150,0.12);
+}
+.movers-gainers-title{ color:#60d890; }
+.movers-losers-title{ color:#f08070; }
+.movers-actives-title{ color:#80c8f0; }
+.movers-list{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+}
+.mover-row{
+    display:grid;
+    grid-template-columns:65px 1fr auto;
+    gap:8px;
+    padding:4px 0;
+    align-items:center;
+    font-size:12px;
+}
+.mover-symbol{ color:#ffffff; font-weight:700; font-size:13px; }
+.mover-name{
+    color:#80a0b8;
+    font-size:11px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.mover-change{
+    font-weight:600;
+    font-size:12px;
+    text-align:right;
+    font-variant-numeric:tabular-nums;
+}
+.mover-change-up{ color:#60d890; }
+.mover-change-down{ color:#f08070; }
+.mover-volume{ color:#607890; font-size:10px; text-align:right; }
+.movers-empty{
+    text-align:center; color:#506878; font-size:12px; padding:12px;
+}
+
+/* Sector rotation table */
+.rotation-table{ width:100%; }
+.rotation-table-header,
+.rotation-table-row{
+    display:grid;
+    grid-template-columns:2fr 1fr 1fr 1fr 1fr;
+    gap:8px;
+    padding:8px 12px;
+    align-items:center;
+}
+.rotation-table-header{
+    color:#607890;
+    font-size:10px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    font-weight:600;
+    border-bottom:1px solid rgba(80,120,150,0.15);
+}
+.rotation-table-row{
+    border-bottom:1px solid rgba(80,120,150,0.06);
+    font-size:12px;
+}
+.rotation-sector-name{ color:#c0d8e8; font-weight:500; }
+.rotation-cell{
+    text-align:right;
+    font-variant-numeric:tabular-nums;
+    padding:3px 8px;
+    border-radius:3px;
+    font-weight:600;
+}
+.rotation-heat-strong-up{ background:rgba(80,200,120,0.25); color:#80e8a0; }
+.rotation-heat-up{ background:rgba(80,200,120,0.10); color:#60d890; }
+.rotation-heat-flat{ color:#90a8b8; }
+.rotation-heat-down{ background:rgba(240,96,96,0.10); color:#f08070; }
+.rotation-heat-strong-down{ background:rgba(240,96,96,0.25); color:#ff8070; }
+
+/* Pre-market grid (2-col) */
+.premarket-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+}
+@media(max-width:800px){
+    .premarket-grid{ grid-template-columns:1fr; }
+}
+
+/* Grades / Analyst Actions */
+.grades-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+}
+.grades-panel{
+    background:rgba(15,30,40,0.6);
+    border:1px solid rgba(80,120,150,0.15);
+    border-radius:6px;
+    padding:10px 12px;
+}
+.grades-panel-title{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    font-weight:700;
+    margin-bottom:8px;
+    padding-bottom:6px;
+    border-bottom:1px solid rgba(80,120,150,0.12);
+}
+.grades-up-title{ color:#60d890; }
+.grades-down-title{ color:#f08070; }
+.grades-list{ max-height:240px; overflow-y:auto; }
+.grade-row{
+    display:grid;
+    grid-template-columns:65px 1fr auto;
+    gap:8px;
+    padding:6px 0;
+    border-bottom:1px solid rgba(80,120,150,0.08);
+    font-size:11px;
+    align-items:center;
+}
+.grade-symbol{ color:#ffffff; font-weight:700; font-size:12px; }
+.grade-detail{
+    color:#80a0b8;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.grade-firm{ color:#607890; font-size:10px; text-align:right; }
+.grades-empty{
+    text-align:center; color:#506878; font-size:12px; padding:12px;
+}
+
+/* ── Phase 3: Sentiment Infrastructure ───────────────────── */
+
+/* Crypto grid */
+.crypto-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:12px;
+}
+@media(max-width:800px){
+    .crypto-grid{ grid-template-columns:1fr; }
+}
+.crypto-tile{
+    background:rgba(15,30,40,0.6);
+    border:1px solid rgba(80,120,150,0.15);
+    border-radius:6px;
+    padding:14px;
+}
+.crypto-symbol{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    color:#607890;
+    font-weight:600;
+    margin-bottom:6px;
+}
+.crypto-price{
+    font-size:22px;
+    font-weight:700;
+    color:#ffffff;
+    font-variant-numeric:tabular-nums;
+    margin-bottom:4px;
+}
+.crypto-change{
+    font-size:13px;
+    font-weight:600;
+    font-variant-numeric:tabular-nums;
+}
+.crypto-up{ color:#60d890; }
+.crypto-down{ color:#f08070; }
+.crypto-meta{
+    color:#607890;
+    font-size:10px;
+    margin-top:8px;
+    padding-top:8px;
+    border-top:1px solid rgba(80,120,150,0.1);
+}
+.crypto-empty{
+    text-align:center; color:#506878; font-size:12px; padding:12px;
+}
+
 .bt-chat-followup-btn:hover{
     background:rgba(0,234,255,0.12);
     border-color:rgba(0,234,255,0.30);
@@ -9316,3 +9657,121 @@ a.at-symbol-link:hover{
     background: rgba(255, 255, 255, 0.015);
     border: 1px solid rgba(255, 255, 255, 0.06);
 }
+
+/* ═══ Phase 5: Specialty Signals ═══ */
+
+/* ── Congressional Trading ── */
+.congress-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 12px;
+}
+@media (max-width: 900px) {
+    .congress-grid { grid-template-columns: 1fr; }
+}
+.congress-trades-panel,
+.congress-trending-panel {
+    background: rgba(15, 30, 40, 0.6);
+    border: 1px solid rgba(80, 120, 150, 0.15);
+    border-radius: 6px;
+    padding: 12px;
+}
+.congress-panel-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #607890;
+    font-weight: 600;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(80, 120, 150, 0.12);
+}
+.congress-trades-list { max-height: 320px; overflow-y: auto; }
+.congress-trade {
+    display: grid;
+    grid-template-columns: 60px 1fr auto;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(80, 120, 150, 0.08);
+    font-size: 11px;
+}
+.congress-trade-symbol { color: #ffffff; font-weight: 700; font-size: 13px; }
+.congress-trade-detail { color: #80a0b8; font-size: 11px; overflow: hidden; }
+.congress-trade-name { color: #c0d8e8; font-weight: 500; }
+.congress-trade-meta { color: #607890; font-size: 10px; margin-top: 2px; }
+.congress-trade-type {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    text-align: center;
+    font-weight: 600;
+}
+.congress-type-buy { background: rgba(80, 200, 120, 0.15); color: #60d890; }
+.congress-type-sell { background: rgba(240, 96, 96, 0.15); color: #f08070; }
+.congress-type-exchange { background: rgba(80, 120, 150, 0.15); color: #80a0b8; }
+.congress-chamber {
+    font-size: 9px;
+    padding: 1px 4px;
+    border-radius: 2px;
+    background: rgba(80, 120, 150, 0.1);
+    color: #80a0b8;
+    margin-left: 4px;
+}
+.congress-trending-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(80, 120, 150, 0.08);
+    font-size: 12px;
+}
+.congress-trending-symbol { color: #ffffff; font-weight: 700; font-size: 13px; }
+.congress-trending-count {
+    background: rgba(80, 200, 160, 0.15);
+    color: #60d8a0;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.congress-loading, .congress-empty { color: #607890; font-size: 12px; padding: 12px 0; }
+
+/* ── Unusual Options Activity ── */
+.uoa-list { max-height: 360px; overflow-y: auto; }
+.uoa-row {
+    display: grid;
+    grid-template-columns: 60px 50px 70px 1fr auto auto;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(80, 120, 150, 0.08);
+    font-size: 12px;
+    align-items: center;
+}
+.uoa-symbol { color: #ffffff; font-weight: 700; font-size: 13px; }
+.uoa-type {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    text-align: center;
+    font-weight: 600;
+}
+.uoa-type-call { background: rgba(80, 200, 120, 0.15); color: #60d890; }
+.uoa-type-put { background: rgba(240, 96, 96, 0.15); color: #f08070; }
+.uoa-strike {
+    color: #c0d8e8;
+    font-weight: 600;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.uoa-exp { color: #80a0b8; font-size: 10px; }
+.uoa-volume { color: #c0d8e8; text-align: right; font-variant-numeric: tabular-nums; }
+.uoa-ratio {
+    background: rgba(240, 192, 80, 0.15);
+    color: #f0c060;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    text-align: center;
+}
+.uoa-loading, .uoa-empty { color: #607890; font-size: 12px; padding: 12px 0; }

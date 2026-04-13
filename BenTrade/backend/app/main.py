@@ -53,6 +53,13 @@ from app.api.routes_pre_market import router as pre_market_router
 from app.api.routes_orchestrator import router as orchestrator_router
 from app.api.routes_notifications import router as notifications_router
 from app.api.routes_company_evaluator import router as company_evaluator_router
+from app.api.routes_calendar_news import router as calendar_news_router
+from app.api.routes_market_intel import router as market_intel_router
+from app.api.routes_sentiment import router as sentiment_router
+from app.api.routes_dashboard_fixes import router as dashboard_fixes_router
+from app.api.routes_specialty_signals import router as specialty_signals_router
+from app.clients.coingecko_client import CoinGeckoClient
+from app.clients.fmp_client import FMPClient
 from app.clients.polygon_client import PolygonClient
 from app.clients.tradier_client import TradierClient
 from app.config import get_settings
@@ -136,6 +143,8 @@ def create_app() -> FastAPI:
     polygon_client = PolygonClient(settings=settings, http_client=http_client, cache=cache)
     fred_client = FredClient(settings=settings, http_client=http_client, cache=cache)
     futures_client = FuturesClient(settings=settings, cache=cache, http_client=http_client)
+    fmp_client = FMPClient(settings=settings, http_client=http_client, cache=cache)
+    coingecko_client = CoinGeckoClient(http_client=http_client, cache=cache)
 
     # -- Snapshot chain source / recorder -----------------------------------
     _logger = logging.getLogger(__name__)
@@ -174,6 +183,11 @@ def create_app() -> FastAPI:
 
     # -- Platform settings (runtime data-source toggle) --------------------
     data_dir = backend_dir / "data"
+
+    # -- Equity Tracker (local balance snapshots for equity curve) ----------
+    from app.services.equity_tracker import EquityTracker
+    equity_tracker = EquityTracker(data_dir=data_dir)
+
     platform_settings = PlatformSettings(
         data_dir,
         env_default_mode="snapshot" if settings.OPTION_CHAIN_SOURCE == "snapshot" else "live",
@@ -259,6 +273,9 @@ def create_app() -> FastAPI:
     app.state.polygon_client = polygon_client
     app.state.fred_client = fred_client
     app.state.futures_client = futures_client
+    app.state.fmp_client = fmp_client
+    app.state.coingecko_client = coingecko_client
+    app.state.equity_tracker = equity_tracker
     pre_market_service = PreMarketIntelligenceService(
         futures_client=futures_client,
         cache=cache,
@@ -445,6 +462,11 @@ def create_app() -> FastAPI:
     app.include_router(orchestrator_router)
     app.include_router(notifications_router)
     app.include_router(company_evaluator_router)
+    app.include_router(calendar_news_router)
+    app.include_router(market_intel_router)
+    app.include_router(sentiment_router)
+    app.include_router(dashboard_fixes_router)
+    app.include_router(specialty_signals_router)
     app.include_router(frontend_router)
 
     @app.exception_handler(UpstreamError)

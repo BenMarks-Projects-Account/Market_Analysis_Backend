@@ -15,7 +15,11 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="assets/css/app.css">
   <link rel="stylesheet" href="assets/css/module-dashboard.css?v=20260310d">
+  <link rel="stylesheet" href="assets/css/on_demand_evaluator.css?v=20260413b">
+  <link rel="stylesheet" href="assets/css/price_chart.css?v=20260615a">
   <style>
+    /* CE symbol/name links */
+    .ce-symbol-link:hover, .ce-name-link:hover { color: #80e0e0 !important; text-decoration: underline; }
     :root{
       --scroll-pad: 8px;
     }
@@ -320,6 +324,13 @@
               <span class="nav-item-text">
                 <span class="nav-item-title">Company Evaluator</span>
                 <span class="nav-item-sub">Ranked fundamental evaluations</span>
+              </span>
+            </a>
+            <a class="nav-link" href="#/on-demand-evaluator" data-route="on-demand-evaluator">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">On-Demand Evaluator</span>
+                <span class="nav-item-sub">Deep-dive any symbol on demand</span>
               </span>
             </a>
             <a class="nav-link" href="#/notifications" data-route="notifications">
@@ -809,6 +820,8 @@
   <script src="assets/js/pages/active_trades.js?v=20260306a"></script>
   <script src="assets/js/pages/trade_workbench.js?v=20260217a"></script>
   <script src="assets/js/pages/stock_analysis.js?v=20260216d"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="assets/js/components/price_chart.js?v=20260615a"></script>
   <script src="assets/js/components/pre_market_display.js?v=20260325a"></script>
   <script src="assets/js/pages/stock_scanner.js?v=20260217a"></script>
   <script src="assets/js/pages/stock_pullback_swing.js?v=20260302e"></script>
@@ -831,7 +844,8 @@
   <script src="assets/js/pages/scanner_review.js?v=20260312a"></script>
   <script src="assets/js/pages/trade_management_center.js?v=20260403a"></script>
   <script src="assets/js/pages/notifications.js?v=20260326a"></script>
-  <script src="assets/js/pages/company_evaluator.js?v=20260326a"></script>
+  <script src="assets/js/pages/company_evaluator.js?v=20260615a"></script>
+  <script src="assets/js/pages/on_demand_evaluator.js?v=20260615a"></script>
   <script src="assets/js/app.js?v=20260217a"></script>
   <script src="assets/js/router.js?v=20260216c"></script>
 </body>

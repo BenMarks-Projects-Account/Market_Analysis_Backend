@@ -517,6 +517,7 @@ window.BenTradePages.initCompanyEvaluator = function initCompanyEvaluator(rootEl
   var _evaPanelOpen = {};     // { SYMBOL: true }
   var _smartMoneyPanelOpen = {}; // { SYMBOL: true }
   var _smartMoneyCache = {};  // { SYMBOL: { data, analyzedAt } }
+  var _chartPanelOpen = {};   // { SYMBOL: true }
   // Track which symbols have server-side cached analyses (from status endpoint)
   var _analysisStatus = {};   // { SYMBOL: { entry: bool, comps: bool, dcf: bool, eva: bool } }
 
@@ -968,6 +969,94 @@ window.BenTradePages.initCompanyEvaluator = function initCompanyEvaluator(rootEl
       });
   }
 
+  // ── Chart panel (uses BenTradeComponents.mountPriceChart) ──
+  function _handleChartPanel(symbol) {
+    var hdr = scope.querySelector('.ce-analysis-header[data-symbol="' + symbol + '"][data-type="chart"]');
+    if (hdr) {
+      _toggleChartPanel(symbol);
+      return;
+    }
+    _chartPanelOpen[symbol] = true;
+    _updateBtnState(symbol, 'chart');
+
+    var actionRow = scope.querySelector('.ce-action-row[data-symbol="' + _esc(symbol) + '"]');
+    if (!actionRow) return;
+    var colCount = _getColCount();
+    var chartContainerId = 'ce-chart-' + symbol.replace(/[^a-zA-Z0-9]/g, '_');
+
+    // Header TR
+    var hdrTr = document.createElement('tr');
+    hdrTr.className = 'ce-analysis-header';
+    hdrTr.setAttribute('data-symbol', symbol);
+    hdrTr.setAttribute('data-type', 'chart');
+    var hdrTd = document.createElement('td');
+    hdrTd.colSpan = colCount;
+    hdrTd.style.cssText = 'padding:6px 12px; cursor:pointer; border-bottom:1px solid rgba(80,120,150,0.06);';
+    hdrTd.innerHTML = '<span style="display:flex; align-items:center; gap:8px;">'
+      + '<span class="ce-ah-chevron open" style="font-size:10px; transition:transform 0.2s;">\u25BC</span>'
+      + '<span style="font-weight:600; font-size:12px; color:#c0d4e0;">Price Chart</span>'
+      + '<span style="font-size:11px; color:#506878;">' + _esc(symbol) + '</span>'
+      + '</span>';
+    hdrTr.appendChild(hdrTd);
+    hdrTd.addEventListener('click', function() { _toggleChartPanel(symbol); });
+
+    // Content TR
+    var cntTr = document.createElement('tr');
+    cntTr.className = 'ce-analysis-content';
+    cntTr.setAttribute('data-symbol', symbol);
+    cntTr.setAttribute('data-type', 'chart');
+    var cntTd = document.createElement('td');
+    cntTd.colSpan = colCount;
+    cntTd.style.padding = '0';
+    cntTd.innerHTML = '<div class="ce-ac-wrapper open" style="overflow:hidden; max-height:2000px; transition:max-height 0.35s ease;">'
+      + '<div class="ce-ac-inner" style="padding:8px 16px 12px;">'
+      + '<div id="' + _esc(chartContainerId) + '"></div>'
+      + '</div></div>';
+    cntTr.appendChild(cntTd);
+
+    // Insert into table
+    var anchor = _getInsertAnchor(symbol, 'chart');
+    if (anchor && anchor.parentNode) {
+      anchor.parentNode.insertBefore(hdrTr, anchor.nextSibling);
+      hdrTr.parentNode.insertBefore(cntTr, hdrTr.nextSibling);
+    }
+
+    // Mount the chart component
+    if (window.BenTradeComponents && window.BenTradeComponents.mountPriceChart) {
+      window.BenTradeComponents.mountPriceChart(chartContainerId, symbol);
+    }
+  }
+
+  function _toggleChartPanel(symbol) {
+    var hdr = scope.querySelector('.ce-analysis-header[data-symbol="' + symbol + '"][data-type="chart"]');
+    var cnt = scope.querySelector('.ce-analysis-content[data-symbol="' + symbol + '"][data-type="chart"]');
+    if (!hdr || !cnt) return;
+
+    var wrapper = cnt.querySelector('.ce-ac-wrapper');
+    var chevron = hdr.querySelector('.ce-ah-chevron');
+    var isOpen = wrapper && wrapper.classList.contains('open');
+    var chartContainerId = 'ce-chart-' + symbol.replace(/[^a-zA-Z0-9]/g, '_');
+
+    if (isOpen) {
+      if (wrapper) wrapper.classList.remove('open');
+      if (chevron) chevron.classList.remove('open');
+      delete _chartPanelOpen[symbol];
+      // Destroy chart to free memory
+      if (window.BenTradeComponents && window.BenTradeComponents.destroyPriceChart) {
+        window.BenTradeComponents.destroyPriceChart(chartContainerId);
+      }
+    } else {
+      if (wrapper) wrapper.classList.add('open');
+      if (chevron) chevron.classList.add('open');
+      _chartPanelOpen[symbol] = true;
+      // Re-mount chart
+      if (window.BenTradeComponents && window.BenTradeComponents.mountPriceChart) {
+        window.BenTradeComponents.mountPriceChart(chartContainerId, symbol);
+      }
+    }
+    _updateBtnState(symbol, 'chart');
+  }
+
   // ── Smart Money verdict matrix ──
   var _smVerdictMatrix = {
     'strong_buying|accumulating': { text: 'STRONG BULLISH ALIGNMENT', detail: 'Multiple insiders buying + Institutions accumulating', tier: 'bullish-strong', css: '#80e8a0' },
@@ -1284,8 +1373,11 @@ window.BenTradePages.initCompanyEvaluator = function initCompanyEvaluator(rootEl
     if (type === 'comps') {
       return lastOfType('dcf') || lastOfType('eva') || lastOfType('entry') || priceRow || actionRow;
     }
-    // smart-money is last (after comps)
-    return lastOfType('comps') || lastOfType('dcf') || lastOfType('eva') || lastOfType('entry') || priceRow || actionRow;
+    if (type === 'smart-money') {
+      return lastOfType('comps') || lastOfType('dcf') || lastOfType('eva') || lastOfType('entry') || priceRow || actionRow;
+    }
+    // chart is last (after smart-money)
+    return lastOfType('smart-money') || lastOfType('comps') || lastOfType('dcf') || lastOfType('eva') || lastOfType('entry') || priceRow || actionRow;
   }
 
   function _getRecIcon(rec) {
@@ -1434,6 +1526,7 @@ window.BenTradePages.initCompanyEvaluator = function initCompanyEvaluator(rootEl
       else if (type === 'comps') { delete _compsPanelOpen[symbol]; }
       else if (type === 'dcf') { delete _dcfPanelOpen[symbol]; }
       else if (type === 'smart-money') { delete _smartMoneyPanelOpen[symbol]; }
+      else if (type === 'chart') { delete _chartPanelOpen[symbol]; }
       else { delete _evaPanelOpen[symbol]; }
     } else {
       // Expand
@@ -1443,6 +1536,7 @@ window.BenTradePages.initCompanyEvaluator = function initCompanyEvaluator(rootEl
       else if (type === 'comps') { _compsPanelOpen[symbol] = true; }
       else if (type === 'dcf') { _dcfPanelOpen[symbol] = true; }
       else if (type === 'smart-money') { _smartMoneyPanelOpen[symbol] = true; }
+      else if (type === 'chart') { _chartPanelOpen[symbol] = true; }
       else { _evaPanelOpen[symbol] = true; }
     }
     _updateBtnState(symbol, type);
@@ -1563,14 +1657,14 @@ window.BenTradePages.initCompanyEvaluator = function initCompanyEvaluator(rootEl
   }
 
   function _updateBtnState(symbol, type) {
-    var selectorMap = { entry: '.ce-entry-btn', comps: '.ce-comps-btn', dcf: '.ce-dcf-btn', eva: '.ce-eva-btn', 'smart-money': '.ce-sm-btn' };
+    var selectorMap = { entry: '.ce-entry-btn', comps: '.ce-comps-btn', dcf: '.ce-dcf-btn', eva: '.ce-eva-btn', 'smart-money': '.ce-sm-btn', chart: '.ce-chart-btn' };
     var selector = selectorMap[type] || '.ce-entry-btn';
     var btn = scope.querySelector(selector + '[data-symbol="' + symbol + '"]');
     if (!btn) return;
-    var openMap = { entry: _entryPanelOpen, comps: _compsPanelOpen, dcf: _dcfPanelOpen, eva: _evaPanelOpen, 'smart-money': _smartMoneyPanelOpen };
+    var openMap = { entry: _entryPanelOpen, comps: _compsPanelOpen, dcf: _dcfPanelOpen, eva: _evaPanelOpen, 'smart-money': _smartMoneyPanelOpen, chart: _chartPanelOpen };
     var cacheMap = { entry: _entryCache, comps: _compsCache, dcf: _dcfCache, eva: _evaCache, 'smart-money': _smartMoneyCache };
-    var labelMap = { entry: 'Entry \uD83D\uDD0D', comps: 'Comps \uD83D\uDCCA', dcf: 'DCF \uD83D\uDCC8', eva: 'EVA \uD83C\uDFDB', 'smart-money': 'Smart $ \uD83D\uDCB0' };
-    var shortMap = { entry: 'Entry', comps: 'Comps', dcf: 'DCF', eva: 'EVA', 'smart-money': 'Smart $' };
+    var labelMap = { entry: 'Entry \uD83D\uDD0D', comps: 'Comps \uD83D\uDCCA', dcf: 'DCF \uD83D\uDCC8', eva: 'EVA \uD83C\uDFDB', 'smart-money': 'Smart $ \uD83D\uDCB0', chart: 'Chart \uD83D\uDCC9' };
+    var shortMap = { entry: 'Entry', comps: 'Comps', dcf: 'DCF', eva: 'EVA', 'smart-money': 'Smart $', chart: 'Chart' };
     var isOpen = openMap[type] && openMap[type][symbol];
     var hasCache = cacheMap[type] && !!cacheMap[type][symbol];
     var hasServerCache = _analysisStatus[symbol] && _analysisStatus[symbol][type];
@@ -2614,8 +2708,8 @@ window.BenTradePages.initCompanyEvaluator = function initCompanyEvaluator(rootEl
       // Row 1: Data row
       html += '<tr class="ce-row" data-symbol="' + sym + '" style="' + rowStyle + '">';
       html += '<td style="' + _tdStyle + 'color:#506878; font-weight:600; font-size:0.75rem; text-align:center; min-width:30px;">' + (globalIdx + 1) + '</td>';
-      html += '<td style="' + _tdStyle + 'font-weight:700; color:#ffffff; font-size:0.95rem; letter-spacing:0.5px;">' + sym + '</td>';
-      html += '<td style="' + _tdStyle + 'color:#b8c8d8; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.82rem;">' + _esc(c.company_name || '') + '</td>';
+      html += '<td style="' + _tdStyle + 'font-weight:700; color:#ffffff; font-size:0.95rem; letter-spacing:0.5px;"><a href="#/on-demand-evaluator?symbol=' + encodeURIComponent(c.symbol || '') + '" class="ce-symbol-link" style="color:inherit; text-decoration:none; transition:color 0.15s ease;">' + sym + '</a></td>';
+      html += '<td style="' + _tdStyle + 'color:#b8c8d8; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.82rem;"><a href="#/on-demand-evaluator?symbol=' + encodeURIComponent(c.symbol || '') + '" class="ce-name-link" style="color:inherit; text-decoration:none; transition:color 0.15s ease;">' + _esc(c.company_name || '') + '</a></td>';
       html += '<td style="' + _tdStyle + 'color:#7090a8; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.3px;">' + _esc(c.sector || '--') + '</td>';
       if (hasMcap) {
         html += '<td style="' + _tdStyle + 'text-align:right; color:#90a8b8; font-size:0.82rem; font-weight:500; font-variant-numeric:tabular-nums;">' + _formatMarketCap(c.market_cap) + '</td>';
@@ -2672,6 +2766,9 @@ window.BenTradePages.initCompanyEvaluator = function initCompanyEvaluator(rootEl
       html += ' <button class="ce-raw-btn ce-action-btn" data-symbol="' + sym + '" data-idx="' + i + '" '
         + 'style="' + _abtnBase + '"'
         + '>Raw \uD83D\uDD2C</button>';
+      html += ' <button class="ce-chart-btn ce-action-btn" data-symbol="' + sym + '" data-idx="' + i + '" '
+        + 'style="' + _abtnBase + '"'
+        + '>Chart \uD83D\uDCC9</button>';
       html += '</td>';
       html += '</tr>';
     }
@@ -2814,6 +2911,17 @@ window.BenTradePages.initCompanyEvaluator = function initCompanyEvaluator(rootEl
       })(smBtns[smi].getAttribute('data-symbol')));
     }
 
+    // Bind Chart buttons
+    var chartBtns = container.querySelectorAll('.ce-chart-btn');
+    for (var chi = 0; chi < chartBtns.length; chi++) {
+      chartBtns[chi].addEventListener('click', (function(sym) {
+        return function(e) {
+          e.stopPropagation();
+          _handleChartPanel(sym);
+        };
+      })(chartBtns[chi].getAttribute('data-symbol')));
+    }
+
     // Bind paging controls
     var prevBtn = container.querySelector('.ce-paging-prev');
     if (prevBtn) prevBtn.addEventListener('click', function() {
@@ -2834,7 +2942,9 @@ window.BenTradePages.initCompanyEvaluator = function initCompanyEvaluator(rootEl
     _loadAnalysisStatus();
   }
 
-  function _onRowClick() {
+  function _onRowClick(e) {
+    // Don't open detail drawer if user clicked a symbol/name link
+    if (e.target.closest && e.target.closest('.ce-symbol-link, .ce-name-link')) return;
     var sym = this.getAttribute('data-symbol');
     if (sym) openDetail(sym);
   }

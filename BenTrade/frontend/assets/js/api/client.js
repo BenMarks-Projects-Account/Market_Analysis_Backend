@@ -341,6 +341,55 @@ window.BenTradeApi = (function(){
   function getMarketPictureScoreboard(){
     return jsonFetch('/api/market-picture/scoreboard');
   }
+  function getEconomicCalendar(daysAhead){
+    var qs = daysAhead != null ? '?days_ahead=' + daysAhead : '';
+    return timedFetch('/api/calendar/economic' + qs);
+  }
+
+  function getEarningsCalendar(daysAhead){
+    var qs = daysAhead != null ? '?days_ahead=' + daysAhead : '';
+    return timedFetch('/api/calendar/earnings' + qs);
+  }
+
+  function getMarketNews(category, limit){
+    var params = [];
+    if(category) params.push('category=' + encodeURIComponent(category));
+    if(limit) params.push('limit=' + limit);
+    var qs = params.length ? '?' + params.join('&') : '';
+    return timedFetch('/api/news/market' + qs);
+  }
+
+  /* ── FMP Market Intelligence ── */
+  function getMarketMovers(){
+    return timedFetch('/api/market/movers');
+  }
+  function getSectorRotation(){
+    return timedFetch('/api/market/sectors');
+  }
+  function getPreMarketMovers(){
+    return timedFetch('/api/market/pre-market-movers');
+  }
+  function getUpgradesDowngrades(limit){
+    var qs = limit ? '?limit=' + limit : '';
+    return timedFetch('/api/market/upgrades-downgrades' + qs);
+  }
+
+  /* ── Sentiment Infrastructure ── */
+  function getCryptoSentiment(){
+    return timedFetch('/api/sentiment/crypto');
+  }
+  function getEquityCurve(days){
+    var qs = days ? '?days=' + encodeURIComponent(days) : '';
+    return timedFetch('/api/portfolio/equity-curve' + qs);
+  }
+  /* ── Specialty Signals ── */
+  function getCongressionalTrading(limit){
+    var qs = limit ? '?limit=' + encodeURIComponent(limit) : '';
+    return timedFetch('/api/signals/congress' + qs);
+  }
+  function getUnusualOptions(){
+    return timedFetch('/api/signals/unusual-options');
+  }
 
   function getMarketPictureModelScores(){
     return jsonFetch('/api/market-picture/model-scores');
@@ -667,6 +716,17 @@ window.BenTradeApi = (function(){
     getSignalsUniverse,
     getPortfolioRiskMatrix,
     getMarketPictureScoreboard,
+    getEconomicCalendar,
+    getEarningsCalendar,
+    getMarketNews,
+    getMarketMovers,
+    getSectorRotation,
+    getPreMarketMovers,
+    getUpgradesDowngrades,
+    getCryptoSentiment,
+    getEquityCurve,
+    getCongressionalTrading,
+    getUnusualOptions,
     getMarketPictureModelScores,
     getMarketPictureHistory,
     postLifecycleEvent,

@@ -50,6 +50,23 @@
       </div>
     </section>
 
+    <!-- ═══ Pre-Market Movers ═══ -->
+    <section class="stock-card" id="home-section-premarket-movers">
+      <div class="stock-card-title bt-panel-title">Pre-Market Movers
+        <span class="section-subtitle" style="font-size:11px;color:#607890;font-weight:400;margin-left:8px;">Equity gappers before open</span>
+      </div>
+      <div class="premarket-grid">
+        <div class="movers-panel">
+          <div class="movers-panel-title movers-gainers-title">↑ GAPPING UP</div>
+          <div class="movers-list" id="premarket-gainers"><div class="stock-note">Loading…</div></div>
+        </div>
+        <div class="movers-panel">
+          <div class="movers-panel-title movers-losers-title">↓ GAPPING DOWN</div>
+          <div class="movers-list" id="premarket-losers"><div class="stock-note">Loading…</div></div>
+        </div>
+      </div>
+    </section>
+
     <!-- ═══ 1. Market Regime ═══ -->
     <section class="stock-card home-regime-panel">
       <div class="stock-card-title bt-panel-title">Market Regime</div>
@@ -161,14 +178,100 @@
               <div id="homeMacroTiles" class="home-macro-tiles"></div>
             </div>
           </div>
-          <div class="home-scoreboard-fullwidth">
-            <div class="stock-card home-nested-card">
-              <div class="stock-card-title">Sector Performance</div>
-              <div id="homeSectorContext" class="home-sector-context"></div>
-              <div id="homeSectorBars" class="home-sector-bars"></div>
-            </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Today's Calendar (Economic + Earnings) ═══ -->
+    <section class="stock-card home-calendar-panel">
+      <div class="stock-card-title bt-panel-title">Today's Calendar</div>
+      <div class="home-calendar-grid">
+        <div class="home-calendar-sub">
+          <div class="home-calendar-sub-header">
+            <span class="home-calendar-icon">📊</span>
+            <span>Economic Releases</span>
+            <span class="home-calendar-count" id="homeEconomicCount">--</span>
+          </div>
+          <div class="home-calendar-content" id="homeEconomicCalendar">
+            <div class="stock-note">Loading economic calendar…</div>
           </div>
         </div>
+        <div class="home-calendar-sub">
+          <div class="home-calendar-sub-header">
+            <span class="home-calendar-icon">📈</span>
+            <span>Earnings Today</span>
+            <span class="home-calendar-count" id="homeEarningsCount">--</span>
+          </div>
+          <div class="home-calendar-content" id="homeEarningsCalendar">
+            <div class="stock-note">Loading earnings calendar…</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Market News Feed ═══ -->
+    <section class="stock-card home-news-panel">
+      <div class="stock-card-title bt-panel-title">Market News</div>
+      <div class="home-news-feed" id="homeNewsFeed">
+        <div class="stock-note">Loading market news…</div>
+      </div>
+    </section>
+
+    <!-- ═══ Market Movers ═══ -->
+    <section class="stock-card" id="home-section-movers">
+      <div class="stock-card-title bt-panel-title">Market Movers
+        <span class="section-subtitle" style="font-size:11px;color:#607890;font-weight:400;margin-left:8px;">Today's biggest moves · live</span>
+      </div>
+      <div class="movers-grid">
+        <div class="movers-panel">
+          <div class="movers-panel-title movers-gainers-title">↑ TOP GAINERS</div>
+          <div class="movers-list" id="market-gainers"><div class="stock-note">Loading…</div></div>
+        </div>
+        <div class="movers-panel">
+          <div class="movers-panel-title movers-losers-title">↓ TOP LOSERS</div>
+          <div class="movers-list" id="market-losers"><div class="stock-note">Loading…</div></div>
+        </div>
+        <div class="movers-panel">
+          <div class="movers-panel-title movers-actives-title">⚡ MOST ACTIVE</div>
+          <div class="movers-list" id="market-actives"><div class="stock-note">Loading…</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Sector Rotation ═══ -->
+    <section class="stock-card" id="home-section-sector-rotation">
+      <div class="stock-card-title bt-panel-title">Sector Rotation
+        <span class="section-subtitle" style="font-size:11px;color:#607890;font-weight:400;margin-left:8px;">Multi-timeframe sector performance</span>
+      </div>
+      <div class="rotation-table" id="sector-rotation-table">
+        <div class="stock-note">Loading sector data…</div>
+      </div>
+    </section>
+
+    <!-- ═══ Analyst Actions (FMP) ═══ -->
+    <section class="stock-card" id="home-section-grades">
+      <div class="stock-card-title bt-panel-title">Analyst Actions
+        <span class="section-subtitle" style="font-size:11px;color:#607890;font-weight:400;margin-left:8px;">Today's upgrades &amp; downgrades</span>
+      </div>
+      <div class="grades-grid">
+        <div class="grades-panel">
+          <div class="grades-panel-title grades-up-title">↑ UPGRADES</div>
+          <div class="grades-list" id="grades-upgrades"><div class="stock-note">Loading…</div></div>
+        </div>
+        <div class="grades-panel">
+          <div class="grades-panel-title grades-down-title">↓ DOWNGRADES</div>
+          <div class="grades-list" id="grades-downgrades"><div class="stock-note">Loading…</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Crypto Risk Sentiment (CoinGecko) ═══ -->
+    <section class="stock-card" id="home-section-crypto">
+      <div class="stock-card-title bt-panel-title">Crypto Risk Sentiment
+        <span class="section-subtitle" style="font-size:11px;color:#607890;font-weight:400;margin-left:8px;">24/7 risk appetite proxy</span>
+      </div>
+      <div class="crypto-grid" id="crypto-grid">
+        <div class="stock-note">Loading crypto data…</div>
       </div>
     </section>
 
@@ -213,6 +316,38 @@
       <div id="homeMPHistoryChart" class="home-mp-history-chart-wrap" style="display:none;">
         <svg id="homeMPHistorySvg" class="home-mp-history-svg" viewBox="0 0 900 300" preserveAspectRatio="none"></svg>
         <div id="homeMPHistoryLegend" class="home-mp-history-legend"></div>
+      </div>
+    </section>
+
+    <!-- ═══ 6. Specialty Signals ═══ -->
+    <section class="stock-card" id="home-section-congress">
+      <div class="section-header">
+        <h2>Congressional Trading</h2>
+        <span class="section-subtitle">Latest STOCK Act disclosures</span>
+      </div>
+      <div class="congress-grid">
+        <div class="congress-trades-panel">
+          <div class="congress-panel-title">Recent Disclosures</div>
+          <div class="congress-trades-list" id="congress-trades">
+            <div class="congress-loading">Loading…</div>
+          </div>
+        </div>
+        <div class="congress-trending-panel">
+          <div class="congress-panel-title">Trending Tickers</div>
+          <div class="congress-trending-list" id="congress-trending">
+            <div class="congress-loading">Loading…</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="stock-card" id="home-section-uoa">
+      <div class="section-header">
+        <h2>Unusual Options Activity</h2>
+        <span class="section-subtitle">Vol &gt; 2× OI on actively-traded stocks</span>
+      </div>
+      <div class="uoa-list" id="uoa-list">
+        <div class="uoa-loading">Loading…</div>
       </div>
     </section>
 

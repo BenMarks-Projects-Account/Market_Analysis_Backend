@@ -3,7 +3,7 @@
 import logging
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.config import get_settings
 
@@ -449,3 +449,121 @@ async def proxy_fmp_status():
     except Exception as exc:
         _log.error("event=fmp_status_proxy_failed error=%s", exc)
         raise HTTPException(503, detail="FMP status unavailable")
+
+
+# ── On-Demand Evaluator proxy routes ──────────────────────────────────
+
+@router.post("/on-demand/analyze")
+async def proxy_on_demand_analyze(request: Request):
+    """Proxy: Start an on-demand company evaluation job."""
+    body = await request.json()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(f"{_base_url()}/api/on-demand/analyze", json=body)
+            if resp.status_code != 200:
+                try:
+                    error_body = resp.json()
+                except Exception:
+                    error_body = {"detail": resp.text}
+                raise HTTPException(resp.status_code, detail=error_body.get("detail", resp.text))
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=on_demand_analyze_proxy_failed error=%s", exc)
+        raise HTTPException(503, detail=_unavailable_detail())
+
+
+@router.get("/on-demand/jobs/{job_id}")
+async def proxy_on_demand_job_status(job_id: str):
+    """Proxy: Poll on-demand job status."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{_base_url()}/api/on-demand/jobs/{job_id}")
+            if resp.status_code != 200:
+                try:
+                    error_body = resp.json()
+                except Exception:
+                    error_body = {"detail": resp.text}
+                raise HTTPException(resp.status_code, detail=error_body.get("detail", resp.text))
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=on_demand_job_status_proxy_failed job_id=%s error=%s", job_id, exc)
+        raise HTTPException(503, detail=_unavailable_detail())
+
+
+@router.get("/on-demand/jobs/{job_id}/result")
+async def proxy_on_demand_job_result(job_id: str):
+    """Proxy: Fetch completed on-demand job result."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(f"{_base_url()}/api/on-demand/jobs/{job_id}/result")
+            if resp.status_code != 200:
+                try:
+                    error_body = resp.json()
+                except Exception:
+                    error_body = {"detail": resp.text}
+                raise HTTPException(resp.status_code, detail=error_body.get("detail", resp.text))
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=on_demand_job_result_proxy_failed job_id=%s error=%s", job_id, exc)
+        raise HTTPException(503, detail=_unavailable_detail())
+
+
+@router.delete("/on-demand/jobs/{job_id}")
+async def proxy_on_demand_cancel_job(job_id: str):
+    """Proxy: Cancel an on-demand evaluation job."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.delete(f"{_base_url()}/api/on-demand/jobs/{job_id}")
+            if resp.status_code != 200:
+                try:
+                    error_body = resp.json()
+                except Exception:
+                    error_body = {"detail": resp.text}
+                raise HTTPException(resp.status_code, detail=error_body.get("detail", resp.text))
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=on_demand_cancel_proxy_failed job_id=%s error=%s", job_id, exc)
+        raise HTTPException(503, detail=_unavailable_detail())
+
+
+# ── Chart data proxy ───────────────────────────────────────────────────
+
+@router.get("/charts/{symbol}")
+async def proxy_chart(symbol: str, timeframe: str = Query("1Y")):
+    """Proxy: Forward chart data request to Company Evaluator."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(
+                f"{_base_url()}/api/charts/{symbol}",
+                params={"timeframe": timeframe},
+            )
+            if resp.status_code != 200:
+                try:
+                    error_body = resp.json()
+                except Exception:
+                    error_body = {"detail": resp.text}
+                raise HTTPException(resp.status_code, detail=error_body.get("detail", resp.text))
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=chart_proxy_failed symbol=%s error=%s", symbol, exc)
+        raise HTTPException(503, detail=_unavailable_detail())

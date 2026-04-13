@@ -65,6 +65,9 @@ class Settings(BaseModel):
     POLYGON_API_KEY: str = _cfg("POLYGON_API_KEY", default="")
     POLYGON_BASE_URL: str = _cfg("POLYGON_BASE_URL", default="https://api.polygon.io")
 
+    FMP_API_KEY: str = _cfg("FMP_API_KEY", default="")
+    FMP_BASE_URL: str = _cfg("FMP_BASE_URL", default="https://financialmodelingprep.com/stable")
+
     # ── AWS Bedrock (premium model execution) ──────────────────
     BEDROCK_ENABLED: bool = os.getenv("BEDROCK_ENABLED", "true").lower() == "true"
     BEDROCK_REGION: str = _cfg("BEDROCK_REGION", "AWS_DEFAULT_REGION", default="us-east-1")

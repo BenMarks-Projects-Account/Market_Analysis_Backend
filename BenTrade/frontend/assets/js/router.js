@@ -206,6 +206,7 @@
     "market/liquidity": { title: "Liquidity & Financial Conditions", group: "Market Picture", subgroup: "Liquidity", description: "Financial conditions & policy" },
     "notifications": { title: "Notifications", group: "Navigation", subgroup: "Alerts", description: "BUY/EXECUTE signal alerts" },
     "company-evaluator": { title: "Company Evaluator", group: "Analysis", subgroup: "Fundamentals", description: "Ranked company evaluations from Machine 2" },
+    "on-demand-evaluator": { title: "On-Demand Evaluator", group: "Analysis", subgroup: "Fundamentals", description: "Deep-dive any symbol with full evaluation pipeline" },
   };
 
   const routes = {
@@ -373,6 +374,11 @@
       view: "dashboards/company_evaluator.html",
       init: () => window.BenTradePages?.initCompanyEvaluator?.(document.getElementById('view')),
       title: routeMeta["company-evaluator"].title
+    },
+    "on-demand-evaluator": {
+      view: "dashboards/on_demand_evaluator.html",
+      init: () => window.BenTradePages?.initOnDemandEvaluator?.(document.getElementById('view')),
+      title: routeMeta["on-demand-evaluator"].title
     }
   };
 

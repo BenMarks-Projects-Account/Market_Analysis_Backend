@@ -67,3 +67,88 @@ class FredClient:
             return True
         except Exception:
             return False
+
+    async def get_observation_series(self, series_id: str, limit: int = 30) -> list[dict] | None:
+        """Fetch the last *limit* observations for a FRED series.
+
+        Returns a list of {"date": "YYYY-MM-DD", "value": float} dicts
+        (most recent last), or None on failure.
+        """
+        key = f"fred:series:{series_id}:list:{limit}"
+
+        async def _load() -> list[dict] | None:
+            url = f"{self.settings.FRED_BASE_URL}/series/observations"
+            payload = await request_json(
+                self.http_client,
+                "GET",
+                url,
+                params={
+                    "series_id": series_id,
+                    "sort_order": "desc",
+                    "limit": limit,
+                    "api_key": self.settings.FRED_KEY,
+                    "file_type": "json",
+                },
+            )
+            observations = payload.get("observations") or []
+            result: list[dict] = []
+            for row in reversed(observations):  # oldest first
+                raw = row.get("value")
+                if raw in (None, "."):
+                    continue
+                try:
+                    result.append({"date": row.get("date", ""), "value": float(raw)})
+                except (TypeError, ValueError):
+                    continue
+            return result or None
+
+        return await self.cache.get_or_set(key, self.settings.FRED_CACHE_TTL_SECONDS, _load)
+
+    async def get_release_dates(self, realtime_start: str, realtime_end: str) -> list[dict] | None:
+        """Fetch upcoming FRED release dates for economic data.
+
+        Returns list of {"release_id": int, "date": str} dicts, or None on failure.
+        """
+        key = f"fred:release_dates:{realtime_start}:{realtime_end}"
+
+        async def _load() -> list[dict] | None:
+            url = f"{self.settings.FRED_BASE_URL}/releases/dates"
+            payload = await request_json(
+                self.http_client,
+                "GET",
+                url,
+                params={
+                    "realtime_start": realtime_start,
+                    "realtime_end": realtime_end,
+                    "include_release_dates_with_no_data": "false",
+                    "limit": 100,
+                    "sort_order": "asc",
+                    "api_key": self.settings.FRED_KEY,
+                    "file_type": "json",
+                },
+            )
+            return payload.get("release_dates") or None
+
+        return await self.cache.get_or_set(key, 300, _load)
+
+    async def get_releases(self) -> dict[int, str] | None:
+        """Fetch all FRED releases for ID → name mapping. Cached aggressively."""
+        key = "fred:releases:all"
+
+        async def _load() -> dict[int, str] | None:
+            url = f"{self.settings.FRED_BASE_URL}/releases"
+            payload = await request_json(
+                self.http_client,
+                "GET",
+                url,
+                params={
+                    "api_key": self.settings.FRED_KEY,
+                    "file_type": "json",
+                },
+            )
+            releases = payload.get("releases") or []
+            if not releases:
+                return None
+            return {r["id"]: r.get("name", "") for r in releases if "id" in r}
+
+        return await self.cache.get_or_set(key, 3600, _load)  # 1-hour cache

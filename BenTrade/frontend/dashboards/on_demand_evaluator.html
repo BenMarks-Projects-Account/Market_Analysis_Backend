@@ -1,0 +1,132 @@
+<div class="on-demand-evaluator">
+    <!-- Hero banner with input -->
+    <section class="ode-hero">
+        <div class="ode-hero-inner">
+            <h1 class="ode-hero-title">
+                On-Demand Company Evaluator
+            </h1>
+            <p class="ode-hero-subtitle">
+                Run a complete fundamental analysis on any US-listed
+                company. Pulls fresh data from all sources, computes
+                all scores, runs all valuation models, and persists
+                the result to the universe.
+            </p>
+
+            <form class="ode-form" id="ode-form" autocomplete="off">
+                <input
+                    type="text"
+                    id="ode-symbol-input"
+                    class="ode-input"
+                    placeholder="Enter symbol (e.g., QCOM, AAPL, NVDA)"
+                    maxlength="6"
+                    autocomplete="off"
+                    spellcheck="false"
+                />
+                <button type="submit" id="ode-analyze-btn" class="ode-button">
+                    <span class="ode-button-text">Analyze</span>
+                </button>
+            </form>
+
+            <div class="ode-hero-hint">
+                Analysis takes 30-90 seconds. Results persist as if
+                the crawler had just evaluated the company.
+            </div>
+        </div>
+    </section>
+
+    <!-- Loading state (hidden by default) -->
+    <section class="ode-loading" id="ode-loading" hidden>
+        <div class="ode-loading-inner">
+            <div class="ode-loading-spinner"></div>
+            <div class="ode-loading-symbol" id="ode-loading-symbol">--</div>
+            <div class="ode-loading-step" id="ode-loading-step">
+                Initializing analysis...
+            </div>
+            <div class="ode-loading-progress-bar">
+                <div class="ode-loading-progress-fill" id="ode-loading-progress-fill" style="width: 0%"></div>
+            </div>
+            <div class="ode-loading-percent" id="ode-loading-percent">0%</div>
+            <div class="ode-loading-completed" id="ode-loading-completed"></div>
+            <button class="ode-loading-cancel" id="ode-loading-cancel">Cancel</button>
+        </div>
+    </section>
+
+    <!-- Error state -->
+    <section class="ode-error" id="ode-error" hidden>
+        <div class="ode-error-inner">
+            <div class="ode-error-icon">&#9888;&#65039;</div>
+            <div class="ode-error-title" id="ode-error-title">Analysis Failed</div>
+            <div class="ode-error-message" id="ode-error-message"></div>
+            <button class="ode-error-retry" id="ode-error-retry">Try Again</button>
+        </div>
+    </section>
+
+    <!-- Results (hidden by default, populated after job completes) -->
+    <section class="ode-results" id="ode-results" hidden>
+        <!-- Company header -->
+        <div class="ode-company-header" id="ode-company-header"></div>
+
+        <!-- Price chart (auto-loads after analysis) -->
+        <div id="ode-chart-container"></div>
+
+        <!-- Top row: scores and recommendation -->
+        <div class="ode-scores-row">
+            <div class="ode-score-card ode-composite-card" id="ode-composite-card"></div>
+            <div class="ode-score-card ode-breakout-card" id="ode-breakout-card"></div>
+            <div class="ode-score-card ode-llm-card" id="ode-llm-card"></div>
+        </div>
+
+        <!-- Pillar breakdown -->
+        <div class="ode-section">
+            <div class="ode-section-title">Pillar Breakdown</div>
+            <div class="ode-pillars-grid" id="ode-pillars-grid"></div>
+        </div>
+
+        <!-- Smart money panel -->
+        <div class="ode-section">
+            <div class="ode-section-title">Smart Money</div>
+            <div class="ode-smart-money" id="ode-smart-money"></div>
+        </div>
+
+        <!-- Valuation models row: DCF, EVA, Comps -->
+        <div class="ode-section">
+            <div class="ode-section-title">Valuation Models</div>
+            <div class="ode-valuation-grid">
+                <div class="ode-valuation-card" id="ode-dcf-card"></div>
+                <div class="ode-valuation-card" id="ode-eva-card"></div>
+                <div class="ode-valuation-card" id="ode-comps-card"></div>
+            </div>
+        </div>
+
+        <!-- Entry analysis + price targets -->
+        <div class="ode-section">
+            <div class="ode-section-title">Entry &amp; Price Targets</div>
+            <div class="ode-entry-grid">
+                <div class="ode-entry-card" id="ode-entry-card"></div>
+                <div class="ode-targets-card" id="ode-targets-card"></div>
+            </div>
+        </div>
+
+        <!-- LLM thesis (full text) -->
+        <div class="ode-section">
+            <div class="ode-section-title">Investment Thesis</div>
+            <div class="ode-thesis" id="ode-thesis"></div>
+        </div>
+
+        <!-- Raw financials at the bottom (verbose) -->
+        <div class="ode-section ode-raw-financials-section">
+            <div class="ode-section-title">Raw Financials</div>
+            <div class="ode-raw-tabs">
+                <button class="ode-raw-tab ode-raw-tab-active" data-tab="income">Income Statement</button>
+                <button class="ode-raw-tab" data-tab="balance">Balance Sheet</button>
+                <button class="ode-raw-tab" data-tab="cashflow">Cash Flow</button>
+                <button class="ode-raw-tab" data-tab="metrics">Computed Metrics</button>
+                <button class="ode-raw-tab" data-tab="sources">Data Sources</button>
+            </div>
+            <div class="ode-raw-content" id="ode-raw-content"></div>
+        </div>
+
+        <!-- Metadata footer -->
+        <div class="ode-metadata-footer" id="ode-metadata-footer"></div>
+    </section>
+</div>

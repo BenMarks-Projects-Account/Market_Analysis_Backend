@@ -1,0 +1,636 @@
+/* ===================================================================
+   On-Demand Company Evaluator — Dashboard Styles
+   =================================================================== */
+
+/* === LAYOUT === */
+.on-demand-evaluator {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* === HERO BANNER === */
+.ode-hero {
+    background: linear-gradient(135deg, rgba(15, 30, 40, 0.9) 0%, rgba(20, 40, 55, 0.8) 100%);
+    border: 1px solid rgba(80, 200, 200, 0.2);
+    border-radius: 12px;
+    padding: 30px 40px;
+    margin-bottom: 24px;
+    text-align: center;
+}
+
+.ode-hero-title {
+    font-size: 28px;
+    color: #80e0e0;
+    margin: 0 0 8px 0;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.ode-hero-icon {
+    margin-right: 8px;
+}
+
+.ode-hero-subtitle {
+    color: #80a0b8;
+    font-size: 13px;
+    max-width: 600px;
+    margin: 0 auto 24px auto;
+    line-height: 1.5;
+}
+
+.ode-form {
+    display: flex;
+    gap: 12px;
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.ode-input {
+    flex: 1;
+    background: rgba(15, 25, 35, 0.9);
+    border: 1px solid rgba(80, 120, 150, 0.3);
+    border-radius: 8px;
+    padding: 14px 18px;
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.ode-input:focus {
+    border-color: #60d8d8;
+}
+
+.ode-input::placeholder {
+    color: #506878;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.ode-button {
+    background: linear-gradient(135deg, #60d8a0 0%, #40c890 100%);
+    border: none;
+    border-radius: 8px;
+    padding: 14px 32px;
+    color: #0a1820;
+    font-size: 16px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ode-button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(96, 216, 160, 0.3);
+}
+
+.ode-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.ode-hero-hint {
+    color: #506878;
+    font-size: 11px;
+    margin-top: 16px;
+}
+
+/* === LOADING STATE === */
+.ode-loading {
+    background: rgba(15, 30, 40, 0.6);
+    border: 1px solid rgba(80, 120, 150, 0.2);
+    border-radius: 12px;
+    padding: 60px 40px;
+    margin-bottom: 24px;
+    text-align: center;
+}
+
+.ode-loading-spinner {
+    width: 48px;
+    height: 48px;
+    border: 3px solid rgba(80, 200, 200, 0.2);
+    border-top-color: #60d8d8;
+    border-radius: 50%;
+    margin: 0 auto 24px auto;
+    animation: ode-spin 0.8s linear infinite;
+}
+
+@keyframes ode-spin {
+    to { transform: rotate(360deg); }
+}
+
+.ode-loading-symbol {
+    font-size: 28px;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+}
+
+.ode-loading-step {
+    color: #80c8e0;
+    font-size: 14px;
+    margin-bottom: 20px;
+    min-height: 20px;
+}
+
+.ode-loading-progress-bar {
+    max-width: 500px;
+    height: 6px;
+    background: rgba(80, 120, 150, 0.2);
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 0 auto;
+}
+
+.ode-loading-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #60d8a0 0%, #60d8d8 100%);
+    transition: width 0.4s ease;
+}
+
+.ode-loading-percent {
+    color: #607890;
+    font-size: 12px;
+    margin-top: 8px;
+}
+
+.ode-loading-completed {
+    margin-top: 24px;
+    color: #506878;
+    font-size: 11px;
+    line-height: 1.8;
+}
+
+.ode-loading-completed-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.ode-loading-completed-check {
+    color: #60d890;
+}
+
+.ode-loading-cancel {
+    margin-top: 24px;
+    background: transparent;
+    border: 1px solid rgba(80, 120, 150, 0.3);
+    border-radius: 6px;
+    padding: 8px 24px;
+    color: #80a0b8;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.ode-loading-cancel:hover {
+    border-color: #f08070;
+    color: #f08070;
+}
+
+/* === ERROR STATE === */
+.ode-error {
+    background: rgba(40, 20, 20, 0.6);
+    border: 1px solid rgba(240, 100, 100, 0.3);
+    border-radius: 12px;
+    padding: 40px;
+    margin-bottom: 24px;
+    text-align: center;
+}
+
+.ode-error-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.ode-error-title {
+    color: #ff8070;
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+.ode-error-message {
+    color: #c8a0a0;
+    font-size: 13px;
+    max-width: 500px;
+    margin: 0 auto 20px auto;
+}
+
+.ode-error-retry {
+    background: rgba(240, 100, 100, 0.15);
+    border: 1px solid rgba(240, 100, 100, 0.4);
+    border-radius: 6px;
+    padding: 10px 24px;
+    color: #ff8070;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+/* === RESULTS === */
+.ode-results {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* Company header */
+.ode-company-header {
+    background: rgba(15, 30, 40, 0.6);
+    border: 1px solid rgba(80, 120, 150, 0.15);
+    border-radius: 8px;
+    padding: 24px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+}
+
+.ode-company-symbol {
+    font-size: 36px;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: 1px;
+}
+
+.ode-company-info {
+    flex: 1;
+}
+
+.ode-company-name {
+    font-size: 18px;
+    color: #c0d8e8;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.ode-company-meta {
+    color: #80a0b8;
+    font-size: 12px;
+}
+
+.ode-company-meta span {
+    margin-right: 16px;
+}
+
+.ode-company-price {
+    text-align: right;
+}
+
+.ode-company-price-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: #ffffff;
+    font-variant-numeric: tabular-nums;
+}
+
+.ode-company-market-cap {
+    color: #80a0b8;
+    font-size: 12px;
+}
+
+/* Score cards row */
+.ode-scores-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+}
+
+@media (max-width: 900px) {
+    .ode-scores-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+.ode-score-card {
+    background: rgba(15, 30, 40, 0.6);
+    border: 1px solid rgba(80, 120, 150, 0.15);
+    border-radius: 8px;
+    padding: 20px;
+}
+
+.ode-score-card-title {
+    color: #607890;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.ode-score-card-value {
+    font-size: 42px;
+    font-weight: 700;
+    color: #ffffff;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+}
+
+.ode-score-card-subtitle {
+    color: #80a0b8;
+    font-size: 12px;
+    margin-top: 8px;
+}
+
+.ode-llm-rating {
+    display: inline-block;
+    padding: 6px 16px;
+    border-radius: 4px;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.ode-llm-rating-buy { background: rgba(80, 200, 120, 0.2); color: #60d890; }
+.ode-llm-rating-strong-buy { background: rgba(80, 200, 120, 0.3); color: #80e8a0; }
+.ode-llm-rating-hold { background: rgba(80, 120, 150, 0.2); color: #80a0b8; }
+.ode-llm-rating-sell { background: rgba(240, 100, 100, 0.2); color: #f08070; }
+.ode-llm-rating-strong-sell { background: rgba(240, 100, 100, 0.3); color: #ff8070; }
+.ode-llm-rating-pass { background: rgba(80, 120, 150, 0.15); color: #607890; }
+
+/* Sections */
+.ode-section {
+    background: rgba(15, 30, 40, 0.6);
+    border: 1px solid rgba(80, 120, 150, 0.15);
+    border-radius: 8px;
+    padding: 20px 24px;
+}
+
+.ode-section-title {
+    color: #80c8e0;
+    font-size: 14px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(80, 120, 150, 0.15);
+}
+
+/* Pillar breakdown */
+.ode-pillars-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 16px;
+}
+
+@media (max-width: 1100px) {
+    .ode-pillars-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.ode-pillar-card {
+    background: rgba(20, 35, 45, 0.6);
+    border-radius: 6px;
+    padding: 16px;
+}
+
+.ode-pillar-name {
+    color: #607890;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.ode-pillar-score {
+    font-size: 28px;
+    font-weight: 700;
+    color: #ffffff;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 12px;
+}
+
+.ode-pillar-components {
+    color: #80a0b8;
+    font-size: 11px;
+    line-height: 1.6;
+}
+
+.ode-pillar-component {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+}
+
+/* Valuation models grid */
+.ode-valuation-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+}
+
+@media (max-width: 1100px) {
+    .ode-valuation-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.ode-valuation-card {
+    background: rgba(20, 35, 45, 0.6);
+    border-radius: 6px;
+    padding: 16px;
+}
+
+.ode-valuation-title {
+    color: #607890;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+
+.ode-valuation-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: #ffffff;
+    font-variant-numeric: tabular-nums;
+}
+
+.ode-valuation-detail {
+    color: #80a0b8;
+    font-size: 12px;
+    line-height: 1.5;
+    margin-top: 8px;
+}
+
+/* Entry & targets */
+.ode-entry-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+@media (max-width: 900px) {
+    .ode-entry-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.ode-entry-card,
+.ode-targets-card {
+    background: rgba(20, 35, 45, 0.6);
+    border-radius: 6px;
+    padding: 16px;
+}
+
+/* Smart money */
+.ode-smart-money {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+}
+
+@media (max-width: 900px) {
+    .ode-smart-money {
+        grid-template-columns: 1fr;
+    }
+}
+
+.ode-sm-card {
+    background: rgba(20, 35, 45, 0.6);
+    border-radius: 6px;
+    padding: 16px;
+}
+
+/* Thesis */
+.ode-thesis {
+    color: #c0d8e8;
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+.ode-thesis-section {
+    margin-bottom: 16px;
+}
+
+.ode-thesis-section-title {
+    color: #80c8e0;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.ode-thesis-list {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.ode-thesis-list li {
+    margin-bottom: 4px;
+}
+
+/* Raw financials */
+.ode-raw-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid rgba(80, 120, 150, 0.15);
+}
+
+.ode-raw-tab {
+    background: transparent;
+    border: none;
+    color: #607890;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+    padding: 12px 20px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s ease;
+}
+
+.ode-raw-tab:hover {
+    color: #80a0b8;
+}
+
+.ode-raw-tab-active {
+    color: #80c8e0;
+    border-bottom-color: #80c8e0;
+}
+
+.ode-raw-content {
+    overflow-x: auto;
+}
+
+.ode-raw-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.ode-raw-table th,
+.ode-raw-table td {
+    padding: 8px 12px;
+    text-align: right;
+    border-bottom: 1px solid rgba(80, 120, 150, 0.08);
+}
+
+.ode-raw-table th {
+    color: #607890;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 1px;
+    font-weight: 600;
+    border-bottom: 1px solid rgba(80, 120, 150, 0.2);
+}
+
+.ode-raw-table th:first-child,
+.ode-raw-table td:first-child {
+    text-align: left;
+    color: #80a0b8;
+}
+
+.ode-raw-table tr:hover td {
+    background: rgba(80, 120, 150, 0.04);
+}
+
+/* Metadata footer */
+.ode-metadata-footer {
+    background: rgba(15, 30, 40, 0.4);
+    border: 1px solid rgba(80, 120, 150, 0.1);
+    border-radius: 6px;
+    padding: 12px 16px;
+    color: #506878;
+    font-size: 11px;
+    text-align: center;
+}
+
+/* Empty state helper */
+.ode-empty {
+    color: #506878;
+    font-size: 12px;
+    padding: 12px 0;
+}
+
+/* Smart money verdict badge */
+.ode-sm-verdict {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+}
+
+.ode-sm-verdict-bullish { background: rgba(80, 200, 120, 0.15); color: #60d890; }
+.ode-sm-verdict-neutral { background: rgba(80, 120, 150, 0.15); color: #80a0b8; }
+.ode-sm-verdict-bearish { background: rgba(240, 100, 100, 0.15); color: #f08070; }

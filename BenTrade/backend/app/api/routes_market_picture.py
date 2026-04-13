@@ -21,6 +21,7 @@ Model scores are enriched from the same durable store.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
@@ -31,6 +32,10 @@ from app.services.market_picture_contract import ENGINE_DISPLAY, build_engine_ca
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["market-picture"])
+
+# Route-level cache for history endpoint (avoids re-reading JSONL every request)
+_history_cache: dict[str, tuple[float, Any]] = {}
+_HISTORY_CACHE_TTL = 60  # seconds
 
 
 def _get_data_dir(request: Request) -> str:
@@ -129,7 +134,18 @@ async def get_history(
 
     Response shape:
         { ok, entries: [...], count }
+
+    Route-level cache: results are cached for 60s to avoid re-reading the
+    JSONL file on every dashboard poll.
     """
+    cache_key = f"history_{limit}"
+    now = time.monotonic()
+    cached = _history_cache.get(cache_key)
+    if cached:
+        cached_time, cached_response = cached
+        if (now - cached_time) < _HISTORY_CACHE_TTL:
+            return cached_response
+
     try:
         data_dir = _get_data_dir(request)
         from app.services.market_picture_history import load_history
@@ -142,11 +158,13 @@ async def get_history(
             status_code=200,
         )
 
-    return JSONResponse(content={
+    response = JSONResponse(content={
         "ok": True,
         "entries": entries,
         "count": len(entries),
     })
+    _history_cache[cache_key] = (now, response)
+    return response
 
 
 @router.get("/api/market-picture/model-scores")

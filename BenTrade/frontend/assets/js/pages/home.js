@@ -23,11 +23,9 @@ window.BenTradePages.initHome = function initHome(rootEl){
   const queueLogEl = scope.querySelector('#homeQueueLog');              // null — OE removed from home
   const scanStatusEl = scope.querySelector('#homeScanStatus');          // null — OE removed from home
   const scanErrorEl = scope.querySelector('#homeScanError');            // null — OE removed from home
-  const sectorContextEl = scope.querySelector('#homeSectorContext');
   const indexTilesEl = scope.querySelector('#homeIndexTiles');
   const scoreboardCardsEl = scope.querySelector('#homeScoreboardCards');
   const spyChartEl = scope.querySelector('#homeSpyChart');
-  const sectorBarsEl = scope.querySelector('#homeSectorBars');
   const scannerOpportunitiesEl = scope.querySelector('#homeScannerOpportunities'); // null — OE removed
   const symbolUniverseEl = scope.querySelector('#homeSymbolUniverse');  // null — OE removed from home
   const riskTilesEl = scope.querySelector('#homeRiskTiles');
@@ -72,6 +70,31 @@ window.BenTradePages.initHome = function initHome(rootEl){
   /* ── Regime proxy charts ref ── */
   const regimeProxiesEl = scope.querySelector('#homeRegimeProxies');
 
+  /* ── Calendar & News refs ── */
+  const economicCalendarEl = scope.querySelector('#homeEconomicCalendar');
+  const economicCountEl = scope.querySelector('#homeEconomicCount');
+  const earningsCalendarEl = scope.querySelector('#homeEarningsCalendar');
+  const earningsCountEl = scope.querySelector('#homeEarningsCount');
+  const newsFeedEl = scope.querySelector('#homeNewsFeed');
+
+  /* ── FMP Market Intelligence refs ── */
+  const marketGainersEl = scope.querySelector('#market-gainers');
+  const marketLosersEl = scope.querySelector('#market-losers');
+  const marketActivesEl = scope.querySelector('#market-actives');
+  const sectorRotationEl = scope.querySelector('#sector-rotation-table');
+  const premarketGainersEl = scope.querySelector('#premarket-gainers');
+  const premarketLosersEl = scope.querySelector('#premarket-losers');
+  const gradesUpgradesEl = scope.querySelector('#grades-upgrades');
+  const gradesDowngradesEl = scope.querySelector('#grades-downgrades');
+
+  /* ── Sentiment Infrastructure refs ── */
+  const cryptoGridEl = scope.querySelector('#crypto-grid');
+
+  /* ── Specialty Signals refs ── */
+  const congressTradesEl = scope.querySelector('#congress-trades');
+  const congressTrendingEl = scope.querySelector('#congress-trending');
+  const uoaListEl = scope.querySelector('#uoa-list');
+
   /* ── Pre-Market refs removed: now handled by BenTradePreMarket module ── */
 
   /* ── Contextual Chat button ── */
@@ -84,7 +107,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   /* Guard: only require elements that are actually in the new layout */
-  if(!regimeStripEl || !indexTilesEl || !spyChartEl || !sectorBarsEl || !riskTilesEl || !macroTilesEl || !refreshBtnEl || !refreshingBadgeEl || !lastUpdatedEl || !vixChartEl || !errorEl){
+  if(!regimeStripEl || !indexTilesEl || !spyChartEl || !riskTilesEl || !macroTilesEl || !refreshBtnEl || !refreshingBadgeEl || !lastUpdatedEl || !vixChartEl || !errorEl){
     return;
   }
 
@@ -827,20 +850,6 @@ window.BenTradePages.initHome = function initHome(rootEl){
     IWM: { name: 'Russell 2000', descriptor: 'Small-cap risk appetite gauge', index: 'Russell 2000' },
     IWB: { name: 'Russell 1000', descriptor: 'Large/mid-cap breadth proxy', index: 'Russell 1000' },
     MDY: { name: 'S&P MidCap 400', descriptor: 'Mid-cap domestic cycle read', index: 'MidCap 400' },
-  };
-  const SECTOR_SYMBOLS = ['XLF', 'XLK', 'XLE', 'XLY', 'XLP', 'XLV', 'XLI', 'XLB', 'XLRE', 'XLU', 'XLC'];
-  const SECTOR_META = {
-    XLF: { name: 'Financials', description: 'Banks, insurers, and diversified financial services firms' },
-    XLK: { name: 'Technology', description: 'Software, semiconductors, hardware, and IT services' },
-    XLE: { name: 'Energy', description: 'Oil, gas, exploration, production, and energy equipment' },
-    XLY: { name: 'Consumer Discretionary', description: 'Retail, autos, media, and optional consumer spending' },
-    XLP: { name: 'Consumer Staples', description: 'Everyday household goods, food, and beverage producers' },
-    XLV: { name: 'Health Care', description: 'Pharma, biotech, medical devices, and health providers' },
-    XLI: { name: 'Industrials', description: 'Aerospace, machinery, transportation, and business services' },
-    XLB: { name: 'Materials', description: 'Chemicals, metals, mining, and construction materials' },
-    XLRE: { name: 'Real Estate', description: 'REITs and diversified real estate management firms' },
-    XLU: { name: 'Utilities', description: 'Electric, gas, and water utility providers' },
-    XLC: { name: 'Communication Services', description: 'Telecom, media, entertainment, and interactive platforms' },
   };
   const STRATEGY_SOURCES = [
     { id: 'credit_spread', label: 'Credit Spread', route: '#/credit-spread' },
@@ -2601,95 +2610,6 @@ window.BenTradePages.initHome = function initHome(rootEl){
     }
   }
 
-  function renderSectors(sectorSummaries, regimePayload){
-    const rows = SECTOR_SYMBOLS.map((symbol) => {
-      const pct = toNumber(sectorSummaries[symbol]?.price?.change_pct) ?? 0;
-      const meta = SECTOR_META[symbol] || { name: symbol, description: symbol };
-      return { symbol, pct, meta };
-    });
-    const maxAbs = Math.max(...rows.map((row) => Math.abs(row.pct)), 0.01);
-
-    sectorBarsEl.innerHTML = rows.map((row) => {
-      const width = Math.max(4, Math.round((Math.abs(row.pct) / maxAbs) * 100));
-      const positive = row.pct >= 0;
-      const label = `${row.symbol} — ${row.meta.name}`;
-      const tooltip = `${row.symbol}: ${row.meta.description}`;
-      return `
-        <div class="home-sector-row">
-          <div class="home-sector-label" title="${tooltip}">${label}</div>
-          <div class="home-sector-track">
-            <div class="home-sector-fill ${positive ? 'positive' : 'negative'}" style="width:${width}%;"></div>
-          </div>
-          <div class="home-sector-pct">${fmtPct(row.pct, 2)}</div>
-        </div>
-      `;
-    }).join('');
-
-    /* ── Sector context metadata chips ── */
-    if(sectorContextEl){
-      const chips = _buildSectorContextChips(rows, regimePayload);
-      sectorContextEl.innerHTML = chips.length
-        ? `<div class="home-sector-context-chips">${chips.map(c => `<span class="home-sector-ctx-chip ${c.tone}">${_esc(c.label)}</span>`).join('')}</div>`
-        : '';
-    }
-  }
-
-  /**
-   * Derive concise sector influence/metadata chips for the expanded sector panel.
-   */
-  function _buildSectorContextChips(rows, regimePayload){
-    const chips = [];
-    const sorted = rows.slice().sort((a, b) => b.pct - a.pct);
-    const positiveCount = rows.filter(r => r.pct > 0).length;
-
-    // Breadth influence
-    const breadthPct = Math.round((positiveCount / Math.max(rows.length, 1)) * 100);
-    chips.push({
-      label: `Breadth: ${breadthPct}% advancing`,
-      tone: breadthPct >= 64 ? 'bullish' : (breadthPct <= 36 ? 'riskoff' : 'neutral'),
-    });
-
-    // Leadership concentration: top 2 sectors' share of total positive motion
-    const totalAbsMove = rows.reduce((s, r) => s + Math.abs(r.pct), 0);
-    if(totalAbsMove > 0 && sorted.length >= 2){
-      const top2Share = (Math.abs(sorted[0].pct) + Math.abs(sorted[1].pct)) / totalAbsMove;
-      if(top2Share > 0.45){
-        chips.push({ label: `Concentrated: ${sorted[0].symbol} + ${sorted[1].symbol}`, tone: 'neutral' });
-      } else {
-        chips.push({ label: 'Leadership: Distributed', tone: 'bullish' });
-      }
-    }
-
-    // Defensive vs Cyclical tilt
-    const DEFENSIVE = ['XLP', 'XLU', 'XLV', 'XLRE'];
-    const CYCLICAL = ['XLK', 'XLY', 'XLF', 'XLI', 'XLE', 'XLB', 'XLC'];
-    const defAvg = DEFENSIVE.reduce((s, sym) => {
-      const r = rows.find(x => x.symbol === sym);
-      return s + (r ? r.pct : 0);
-    }, 0) / DEFENSIVE.length;
-    const cycAvg = CYCLICAL.reduce((s, sym) => {
-      const r = rows.find(x => x.symbol === sym);
-      return s + (r ? r.pct : 0);
-    }, 0) / CYCLICAL.length;
-    if(Math.abs(cycAvg - defAvg) > 0.15){
-      const tilt = cycAvg > defAvg ? 'Cyclical' : 'Defensive';
-      const tiltTone = cycAvg > defAvg ? 'bullish' : 'riskoff';
-      chips.push({ label: `Tilt: ${tilt}`, tone: tiltTone });
-    } else {
-      chips.push({ label: 'Tilt: Balanced', tone: 'neutral' });
-    }
-
-    // Rates influence — from regime components if available
-    const ratesScore = toNumber(regimePayload?.components?.rates?.score);
-    if(ratesScore !== null){
-      const ratesLabel = ratesScore >= 60 ? 'Supportive' : (ratesScore < 40 ? 'Pressuring' : 'Neutral');
-      const ratesTone = ratesScore >= 60 ? 'bullish' : (ratesScore < 40 ? 'riskoff' : 'neutral');
-      chips.push({ label: `Rates: ${ratesLabel}`, tone: ratesTone });
-    }
-
-    return chips;
-  }
-
   function renderScannerOpportunities(ideas){
     if(!scannerOpportunitiesEl) return;
     latestOpportunities = Array.isArray(ideas) ? ideas.slice() : [];
@@ -3036,11 +2956,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
   /* ── Equity Curve ── */
   function renderEquityCurve(activeTradesPayload){
     if(!equityCurveEl) return;
-    // Build a best-effort equity series from active trades sorted by open date
+    // Backend-fetched equity curve — loaded via loadEquityCurve()
+    // Fallback: derive from active trades P&L (legacy behavior)
     const trades = Array.isArray(activeTradesPayload?.active_trades) ? activeTradesPayload.active_trades : [];
     let equitySeries = [];
     if(trades.length >= 2){
-      // Sort by opened_at / created_at ascending, accumulate P&L
       const sorted = trades
         .map(t => {
           const comp = (t?.computed && typeof t.computed === 'object') ? t.computed : {};
@@ -3063,10 +2983,61 @@ window.BenTradePages.initHome = function initHome(rootEl){
       equityCurveEl.style.display = '';
       renderChart(equityCurveEl, equitySeries, { stroke: 'rgba(126,247,184,0.92)' });
     } else {
-      // Show empty state
-      if(equityCurveEmptyEl) equityCurveEmptyEl.style.display = '';
-      equityCurveEl.style.display = 'none';
+      // Show empty state — unless backend curve already rendered
+      if(!equityCurveEl.dataset.backendRendered){
+        if(equityCurveEmptyEl) equityCurveEmptyEl.style.display = '';
+        equityCurveEl.style.display = 'none';
+      }
     }
+  }
+
+  /**
+   * Load equity curve from backend snapshot store.
+   * If data exists, renders a proper equity chart + summary stats.
+   * Otherwise keeps the active-trades-derived fallback.
+   */
+  async function loadEquityCurve(){
+    try {
+      const data = await api.getEquityCurve(90);
+      if(!data || !data.data || data.data.length === 0) return;
+      _renderEquityCurveFromBackend(data);
+    } catch(err) {
+      console.warn('[EquityCurve] backend fetch failed:', err?.message || err);
+    }
+  }
+
+  function _renderEquityCurveFromBackend(data){
+    if(!equityCurveEl) return;
+    const history = data.data;
+    if(!history || history.length === 0) return;
+
+    const series = history.map(r => ({ close: r.total_value }));
+    if(series.length < 1) return;
+
+    // Mark as backend-rendered so the fallback doesn't overwrite
+    equityCurveEl.dataset.backendRendered = '1';
+
+    // Render summary above chart
+    const endVal = data.end_value;
+    const retPct = data.total_return_pct;
+    const retClass = (retPct != null && retPct >= 0) ? 'crypto-up' : 'crypto-down';
+    const retStr = retPct != null
+      ? ((retPct >= 0 ? '+' : '') + retPct.toFixed(2) + '%')
+      : '--';
+
+    // Update the empty-state div as a summary bar
+    if(equityCurveEmptyEl){
+      equityCurveEmptyEl.style.display = '';
+      equityCurveEmptyEl.className = 'home-equity-summary';
+      equityCurveEmptyEl.innerHTML =
+        '<span class="equity-stat"><span class="equity-stat-label">Current</span> ' +
+        '<span class="equity-stat-value">$' + (endVal ? endVal.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) : '--') + '</span></span>' +
+        '<span class="equity-stat"><span class="equity-stat-label">' + data.total_days + '-day</span> ' +
+        '<span class="equity-stat-value ' + retClass + '">' + retStr + '</span></span>';
+    }
+    equityCurveEl.style.display = '';
+    const strokeColor = (retPct != null && retPct >= 0) ? 'rgba(126,247,184,0.92)' : 'rgba(255,79,102,0.92)';
+    renderChart(equityCurveEl, series, { stroke: strokeColor });
   }
 
   function _freshnessTag(freshness, key){
@@ -3085,13 +3056,11 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
 
   function renderMacro(macro, spySummary){
-    const vix = toNumber(macro?.vix ?? spySummary?.options_context?.vix);
     const freshness = macro?._freshness || {};
     macroTilesEl.innerHTML = `
       <div class="statTile"><div class="statLabel" data-metric="ten_year_yield">10Y Yield ${_freshnessTag(freshness, 'ten_year_yield')}</div><div class="statValue">${fmt(macro?.ten_year_yield, 2)}%</div></div>
       <div class="statTile"><div class="statLabel" data-metric="fed_funds">Fed Funds ${_freshnessTag(freshness, 'fed_funds_rate')}</div><div class="statValue">${fmt(macro?.fed_funds_rate, 2)}%</div></div>
       <div class="statTile"><div class="statLabel" data-metric="cpi_yoy">CPI YoY ${_freshnessTag(freshness, 'cpi_yoy')}</div><div class="statValue">${fmt(macro?.cpi_yoy, 2)}%</div></div>
-      <div class="statTile"><div class="statLabel" data-metric="vix_level">VIX ${_freshnessTag(freshness, 'vix')}</div><div class="statValue">${fmt(vix, 2)}</div></div>
     `;
     // Update shared market context store
     var mc = window.BenTradeMarketContext;
@@ -3572,6 +3541,423 @@ window.BenTradePages.initHome = function initHome(rootEl){
     });
   }
 
+  /* ═══ Calendar & News Renderers ═══ */
+
+  function _escText(str){
+    if(!str) return '';
+    var d = doc.createElement('div');
+    d.textContent = String(str);
+    return d.innerHTML;
+  }
+
+  function _fmtEventTime(isoTime){
+    if(!isoTime) return '--';
+    try {
+      var d = new Date(isoTime);
+      if(isNaN(d.getTime())) return String(isoTime).slice(11,16) || '--';
+      return d.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit', hour12:false });
+    } catch(_e){ return '--'; }
+  }
+
+  function _fmtRelativeTime(unixTs){
+    if(!unixTs) return '';
+    var now = Date.now() / 1000;
+    var diff = now - unixTs;
+    if(diff < 60) return 'just now';
+    if(diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if(diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+  }
+
+  function renderEconomicCalendar(data){
+    if(!economicCalendarEl) return;
+    if(data && data.error){
+      economicCalendarEl.innerHTML = '<div class="home-cal-empty">' + _escText(data.error) + '</div>';
+      if(economicCountEl) economicCountEl.textContent = '—';
+      return;
+    }
+    if(!data || !data.events || data.events.length === 0){
+      economicCalendarEl.innerHTML = '<div class="home-cal-empty">No major US releases today</div>';
+      if(economicCountEl) economicCountEl.textContent = '0';
+      return;
+    }
+    if(economicCountEl) economicCountEl.textContent = String(data.count || data.events.length);
+    var html = data.events.map(function(ev){
+      var time = _fmtEventTime(ev.time);
+      var impact = String(ev.impact || 'low').toLowerCase();
+      var impactCls = 'home-cal-impact-' + (impact === 'high' ? 'high' : impact === 'medium' ? 'medium' : 'low');
+      var parts = [];
+      if(ev.actual != null) parts.push('Actual: ' + ev.actual);
+      if(ev.forecast != null) parts.push('Est: ' + ev.forecast);
+      if(ev.previous != null) parts.push('Prev: ' + ev.previous);
+      var valuesHtml = parts.length ? '<div class="home-cal-values">' + _escText(parts.join(' · ')) + '</div>' : '';
+      return '<div class="home-cal-event">'
+        + '<div class="home-cal-time">' + _escText(time) + '</div>'
+        + '<div class="home-cal-name">' + _escText(ev.event) + '</div>'
+        + '<div class="home-cal-impact ' + impactCls + '">' + _escText(impact.toUpperCase()) + '</div>'
+        + valuesHtml
+        + '</div>';
+    }).join('');
+    economicCalendarEl.innerHTML = html;
+  }
+
+  function renderEarningsCalendar(data){
+    if(!earningsCalendarEl) return;
+    if(!data || !data.earnings || data.earnings.length === 0){
+      earningsCalendarEl.innerHTML = '<div class="home-cal-empty">No earnings reports today</div>';
+      if(earningsCountEl) earningsCountEl.textContent = '0';
+      return;
+    }
+    if(earningsCountEl) earningsCountEl.textContent = String(data.count || data.earnings.length);
+    var trimmed = data.earnings.slice(0, 20);
+    var html = trimmed.map(function(e){
+      var hour = String(e.hour || '').toLowerCase();
+      var hourLabel = hour === 'bmo' ? 'BMO' : hour === 'amc' ? 'AMC' : hour === 'dmh' ? 'MID' : '—';
+      var hourCls = 'home-earn-hour-' + (hour === 'bmo' ? 'bmo' : hour === 'amc' ? 'amc' : 'dmh');
+      var eps = e.eps_estimate != null ? 'Est $' + Number(e.eps_estimate).toFixed(2) : '';
+      return '<div class="home-earn-row">'
+        + '<div class="home-earn-sym">' + _escText(e.symbol) + '</div>'
+        + '<div class="home-earn-hour ' + hourCls + '">' + hourLabel + '</div>'
+        + '<div style="color:#90b0c8;font-size:11px;">Q' + (e.quarter || '?') + '</div>'
+        + '<div class="home-earn-eps">' + _escText(eps) + '</div>'
+        + '</div>';
+    }).join('');
+    earningsCalendarEl.innerHTML = html;
+  }
+
+  function renderMarketNews(data){
+    if(!newsFeedEl) return;
+    if(!data || !data.news || data.news.length === 0){
+      newsFeedEl.innerHTML = '<div class="home-news-empty">No news available</div>';
+      return;
+    }
+    var html = data.news.map(function(item){
+      var time = _fmtRelativeTime(item.datetime);
+      var related = String(item.related || '').split(',').filter(Boolean).slice(0,3).join(' · ');
+      var safeUrl = _escText(item.url || '');
+      var imgHtml = item.image
+        ? '<img class="home-news-img" src="' + _escText(item.image) + '" onerror="this.style.display=\'none\'" />'
+        : '<div class="home-news-img"></div>';
+      return '<a class="home-news-item" href="' + safeUrl + '" target="_blank" rel="noopener noreferrer">'
+        + imgHtml
+        + '<div class="home-news-body">'
+        + '<div class="home-news-headline">' + _escText(item.headline) + '</div>'
+        + '<div class="home-news-meta">'
+        + '<span class="home-news-source">' + _escText(item.source) + '</span>'
+        + '<span class="home-news-time">' + _escText(time) + '</span>'
+        + (related ? '<span class="home-news-related">' + _escText(related) + '</span>' : '')
+        + '</div></div></a>';
+    }).join('');
+    newsFeedEl.innerHTML = html;
+  }
+
+  /* ═══ FMP Market Intelligence renderers ═══ */
+
+  function _fmtVolume(v){
+    if(!v) return '';
+    if(v >= 1e9) return (v/1e9).toFixed(1) + 'B';
+    if(v >= 1e6) return (v/1e6).toFixed(1) + 'M';
+    if(v >= 1e3) return (v/1e3).toFixed(1) + 'K';
+    return String(v);
+  }
+  function _fmtPct(v){
+    if(v == null) return '\u2014';
+    var sign = v >= 0 ? '+' : '';
+    return sign + v.toFixed(2) + '%';
+  }
+  function _heatClass(v){
+    if(v == null) return 'rotation-heat-flat';
+    if(v >= 5) return 'rotation-heat-strong-up';
+    if(v >= 1) return 'rotation-heat-up';
+    if(v >= -1) return 'rotation-heat-flat';
+    if(v >= -5) return 'rotation-heat-down';
+    return 'rotation-heat-strong-down';
+  }
+
+  function _renderMoversList(el, movers, type){
+    if(!el) return;
+    if(!movers || movers.length === 0){
+      el.innerHTML = '<div class="movers-empty">No data</div>';
+      return;
+    }
+    el.innerHTML = movers.map(function(m){
+      var change = m.changesPercentage || 0;
+      var cls = change >= 0 ? 'mover-change-up' : 'mover-change-down';
+      var str = change >= 0 ? '+' + change.toFixed(2) + '%' : change.toFixed(2) + '%';
+      var vol = (type === 'active' && m.volume) ? '<div class="mover-volume">' + _fmtVolume(m.volume) + '</div>' : '';
+      return '<div class="mover-row">'
+        + '<div class="mover-symbol">' + _escText(m.symbol) + '</div>'
+        + '<div class="mover-name">' + _escText(m.name || '') + '</div>'
+        + '<div><div class="mover-change ' + cls + '">' + str + '</div>' + vol + '</div>'
+        + '</div>';
+    }).join('');
+  }
+
+  function renderMarketMovers(data){
+    if(!data) return;
+    _renderMoversList(marketGainersEl, data.gainers, 'up');
+    _renderMoversList(marketLosersEl, data.losers, 'down');
+    _renderMoversList(marketActivesEl, data.actives, 'active');
+  }
+
+  function renderSectorRotation(data){
+    if(!sectorRotationEl) return;
+    if(!data || !data.rotation || data.rotation.length === 0){
+      sectorRotationEl.innerHTML = '<div class="movers-empty">No sector data</div>';
+      return;
+    }
+    var hdr = '<div class="rotation-table-header">'
+      + '<div>SECTOR</div>'
+      + '<div style="text-align:right">1D</div>'
+      + '<div style="text-align:right">1W</div>'
+      + '<div style="text-align:right">1M</div>'
+      + '<div style="text-align:right">3M</div>'
+      + '</div>';
+    var rows = data.rotation.map(function(r){
+      return '<div class="rotation-table-row">'
+        + '<div class="rotation-sector-name">' + _escText(r.sector || '') + '</div>'
+        + '<div class="rotation-cell ' + _heatClass(r['1d']) + '">' + _fmtPct(r['1d']) + '</div>'
+        + '<div class="rotation-cell ' + _heatClass(r['1w']) + '">' + _fmtPct(r['1w']) + '</div>'
+        + '<div class="rotation-cell ' + _heatClass(r['1m']) + '">' + _fmtPct(r['1m']) + '</div>'
+        + '<div class="rotation-cell ' + _heatClass(r['3m']) + '">' + _fmtPct(r['3m']) + '</div>'
+        + '</div>';
+    }).join('');
+    sectorRotationEl.innerHTML = hdr + rows;
+  }
+
+  function renderPreMarketMovers(data){
+    if(!data) return;
+    var empty = (!data.gainers || data.gainers.length === 0) && (!data.losers || data.losers.length === 0);
+    if(empty){
+      var msg = (data.error) ? data.error : 'No pre-market movers';
+      if(premarketGainersEl) premarketGainersEl.innerHTML = '<div class="movers-empty">' + _escText(msg) + '</div>';
+      if(premarketLosersEl) premarketLosersEl.innerHTML = '';
+      return;
+    }
+    _renderMoversList(premarketGainersEl, data.gainers, 'up');
+    _renderMoversList(premarketLosersEl, data.losers, 'down');
+  }
+
+  function _renderGradesList(el, grades){
+    if(!el) return;
+    if(!grades || grades.length === 0){
+      el.innerHTML = '<div class="grades-empty">No actions today</div>';
+      return;
+    }
+    el.innerHTML = grades.map(function(g){
+      var detail = (g.previousGrade || '') + ' \u2192 ' + (g.newGrade || '');
+      return '<div class="grade-row">'
+        + '<div class="grade-symbol">' + _escText(g.symbol || '') + '</div>'
+        + '<div class="grade-detail">' + _escText(detail) + '</div>'
+        + '<div class="grade-firm">' + _escText((g.gradingCompany || '').substring(0, 15)) + '</div>'
+        + '</div>';
+    }).join('');
+  }
+
+  function renderUpgradesDowngrades(data){
+    if(!data) return;
+    _renderGradesList(gradesUpgradesEl, data.upgrades);
+    _renderGradesList(gradesDowngradesEl, data.downgrades);
+  }
+
+  /* ── Sentiment renderers ───────────────────────────────── */
+
+  function _fmtCryptoPrice(p){
+    if(p >= 1000) return p.toLocaleString('en-US', {maximumFractionDigits:0});
+    if(p >= 1) return p.toFixed(2);
+    return p.toFixed(4);
+  }
+  function _fmtLargeNum(n){
+    if(!n) return '\u2014';
+    if(n >= 1e12) return (n/1e12).toFixed(2) + 'T';
+    if(n >= 1e9) return (n/1e9).toFixed(2) + 'B';
+    if(n >= 1e6) return (n/1e6).toFixed(2) + 'M';
+    return n.toFixed(0);
+  }
+
+  function renderCryptoSentiment(data){
+    if(!cryptoGridEl) return;
+    if(!data){
+      cryptoGridEl.innerHTML = '<div class="crypto-empty">Crypto data unavailable</div>';
+      return;
+    }
+    var tiles = [
+      {key:'btc', label:'BITCOIN'},
+      {key:'eth', label:'ETHEREUM'},
+      {key:'sol', label:'SOLANA'},
+    ];
+    cryptoGridEl.innerHTML = tiles.map(function(t){
+      var d = data[t.key];
+      if(!d || d.price == null){
+        return '<div class="crypto-tile">'
+          + '<div class="crypto-symbol">' + _escText(t.label) + '</div>'
+          + '<div class="crypto-price">--</div>'
+          + '</div>';
+      }
+      var change = d.change_24h || 0;
+      var cls = change >= 0 ? 'crypto-up' : 'crypto-down';
+      var sign = change >= 0 ? '+' : '';
+      return '<div class="crypto-tile">'
+        + '<div class="crypto-symbol">' + _escText(t.label) + '</div>'
+        + '<div class="crypto-price">$' + _fmtCryptoPrice(d.price) + '</div>'
+        + '<div class="crypto-change ' + cls + '">' + sign + change.toFixed(2) + '% 24h</div>'
+        + '<div class="crypto-meta">Mkt Cap: $' + _fmtLargeNum(d.market_cap) + '</div>'
+        + '</div>';
+    }).join('');
+  }
+
+  /* ── Sentiment load + refresh ──────────────────────────── */
+
+  let _sentimentTimer = null;
+  function loadSentiment(){
+    api.getCryptoSentiment().then(renderCryptoSentiment).catch(function(err){
+      console.warn('[Sentiment] crypto fetch failed:', err?.message || err);
+    });
+  }
+  function startSentimentRefresh(){
+    if(_sentimentTimer) return;
+    _sentimentTimer = setInterval(loadSentiment, 60000);
+  }
+
+  /* ═══ Specialty Signals — Congressional, Insider Clusters, UOA ═══ */
+
+  let _specialtyTimer = null;
+
+  function renderCongressionalTrading(data){
+    if(!congressTradesEl) return;
+    if(!data || !data.trades || data.trades.length === 0){
+      congressTradesEl.innerHTML = '<div class="congress-empty">No recent disclosures</div>';
+      if(congressTrendingEl) congressTrendingEl.innerHTML = '<div class="congress-empty">\u2014</div>';
+      return;
+    }
+    congressTradesEl.innerHTML = data.trades.map(function(t){
+      var type = (t.type || '').toLowerCase();
+      var typeClass = 'congress-type-exchange';
+      if(type.indexOf('buy') !== -1 || type.indexOf('purchase') !== -1) typeClass = 'congress-type-buy';
+      else if(type.indexOf('sell') !== -1 || type.indexOf('sale') !== -1) typeClass = 'congress-type-sell';
+      var dateDisclosed = '';
+      if(t.date_disclosed){
+        try{ dateDisclosed = new Date(t.date_disclosed).toLocaleDateString('en-US',{month:'short',day:'numeric'}); }catch(e){}
+      }
+      return '<div class="congress-trade">'
+        + '<div class="congress-trade-symbol">' + escapeHtml(t.symbol || 'N/A') + '</div>'
+        + '<div class="congress-trade-detail">'
+        +   '<div class="congress-trade-name">' + escapeHtml(t.name || '')
+        +     ' <span class="congress-chamber">' + escapeHtml(t.chamber || '') + '</span>'
+        +   '</div>'
+        +   '<div class="congress-trade-meta">' + escapeHtml(t.amount || '') + ' \u00b7 disclosed ' + escapeHtml(dateDisclosed) + '</div>'
+        + '</div>'
+        + '<div class="congress-trade-type ' + typeClass + '">' + escapeHtml((t.type || '?').substring(0,4).toUpperCase()) + '</div>'
+        + '</div>';
+    }).join('');
+
+    if(congressTrendingEl){
+      if(!data.trending_tickers || data.trending_tickers.length === 0){
+        congressTrendingEl.innerHTML = '<div class="congress-empty">\u2014</div>';
+      } else {
+        congressTrendingEl.innerHTML = data.trending_tickers.map(function(t){
+          return '<div class="congress-trending-item">'
+            + '<span class="congress-trending-symbol">' + escapeHtml(t.symbol) + '</span>'
+            + '<span class="congress-trending-count">' + t.trade_count + ' trades</span>'
+            + '</div>';
+        }).join('');
+      }
+    }
+  }
+
+  function renderUnusualOptions(data){
+    if(!uoaListEl) return;
+    if(!data || !data.unusual || data.unusual.length === 0){
+      uoaListEl.innerHTML = '<div class="uoa-empty">No unusual activity detected</div>';
+      return;
+    }
+    uoaListEl.innerHTML = data.unusual.map(function(c){
+      var typeClass = c.type === 'call' ? 'uoa-type-call' : 'uoa-type-put';
+      var exp = '';
+      if(c.expiration){
+        try{ exp = new Date(c.expiration).toLocaleDateString('en-US',{month:'short',day:'numeric'}); }catch(e){}
+      }
+      return '<div class="uoa-row">'
+        + '<div class="uoa-symbol">' + escapeHtml(c.symbol) + '</div>'
+        + '<div class="uoa-type ' + typeClass + '">' + (c.type || '').toUpperCase() + '</div>'
+        + '<div class="uoa-strike">$' + c.strike + '</div>'
+        + '<div class="uoa-exp">' + escapeHtml(exp) + '</div>'
+        + '<div class="uoa-volume">' + (c.volume || 0).toLocaleString() + '</div>'
+        + '<div class="uoa-ratio">' + c.vol_oi_ratio + 'x OI</div>'
+        + '</div>';
+    }).join('');
+  }
+
+  function loadSpecialtySignals(){
+    api.getCongressionalTrading(20).then(renderCongressionalTrading).catch(function(err){
+      console.warn('[Specialty] congress fetch failed:', err?.message || err);
+    });
+    setTimeout(function(){
+      api.getUnusualOptions().then(renderUnusualOptions).catch(function(err){
+        console.warn('[Specialty] UOA fetch failed:', err?.message || err);
+      });
+    }, 350);
+  }
+
+  function startSpecialtyRefresh(){
+    if(_specialtyTimer) return;
+    _specialtyTimer = setInterval(loadSpecialtySignals, 300000); // 5 minutes
+  }
+
+  let _marketIntelTimer = null;
+  function loadMarketIntel(){
+    api.getMarketMovers().then(renderMarketMovers).catch(function(err){
+      console.warn('[MarketIntel] movers fetch failed:', err?.message || err);
+    });
+    setTimeout(function(){
+      api.getSectorRotation().then(renderSectorRotation).catch(function(err){
+        console.warn('[MarketIntel] sectors fetch failed:', err?.message || err);
+      });
+    }, 350);
+    setTimeout(function(){
+      api.getUpgradesDowngrades(30).then(renderUpgradesDowngrades).catch(function(err){
+        console.warn('[MarketIntel] grades fetch failed:', err?.message || err);
+      });
+    }, 700);
+    // Pre-market movers: always fetch; endpoint returns empty gracefully
+    // when data is unavailable (FMP Starter plan limitation)
+    setTimeout(function(){
+      api.getPreMarketMovers().then(renderPreMarketMovers).catch(function(err){
+        console.warn('[MarketIntel] pre-market fetch failed:', err?.message || err);
+      });
+    }, 1050);
+  }
+  function startMarketIntelRefresh(){
+    if(_marketIntelTimer) return;
+    _marketIntelTimer = setInterval(loadMarketIntel, 60000);
+  }
+
+  /**
+   * Load calendar + news data independently of the homeCache pipeline.
+   * Uses separate fetch-and-render calls so they don't block the main cache cycle.
+   * Called once during init and on each manual refresh.
+   */
+  let _calendarNewsTimer = null;
+  function loadCalendarAndNews(){
+    api.getEconomicCalendar(1).then(renderEconomicCalendar).catch(function(err){
+      console.warn('[CalendarNews] economic fetch failed:', err?.message || err);
+      renderEconomicCalendar(null);
+    });
+    api.getEarningsCalendar(1).then(renderEarningsCalendar).catch(function(err){
+      console.warn('[CalendarNews] earnings fetch failed:', err?.message || err);
+      renderEarningsCalendar(null);
+    });
+    api.getMarketNews('general', 15).then(renderMarketNews).catch(function(err){
+      console.warn('[CalendarNews] news fetch failed:', err?.message || err);
+      renderMarketNews(null);
+    });
+  }
+  function startCalendarNewsRefresh(){
+    if(_calendarNewsTimer) return;
+    // News: 60s, calendars: backend cached (5min & 1h) so 60s fetch is fine
+    _calendarNewsTimer = setInterval(loadCalendarAndNews, 60000);
+  }
+
   function renderSnapshot(snapshot){
     const payload = (snapshot && typeof snapshot === 'object') ? snapshot : {};
     const data = (payload.data && typeof payload.data === 'object') ? payload.data : {};
@@ -3601,7 +3987,6 @@ window.BenTradePages.initHome = function initHome(rootEl){
     _restoreRegimeModelResult(data);
     renderScoreboard(scoreboardPayload);
     renderIndexes(indexSummaries);
-    renderSectors(sectorSummaries, regimePayload);
     renderScannerOpportunities(ideas);
 
     // Shape and render Stock + Options playbooks from market-picture context
@@ -3933,6 +4318,25 @@ window.BenTradePages.initHome = function initHome(rootEl){
     console.warn('[Home] BenTradePreMarket module not loaded — pre-market panels will not render');
   }
 
+  // Calendar & News — independent fetch cycle (not in homeCache pipeline)
+  loadCalendarAndNews();
+  startCalendarNewsRefresh();
+
+  // FMP Market Intelligence — independent fetch cycle
+  loadMarketIntel();
+  startMarketIntelRefresh();
+
+  // Sentiment Infrastructure — independent fetch cycle
+  loadSentiment();
+  startSentimentRefresh();
+
+  // Equity Curve — backend snapshot store (fire-and-forget)
+  loadEquityCurve();
+
+  // Specialty Signals — slower-moving data, 5-minute refresh
+  loadSpecialtySignals();
+  startSpecialtyRefresh();
+
   let _loadInFlight = null;       // singleton guard — prevents overlapping load sequences
   const overlay = window.BenTradeHomeLoadingOverlay?.create?.(scope) || null;
 
@@ -4182,6 +4586,16 @@ window.BenTradePages.initHome = function initHome(rootEl){
       setError('');
       // Auto-trigger model analysis after manual refresh
       runRegimeModelAnalysis().catch(function(){});
+      // Refresh calendar & news alongside
+      loadCalendarAndNews();
+      // Refresh FMP market intel alongside
+      loadMarketIntel();
+      // Refresh sentiment alongside
+      loadSentiment();
+      // Refresh equity curve alongside
+      loadEquityCurve();
+      // Refresh specialty signals alongside
+      loadSpecialtySignals();
     }catch(err){
       setError(String(err?.message || err || 'Refresh failed'));
     }finally{
