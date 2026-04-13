@@ -1,37 +1,25 @@
 <div class="on-demand-evaluator">
     <!-- Hero banner with input -->
-    <section class="ode-hero">
-        <div class="ode-hero-inner">
-            <h1 class="ode-hero-title">
-                On-Demand Company Evaluator
-            </h1>
-            <p class="ode-hero-subtitle">
-                Run a complete fundamental analysis on any US-listed
-                company. Pulls fresh data from all sources, computes
-                all scores, runs all valuation models, and persists
-                the result to the universe.
-            </p>
-
-            <form class="ode-form" id="ode-form" autocomplete="off">
-                <input
-                    type="text"
-                    id="ode-symbol-input"
-                    class="ode-input"
-                    placeholder="Enter symbol (e.g., QCOM, AAPL, NVDA)"
-                    maxlength="6"
-                    autocomplete="off"
-                    spellcheck="false"
-                />
-                <button type="submit" id="ode-analyze-btn" class="ode-button">
-                    <span class="ode-button-text">Analyze</span>
-                </button>
-            </form>
-
-            <div class="ode-hero-hint">
-                Analysis takes 30-90 seconds. Results persist as if
-                the crawler had just evaluated the company.
-            </div>
+    <section class="ode-hero ode-hero-compact">
+        <div class="ode-hero-title">
+            <span class="ode-hero-icon">🔍</span>
+            <span class="ode-hero-label">On-Demand Evaluator</span>
         </div>
+
+        <form class="ode-form" id="ode-form" autocomplete="off">
+            <input
+                type="text"
+                id="ode-symbol-input"
+                class="ode-input"
+                placeholder="Enter symbol"
+                maxlength="6"
+                autocomplete="off"
+                spellcheck="false"
+            />
+            <button type="submit" id="ode-analyze-btn" class="ode-button">
+                <span class="ode-button-text">Analyze</span>
+            </button>
+        </form>
     </section>
 
     <!-- Loading state (hidden by default) -->
