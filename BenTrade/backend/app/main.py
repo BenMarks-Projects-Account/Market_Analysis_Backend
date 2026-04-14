@@ -58,6 +58,7 @@ from app.api.routes_market_intel import router as market_intel_router
 from app.api.routes_sentiment import router as sentiment_router
 from app.api.routes_dashboard_fixes import router as dashboard_fixes_router
 from app.api.routes_specialty_signals import router as specialty_signals_router
+from app.api.routes_refresh import router as refresh_router
 from app.clients.coingecko_client import CoinGeckoClient
 from app.clients.fmp_client import FMPClient
 from app.clients.polygon_client import PolygonClient
@@ -467,6 +468,7 @@ def create_app() -> FastAPI:
     app.include_router(sentiment_router)
     app.include_router(dashboard_fixes_router)
     app.include_router(specialty_signals_router)
+    app.include_router(refresh_router)
     app.include_router(frontend_router)
 
     @app.exception_handler(UpstreamError)

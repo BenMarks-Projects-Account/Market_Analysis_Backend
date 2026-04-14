@@ -2,7 +2,6 @@
     <!-- Hero banner with input -->
     <section class="ode-hero ode-hero-compact">
         <div class="ode-hero-title">
-            <span class="ode-hero-icon">🔍</span>
             <span class="ode-hero-label">On-Demand Evaluator</span>
         </div>
 
@@ -53,9 +52,22 @@
     <section class="ode-results" id="ode-results" hidden>
         <!-- Company header -->
         <div class="ode-company-header" id="ode-company-header"></div>
+        <div class="ode-distress-badge unknown" id="ode-distress-badge"></div>
 
         <!-- Price chart (auto-loads after analysis) -->
         <div id="ode-chart-container"></div>
+
+        <!-- Business profile (populated after analysis if LLM available) -->
+        <section class="ode-business-profile" id="ode-business-profile" hidden>
+            <div class="ode-section-title">Business Profile</div>
+            <div class="ode-business-profile-body" id="ode-business-profile-body"></div>
+        </section>
+
+        <!-- Quality signals (populated after analysis) -->
+        <section class="ode-quality-indicators" id="ode-quality-indicators" hidden>
+            <div class="ode-section-title">Quality Signals</div>
+            <div class="ode-quality-grid" id="ode-quality-grid"></div>
+        </section>
 
         <!-- Top row: scores and recommendation -->
         <div class="ode-scores-row">

@@ -279,6 +279,17 @@ def _openai_compat_call(
                 provider_id, resp.status_code, len(resp.content), elapsed_ms,
             )
 
+            # Diagnostic: capture response body on non-2xx errors before raise_for_status
+            if resp.status_code >= 400:
+                # Summarize the request: message count, total chars, model, params
+                msg_summary = f"{len(messages)} messages, ~{sum(len(m.get('content','')) for m in messages)} chars"
+                logger.warning(
+                    "[%s] HTTP %d response body (task=%s, request=%s, model=%s): %s",
+                    provider_id, resp.status_code, request.task_type,
+                    msg_summary, body.get("model", "none"),
+                    resp.text[:2000],
+                )
+
             # 429 rate-limit → backoff and retry
             if resp.status_code == 429 and attempt < _RATE_LIMIT_MAX_RETRIES:
                 retry_after = resp.headers.get("Retry-After")

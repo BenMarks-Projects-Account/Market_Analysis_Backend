@@ -567,3 +567,32 @@ async def proxy_chart(symbol: str, timeframe: str = Query("1Y")):
     except Exception as exc:
         _log.error("event=chart_proxy_failed symbol=%s error=%s", symbol, exc)
         raise HTTPException(503, detail=_unavailable_detail())
+
+
+# ── Symbol search proxy ──────────────────────────────────────────────
+
+@router.get("/search/symbols")
+async def proxy_search_symbols(
+    query: str = Query(..., description="Search query"),
+    limit: int = Query(10, ge=1, le=20),
+):
+    """Proxy: Forward symbol search to Company Evaluator."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(
+                f"{_base_url()}/api/search/symbols",
+                params={"query": query, "limit": limit},
+            )
+            if resp.status_code != 200:
+                try:
+                    error_body = resp.json()
+                except Exception:
+                    error_body = {"detail": resp.text}
+                raise HTTPException(resp.status_code, detail=error_body.get("detail", resp.text))
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        raise HTTPException(503, detail=_unavailable_detail())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error("event=search_proxy_failed query=%r error=%s", query, exc)

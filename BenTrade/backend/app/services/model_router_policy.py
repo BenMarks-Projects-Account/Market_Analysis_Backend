@@ -88,7 +88,74 @@ logger = logging.getLogger("bentrade.router_policy")
 
 
 # ---------------------------------------------------------------------------
-# 0. Round-robin rotation for distributed modes
+# 0a. Crawler-aware routing — skip network_model_machine when crawler is active
+# ---------------------------------------------------------------------------
+# The model machine (192.168.1.143) hosts LM Studio shared between the
+# Company Evaluator crawler (runs locally on that machine) and BenTrade
+# (routes LLM calls over the network).  When both send requests
+# simultaneously, LM Studio's queue overflows ("Channel Error").
+#
+# This check calls the upstream Company Evaluator pipeline status endpoint
+# directly (NOT the BenTrade proxy at /api/company-evaluator/status) to
+# avoid a BenTrade-to-BenTrade HTTP loopback.
+#
+# The upstream response is {"running": bool, ...} so we read
+# data["running"] directly.  If anyone switches this to the BenTrade
+# proxy URL in the future, the field becomes data["pipeline"]["running"]
+# because the proxy wraps the response in {"service_healthy": ...,
+# "pipeline": ...}.
+#
+# Cached for 5 seconds to avoid HTTP overhead on every LLM call.
+# Fails OPEN (returns False) on errors — if Company Evaluator is
+# unreachable, the crawler almost certainly isn't running either, so
+# it's safe to allow normal routing.
+
+import requests as _requests_sync
+
+_crawler_state_cache: tuple[float, bool] | None = None
+_CRAWLER_STATE_CACHE_TTL_SECONDS = 5
+_CRAWLER_STATUS_TIMEOUT = 1.5  # seconds — short enough not to add latency
+
+
+def _get_crawler_status_url() -> str:
+    """Build the upstream Company Evaluator pipeline status URL from config."""
+    from app.config import get_settings
+    base = get_settings().COMPANY_EVALUATOR_URL.rstrip("/")
+    return f"{base}/api/pipeline/status"
+
+
+def is_crawler_running() -> bool:
+    """Check whether the Company Evaluator crawler is currently running.
+
+    Uses a 5-second TTL cache so consecutive LLM routing calls within
+    the same window share a single HTTP check.
+    """
+    global _crawler_state_cache
+
+    now = time.time()
+    if _crawler_state_cache is not None:
+        cached_at, cached_value = _crawler_state_cache
+        if now - cached_at < _CRAWLER_STATE_CACHE_TTL_SECONDS:
+            return cached_value
+
+    is_running = False
+    try:
+        resp = _requests_sync.get(
+            _get_crawler_status_url(), timeout=_CRAWLER_STATUS_TIMEOUT,
+        )
+        if resp.ok:
+            data = resp.json()
+            is_running = bool(data.get("running"))
+    except Exception as exc:
+        logger.debug("[router] crawler status check failed: %s", exc)
+        is_running = False
+
+    _crawler_state_cache = (now, is_running)
+    return is_running
+
+
+# ---------------------------------------------------------------------------
+# 0b. Round-robin rotation for distributed modes
 # ---------------------------------------------------------------------------
 # For sequential requests, all providers pass probe + gate checks, so the
 # first candidate always wins.  This counter rotates the starting index
@@ -629,6 +696,17 @@ def route_and_execute(
     # position ensures requests distribute across providers.
     if not resolution.is_strict and len(candidate_order) > 1:
         candidate_order = _rotate_candidates(candidate_order)
+
+    # -- Crawler-aware filtering: skip network_model_machine when crawler
+    #    is active to avoid saturating the shared LM Studio instance ------
+    _NMM = Provider.NETWORK_MODEL_MACHINE.value
+    if _NMM in candidate_order and is_crawler_running():
+        logger.info(
+            "[router] crawler_active=true skipping network_model_machine "
+            "for task=%s (using remaining providers only)",
+            request.task_type,
+        )
+        candidate_order = [p for p in candidate_order if p != _NMM]
 
     # -- TEMPORARY DIAGNOSTIC: verify round-robin + concurrency behavior -----
     logger.info(

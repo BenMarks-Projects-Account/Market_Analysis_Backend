@@ -8,6 +8,15 @@
           <button id="homeRefreshBtn" class="btn qtButton" type="button">Refresh</button>
           <span id="homeRefreshingBadge" class="home-refreshing-badge" style="display:none;"><span class="badge-spinner" aria-hidden="true"></span>Populating Data...</span>
           <span id="homeLastUpdated" class="stock-note">Last updated: --</span>
+          <div class="home-refresh-control" id="home-refresh-control">
+            <span class="home-refresh-status" id="home-refresh-status">
+              <span class="home-refresh-dot" id="home-refresh-dot"></span>
+              <span class="home-refresh-label" id="home-refresh-label">Loading...</span>
+            </span>
+            <button class="home-refresh-toggle-btn" id="home-refresh-toggle-btn" type="button">
+              <span id="home-refresh-toggle-text">Pause</span>
+            </button>
+          </div>
         </div>
       </div>
     </section>

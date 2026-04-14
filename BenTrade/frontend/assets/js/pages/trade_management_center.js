@@ -3570,40 +3570,140 @@
 
   /**
    * Handle close/reduce position via the suggested_close_order from the pipeline.
-   * Uses /api/trading/preview if available, falls back to TradeTicket.
+   * Uses /api/trading/close-preview → confirmation dialog → /api/trading/close-submit.
+   * Falls back to TradeTicket if no suggested_close_order available.
    */
   function _executeActiveClose(btn, tradeKey, rec) {
     var closeOrder = rec.suggested_close_order;
     if (!closeOrder) {
       console.warn('[TMC] No suggested_close_order for', tradeKey);
-      // Fall back to TradeTicket
       _openActiveTradeTicket(rec, 'close');
       return;
     }
 
-    if (api && api.tradingPreview) {
+    // Ensure account mode is explicit so live closes don't silently hit paper
+    closeOrder.mode = _getAccountMode();
+
+    var originalLabel = btn.textContent;
+
+    if (api && api.tradingClosePreview) {
       btn.disabled = true;
       btn.textContent = 'Previewing\u2026';
-      api.tradingPreview(closeOrder)
+      api.tradingClosePreview(closeOrder)
         .then(function (preview) {
           btn.disabled = false;
-          btn.textContent = btn.textContent.indexOf('Reduce') >= 0 ? 'Reduce Position' : 'Close Position';
-          if (window.BenTradeExecutionModal && window.BenTradeExecutionModal.open) {
-            window.BenTradeExecutionModal.open(closeOrder, preview);
-          } else {
-            console.log('[TMC] Close order preview:', preview);
-            alert('Preview: ' + JSON.stringify(preview, null, 2));
-          }
+          btn.textContent = originalLabel;
+          _showCloseConfirmation(closeOrder, preview, rec);
         })
         .catch(function (err) {
           btn.disabled = false;
-          btn.textContent = btn.textContent.indexOf('Reduce') >= 0 ? 'Reduce Position' : 'Close Position';
+          btn.textContent = originalLabel;
           console.error('[TMC] Close order preview failed:', err);
           alert('Preview failed: ' + (err.message || String(err)));
         });
     } else {
       _openActiveTradeTicket(rec, 'close');
     }
+  }
+
+  /**
+   * Show a confirmation dialog with preview results, then submit
+   * via /api/trading/close-submit on confirm.
+   */
+  function _showCloseConfirmation(closeOrder, preview, rec) {
+    var symbol = _escapeHtml(String(closeOrder.symbol || ''));
+    var action = closeOrder.action || 'CLOSE';
+    var orderType = closeOrder.order_type || 'unknown';
+    var modeLabel = (closeOrder.mode || 'paper').toUpperCase();
+    var description = (closeOrder.description || preview.description || '');
+    var priceEffect = closeOrder.price_effect || '';
+    var limitPrice = closeOrder.limit_price;
+
+    // Build legs summary for multileg orders
+    var legsHtml = '';
+    if (closeOrder.legs && closeOrder.legs.length > 0) {
+      legsHtml = '<div style="margin-top:10px;">';
+      closeOrder.legs.forEach(function (leg) {
+        var legSymbol = _escapeHtml(String(leg.option_symbol || ''));
+        var legSide = _escapeHtml(String(leg.side || ''));
+        var legQty = leg.quantity || 0;
+        legsHtml += '<div style="font-size:12px;color:#c0d8e8;padding:2px 0;">' +
+          legSide + ' ' + legQty + 'x ' + legSymbol + '</div>';
+      });
+      legsHtml += '</div>';
+    }
+
+    // Tradier preview warnings
+    var warningHtml = '';
+    if (preview.tradier_preview_error) {
+      warningHtml = '<div style="color:#f08070;margin-top:10px;font-size:12px;">' +
+        'Preview warning: ' + _escapeHtml(preview.tradier_preview_error) + '</div>';
+    }
+
+    // Build the overlay
+    var overlay = document.createElement('div');
+    overlay.className = 'tmc-close-confirm-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML =
+      '<div style="background:#0f1e28;border:1px solid rgba(80,120,150,0.3);border-radius:8px;padding:24px;max-width:480px;width:90%;color:#c0d8e8;">' +
+        '<div style="font-size:16px;font-weight:600;color:#e0f0f8;margin-bottom:16px;">' +
+          _escapeHtml(action) + ' ' + symbol + '</div>' +
+        '<div style="font-size:13px;margin-bottom:6px;">' +
+          '<span style="color:#607890;">Type:</span> ' + _escapeHtml(orderType) +
+          (priceEffect ? ' (' + _escapeHtml(priceEffect) + ')' : '') + '</div>' +
+        (limitPrice != null ? '<div style="font-size:13px;margin-bottom:6px;">' +
+          '<span style="color:#607890;">Limit Price:</span> $' + Number(limitPrice).toFixed(2) + '</div>' : '') +
+        '<div style="font-size:13px;margin-bottom:6px;">' +
+          '<span style="color:#607890;">Account:</span> ' + modeLabel + '</div>' +
+        (description ? '<div style="font-size:12px;color:#80a0b8;margin-top:8px;">' + _escapeHtml(description) + '</div>' : '') +
+        legsHtml +
+        warningHtml +
+        '<div style="margin-top:18px;display:flex;gap:10px;">' +
+          '<button id="tmc-close-confirm-btn" style="flex:1;padding:10px;border:none;border-radius:4px;' +
+            'background:rgba(96,216,144,0.2);color:#60d890;font-weight:600;cursor:pointer;">Submit ' + _escapeHtml(action) + '</button>' +
+          '<button id="tmc-close-cancel-btn" style="flex:1;padding:10px;border:none;border-radius:4px;' +
+            'background:rgba(80,120,150,0.2);color:#80a0b8;cursor:pointer;">Cancel</button>' +
+        '</div>' +
+      '</div>';
+
+    document.body.appendChild(overlay);
+
+    var confirmBtn = overlay.querySelector('#tmc-close-confirm-btn');
+    var cancelBtn = overlay.querySelector('#tmc-close-cancel-btn');
+
+    cancelBtn.addEventListener('click', function () {
+      document.body.removeChild(overlay);
+    });
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) document.body.removeChild(overlay);
+    });
+
+    confirmBtn.addEventListener('click', function () {
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Submitting\u2026';
+
+      api.tradingCloseSubmit(closeOrder)
+        .then(function (result) {
+          document.body.removeChild(overlay);
+          if (result && result.ok) {
+            var statusMsg = result.status || 'SUBMITTED';
+            if (result.dry_run) statusMsg = 'DRY RUN';
+            alert(action + ' ' + symbol + ': ' + statusMsg +
+              (result.broker_order_id ? ' (Order: ' + result.broker_order_id + ')' : ''));
+            // Refresh the active trades list
+            if (typeof runActivePipeline === 'function') {
+              setTimeout(runActivePipeline, 1500);
+            }
+          } else {
+            alert(action + ' failed: ' + (result.message || 'Unknown error'));
+          }
+        })
+        .catch(function (err) {
+          document.body.removeChild(overlay);
+          console.error('[TMC] Close order submit failed:', err);
+          alert('Submit failed: ' + (err.message || String(err)));
+        });
+    });
   }
 
   /**

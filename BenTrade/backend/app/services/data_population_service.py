@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from app.utils.market_hours import market_status
+from app.services.refresh_state_manager import get_state_manager
 from app.workflows.market_intelligence_runner import (
     MarketIntelligenceDeps,
     run_scheduled_market_intelligence,
@@ -128,7 +129,10 @@ class DataPopulationService:
         logger.info("event=data_population_scheduler_stopped")
 
     async def trigger(self) -> PopulationStatus:
-        """Manually trigger a run. Returns immediately if already running."""
+        """Manually trigger a run. Returns immediately if already running or paused."""
+        if get_state_manager().is_paused():
+            logger.info("event=data_population_trigger_skipped reason=paused_by_user")
+            return self._status
         if self._status.phase in ("market_data", "model_analysis"):
             logger.info("event=data_population_trigger_skipped reason=already_running")
             return self._status
@@ -155,21 +159,28 @@ class DataPopulationService:
 
     async def _run_loop(self) -> None:
         """Background loop: run immediately, then at adaptive intervals."""
-        # First run on startup
-        await self._run_once()
+        state_mgr = get_state_manager()
+        # First run on startup (respect pause)
+        if not state_mgr.is_paused():
+            await self._run_once()
+        else:
+            logger.debug("event=data_population_paused reason=paused_by_user phase=startup")
         while not self._stopped:
             try:
                 interval = self._cycle_interval()
                 logger.debug("event=data_population_sleep interval_s=%d", interval)
-                await asyncio.sleep(interval)
+                await state_mgr.wait_for_interval_or_wakeup(interval)
                 if not self._stopped:
-                    await self._run_once()
+                    if state_mgr.is_paused():
+                        logger.debug("event=data_population_paused reason=paused_by_user")
+                    else:
+                        await self._run_once()
             except asyncio.CancelledError:
                 break
             except Exception as exc:
                 logger.error("event=data_population_loop_error error=%s", exc, exc_info=True)
                 interval = self._cycle_interval()
-                await asyncio.sleep(interval)
+                await state_mgr.wait_for_interval_or_wakeup(interval)
 
     async def _run_once(self) -> None:
         """Execute one full data-population cycle.

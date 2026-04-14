@@ -208,6 +208,8 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
     if (loadingEl) loadingEl.hidden = true;
     if (errorEl) errorEl.hidden = true;
     if (resultsEl) resultsEl.hidden = true;
+    var bp = scope.querySelector('#ode-business-profile');
+    if (bp) bp.hidden = true;
   }
 
   function showLoading(symbol) {
@@ -253,10 +255,13 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
     if (analyzeBtn) analyzeBtn.disabled = false;
 
     renderCompanyHeader(data);
+    renderDistressBadge(data);
     // Mount price chart below header
     if (window.BenTradeComponents && window.BenTradeComponents.mountPriceChart && data.symbol) {
       window.BenTradeComponents.mountPriceChart('ode-chart-container', data.symbol);
     }
+    renderBusinessProfile(data);
+    renderQualityIndicators(data);
     renderScoreCards(data);
     renderPillars(data.evaluation);
     renderSmartMoney(data.smart_money);
@@ -295,6 +300,415 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
       '<div class="ode-company-price">' +
         '<div class="ode-company-price-value">' + (price != null ? '$' + price.toFixed(2) : '\u2014') + '</div>' +
         '<div class="ode-company-market-cap">Mkt Cap: $' + fmtLarge(company.market_cap) + '</div>' +
+      '</div>';
+  }
+
+  // === DISTRESS RISK BADGE ===
+  function renderDistressBadge(data) {
+    var badge = scope.querySelector('#ode-distress-badge');
+    if (!badge) return;
+
+    // Try real API structure first, then mock/legacy
+    var altmanZ = null;
+    var breakdowns = data && data.evaluation ? data.evaluation.pillar_breakdowns : null;
+    if (breakdowns && breakdowns.operational_health) {
+      var oh = breakdowns.operational_health;
+      if (oh.metrics && oh.metrics.altman_z != null) {
+        altmanZ = oh.metrics.altman_z;
+      } else if (oh.components && oh.components.altman_z) {
+        altmanZ = oh.components.altman_z.value;
+      }
+    }
+
+    if (altmanZ === null || altmanZ === undefined) {
+      badge.className = 'ode-distress-badge unknown';
+      badge.innerHTML = '<span class="ode-distress-badge-icon">\u25CF</span>Distress: N/A';
+      return;
+    }
+
+    var z = Number(altmanZ);
+    var level, label;
+    if (z >= 2.99) {
+      level = 'safe';
+      label = 'Safe (Z=' + z.toFixed(2) + ')';
+    } else if (z >= 1.81) {
+      level = 'watch';
+      label = 'Watch (Z=' + z.toFixed(2) + ')';
+    } else {
+      level = 'distress';
+      label = 'Distress (Z=' + z.toFixed(2) + ')';
+    }
+
+    badge.className = 'ode-distress-badge ' + level;
+    badge.innerHTML = '<span class="ode-distress-badge-icon">\u25CF</span>' + _esc(label);
+  }
+
+  // === QUALITY INDICATORS PANEL ===
+  function renderQualityIndicators(data) {
+    var section = scope.querySelector('#ode-quality-indicators');
+    var grid = scope.querySelector('#ode-quality-grid');
+    if (!section || !grid) return;
+
+    var breakdowns = data && data.evaluation ? data.evaluation.pillar_breakdowns : null;
+    if (!breakdowns) {
+      section.hidden = true;
+      return;
+    }
+
+    // Helper to get metric value from real or mock API structure
+    function _getMetric(pillar, metric) {
+      var bd = breakdowns[pillar];
+      if (!bd) return null;
+      if (bd.metrics && bd.metrics[metric] != null) return bd.metrics[metric];
+      if (bd.components && bd.components[metric]) return bd.components[metric].value;
+      return null;
+    }
+
+    var cards = [];
+
+    // Capital Quality from ROIC vs WACC spread
+    var spread = _getMetric('capital_allocation', 'roic_wacc_spread');
+    if (spread !== null && spread !== undefined) {
+      var pct = spread * 100;
+      var level, label;
+      if (pct >= 10) { level = 'excellent'; label = 'Excellent'; }
+      else if (pct >= 5) { level = 'good'; label = 'Good'; }
+      else if (pct >= 0) { level = 'adequate'; label = 'Adequate'; }
+      else { level = 'poor'; label = 'Destroying Value'; }
+
+      cards.push({
+        label: 'Capital Quality',
+        value: label,
+        detail: 'ROIC ' + (pct >= 0 ? 'beats' : 'lags') + ' WACC by ' + Math.abs(pct).toFixed(1) + ' pts',
+        level: level
+      });
+    }
+
+    // Smart Money from insider activity (try smart_money first, fallback to capital_allocation metrics)
+    var sm = data.smart_money;
+    var ia = sm ? sm.insider_activity : null;
+    var insiderScore = (ia && ia.score != null) ? Number(ia.score) : null;
+    // Fallback: capital_allocation pillar sometimes has insider_score
+    if (insiderScore === null) {
+      var capInsider = _getMetric('capital_allocation', 'insider_score');
+      if (capInsider != null) insiderScore = Number(capInsider);
+    }
+    if (insiderScore !== null && !isNaN(insiderScore)) {
+      var smLevel, smLabel;
+      if (insiderScore >= 70) { smLevel = 'excellent'; smLabel = 'Strong Buying'; }
+      else if (insiderScore >= 55) { smLevel = 'good'; smLabel = 'Net Buying'; }
+      else if (insiderScore >= 45) { smLevel = 'adequate'; smLabel = 'Neutral'; }
+      else { smLevel = 'poor'; smLabel = 'Net Selling'; }
+
+      cards.push({
+        label: 'Smart Money',
+        value: smLabel,
+        detail: 'Insider score ' + insiderScore.toFixed(0) + '/100',
+        level: smLevel
+      });
+    }
+
+    // Predictability from revenue stability
+    var stability = _getMetric('business_quality', 'rev_stability');
+    if (stability !== null && stability !== undefined) {
+      var stabPct = stability * 100;
+      var stabLevel, stabLabel;
+      if (stabPct >= 80) { stabLevel = 'excellent'; stabLabel = 'High'; }
+      else if (stabPct >= 60) { stabLevel = 'good'; stabLabel = 'Moderate'; }
+      else if (stabPct >= 40) { stabLevel = 'adequate'; stabLabel = 'Variable'; }
+      else { stabLevel = 'poor'; stabLabel = 'Volatile'; }
+
+      cards.push({
+        label: 'Predictability',
+        value: stabLabel,
+        detail: 'Revenue stability ' + stabPct.toFixed(0) + '%',
+        level: stabLevel
+      });
+    }
+
+    // Cash Quality from cash conversion
+    var cashConv = _getMetric('operational_health', 'cash_conversion');
+    if (cashConv !== null && cashConv !== undefined) {
+      var ratio = Number(cashConv);
+      var cashLevel, cashLabel;
+      if (ratio >= 1.0) { cashLevel = 'excellent'; cashLabel = 'Strong'; }
+      else if (ratio >= 0.7) { cashLevel = 'good'; cashLabel = 'Adequate'; }
+      else if (ratio >= 0.4) { cashLevel = 'adequate'; cashLabel = 'Weak'; }
+      else { cashLevel = 'poor'; cashLabel = 'Poor'; }
+
+      cards.push({
+        label: 'Cash Quality',
+        value: cashLabel,
+        detail: 'OCF/NI ratio ' + ratio.toFixed(2),
+        level: cashLevel
+      });
+    }
+
+    // Piotroski F-Score
+    var piotroski = data && data.piotroski_f_score ? data.piotroski_f_score : null;
+    if (piotroski) {
+      if (piotroski.ok) {
+        var pScore = piotroski.score;
+        var pLabel = piotroski.label;
+        var pLevel;
+        if (pLabel === 'STRONG') pLevel = 'excellent';
+        else if (pLabel === 'AVERAGE') pLevel = 'good';
+        else pLevel = 'poor';
+
+        cards.push({
+          label: 'Piotroski F-Score',
+          value: pScore + '/9 ' + _capitalize(pLabel),
+          detail: piotroski.interpretation || (pScore + ' of 9 quality checks passed'),
+          level: pLevel,
+          expandable: true,
+          expandKey: 'piotroski',
+          piotroskiData: piotroski
+        });
+      } else {
+        cards.push({
+          label: 'Piotroski F-Score',
+          value: 'N/A',
+          detail: piotroski.error || 'Insufficient historical data',
+          level: 'unknown',
+          expandable: false
+        });
+      }
+    }
+
+    if (cards.length === 0) {
+      section.hidden = true;
+      return;
+    }
+
+    section.hidden = false;
+    grid.innerHTML = cards.map(function(c, idx) {
+      var expandCls = c.expandable ? ' expandable' : '';
+      var expandAttrs = c.expandable
+        ? ' data-expand-key="' + c.expandKey + '" data-card-idx="' + idx + '"'
+        : '';
+      var chevron = c.expandable ? '<span class="ode-quality-card-chevron">\u25BE</span>' : '';
+
+      return '<div class="ode-quality-card ' + c.level + expandCls + '"' + expandAttrs + '>' +
+        '<div class="ode-quality-card-header">' +
+          '<div>' +
+            '<div class="ode-quality-card-label">' + _esc(c.label) + '</div>' +
+            '<div class="ode-quality-card-value">' + _esc(c.value) + '</div>' +
+            '<div class="ode-quality-card-detail">' + _esc(c.detail) + '</div>' +
+          '</div>' +
+          chevron +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    // Wire up click handlers for expandable cards
+    grid.querySelectorAll('.ode-quality-card.expandable').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var expandKey = el.dataset.expandKey;
+        if (expandKey === 'piotroski') {
+          var cardIdx = parseInt(el.dataset.cardIdx, 10);
+          var cardData = cards[cardIdx];
+          if (cardData && cardData.piotroskiData) {
+            _showPiotroskiBreakdown(cardData.piotroskiData);
+          }
+        }
+      });
+    });
+  }
+
+  // === PIOTROSKI BREAKDOWN MODAL ===
+  function _showPiotroskiBreakdown(piotroski) {
+    if (!piotroski || !piotroski.checks) return;
+
+    // Remove existing modal if any
+    var existing = document.getElementById('ode-piotroski-modal');
+    if (existing) existing.remove();
+
+    var overlay = document.createElement('div');
+    overlay.className = 'ode-modal-overlay';
+    overlay.id = 'ode-piotroski-modal';
+
+    var checksHtml = Object.values(piotroski.checks).map(function(check) {
+      var cls = check.passed ? 'passed' : 'failed';
+      var icon = check.passed ? '\u2713' : '\u2717';
+      return '<div class="ode-piotroski-check ' + cls + '">' +
+        '<span class="ode-piotroski-check-icon">' + icon + '</span>' +
+        '<div class="ode-piotroski-check-body">' +
+          '<div class="ode-piotroski-check-label">' + _esc(check.label) + '</div>' +
+          '<div class="ode-piotroski-check-details">' + _esc(check.details || '') + '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    overlay.innerHTML =
+      '<div class="ode-modal" role="dialog" aria-labelledby="piotroski-modal-title">' +
+        '<div class="ode-modal-header">' +
+          '<div class="ode-modal-title" id="piotroski-modal-title">' +
+            'Piotroski F-Score: ' + piotroski.score + '/9 (' + _esc(piotroski.label) + ')' +
+          '</div>' +
+          '<button class="ode-modal-close" aria-label="Close">\u00D7</button>' +
+        '</div>' +
+        '<div class="ode-modal-body">' +
+          '<div class="ode-piotroski-interpretation">' + _esc(piotroski.interpretation || '') + '</div>' +
+          '<div class="ode-piotroski-checks">' + checksHtml + '</div>' +
+          '<div class="ode-piotroski-footer">' +
+            '<a href="https://en.wikipedia.org/wiki/Piotroski_F-score" target="_blank" rel="noopener">' +
+              'About the Piotroski F-Score \u2192' +
+            '</a>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    document.body.appendChild(overlay);
+
+    var close = function() { overlay.remove(); document.removeEventListener('keydown', escHandler); };
+    overlay.querySelector('.ode-modal-close').addEventListener('click', close);
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) close();
+    });
+
+    var escHandler = function(e) {
+      if (e.key === 'Escape') close();
+    };
+    document.addEventListener('keydown', escHandler);
+  }
+
+  function _capitalize(s) {
+    if (!s) return '';
+    return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+  }
+
+  function renderBusinessProfile(data) {
+    var section = scope.querySelector('#ode-business-profile');
+    var body = scope.querySelector('#ode-business-profile-body');
+    if (!section || !body) return;
+
+    var profile = data.business_profile;
+
+    // Not generated / not available case
+    if (!profile || !profile.ok) {
+      section.hidden = false;
+      var errorMsg = (profile && profile.error) ? profile.error : 'Business profile not available';
+      body.innerHTML =
+        '<div class="ode-bp-unavailable">' +
+          _esc(errorMsg) +
+          (profile && profile.llm_available === false ? '<div style="margin-top: 8px; font-size: 11px;">LM Studio may not be running on the model machine.</div>' : '') +
+        '</div>';
+      return;
+    }
+
+    section.hidden = false;
+
+    var pitch = profile.elevator_pitch || '';
+    var bm = profile.business_model || {};
+    var moat = profile.moat || {};
+    var comp = profile.competitive_landscape || {};
+    var risks = Array.isArray(profile.key_risks) ? profile.key_risks : [];
+    var confidence = profile.confidence || '\u2014';
+    var generatedAt = profile.generated_at || '';
+
+    var moatStrength = (moat.strength || 'NONE').toUpperCase();
+    var moatBadgeMap = { 'STRONG': 'ode-bp-badge-strong', 'MODERATE': 'ode-bp-badge-moderate', 'WEAK': 'ode-bp-badge-weak', 'NONE': 'ode-bp-badge-none' };
+    var moatBadgeClass = moatBadgeMap[moatStrength] || 'ode-bp-badge-none';
+
+    var positionLabel = (comp.market_position || '\u2014').toUpperCase();
+    var positionMap = { 'LEADER': 'ode-bp-position-leader', 'CHALLENGER': 'ode-bp-position-challenger', 'NICHE': 'ode-bp-position-niche', 'FOLLOWER': 'ode-bp-position-follower' };
+    var positionClass = positionMap[positionLabel] || '';
+
+    // Revenue streams as tags
+    var revenueStreams = Array.isArray(bm.revenue_streams) ? bm.revenue_streams : [];
+    var revenueTags = revenueStreams.length
+      ? '<div class="ode-bp-tags">' + revenueStreams.map(function(s) { return '<span class="ode-bp-tag">' + _esc(s) + '</span>'; }).join('') + '</div>'
+      : '<div class="ode-bp-field-value">\u2014</div>';
+
+    // Competitors as tags
+    var competitors = Array.isArray(comp.direct_competitors) ? comp.direct_competitors : [];
+    var competitorTags = competitors.length
+      ? '<div class="ode-bp-tags">' + competitors.map(function(c) { return '<span class="ode-bp-tag">' + _esc(c) + '</span>'; }).join('') + '</div>'
+      : '<div class="ode-bp-field-value">\u2014</div>';
+
+    // Moat signals as list
+    var moatSignals = Array.isArray(moat.signals) ? moat.signals : [];
+    var moatSignalsList = moatSignals.length
+      ? '<ul class="ode-bp-list">' + moatSignals.map(function(s) { return '<li>' + _esc(s) + '</li>'; }).join('') + '</ul>'
+      : '<div class="ode-bp-field-value">\u2014</div>';
+
+    // Risks as list
+    var risksList = risks.length
+      ? '<ul class="ode-bp-list">' + risks.map(function(r) { return '<li>' + _esc(r) + '</li>'; }).join('') + '</ul>'
+      : '<div class="ode-bp-field-value">No specific risks identified</div>';
+
+    // Format the generated timestamp
+    var generatedStr = '';
+    if (generatedAt) {
+      try {
+        var d = new Date(generatedAt);
+        generatedStr = d.toLocaleString();
+      } catch (e) {
+        generatedStr = generatedAt;
+      }
+    }
+
+    body.innerHTML =
+      (pitch ? '<div class="ode-bp-pitch">' + _esc(pitch) + '</div>' : '') +
+
+      '<div class="ode-bp-block">' +
+        '<div class="ode-bp-block-title">Business Model</div>' +
+        '<div class="ode-bp-field">' +
+          '<span class="ode-bp-field-label">Revenue Streams</span>' +
+          revenueTags +
+        '</div>' +
+        '<div class="ode-bp-field">' +
+          '<span class="ode-bp-field-label">Customer Type</span>' +
+          '<span class="ode-bp-field-value">' + _esc(bm.customer_type || '\u2014') + '</span>' +
+        '</div>' +
+        '<div class="ode-bp-field">' +
+          '<span class="ode-bp-field-label">Pricing Model</span>' +
+          '<span class="ode-bp-field-value">' + _esc(bm.pricing_model || '\u2014') + '</span>' +
+        '</div>' +
+        '<div class="ode-bp-field">' +
+          '<span class="ode-bp-field-label">Contract Type</span>' +
+          '<span class="ode-bp-field-value">' + _esc(bm.contract_type || '\u2014') + '</span>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="ode-bp-block">' +
+        '<div class="ode-bp-block-title">' +
+          'Moat' +
+          '<span class="ode-bp-badge ' + moatBadgeClass + '">' + _esc(moatStrength) + '</span>' +
+        '</div>' +
+        '<div class="ode-bp-field">' +
+          '<span class="ode-bp-field-label">Primary Advantage</span>' +
+          '<span class="ode-bp-field-value">' + _esc(moat.primary || '\u2014') + '</span>' +
+        '</div>' +
+        '<div class="ode-bp-field">' +
+          '<span class="ode-bp-field-label">Supporting Evidence</span>' +
+          moatSignalsList +
+        '</div>' +
+      '</div>' +
+
+      '<div class="ode-bp-block">' +
+        '<div class="ode-bp-block-title">Competitive Landscape</div>' +
+        '<div class="ode-bp-field">' +
+          '<span class="ode-bp-field-label">Market Position</span>' +
+          '<span class="ode-bp-field-value ' + positionClass + '" style="font-weight: 700;">' + _esc(positionLabel) + '</span>' +
+        '</div>' +
+        '<div class="ode-bp-field">' +
+          '<span class="ode-bp-field-label">Direct Competitors</span>' +
+          competitorTags +
+        '</div>' +
+        '<div class="ode-bp-field">' +
+          '<span class="ode-bp-field-label">Differentiation</span>' +
+          '<span class="ode-bp-field-value">' + _esc(comp.differentiation || '\u2014') + '</span>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="ode-bp-block ode-bp-risks">' +
+        '<div class="ode-bp-block-title">Key Business Risks</div>' +
+        risksList +
+      '</div>' +
+
+      '<div class="ode-bp-footer">' +
+        'Confidence: ' + _esc(confidence) + (generatedStr ? ' \u00b7 Generated ' + _esc(generatedStr) : '') +
       '</div>';
   }
 
@@ -345,18 +759,35 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
       ['valuation', 'Valuation']
     ];
 
+    var fmt = window.BenTradeComponents;
+
     container.innerHTML = pillarOrder.map(function(pair) {
       var key = pair[0], label = pair[1];
       var score = evaluation.pillar_scores[key];
       var breakdown = evaluation.pillar_breakdowns ? evaluation.pillar_breakdowns[key] : null;
 
       var componentsHtml = '';
-      if (breakdown && breakdown.components) {
+      if (breakdown && breakdown.metrics) {
+        // Real API: separate metrics and scores dicts
+        var metricNames = Object.keys(breakdown.metrics);
+        componentsHtml = metricNames.map(function(name) {
+          var metricVal = breakdown.metrics[name];
+          var metricScore = breakdown.scores ? breakdown.scores[name] : null;
+          var fmtVal = fmt ? fmt.formatMetric(name, metricVal) : (metricVal != null ? String(metricVal) : '\u2014');
+          var fmtLabel = fmt ? fmt.formatMetricLabel(name) : name.replace(/_/g, ' ');
+          return '<div class="ode-pillar-component">' +
+            '<span>' + _esc(fmtLabel) + '</span>' +
+            '<span title="Score: ' + (metricScore != null ? metricScore.toFixed(0) : 'n/a') + '/100">' + _esc(fmtVal) + '</span></div>';
+        }).join('');
+      } else if (breakdown && breakdown.components) {
+        // Mock / legacy: components with {value, score, weight}
         componentsHtml = Object.keys(breakdown.components).map(function(name) {
           var comp = breakdown.components[name];
+          var fmtVal = fmt ? fmt.formatMetric(name, comp.value) : (comp.score != null ? comp.score.toFixed(0) : '\u2014');
+          var fmtLabel = fmt ? fmt.formatMetricLabel(name) : name.replace(/_/g, ' ');
           return '<div class="ode-pillar-component">' +
-            '<span>' + name.replace(/_/g, ' ') + '</span>' +
-            '<span>' + (comp.score != null ? comp.score.toFixed(0) : '\u2014') + '</span></div>';
+            '<span>' + _esc(fmtLabel) + '</span>' +
+            '<span>' + _esc(fmtVal) + '</span></div>';
         }).join('');
       }
 
@@ -868,25 +1299,14 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
   }
 
   function fmtMetric(value, key) {
+    // Delegate to the per-metric format registry when available
+    if (window.BenTradeComponents && window.BenTradeComponents.formatMetric) {
+      return window.BenTradeComponents.formatMetric(key, value);
+    }
+    // Fallback for cases where metric_formatter.js hasn't loaded
     if (value == null) return '\u2014';
     if (typeof value !== 'number') return String(value);
-
-    // Percentages (decimals that look like ratios based on key name)
-    var pctKeys = ['margin', 'yield', 'ratio', 'roic', 'roe', 'roa', 'growth', 'cagr', 'intensity', 'payout', 'spread', 'stability'];
-    var lowerKey = key.toLowerCase();
-    var isPct = false;
-    for (var i = 0; i < pctKeys.length; i++) {
-      if (lowerKey.indexOf(pctKeys[i]) !== -1) { isPct = true; break; }
-    }
-    if (isPct && Math.abs(value) < 10) {
-      return (value * 100).toFixed(2) + '%';
-    }
-
-    // Large numbers
-    if (Math.abs(value) >= 1e6) {
-      return fmtCurrency(value);
-    }
-
+    if (Math.abs(value) >= 1e6) return fmtCurrency(value);
     return value.toFixed(2);
   }
 

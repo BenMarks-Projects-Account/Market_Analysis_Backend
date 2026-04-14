@@ -5369,6 +5369,64 @@ a.at-symbol-link:hover{
     animation: homeLoadingSpin 0.7s linear infinite;
 }
 
+/* ── Refresh pause/resume control ──────────────────────── */
+.home-refresh-control{
+    display:inline-flex;
+    align-items:center;
+    gap:12px;
+    background:rgba(15,30,40,0.6);
+    border:1px solid rgba(80,120,150,0.2);
+    border-radius:6px;
+    padding:6px 12px;
+    margin-left:12px;
+}
+.home-refresh-status{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    font-size:11px;
+    color:#80a0b8;
+    white-space:nowrap;
+}
+.home-refresh-dot{
+    width:8px;
+    height:8px;
+    border-radius:50%;
+    background:#60d890;
+    box-shadow:0 0 6px rgba(96,216,144,0.6);
+    transition:background 0.2s ease, box-shadow 0.2s ease;
+}
+.home-refresh-dot.paused{
+    background:#e0a060;
+    box-shadow:0 0 6px rgba(224,160,96,0.6);
+}
+.home-refresh-toggle-btn{
+    background:rgba(15,25,35,0.9);
+    border:1px solid rgba(80,120,150,0.3);
+    border-radius:4px;
+    padding:4px 12px;
+    color:#c0d8e8;
+    font-size:11px;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:0.5px;
+    cursor:pointer;
+    transition:all 0.15s ease;
+}
+.home-refresh-toggle-btn:hover{
+    background:rgba(80,120,150,0.2);
+    color:#ffffff;
+}
+.home-refresh-toggle-btn.paused{
+    background:rgba(96,216,144,0.15);
+    border-color:rgba(96,216,144,0.4);
+    color:#80e0a0;
+}
+.home-refresh-toggle-btn:disabled{
+    opacity:0.5;
+    cursor:not-allowed;
+}
+
 .home-loading-overlay{
     position:fixed;
     inset:0;

@@ -5,6 +5,15 @@ window.BenTradePages.initHome = function initHome(rootEl){
   const scope = rootEl || doc;
   const api = window.BenTradeApi;
 
+  // ── Refresh state (pause/resume + adaptive intervals) ──────────
+  const BASE_INTERVAL_SENTIMENT    = 60  * 1000;   // 60s
+  const BASE_INTERVAL_SPECIALTY    = 300 * 1000;   // 300s
+  const BASE_INTERVAL_MARKET_INTEL = 60  * 1000;   // 60s
+  const BASE_INTERVAL_CALENDAR_NEWS= 60  * 1000;   // 60s
+  const STATE_POLL_INTERVAL        = 30  * 1000;   // 30s
+  let _refreshState = { paused: false, market_hours_active: true, interval_multiplier: 1 };
+  let _statePollTimer = null;
+
   /*
    * Do NOT add selectors for Source Health, Session Stats, or Strategy Leaderboard here.
    * Those are GLOBAL-ONLY panels rendered in the global right info bar (index.html / sessionStats.js).
@@ -3816,7 +3825,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
   function startSentimentRefresh(){
     if(_sentimentTimer) return;
-    _sentimentTimer = setInterval(loadSentiment, 60000);
+    _sentimentTimer = setInterval(function(){ if(!_refreshState.paused) loadSentiment(); },
+      BASE_INTERVAL_SENTIMENT * _refreshState.interval_multiplier);
   }
 
   /* ═══ Specialty Signals — Congressional, Insider Clusters, UOA ═══ */
@@ -3901,7 +3911,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
 
   function startSpecialtyRefresh(){
     if(_specialtyTimer) return;
-    _specialtyTimer = setInterval(loadSpecialtySignals, 300000); // 5 minutes
+    _specialtyTimer = setInterval(function(){ if(!_refreshState.paused) loadSpecialtySignals(); },
+      BASE_INTERVAL_SPECIALTY * _refreshState.interval_multiplier);
   }
 
   let _marketIntelTimer = null;
@@ -3929,7 +3940,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
   function startMarketIntelRefresh(){
     if(_marketIntelTimer) return;
-    _marketIntelTimer = setInterval(loadMarketIntel, 60000);
+    _marketIntelTimer = setInterval(function(){ if(!_refreshState.paused) loadMarketIntel(); },
+      BASE_INTERVAL_MARKET_INTEL * _refreshState.interval_multiplier);
   }
 
   /**
@@ -3954,8 +3966,85 @@ window.BenTradePages.initHome = function initHome(rootEl){
   }
   function startCalendarNewsRefresh(){
     if(_calendarNewsTimer) return;
-    // News: 60s, calendars: backend cached (5min & 1h) so 60s fetch is fine
-    _calendarNewsTimer = setInterval(loadCalendarAndNews, 60000);
+    // News: 60s base, calendars: backend cached (5min & 1h) so 60s fetch is fine
+    _calendarNewsTimer = setInterval(function(){ if(!_refreshState.paused) loadCalendarAndNews(); },
+      BASE_INTERVAL_CALENDAR_NEWS * _refreshState.interval_multiplier);
+  }
+
+  /* ── Refresh state management (pause/resume + adaptive intervals) ──── */
+
+  function _clearAllRefreshTimers(){
+    if(_sentimentTimer){ clearInterval(_sentimentTimer); _sentimentTimer = null; }
+    if(_specialtyTimer){ clearInterval(_specialtyTimer); _specialtyTimer = null; }
+    if(_marketIntelTimer){ clearInterval(_marketIntelTimer); _marketIntelTimer = null; }
+    if(_calendarNewsTimer){ clearInterval(_calendarNewsTimer); _calendarNewsTimer = null; }
+  }
+
+  function _recreateRefreshTimers(){
+    _clearAllRefreshTimers();
+    // Reset guard flags so start* functions will create new timers
+    startSentimentRefresh();
+    startSpecialtyRefresh();
+    startMarketIntelRefresh();
+    startCalendarNewsRefresh();
+    console.log('[refresh] timers recreated — multiplier=' + _refreshState.interval_multiplier +
+      ', paused=' + _refreshState.paused);
+  }
+
+  function _renderRefreshControl(state){
+    var dot   = doc.getElementById('home-refresh-dot');
+    var label = doc.getElementById('home-refresh-label');
+    var btn   = doc.getElementById('home-refresh-toggle-btn');
+    var btnTx = doc.getElementById('home-refresh-toggle-text');
+    if(!dot || !label || !btn || !btnTx) return;
+
+    if(state.paused){
+      dot.classList.add('paused');
+      btn.classList.add('paused');
+      label.textContent = 'Paused';
+      btnTx.textContent = 'Resume';
+    } else {
+      dot.classList.remove('paused');
+      btn.classList.remove('paused');
+      var period = state.market_hours_active ? 'market hours' : 'off-hours';
+      label.textContent = 'Running \u00b7 ' + period;
+      btnTx.textContent = 'Pause';
+    }
+  }
+
+  async function _pollRefreshState(){
+    try {
+      var resp = await fetch('/api/refresh/state');
+      if(!resp.ok) return;
+      var newState = await resp.json();
+      var intervalChanged = newState.interval_multiplier !== _refreshState.interval_multiplier;
+      _refreshState = newState;
+      if(intervalChanged) _recreateRefreshTimers();
+      _renderRefreshControl(newState);
+    } catch(err){
+      console.warn('[refresh] state poll failed:', err);
+    }
+  }
+
+  async function _handleRefreshToggle(){
+    var btn = doc.getElementById('home-refresh-toggle-btn');
+    if(!btn) return;
+    btn.disabled = true;
+    try {
+      var action = _refreshState.paused ? 'resume' : 'pause';
+      var resp = await fetch('/api/refresh/' + action, { method: 'POST' });
+      if(resp.ok){
+        var newState = await resp.json();
+        var intervalChanged = newState.interval_multiplier !== _refreshState.interval_multiplier;
+        _refreshState = newState;
+        _renderRefreshControl(newState);
+        if(intervalChanged) _recreateRefreshTimers();
+      }
+    } catch(err){
+      console.error('[refresh] toggle failed:', err);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   function renderSnapshot(snapshot){
@@ -4318,6 +4407,14 @@ window.BenTradePages.initHome = function initHome(rootEl){
     console.warn('[Home] BenTradePreMarket module not loaded — pre-market panels will not render');
   }
 
+  // ── Refresh state: initial load + polling ────────────────────────
+  _pollRefreshState();  // fetch initial state (sets _refreshState, renders control)
+  _statePollTimer = setInterval(function(){ _pollRefreshState(); }, STATE_POLL_INTERVAL);
+
+  // Wire pause/resume toggle button
+  var _toggleBtn = doc.getElementById('home-refresh-toggle-btn');
+  if(_toggleBtn) _toggleBtn.addEventListener('click', _handleRefreshToggle);
+
   // Calendar & News — independent fetch cycle (not in homeCache pipeline)
   loadCalendarAndNews();
   startCalendarNewsRefresh();
@@ -4642,6 +4739,8 @@ window.BenTradePages.initHome = function initHome(rootEl){
       overlay.destroy();
     }
     setRefreshingBadge(false);
+    _clearAllRefreshTimers();
+    if(_statePollTimer){ clearInterval(_statePollTimer); _statePollTimer = null; }
     // NOTE: do NOT null the renderer here.
     // The renderer is harmlessly overwritten on next initHome().
     // Nulling it caused setSnapshot() calls (from in-flight refreshes completing

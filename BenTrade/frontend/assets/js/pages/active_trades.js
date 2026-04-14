@@ -982,6 +982,29 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
   /* ── Close Position ── */
   function openCloseConfirmation(trade) {
     if (!closeConfirmModal || !closeConfirmBody) return;
+
+    // Option positions with suggested_close_order use the multileg close flow
+    var closeOrder = trade.suggested_close_order;
+    if (closeOrder) {
+      closeOrder.mode = accountMode || 'paper';
+      return _closeViaPreviewSubmit(trade, closeOrder);
+    }
+
+    // Option positions without suggested_close_order — build close order from legs
+    var isOption = trade.strategy && trade.strategy !== 'equity' && trade.legs && trade.legs.length > 0;
+    if (isOption) {
+      var builtCloseOrder;
+      try {
+        builtCloseOrder = _buildCloseOrderFromLegs(trade, accountMode || 'paper');
+      } catch (err) {
+        console.error('[active_trades] Failed to build close order:', err);
+        showToast('Cannot build close order: ' + (err.message || err), 'error');
+        return;
+      }
+      return _closeViaPreviewSubmit(trade, builtCloseOrder);
+    }
+
+    // Equity positions use the legacy close endpoint
     var sym = trade.symbol || 'N/A';
     var qty = Math.abs(Number(trade.quantity || 0));
     var side = Number(trade.quantity || 0) < 0 ? 'Short' : 'Long';
@@ -1027,6 +1050,165 @@ window.BenTradePages.initActiveTrades = function initActiveTrades(rootEl) {
         showToast('Close order failed: ' + (err.message || err), 'error');
       }
     });
+  }
+
+  /**
+   * Build a close order payload from an active trade's legs.
+   * Returns a CloseOrderPreviewRequest-shaped object ready to POST
+   * to /api/trading/close-preview.
+   *
+   * Side inversion: sell → buy_to_close, buy → sell_to_close
+   * Price: uses leg.price (mark/last) as mid estimate; net computed
+   *   as buy_to_close legs pay (+) and sell_to_close legs receive (-).
+   * Limit price rounded to nearest cent.
+   */
+  function _buildCloseOrderFromLegs(trade, mode) {
+    if (!trade || !Array.isArray(trade.legs) || trade.legs.length === 0) {
+      throw new Error('Trade has no legs');
+    }
+
+    var closeLegs = [];
+    var netMid = 0;
+    var hasPriceData = true;
+
+    for (var i = 0; i < trade.legs.length; i++) {
+      var leg = trade.legs[i];
+      var occ = leg.symbol || '';
+      if (!occ) {
+        throw new Error('Leg missing OCC symbol');
+      }
+
+      // Invert the side
+      var originalSide = (leg.side || '').toLowerCase();
+      var closeSide;
+      if (originalSide === 'sell' || originalSide === 'short') {
+        closeSide = 'buy_to_close';
+      } else if (originalSide === 'buy' || originalSide === 'long') {
+        closeSide = 'sell_to_close';
+      } else {
+        throw new Error('Unknown leg side: ' + originalSide);
+      }
+
+      // Use leg.price (mark/last) as mid estimate
+      var legPrice = Number(leg.price);
+      if (!legPrice || legPrice <= 0) {
+        hasPriceData = false;
+        legPrice = 0;
+      }
+
+      // Accumulate net: buy_to_close adds (pay), sell_to_close subtracts (receive)
+      if (closeSide === 'buy_to_close') {
+        netMid += legPrice;
+      } else {
+        netMid -= legPrice;
+      }
+
+      closeLegs.push({
+        option_symbol: occ,
+        side: closeSide,
+        quantity: Math.abs(Number(leg.qty || leg.quantity || 1)),
+        strike: leg.strike || null,
+        option_type: leg.option_type || null,
+      });
+    }
+
+    if (!hasPriceData) {
+      throw new Error('One or more legs missing price data');
+    }
+
+    // Round to nearest cent
+    var absNet = Math.round(Math.abs(netMid) * 100) / 100;
+    var priceEffect;
+    if (netMid > 0.005) {
+      priceEffect = 'debit';
+    } else if (netMid < -0.005) {
+      priceEffect = 'credit';
+    } else {
+      priceEffect = 'even';
+    }
+
+    return {
+      order_type: 'multileg',
+      symbol: trade.symbol,
+      legs: closeLegs,
+      limit_price: absNet,
+      price_effect: priceEffect,
+      time_in_force: 'DAY',
+      mode: mode,
+    };
+  }
+
+  /**
+   * Close an option position via preview → confirm → submit using the
+   * close-specific endpoints (/api/trading/close-preview, close-submit).
+   */
+  function _closeViaPreviewSubmit(trade, closeOrder) {
+    if (!closeConfirmModal || !closeConfirmBody) return;
+    var sym = trade.symbol || closeOrder.symbol || 'N/A';
+    var modeLabel = (closeOrder.mode || 'paper').toUpperCase();
+
+    closeConfirmBody.innerHTML =
+      '<div class="active-modal-row"><span>Symbol</span><strong>' + sym + '</strong></div>' +
+      '<div class="active-modal-row"><span>Strategy</span><strong>' + (trade.strategy || closeOrder.order_type || 'unknown') + '</strong></div>' +
+      '<div class="active-modal-row"><span>Account</span><strong>' + modeLabel + '</strong></div>' +
+      '<div style="margin-top:10px;text-align:center;color:#607890;">Previewing\u2026</div>';
+
+    closeConfirmModal.style.display = 'flex';
+
+    api.tradingClosePreview(closeOrder)
+      .then(function (preview) {
+        var description = closeOrder.description || preview.description || '';
+        var legsHtml = '';
+        if (closeOrder.legs && closeOrder.legs.length > 0) {
+          legsHtml = closeOrder.legs.map(function (leg) {
+            return '<div style="font-size:12px;padding:2px 0;">' +
+              (leg.side || '') + ' ' + (leg.quantity || 0) + 'x ' + (leg.option_symbol || '') + '</div>';
+          }).join('');
+        }
+        var warningHtml = '';
+        if (preview.tradier_preview_error) {
+          warningHtml = '<div style="color:#f08070;margin-top:8px;font-size:12px;">Warning: ' + preview.tradier_preview_error + '</div>';
+        }
+        closeConfirmBody.innerHTML =
+          '<div class="active-modal-row"><span>Symbol</span><strong>' + sym + '</strong></div>' +
+          '<div class="active-modal-row"><span>Strategy</span><strong>' + (trade.strategy || closeOrder.order_type || 'unknown') + '</strong></div>' +
+          (closeOrder.limit_price != null ? '<div class="active-modal-row"><span>Limit</span><strong>$' + Number(closeOrder.limit_price).toFixed(2) + '</strong></div>' : '') +
+          '<div class="active-modal-row"><span>Account</span><strong>' + modeLabel + '</strong></div>' +
+          (description ? '<div style="font-size:12px;color:#80a0b8;margin-top:6px;">' + description + '</div>' : '') +
+          legsHtml + warningHtml +
+          '<div style="margin-top:14px;display:flex;gap:10px;">' +
+            '<button class="btn btn-exec" id="activeCloseConfirmBtn" style="flex:1;">Confirm Close</button>' +
+            '<button class="btn btn-reject" id="activeCloseCancelBtn" style="flex:1;">Cancel</button>' +
+          '</div>';
+
+        var confirmBtn = closeConfirmBody.querySelector('#activeCloseConfirmBtn');
+        var cancelBtn = closeConfirmBody.querySelector('#activeCloseCancelBtn');
+        cancelBtn.addEventListener('click', function () { closeConfirmModal.style.display = 'none'; });
+
+        confirmBtn.addEventListener('click', async function () {
+          confirmBtn.disabled = true;
+          confirmBtn.textContent = 'Submitting…';
+          try {
+            var result = await api.tradingCloseSubmit(closeOrder);
+            closeConfirmModal.style.display = 'none';
+            if (result?.ok) {
+              var statusMsg = result.status || 'SUBMITTED';
+              if (result.dry_run) statusMsg = 'DRY RUN';
+              showToast(sym + ' close ' + statusMsg + (result.broker_order_id ? ' (' + result.broker_order_id + ')' : ''), 'success');
+              setTimeout(function () { refresh(); }, 1500);
+            } else {
+              showToast('Close failed: ' + (result?.message || 'Unknown error'), 'error');
+            }
+          } catch (err) {
+            closeConfirmModal.style.display = 'none';
+            showToast('Close submit failed: ' + (err.message || err), 'error');
+          }
+        });
+      })
+      .catch(function (err) {
+        closeConfirmModal.style.display = 'none';
+        showToast('Close preview failed: ' + (err.message || err), 'error');
+      });
   }
 
   /* ── Execute Trade ── */

@@ -387,10 +387,22 @@ async def close_preview(req: CloseOrderPreviewRequest, request: Request) -> Clos
         trace_id, req.symbol, req.order_type, req.mode,
     )
 
+    # ── DIAGNOSTIC (temporary) ────────────────────────────────
+    logger.warning(
+        "[CLOSE_PREVIEW DEBUG] received: %s",
+        req.dict(),
+    )
+
     try:
         payload = _build_close_tradier_payload(req)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # ── DIAGNOSTIC (temporary) ────────────────────────────────
+    logger.warning(
+        "[CLOSE_PREVIEW DEBUG] tradier_payload: %s",
+        payload,
+    )
 
     # Resolve credentials
     from app.trading.tradier_credentials import resolve_tradier_credentials
@@ -448,10 +460,22 @@ async def close_submit(req: CloseOrderSubmitRequest, request: Request) -> CloseO
         trace_id, req.symbol, req.order_type, req.mode,
     )
 
+    # ── DIAGNOSTIC (temporary) ────────────────────────────────
+    logger.warning(
+        "[CLOSE_SUBMIT DEBUG] received: %s",
+        req.dict(),
+    )
+
     try:
         payload = _build_close_tradier_payload(req)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # ── DIAGNOSTIC (temporary) ────────────────────────────────
+    logger.warning(
+        "[CLOSE_SUBMIT DEBUG] tradier_payload: %s",
+        payload,
+    )
 
     settings = request.app.state.trading_service.settings
     broker = request.app.state.trading_service.live_broker
@@ -486,6 +510,13 @@ async def close_submit(req: CloseOrderSubmitRequest, request: Request) -> CloseO
             payload, creds=creds, trace_id=trace_id, dry_run=effective_dry_run,
         )
     except Exception as exc:
+        # ── DIAGNOSTIC (temporary) ────────────────────────────────
+        logger.warning(
+            "[CLOSE_SUBMIT DEBUG] broker exception: %s (type=%s, details=%s)",
+            exc,
+            type(exc).__name__,
+            getattr(exc, "details", None),
+        )
         logger.exception(
             "event=close_submit_failed trace_id=%s error=%s", trace_id, exc,
         )
@@ -493,6 +524,13 @@ async def close_submit(req: CloseOrderSubmitRequest, request: Request) -> CloseO
             status_code=502,
             detail={"message": f"Close order submission failed: {exc}", "trace_id": trace_id},
         ) from exc
+
+    # ── DIAGNOSTIC (temporary) ────────────────────────────────────
+    logger.warning(
+        "[CLOSE_SUBMIT DEBUG] broker result: status=%s broker_order_id=%s message=%s raw=%s",
+        result.status, result.broker_order_id, result.message,
+        getattr(result, "raw", None),
+    )
 
     return CloseOrderSubmitResponse(
         ok=result.status not in ("REJECTED",),

@@ -52,7 +52,10 @@ def validate_occ_symbol(symbol: str) -> str | None:
     """Validate OCC symbol format. Returns error message or None if valid."""
     if not symbol or not symbol.strip():
         return "OCC symbol is empty"
-    if not _OCC_PATTERN.match(symbol.strip()):
+    # Strip all whitespace including embedded spaces
+    # (Tradier occasionally returns "SPY 260419C00450000" with a space)
+    cleaned = "".join(symbol.split())
+    if not _OCC_PATTERN.match(cleaned):
         return f"OCC symbol format invalid: {symbol!r} — expected ROOT+YYMMDD+P/C+8digits"
     return None
 
@@ -158,7 +161,9 @@ def build_tradier_multileg_order(
             or leg.get("occ_symbol")
             or leg.get("option_symbol")
             or ""
-        ).strip()
+        )
+        # Strip all whitespace (Tradier sometimes returns spaced OCC symbols)
+        occ = "".join(occ.split())
         occ_error = validate_occ_symbol(occ)
         if occ_error:
             raise ValueError(f"leg[{i}]: {occ_error}")
