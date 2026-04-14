@@ -37,11 +37,14 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
   var retryBtn = scope.querySelector('#ode-error-retry');
   var resultsEl = scope.querySelector('#ode-results');
   var rawTabs = scope.querySelectorAll('.ode-raw-tab');
+  var deepResearchBtn = scope.querySelector('#ode-deep-research-btn');
+  var _currentResearchSymbol = null;
 
   // === EVENT LISTENERS ===
   if (form) form.addEventListener('submit', handleSubmit);
   if (cancelBtn) cancelBtn.addEventListener('click', handleCancel);
   if (retryBtn) retryBtn.addEventListener('click', handleRetry);
+  _initDeepResearchButton();
   rawTabs.forEach(function(tab) {
     tab.addEventListener('click', function() { switchRawTab(tab); });
   });
@@ -141,6 +144,7 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
       return;
     }
 
+    _disableDeepResearchButton();
     showLoading(symbol);
 
     if (MOCK_MODE) {
@@ -271,6 +275,10 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
     currentRawData = data.raw_financials || null;
     renderRawFinancials();
     renderMetadataFooter(data);
+
+    // Enable deep research button now that we have data
+    var sym = (data.company && data.company.symbol) || data.symbol;
+    if (sym) _enableDeepResearchButton(sym);
   }
 
   function renderCompanyHeader(data) {
@@ -858,8 +866,7 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
       '</div>'
     );
 
-    container.innerHTML =
-      '<div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">' + cards.join('') + '</div>';
+    container.innerHTML = cards.join('');
   }
 
   function renderValuationModels(data) {
@@ -957,6 +964,336 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
         compsCard.innerHTML = '<div class="ode-valuation-title">Comps</div><div class="ode-valuation-detail">Not available</div>';
       }
     }
+
+    // EPV (Greenwald) — supports both flat (single EPV) and dual (trailing/normalized) formats
+    var epvCard = scope.querySelector('#ode-epv-card');
+    if (epvCard) {
+      var epv = data.epv;
+      if (epv && epv.ok) {
+        var isDual = !!(epv.trailing && epv.normalized);
+        var currentPrice = isDual ? (epv.shared_inputs || {}).current_price : epv.current_price;
+        var emergence = isDual ? (epv.emergence || {}) : null;
+
+        epvCard.className = 'ode-valuation-card epv-card expandable';
+
+        if (isDual) {
+          // Dual format: trailing + normalized side by side
+          var trailing = epv.trailing;
+          var normalized = epv.normalized;
+          var trailingFv = trailing.fair_value_per_share;
+          var normalizedFv = normalized.fair_value_per_share;
+          var trailingCls = (trailingFv != null && currentPrice != null && trailingFv > currentPrice) ? 'above-price' : 'below-price';
+          var normalizedCls = (normalizedFv != null && currentPrice != null && normalizedFv > currentPrice) ? 'above-price' : 'below-price';
+          var emergLvl = emergence ? _epvEmergenceBadgeLevel(emergence.signal) : 'unknown';
+
+          epvCard.innerHTML =
+            '<div class="ode-valuation-title">EPV (Greenwald)</div>' +
+            '<div class="ode-valuation-card-subtitle">Earnings Power Value</div>' +
+            '<div class="epv-dual-grid">' +
+              '<div class="epv-value-block">' +
+                '<div class="epv-value-label">Trailing (' + (trailing.period_years || 1) + 'y)</div>' +
+                '<div class="epv-value-amount ' + trailingCls + '">' + _epvFmtPrice(trailingFv) + '</div>' +
+                '<div class="epv-value-premium">' + _epvFmtGrowthPremium(trailing) + '</div>' +
+              '</div>' +
+              '<div class="epv-value-block">' +
+                '<div class="epv-value-label">Normalized (' + (normalized.period_years || 5) + 'y)</div>' +
+                '<div class="epv-value-amount ' + normalizedCls + '">' + _epvFmtPrice(normalizedFv) + '</div>' +
+                '<div class="epv-value-premium">' + _epvFmtGrowthPremium(normalized) + '</div>' +
+              '</div>' +
+            '</div>' +
+            (currentPrice != null ? '<div class="epv-current-price">Current: $' + currentPrice.toFixed(2) + '</div>' : '') +
+            '<div class="ode-valuation-card-footer">' +
+              '<span class="epv-emergence-badge ' + emergLvl + '">Emergence: ' + _esc(_epvFmtSignal(emergence ? emergence.signal : null)) + '</span>' +
+            '</div>';
+        } else {
+          // Flat format: single EPV value with growth premium
+          var fv = epv.fair_value_per_share;
+          var fvCls = (fv != null && currentPrice != null && fv > currentPrice) ? 'above-price' : 'below-price';
+          var inputs = epv.inputs || {};
+          var periodYears = inputs.normalization_period_years || 5;
+
+          epvCard.innerHTML =
+            '<div class="ode-valuation-title">EPV (Greenwald)</div>' +
+            '<div class="ode-valuation-card-subtitle">Earnings Power Value</div>' +
+            '<div class="epv-value-block" style="margin-bottom:8px">' +
+              '<div class="epv-value-label">Normalized (' + periodYears + 'y EBIT)</div>' +
+              '<div class="epv-value-amount ' + fvCls + '" style="font-size:22px">' + _epvFmtPrice(fv) + '</div>' +
+              '<div class="epv-value-premium">' + _epvFmtGrowthPremium(epv) + '</div>' +
+            '</div>' +
+            (currentPrice != null ? '<div class="epv-current-price">Current: $' + currentPrice.toFixed(2) + '</div>' : '') +
+            (epv.interpretation ? '<div class="ode-valuation-detail" style="margin-top:8px;font-size:11px">' + _esc(epv.interpretation) + '</div>' : '');
+        }
+
+        epvCard.addEventListener('click', function() { _showEpvBreakdown(epv); });
+      } else if (epv && !epv.ok) {
+        epvCard.innerHTML =
+          '<div class="ode-valuation-title">EPV (Greenwald)</div>' +
+          '<div class="ode-valuation-card-error">' + _esc(epv.error || 'Insufficient data') + '</div>';
+      } else {
+        epvCard.innerHTML = '<div class="ode-valuation-title">EPV</div><div class="ode-valuation-detail">Not available</div>';
+      }
+    }
+  }
+
+  // === EPV HELPERS ===
+  function _epvFmtPrice(v) {
+    if (v == null) return '\u2014';
+    var n = Number(v);
+    if (isNaN(n)) return '\u2014';
+    return '$' + n.toFixed(2);
+  }
+
+  function _epvFmtGrowthPremium(sub) {
+    if (!sub) return '';
+    var label = sub.growth_premium_label;
+    var pct = sub.growth_premium_pct;
+    if (label === 'NEGATIVE_EPV') {
+      return '<span class="epv-premium-label negative">Negative EPV</span>';
+    }
+    if (pct == null) return '';
+    var cls = _epvPremiumClass(label);
+    var display = _epvFmtLabel(label);
+    var sign = pct >= 0 ? '+' : '';
+    return '<span class="epv-premium-label ' + cls + '">' + sign + pct.toFixed(0) + '% ' + display + '</span>';
+  }
+
+  function _epvFmtLabel(label) {
+    if (!label) return '';
+    return label.split('_').map(function(w) {
+      return w.charAt(0) + w.slice(1).toLowerCase();
+    }).join(' ');
+  }
+
+  function _epvPremiumClass(label) {
+    var map = {
+      'DEEP_DISCOUNT': 'positive',
+      'DISCOUNTED': 'positive',
+      'MODEST_GROWTH': 'neutral',
+      'SIGNIFICANT_GROWTH': 'neutral',
+      'HIGH_GROWTH': 'caution',
+      'VERY_HIGH_GROWTH': 'caution',
+      'SPECULATIVE': 'warning',
+      'NEGATIVE_EPV': 'warning'
+    };
+    return map[label] || 'neutral';
+  }
+
+  function _epvFmtSignal(signal) {
+    if (!signal) return 'N/A';
+    return signal.split('_').map(function(w) {
+      return w.charAt(0) + w.slice(1).toLowerCase();
+    }).join(' ');
+  }
+
+  function _epvEmergenceBadgeLevel(signal) {
+    var map = {
+      'EMERGING': 'excellent',
+      'EXPANDING': 'good',
+      'RECOVERING': 'good',
+      'STABLE': 'neutral',
+      'DECLINING': 'poor',
+      'POSSIBLE_ONE_TIME': 'caution',
+      'INSUFFICIENT_DATA': 'unknown'
+    };
+    return map[signal] || 'unknown';
+  }
+
+  function _epvFmtMoneyShort(v) {
+    if (v == null) return '\u2014';
+    var n = Math.abs(Number(v));
+    var sign = v < 0 ? '-' : '';
+    if (n >= 1e12) return sign + (n / 1e12).toFixed(2) + 'T';
+    if (n >= 1e9) return sign + (n / 1e9).toFixed(2) + 'B';
+    if (n >= 1e6) return sign + (n / 1e6).toFixed(2) + 'M';
+    return sign + n.toFixed(0);
+  }
+
+  function _epvFmtShares(v) {
+    if (v == null) return '\u2014';
+    var n = Number(v);
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+    return n.toLocaleString();
+  }
+
+  function _epvCalcBarHeight(value, all) {
+    var max = 0;
+    for (var i = 0; i < all.length; i++) {
+      if (all[i] != null && all[i] > max) max = all[i];
+    }
+    if (!max || max <= 0) return 20;
+    var pct = Math.max(0.1, (value || 0) / max);
+    return Math.round(20 + pct * 80);
+  }
+
+  // === EPV BREAKDOWN MODAL ===
+  function _showEpvBreakdown(epv) {
+    if (!epv || !epv.ok) return;
+
+    var existing = document.getElementById('ode-epv-modal');
+    if (existing) existing.remove();
+
+    var isDual = !!(epv.trailing && epv.normalized);
+
+    // Resolve inputs from either format
+    var inputs = isDual ? (epv.shared_inputs || {}) : (epv.inputs || {});
+    var emergence = isDual ? (epv.emergence || {}) : null;
+
+    // Build emergence block (only for dual format)
+    var emergenceHtml = '';
+    if (emergence && emergence.signal) {
+      var emergLvl = _epvEmergenceBadgeLevel(emergence.signal);
+      emergenceHtml =
+        '<div class="ode-epv-emergence-block ' + emergLvl + '">' +
+          '<div class="ode-epv-emergence-title">Emergence Signal: ' + _esc(_epvFmtSignal(emergence.signal)) + '</div>' +
+          '<div class="ode-epv-emergence-text">' + _esc(emergence.interpretation || '') + '</div>' +
+        '</div>';
+    }
+
+    // Build EBIT history bars (dual format has ebit_history in emergence)
+    var history = emergence ? (emergence.ebit_history || []) : [];
+    var historyHtml = '';
+    if (history.length > 0) {
+      historyHtml =
+        '<div class="ode-epv-section-title">Operating Income History (oldest \u2192 newest)</div>' +
+        '<div class="ode-epv-history-chart">' +
+          history.map(function(v, i) {
+            var h = _epvCalcBarHeight(v, history);
+            return '<div class="ode-epv-history-bar" style="height:' + h + 'px" title="Year ' + (i + 1) + ': $' + _epvFmtMoneyShort(v) + '">' +
+              '<span class="ode-epv-history-label">' + _epvFmtMoneyShort(v) + '</span>' +
+            '</div>';
+          }).join('') +
+        '</div>';
+    }
+
+    // Build inputs section
+    var inputsHtml = '';
+    var taxRate = inputs.tax_rate;
+    var wacc = inputs.wacc;
+    var shares = inputs.diluted_shares;
+    var mktCap = isDual ? inputs.market_cap : epv.market_cap;
+    var nopat = inputs.nopat;
+    var ebit = inputs.normalized_ebit;
+
+    if (ebit != null) {
+      inputsHtml += '<div class="ode-epv-input-row"><span class="ode-epv-input-label">Normalized EBIT</span>' +
+        '<span class="ode-epv-input-value">$' + _epvFmtMoneyShort(ebit) +
+        (inputs.normalization_period_years ? ' <span class="ode-epv-input-source">(' + inputs.normalization_period_years + 'y avg)</span>' : '') +
+        '</span></div>';
+    }
+    if (taxRate != null) {
+      inputsHtml += '<div class="ode-epv-input-row"><span class="ode-epv-input-label">Tax Rate</span>' +
+        '<span class="ode-epv-input-value">' + (taxRate * 100).toFixed(1) + '%' +
+        (inputs.tax_rate_source ? ' <span class="ode-epv-input-source">(' + _esc(inputs.tax_rate_source) + ')</span>' : '') +
+        '</span></div>';
+    }
+    if (nopat != null) {
+      inputsHtml += '<div class="ode-epv-input-row"><span class="ode-epv-input-label">NOPAT</span>' +
+        '<span class="ode-epv-input-value">$' + _epvFmtMoneyShort(nopat) + '</span></div>';
+    }
+    if (wacc != null) {
+      inputsHtml += '<div class="ode-epv-input-row"><span class="ode-epv-input-label">WACC</span>' +
+        '<span class="ode-epv-input-value">' + (wacc * 100).toFixed(2) + '%' +
+        (inputs.wacc_source ? ' <span class="ode-epv-input-source">(' + _esc(inputs.wacc_source) + ')</span>' : '') +
+        '</span></div>';
+    }
+    if (shares != null) {
+      inputsHtml += '<div class="ode-epv-input-row"><span class="ode-epv-input-label">Diluted Shares</span>' +
+        '<span class="ode-epv-input-value">' + _epvFmtShares(shares) +
+        (inputs.shares_source ? ' <span class="ode-epv-input-source">(' + _esc(inputs.shares_source) + ')</span>' : '') +
+        '</span></div>';
+    }
+    if (mktCap != null) {
+      inputsHtml += '<div class="ode-epv-input-row"><span class="ode-epv-input-label">Market Cap</span>' +
+        '<span class="ode-epv-input-value">$' + _epvFmtMoneyShort(mktCap) + '</span></div>';
+    }
+
+    // Build valuation summary
+    var valuationHtml = '';
+    if (isDual) {
+      var trailing = epv.trailing;
+      var normalized = epv.normalized;
+      valuationHtml =
+        '<div class="ode-epv-section-title">Valuation Comparison</div>' +
+        '<div class="ode-epv-comparison-grid">' +
+          '<div class="ode-epv-comparison-col">' +
+            '<div class="ode-epv-col-header">Trailing (' + (trailing.period_years || 1) + 'y)</div>' +
+            '<div class="ode-epv-col-row">EBIT: $' + _epvFmtMoneyShort(trailing.ebit) + '</div>' +
+            '<div class="ode-epv-col-row">EPV Total: $' + _epvFmtMoneyShort(trailing.epv_total) + '</div>' +
+            '<div class="ode-epv-col-row">Per Share: ' + _epvFmtPrice(trailing.fair_value_per_share) + '</div>' +
+            '<div class="ode-epv-col-row">Premium: ' + (trailing.growth_premium_pct != null ? trailing.growth_premium_pct.toFixed(1) + '%' : '\u2014') + '</div>' +
+          '</div>' +
+          '<div class="ode-epv-comparison-col">' +
+            '<div class="ode-epv-col-header">Normalized (' + (normalized.period_years || 5) + 'y)</div>' +
+            '<div class="ode-epv-col-row">EBIT: $' + _epvFmtMoneyShort(normalized.ebit) + '</div>' +
+            '<div class="ode-epv-col-row">EPV Total: $' + _epvFmtMoneyShort(normalized.epv_total) + '</div>' +
+            '<div class="ode-epv-col-row">Per Share: ' + _epvFmtPrice(normalized.fair_value_per_share) + '</div>' +
+            '<div class="ode-epv-col-row">Premium: ' + (normalized.growth_premium_pct != null ? normalized.growth_premium_pct.toFixed(1) + '%' : '\u2014') + '</div>' +
+          '</div>' +
+        '</div>';
+    } else {
+      // Flat format: single summary
+      var currentPrice = epv.current_price;
+      valuationHtml =
+        '<div class="ode-epv-section-title">Valuation Summary</div>' +
+        '<div class="ode-epv-inputs-grid">' +
+          '<div class="ode-epv-input-row"><span class="ode-epv-input-label">EPV Total</span>' +
+            '<span class="ode-epv-input-value">$' + _epvFmtMoneyShort(epv.epv_total) + '</span></div>' +
+          '<div class="ode-epv-input-row"><span class="ode-epv-input-label">Fair Value / Share</span>' +
+            '<span class="ode-epv-input-value">' + _epvFmtPrice(epv.fair_value_per_share) + '</span></div>' +
+          (currentPrice != null ? '<div class="ode-epv-input-row"><span class="ode-epv-input-label">Current Price</span>' +
+            '<span class="ode-epv-input-value">$' + currentPrice.toFixed(2) + '</span></div>' : '') +
+          '<div class="ode-epv-input-row"><span class="ode-epv-input-label">Growth Premium</span>' +
+            '<span class="ode-epv-input-value">' + (epv.growth_premium_pct != null ? (epv.growth_premium_pct >= 0 ? '+' : '') + epv.growth_premium_pct.toFixed(1) + '%' : '\u2014') +
+            (epv.growth_premium_label ? ' <span class="ode-epv-input-source">(' + _esc(_epvFmtLabel(epv.growth_premium_label)) + ')</span>' : '') +
+            '</span></div>' +
+        '</div>';
+    }
+
+    // Interpretation block
+    var interpHtml = '';
+    if (epv.interpretation) {
+      interpHtml =
+        '<div class="ode-piotroski-interpretation" style="margin-bottom:16px">' +
+          _esc(epv.interpretation) +
+        '</div>';
+    }
+
+    var overlay = document.createElement('div');
+    overlay.className = 'ode-modal-overlay';
+    overlay.id = 'ode-epv-modal';
+
+    overlay.innerHTML =
+      '<div class="ode-modal" role="dialog" aria-labelledby="epv-modal-title">' +
+        '<div class="ode-modal-header">' +
+          '<div class="ode-modal-title" id="epv-modal-title">Earnings Power Value Analysis</div>' +
+          '<button class="ode-modal-close" aria-label="Close">\u00D7</button>' +
+        '</div>' +
+        '<div class="ode-modal-body">' +
+          emergenceHtml +
+          interpHtml +
+          historyHtml +
+          (inputsHtml ? '<div class="ode-epv-section-title">Calculation Inputs</div><div class="ode-epv-inputs-grid">' + inputsHtml + '</div>' : '') +
+          valuationHtml +
+          '<div class="ode-modal-footer-link">' +
+            '<a href="https://en.wikipedia.org/wiki/Earnings_Power_Value" target="_blank" rel="noopener">' +
+              'About Earnings Power Value (Greenwald) \u2192' +
+            '</a>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    document.body.appendChild(overlay);
+
+    var close = function() { overlay.remove(); document.removeEventListener('keydown', escHandler); };
+    overlay.querySelector('.ode-modal-close').addEventListener('click', close);
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) close();
+    });
+    var escHandler = function(e) {
+      if (e.key === 'Escape') close();
+    };
+    document.addEventListener('keydown', escHandler);
   }
 
   function renderEntryAndTargets(data) {
@@ -969,23 +1306,59 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
         var tech = (ea.components ? ea.components.technical : null) || {};
         var rec = ea.recommendation;
 
+        // Signal badge
+        var signalClass = 'neutral';
+        if (rec) {
+          var recLower = rec.toLowerCase();
+          if (recLower === 'buy' || recLower === 'strong buy') signalClass = 'bullish';
+          else if (recLower === 'sell' || recLower === 'strong sell') signalClass = 'bearish';
+        }
+        var signalHtml = rec
+          ? '<div class="ode-entry-signal ode-entry-signal-' + signalClass + '">' +
+              _esc(rec) + (ea.conviction != null ? ' \u00b7 ' + ea.conviction.toFixed(0) + '% conviction' : '') +
+            '</div>'
+          : '';
+
+        // Suggested entry callout
+        var entryCallout = ea.suggested_entry != null
+          ? '<div class="ode-entry-callout">' +
+              '<div class="ode-entry-callout-label">Suggested Entry</div>' +
+              '<div class="ode-entry-callout-price">$' + ea.suggested_entry.toFixed(2) + '</div>' +
+            '</div>'
+          : '';
+
+        // Key levels row: Stop / Target / R:R
+        var levels = [];
+        if (ea.suggested_stop != null) {
+          levels.push('<div class="ode-entry-level"><span class="ode-entry-level-label">Stop</span><span class="ode-entry-level-value" style="color: #f08070;">$' + ea.suggested_stop.toFixed(2) + '</span></div>');
+        }
+        if (ea.price_target != null) {
+          levels.push('<div class="ode-entry-level"><span class="ode-entry-level-label">Target</span><span class="ode-entry-level-value" style="color: #60d890;">$' + ea.price_target.toFixed(2) + '</span></div>');
+        }
+        if (ea.risk_reward) {
+          levels.push('<div class="ode-entry-level"><span class="ode-entry-level-label">R / R</span><span class="ode-entry-level-value">' + _esc(ea.risk_reward) + '</span></div>');
+        }
+        var levelsHtml = levels.length
+          ? '<div class="ode-entry-levels">' + levels.join('') + '</div>'
+          : '';
+
+        // Technical context
+        var techItems = [];
+        techItems.push('<span>Trend: ' + _esc(tech.ma_signal || '\u2014') + '</span>');
+        techItems.push('<span>RSI: ' + (tech.rsi != null ? tech.rsi.toFixed(1) : '\u2014') + (tech.rsi_signal ? ' (' + _esc(tech.rsi_signal) + ')' : '') + '</span>');
+        if (tech.sma_50 != null) techItems.push('<span>SMA50: $' + tech.sma_50.toFixed(2) + '</span>');
+        if (tech.sma_200 != null) techItems.push('<span>SMA200: $' + tech.sma_200.toFixed(2) + '</span>');
+        if (tech.percentile_52w != null) techItems.push('<span>52w: ' + (tech.percentile_52w * 100).toFixed(0) + 'th pctl</span>');
+        var techHtml = '<div class="ode-entry-tech">' + techItems.join('') + '</div>';
+
+        // Summary
+        var summaryHtml = ea.summary
+          ? '<div class="ode-entry-summary">' + _esc(ea.summary) + '</div>'
+          : '';
+
         entryCard.innerHTML =
           '<div class="ode-valuation-title">Technical Entry</div>' +
-          '<div class="ode-valuation-detail">' +
-            (rec ? '<div style="margin-bottom: 8px;"><strong>Signal:</strong> ' + _esc(rec) + ' (' + (ea.conviction != null ? ea.conviction.toFixed(0) + '% conviction' : '\u2014') + ')</div>' : '') +
-            '<div><strong>Trend:</strong> ' + _esc(tech.ma_signal || '\u2014') + '</div>' +
-            '<div><strong>RSI:</strong> ' + (tech.rsi != null ? tech.rsi.toFixed(1) : '\u2014') + (tech.rsi_signal ? ' (' + _esc(tech.rsi_signal) + ')' : '') + '</div>' +
-            '<div><strong>SMA 50:</strong> ' + (tech.sma_50 != null ? '$' + tech.sma_50.toFixed(2) : '\u2014') + '</div>' +
-            '<div><strong>SMA 200:</strong> ' + (tech.sma_200 != null ? '$' + tech.sma_200.toFixed(2) : '\u2014') + '</div>' +
-            (tech.percentile_52w != null ? '<div><strong>52w Range:</strong> ' + (tech.percentile_52w * 100).toFixed(0) + 'th percentile</div>' : '') +
-            '<div style="margin-top: 12px;">' +
-              (ea.suggested_entry != null ? '<div><strong>Suggested Entry:</strong> $' + ea.suggested_entry.toFixed(2) + '</div>' : '') +
-              (ea.suggested_stop != null ? '<div style="color: #f08070;"><strong>Suggested Stop:</strong> $' + ea.suggested_stop.toFixed(2) + '</div>' : '') +
-              (ea.price_target != null ? '<div><strong>Target:</strong> $' + ea.price_target.toFixed(2) + '</div>' : '') +
-              (ea.risk_reward ? '<div><strong>R/R:</strong> ' + _esc(ea.risk_reward) + '</div>' : '') +
-            '</div>' +
-            (ea.summary ? '<div style="margin-top: 12px;">' + _esc(ea.summary) + '</div>' : '') +
-          '</div>';
+          signalHtml + entryCallout + levelsHtml + techHtml + summaryHtml;
       } else {
         entryCard.innerHTML = '<div class="ode-valuation-title">Entry Analysis</div><div class="ode-valuation-detail">Not available</div>';
       }
@@ -1591,6 +1964,145 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
     };
   }
 
+  // === DEEP RESEARCH PROMPT ===
+
+  function _enableDeepResearchButton(symbol) {
+    if (deepResearchBtn) {
+      deepResearchBtn.disabled = false;
+      _currentResearchSymbol = symbol;
+    }
+  }
+
+  function _disableDeepResearchButton() {
+    if (deepResearchBtn) {
+      deepResearchBtn.disabled = true;
+      _currentResearchSymbol = null;
+    }
+  }
+
+  function _handleDeepResearchClick() {
+    if (!_currentResearchSymbol) return;
+
+    var modal = scope.querySelector('#ode-research-prompt-modal');
+    var loading = scope.querySelector('#ode-research-prompt-loading');
+    var errorEl = scope.querySelector('#ode-research-prompt-error');
+    var errorMsg = scope.querySelector('#ode-research-prompt-error-message');
+    var content = scope.querySelector('#ode-research-prompt-content');
+    var textarea = scope.querySelector('#ode-research-prompt-textarea');
+    var charcount = scope.querySelector('#ode-research-prompt-charcount');
+    var meta = scope.querySelector('#ode-research-prompt-meta');
+    var copyBtn = scope.querySelector('#ode-research-prompt-copy');
+
+    // Show modal in loading state
+    modal.hidden = false;
+    loading.hidden = false;
+    errorEl.hidden = true;
+    content.hidden = true;
+    copyBtn.disabled = true;
+    copyBtn.classList.remove('copied');
+    copyBtn.textContent = 'Copy to Clipboard';
+    meta.textContent = '';
+
+    fetch('/api/company-evaluator/on-demand/research-prompt/' + encodeURIComponent(_currentResearchSymbol))
+      .then(function(resp) { return resp.json(); })
+      .then(function(data) {
+        loading.hidden = true;
+
+        if (!data.ok) {
+          errorEl.hidden = false;
+          errorMsg.textContent = data.error || 'Failed to generate research prompt.';
+          return;
+        }
+
+        // Success — show content
+        content.hidden = false;
+        textarea.value = data.prompt;
+        charcount.textContent = data.prompt.length.toLocaleString() + ' characters';
+        copyBtn.disabled = false;
+
+        // Meta line
+        var ageStr = _formatPromptAge(data.evaluation_age_seconds);
+        meta.textContent = (data.company_name || data.symbol) + (ageStr ? ' \u00b7 ' + ageStr : '');
+      })
+      .catch(function(err) {
+        loading.hidden = true;
+        errorEl.hidden = false;
+        errorMsg.textContent = 'Network error: ' + err.message;
+      });
+  }
+
+  function _formatPromptAge(seconds) {
+    if (seconds == null) return '';
+    if (seconds < 60) return 'evaluated ' + seconds + 's ago';
+    if (seconds < 3600) return 'evaluated ' + Math.round(seconds / 60) + 'm ago';
+    if (seconds < 86400) return 'evaluated ' + Math.round(seconds / 3600) + 'h ago';
+    return 'evaluated ' + Math.round(seconds / 86400) + 'd ago';
+  }
+
+  function _closeResearchPromptModal() {
+    var modal = scope.querySelector('#ode-research-prompt-modal');
+    if (modal) modal.hidden = true;
+  }
+
+  function _copyResearchPromptToClipboard() {
+    var textarea = scope.querySelector('#ode-research-prompt-textarea');
+    var copyBtn = scope.querySelector('#ode-research-prompt-copy');
+    if (!textarea || !textarea.value) return;
+
+    var onCopied = function() {
+      copyBtn.textContent = '\u2713 Copied';
+      copyBtn.classList.add('copied');
+      setTimeout(function() {
+        copyBtn.textContent = 'Copy to Clipboard';
+        copyBtn.classList.remove('copied');
+      }, 2000);
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(textarea.value).then(onCopied).catch(function() {
+        textarea.select();
+        document.execCommand('copy');
+        onCopied();
+      });
+    } else {
+      textarea.select();
+      document.execCommand('copy');
+      onCopied();
+    }
+  }
+
+  function _onResearchEscKey(e) {
+    if (e.key === 'Escape') {
+      var modal = scope.querySelector('#ode-research-prompt-modal');
+      if (modal && !modal.hidden) _closeResearchPromptModal();
+    }
+  }
+
+  function _onResearchOverlayClick(e) {
+    var modal = scope.querySelector('#ode-research-prompt-modal');
+    if (e.target === modal) _closeResearchPromptModal();
+  }
+
+  function _initDeepResearchButton() {
+    if (deepResearchBtn) {
+      deepResearchBtn.addEventListener('click', _handleDeepResearchClick);
+    }
+
+    var closeBtn = scope.querySelector('#ode-research-prompt-close');
+    if (closeBtn) closeBtn.addEventListener('click', _closeResearchPromptModal);
+
+    var cancelModalBtn = scope.querySelector('#ode-research-prompt-cancel');
+    if (cancelModalBtn) cancelModalBtn.addEventListener('click', _closeResearchPromptModal);
+
+    var copyBtn = scope.querySelector('#ode-research-prompt-copy');
+    if (copyBtn) copyBtn.addEventListener('click', _copyResearchPromptToClipboard);
+
+    document.addEventListener('keydown', _onResearchEscKey);
+
+    var modal = scope.querySelector('#ode-research-prompt-modal');
+    if (modal) modal.addEventListener('click', _onResearchOverlayClick);
+  }
+
   // === CLEANUP (returned to router) ===
   return function cleanup() {
     stopPolling();
@@ -1598,6 +2110,7 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
     if (form) form.removeEventListener('submit', handleSubmit);
     if (cancelBtn) cancelBtn.removeEventListener('click', handleCancel);
     if (retryBtn) retryBtn.removeEventListener('click', handleRetry);
+    document.removeEventListener('keydown', _onResearchEscKey);
     if (window.BenTradeComponents && window.BenTradeComponents.destroyPriceChart) {
       window.BenTradeComponents.destroyPriceChart('ode-chart-container');
     }

@@ -18,6 +18,13 @@
             <button type="submit" id="ode-analyze-btn" class="ode-button">
                 <span class="ode-button-text">Analyze</span>
             </button>
+            <button id="ode-deep-research-btn"
+                    class="ode-deep-research-btn"
+                    type="button"
+                    title="Generate a deep research prompt to paste into a chat conversation"
+                    disabled>
+                Deep Research Prompt
+            </button>
         </form>
     </section>
 
@@ -88,13 +95,14 @@
             <div class="ode-smart-money" id="ode-smart-money"></div>
         </div>
 
-        <!-- Valuation models row: DCF, EVA, Comps -->
+        <!-- Valuation models row: DCF, EVA, Comps, EPV -->
         <div class="ode-section">
             <div class="ode-section-title">Valuation Models</div>
             <div class="ode-valuation-grid">
                 <div class="ode-valuation-card" id="ode-dcf-card"></div>
                 <div class="ode-valuation-card" id="ode-eva-card"></div>
                 <div class="ode-valuation-card" id="ode-comps-card"></div>
+                <div class="ode-valuation-card" id="ode-epv-card"></div>
             </div>
         </div>
 
@@ -129,4 +137,52 @@
         <!-- Metadata footer -->
         <div class="ode-metadata-footer" id="ode-metadata-footer"></div>
     </section>
+
+    <!-- Deep Research Prompt modal -->
+    <div class="ode-modal-overlay" id="ode-research-prompt-modal" hidden>
+        <div class="ode-modal ode-research-prompt-dialog" role="dialog" aria-labelledby="research-prompt-title">
+            <div class="ode-modal-header">
+                <div class="ode-modal-title" id="research-prompt-title">
+                    Deep Research Prompt
+                </div>
+                <button class="ode-modal-close" aria-label="Close" id="ode-research-prompt-close">&times;</button>
+            </div>
+            <div class="ode-modal-body">
+                <div class="ode-research-prompt-meta" id="ode-research-prompt-meta"></div>
+
+                <!-- Loading state -->
+                <div class="ode-research-prompt-loading" id="ode-research-prompt-loading">
+                    <div class="ode-loading-spinner" style="width:32px;height:32px;margin-bottom:12px;"></div>
+                    <div>Generating prompt...</div>
+                </div>
+
+                <!-- Error state -->
+                <div class="ode-research-prompt-error" id="ode-research-prompt-error" hidden>
+                    <div class="ode-error-icon">&#x26A0;</div>
+                    <div class="ode-error-message" id="ode-research-prompt-error-message"></div>
+                </div>
+
+                <!-- Success state -->
+                <div class="ode-research-prompt-content" id="ode-research-prompt-content" hidden>
+                    <div class="ode-research-prompt-instructions">
+                        Paste this prompt into a chat conversation with Claude, ChatGPT,
+                        or Gemini. The model will use web search to fill in current details
+                        and provide a position-sizing recommendation.
+                    </div>
+                    <textarea
+                        id="ode-research-prompt-textarea"
+                        class="ode-research-prompt-textarea"
+                        spellcheck="false"
+                        rows="20"></textarea>
+                    <div class="ode-research-prompt-charcount" id="ode-research-prompt-charcount"></div>
+                </div>
+            </div>
+            <div class="ode-modal-footer">
+                <button class="ode-btn-secondary" id="ode-research-prompt-cancel">Close</button>
+                <button class="ode-btn-primary" id="ode-research-prompt-copy" disabled>
+                    Copy to Clipboard
+                </button>
+            </div>
+        </div>
+    </div>
 </div>

@@ -542,6 +542,39 @@ async def proxy_on_demand_cancel_job(job_id: str):
         raise HTTPException(503, detail=_unavailable_detail())
 
 
+@router.get("/on-demand/research-prompt/{symbol}")
+async def proxy_research_prompt(symbol: str):
+    """Proxy: Get deep research prompt for a symbol."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{_base_url()}/api/on-demand/research-prompt/{symbol.upper()}"
+            )
+            if resp.status_code != 200:
+                return {
+                    "ok": False,
+                    "error": f"Upstream returned {resp.status_code}",
+                    "symbol": symbol.upper(),
+                }
+            return resp.json()
+    except _CE_CONNECT_ERRORS:
+        return {
+            "ok": False,
+            "error": "Company Evaluator service unavailable",
+            "symbol": symbol.upper(),
+        }
+    except Exception as exc:
+        _log.error(
+            "event=research_prompt_proxy_failed symbol=%s error=%s",
+            symbol, exc,
+        )
+        return {
+            "ok": False,
+            "error": f"Proxy error: {exc}",
+            "symbol": symbol.upper(),
+        }
+
+
 # ── Chart data proxy ───────────────────────────────────────────────────
 
 @router.get("/charts/{symbol}")
