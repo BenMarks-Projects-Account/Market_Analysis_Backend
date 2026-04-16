@@ -1,28 +1,28 @@
-"""Flows & Positioning Service — orchestrator layer.
+"""Flows & Positioning Service — Phase 1 rebuild.
 
-Coordinates data fetching, engine computation, and caching.
-Pattern mirrors CrossAssetMacroService:
-  1. Fetch raw data (via FlowsPositioningDataProvider)
-  2. Invoke engine (via flows_positioning_engine.compute_flows_positioning_scores)
-  3. Cache result (via TTLCache)
-  4. Return structured payload
+Orchestrator layer around the new ``flows_positioning_engine``:
+  1. Invoke async engine (which fetches COT + RS bars via FMPClient and
+     runs LLM interpretation inline).
+  2. Cache result.
+  3. Attach ``normalized`` and ``dashboard_metadata``.
+  4. Expose ``get_flows_positioning_analysis`` and ``run_model_analysis``.
 
-Caching:
-  - Engine result cached for FLOWS_POSITIONING_CACHE_TTL seconds (default 90)
-  - Cache key: 'flows_positioning'
-  - Forced refresh via `force=True` parameter
+Public interface is unchanged from the pre-Phase-1 service so
+``MarketIntelligenceRunner``, ``DataPopulationService``, API route
+handlers, and ``RegimeService`` remain wiring-compatible. The only
+change is the constructor — it now takes an ``FMPClient`` instead of a
+``FlowsPositioningDataProvider``.
 """
-
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from app.services.flows_positioning_data_provider import FlowsPositioningDataProvider
-from app.services.flows_positioning_engine import compute_flows_positioning_scores
 from app.services.dashboard_metadata_contract import build_dashboard_metadata
 from app.services.engine_output_contract import normalize_engine_output
+from app.services.flows_positioning_engine import compute_flows_positioning_scores
 from app.utils.cache import TTLCache
 
 logger = logging.getLogger(__name__)
@@ -31,36 +31,28 @@ FLOWS_POSITIONING_CACHE_TTL = 90
 
 
 class FlowsPositioningService:
-    """Service layer for the Flows & Positioning engine."""
+    """Service layer for the Flows & Positioning engine (Phase 1)."""
 
     def __init__(
         self,
-        data_provider: FlowsPositioningDataProvider,
+        fmp_client: Any,
         cache: TTLCache,
         *,
         ttl_seconds: int = FLOWS_POSITIONING_CACHE_TTL,
     ) -> None:
-        self.data_provider = data_provider
+        self.fmp_client = fmp_client
         self.cache = cache
         self.ttl_seconds = ttl_seconds
 
     async def get_flows_positioning_analysis(
         self, *, force: bool = False
     ) -> dict[str, Any]:
-        """Return full flows & positioning analysis.
+        """Return the full flows & positioning analysis.
 
-        Parameters
-        ----------
-        force : bool
-            If True, bypass cache and recompute.
-
-        Returns
-        -------
-        dict with:
-          engine_result: full engine output
-          data_quality: summary of data coverage
-          compute_duration_s: wall-clock time
-          as_of: ISO timestamp
+        Always hits the deterministic + LLM path unless served from cache.
+        The engine's internal LLM interpretation is the single source of
+        narrative / risks / confidence_qualifier — no separate LLM call
+        is made in ``run_model_analysis``.
         """
         cache_key = "flows_positioning"
 
@@ -75,27 +67,9 @@ class FlowsPositioningService:
         start = datetime.now(timezone.utc)
 
         try:
-            raw_data = await self.data_provider.fetch_flows_positioning_data()
-
-            engine_result = compute_flows_positioning_scores(
-                positioning_data=raw_data["positioning_data"],
-                crowding_data=raw_data["crowding_data"],
-                squeeze_data=raw_data["squeeze_data"],
-                flow_data=raw_data["flow_data"],
-                stability_data=raw_data["stability_data"],
-                source_meta=raw_data["source_meta"],
-            )
-
+            engine_result = await compute_flows_positioning_scores(self.fmp_client)
             duration = (datetime.now(timezone.utc) - start).total_seconds()
             computed_at = datetime.now(timezone.utc).isoformat()
-
-            # Surface per-source errors so frontend can show degraded state
-            source_errors = raw_data.get("source_errors", {})
-            if source_errors:
-                for src, err_msg in source_errors.items():
-                    engine_result.setdefault("warnings", []).append(
-                        f"Source '{src}' failed: {err_msg}"
-                    )
 
             payload = {
                 "engine_result": engine_result,
@@ -104,7 +78,6 @@ class FlowsPositioningService:
                     "confidence_score": engine_result.get("confidence_score", 0),
                     "missing_inputs_count": len(engine_result.get("missing_inputs", [])),
                     "warning_count": len(engine_result.get("warnings", [])),
-                    "source_errors": source_errors,
                 },
                 "cache_info": {
                     "cache_hit": False,
@@ -120,26 +93,26 @@ class FlowsPositioningService:
             payload["dashboard_metadata"] = build_dashboard_metadata(
                 "flows_positioning",
                 engine_result=engine_result,
-                source_errors=source_errors,
+                source_errors={},
                 compute_duration_s=round(duration, 2),
             )
 
             await self.cache.set(cache_key, payload, self.ttl_seconds)
             logger.info(
-                "event=flows_positioning_compute_complete score=%.2f label=%s "
+                "event=flows_positioning_compute_complete score=%s label=%s "
                 "duration_s=%.1f cached_ttl=%d",
-                engine_result.get("score", 0),
+                engine_result.get("score"),
                 engine_result.get("label", "unknown"),
                 duration,
                 self.ttl_seconds,
             )
-
             return payload
 
         except Exception as exc:
             logger.error(
                 "event=flows_positioning_compute_failed error=%s",
-                exc, exc_info=True,
+                exc,
+                exc_info=True,
             )
             return {
                 "engine_result": {
@@ -153,7 +126,11 @@ class FlowsPositioningService:
                     "summary": f"Engine computation failed: {exc}",
                     "pillar_scores": {},
                     "pillar_explanations": {},
-                    "strategy_bias": {},
+                    "pillar_status": {
+                        "positioning": "unavailable",
+                        "flows": "unavailable",
+                        "dealer_hedging": "deferred",
+                    },
                     "positive_contributors": [],
                     "negative_contributors": [],
                     "conflicting_signals": [],
@@ -161,7 +138,6 @@ class FlowsPositioningService:
                     "warnings": [f"Engine error: {exc}"],
                     "missing_inputs": [],
                     "diagnostics": {},
-                    "raw_inputs": {},
                 },
                 "data_quality": {
                     "signal_quality": "low",
@@ -180,38 +156,75 @@ class FlowsPositioningService:
 
     # ── Model (LLM) Analysis ────────────────────────────────────
 
-    def _run_model_analysis(
-        self, engine_result: dict[str, Any]
+    async def run_model_analysis(
+        self, *, force: bool = False
     ) -> dict[str, Any]:
-        """Attempt LLM-based flows & positioning analysis.
+        """Return the LLM-sourced fields already computed inside the engine.
 
-        Attaches ``normalized`` key via model_analysis_contract.
+        In the Phase 1 architecture the LLM interpretation runs *inside*
+        the engine (``flows_llm_interpretation``), so this method is a
+        read-through of the cached engine result rather than a second
+        model call.
         """
-        from common.model_sanitize import classify_model_error, user_facing_error_message
         from app.services.model_analysis_contract import wrap_service_model_response
+        from common.model_sanitize import classify_model_error, user_facing_error_message
         import time as _time
 
+        model_cache_key = "flows_positioning:model"
+
+        if not force:
+            cached = await self.cache.get(model_cache_key)
+            if cached is not None:
+                logger.info("event=flows_positioning_model_cache_hit")
+                return cached
+
+        logger.info("event=flows_positioning_model_analysis_start force=%s", force)
         t0 = _time.monotonic()
         requested_at = datetime.now(timezone.utc).isoformat()
 
         try:
-            from common.model_analysis import analyze_flows_positioning
-            result = analyze_flows_positioning(
-                engine_result=engine_result,
-                timeout=180,
-                retries=0,
-            )
+            base = await self.get_flows_positioning_analysis(force=False)
+            engine_result = base.get("engine_result", {}) or {}
+
+            # Lift LLM-sourced fields produced inside the engine. If the
+            # engine's LLM path failed, narrative will be None and
+            # llm_risks empty — propagate that honestly rather than
+            # fabricating a filler narrative.
+            narrative = engine_result.get("narrative")
+            llm_risks = engine_result.get("llm_risks", []) or []
+            qualifier = engine_result.get("confidence_qualifier")
+
+            if narrative is None:
+                outcome = {
+                    "model_analysis": None,
+                    "error": {
+                        "kind": "UNAVAILABLE",
+                        "message": "LLM interpretation was skipped or failed for this engine run.",
+                    },
+                }
+            else:
+                outcome = {
+                    "model_analysis": {
+                        "narrative": narrative,
+                        "risks": llm_risks,
+                        "confidence_qualifier": qualifier,
+                        "score": engine_result.get("score"),
+                        "label": engine_result.get("label"),
+                        "summary": engine_result.get("summary"),
+                        "trader_takeaway": engine_result.get("trader_takeaway"),
+                    },
+                }
+
             duration_ms = int((_time.monotonic() - t0) * 1000)
-            logger.info(
-                "event=flows_positioning_model_analysis_ok score=%s label=%s",
-                result.get("score"),
-                result.get("label"),
-            )
-            outcome = {"model_analysis": result}
-            return wrap_service_model_response(
+            wrapped = wrap_service_model_response(
                 "flows_positioning", outcome,
                 requested_at=requested_at, duration_ms=duration_ms,
             )
+            wrapped["as_of"] = datetime.now(timezone.utc).isoformat()
+
+            await self.cache.set(model_cache_key, wrapped, self.ttl_seconds)
+            return wrapped
+
         except Exception as exc:
             duration_ms = int((_time.monotonic() - t0) * 1000)
             error_kind = classify_model_error(exc)
@@ -228,59 +241,3 @@ class FlowsPositioningService:
                 "flows_positioning", outcome,
                 requested_at=requested_at, duration_ms=duration_ms,
             )
-
-    async def run_model_analysis(
-        self, *, force: bool = False
-    ) -> dict[str, Any]:
-        """Run LLM model analysis on flows & positioning data.
-
-        Returns
-        -------
-        dict with:
-          model_analysis: LLM output or None
-          error: dict | None — { kind, message } if model failed
-          as_of: ISO timestamp
-        """
-        import asyncio
-
-        model_cache_key = "flows_positioning:model"
-
-        if not force:
-            cached = await self.cache.get(model_cache_key)
-            if cached is not None:
-                logger.info("event=flows_positioning_model_cache_hit")
-                return cached
-
-        logger.info("event=flows_positioning_model_analysis_start force=%s", force)
-
-        base = await self.get_flows_positioning_analysis(force=False)
-        engine_result = base.get("engine_result", {})
-
-        loop = asyncio.get_running_loop()
-        model_outcome = await loop.run_in_executor(
-            None, self._run_model_analysis, engine_result
-        )
-
-        result: dict[str, Any] = {
-            "model_analysis": model_outcome.get("model_analysis"),
-            "as_of": datetime.now(timezone.utc).isoformat(),
-        }
-
-        if model_outcome.get("error"):
-            result["error"] = model_outcome["error"]
-
-        # Carry normalized contract through for downstream consumers
-        if "normalized" in model_outcome:
-            result["normalized"] = model_outcome["normalized"]
-
-        if result["model_analysis"] is not None:
-            await self.cache.set(model_cache_key, result, self.ttl_seconds)
-
-        has_model = result["model_analysis"] is not None
-        logger.info(
-            "event=flows_positioning_model_analysis_complete has_model=%s cached_ttl=%d",
-            has_model,
-            self.ttl_seconds if has_model else 0,
-        )
-
-        return result

@@ -41,6 +41,13 @@ _DEFERRED_PILLAR_DISCLOSURE = (
     "Do not speculate about dealer hedging, gamma exposure, or option positioning. "
     "You may briefly note the pillar's absence if it's relevant to your "
     "confidence_qualifier — nothing more.\n"
+    "\n"
+    "BANNED VOCABULARY: Under no circumstance may the following terms appear in "
+    "your output (narrative or risks): 'hedging', 'hedge', 'hedges', 'hedged', "
+    "'gamma', 'dealer', 'dealers', 'GEX', 'option positioning', 'options positioning', "
+    "'max pain'. These concepts belong to the deferred pillar and are out of scope. "
+    "If you feel the need to reference dealer positioning, simply say the third "
+    "pillar is unavailable.\n"
 )
 
 _TASK_PROMPT = """\
@@ -89,6 +96,27 @@ _RISKS_MAX_ITEMS = 2
 _LLM_TIMEOUT_SECONDS = 30.0
 _LLM_TEMPERATURE = 0.2
 
+# Terms tied to the deferred dealer-hedging pillar. If any appear in the
+# LLM output we discard the offending field — the model has crossed the
+# scope boundary even with the banned-vocab prompt in place.
+_BANNED_TERMS = (
+    "hedging", "hedge", "hedges", "hedged",
+    "gamma",
+    "dealer", "dealers",
+    "gex",
+    "option positioning", "options positioning",
+    "max pain",
+)
+
+
+def _contains_banned_term(text: str) -> str | None:
+    """Return the first banned term found in `text` (case-insensitive), else None."""
+    lowered = text.lower()
+    for term in _BANNED_TERMS:
+        if term in lowered:
+            return term
+    return None
+
 
 def _validate_and_coerce(raw: dict[str, Any]) -> dict[str, Any] | None:
     """Validate the LLM response and coerce where safe.
@@ -101,13 +129,30 @@ def _validate_and_coerce(raw: dict[str, Any]) -> dict[str, Any] | None:
         return None
     narrative = narrative.strip()[:_NARRATIVE_MAX]
 
+    # Scope enforcement: narrative must not reference the deferred pillar.
+    bad = _contains_banned_term(narrative)
+    if bad is not None:
+        logger.warning(
+            "event=flows_llm_interpretation_banned_term_in_narrative term=%r",
+            bad,
+        )
+        return None
+
     risks_in = raw.get("risks", [])
     if not isinstance(risks_in, list):
         risks_in = []
     risks: list[str] = []
     for item in risks_in[:_RISKS_MAX_ITEMS]:
         if isinstance(item, str) and item.strip():
-            risks.append(item.strip()[:_RISK_MAX])
+            cleaned = item.strip()[:_RISK_MAX]
+            bad_risk = _contains_banned_term(cleaned)
+            if bad_risk is not None:
+                logger.warning(
+                    "event=flows_llm_interpretation_banned_term_in_risk term=%r",
+                    bad_risk,
+                )
+                continue
+            risks.append(cleaned)
 
     qualifier = raw.get("confidence_qualifier")
     if qualifier not in _QUALIFIER_VALID:

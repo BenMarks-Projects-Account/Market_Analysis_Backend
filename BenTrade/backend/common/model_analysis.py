@@ -3356,283 +3356,85 @@ def analyze_cross_asset_macro(
 # FLOWS & POSITIONING MODEL ANALYSIS
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Fields excluded from flows positioning model input to prevent anchoring
-_FLOWS_POSITIONING_EXCLUDED_FIELDS = [
-    "score",
-    "label",
-    "short_label",
-    "summary",
-    "trader_takeaway",
-    "positive_contributors",
-    "negative_contributors",
-    "conflicting_signals",
-    "confidence_score",
-    "signal_quality",
-    "strategy_bias",
-]
-
-
-def _extract_flows_positioning_raw_evidence(engine_result: dict[str, Any]) -> dict[str, Any]:
-    """Build raw evidence for the flows positioning model — NO derived scores/labels.
-
-    Includes only:
-      - raw_inputs: positioning, crowding, squeeze, flow, stability sub-dicts
-      - pillar_scores: the 5 numeric scores
-      - pillar_weights: how pillars are weighted
-      - warnings: data quality warnings
-      - missing_inputs: what data was unavailable
-    """
-    raw_inputs = engine_result.get("raw_inputs", {})
-    return {
-        "raw_inputs": {
-            "positioning": raw_inputs.get("positioning", {}),
-            "crowding": raw_inputs.get("crowding", {}),
-            "squeeze": raw_inputs.get("squeeze", {}),
-            "flow": raw_inputs.get("flow", {}),
-            "stability": raw_inputs.get("stability", {}),
-        },
-        "pillar_scores": engine_result.get("pillar_scores", {}),
-        "pillar_weights": engine_result.get("pillar_weights", {}),
-        "warnings": engine_result.get("warnings", []),
-        "missing_inputs": engine_result.get("missing_inputs", []),
-    }
-
-
-def _coerce_flows_positioning_model_output(candidate: Any) -> dict[str, Any] | None:
-    """Normalize LLM flows & positioning analysis output into a consistent schema."""
-    if not isinstance(candidate, dict):
-        return None
-
-    label = candidate.get("label") or "ANALYSIS"
-    score = candidate.get("score")
-    confidence = candidate.get("confidence")
-    summary = _safe_summary_text(
-        candidate.get("summary"), fallback="Model did not provide a summary."
-    )
-
-    try:
-        score = max(0.0, min(100.0, float(score)))
-    except (TypeError, ValueError):
-        score = None
-
-    try:
-        confidence = max(0.0, min(1.0, float(confidence) if confidence is not None else 0.5))
-    except (TypeError, ValueError):
-        confidence = 0.5
-
-    result: dict[str, Any] = {
-        "label": str(label).strip().upper(),
-        "score": round(score, 1) if score is not None else None,
-        "confidence": round(confidence, 2),
-        "summary": str(summary).strip(),
-    }
-
-    pa = candidate.get("pillar_analysis")
-    if isinstance(pa, dict):
-        result["pillar_analysis"] = {
-            k: str(v).strip() if isinstance(v, str) else v
-            for k, v in pa.items()
-        }
-    else:
-        result["pillar_analysis"] = {}
-
-    fd = candidate.get("flow_drivers")
-    if isinstance(fd, dict):
-        result["flow_drivers"] = {
-            "supportive_factors": _coerce_string_list(fd.get("supportive_factors")) or [],
-            "risk_factors": _coerce_string_list(fd.get("risk_factors")) or [],
-            "ambiguous_factors": _coerce_string_list(fd.get("ambiguous_factors")) or [],
-        }
-    else:
-        result["flow_drivers"] = {
-            "supportive_factors": [],
-            "risk_factors": [],
-            "ambiguous_factors": [],
-        }
-
-    ti = candidate.get("trading_implications")
-    if isinstance(ti, dict):
-        result["trading_implications"] = {
-            "continuation_support": str(ti.get("continuation_support", "")).strip(),
-            "reversal_risk": str(ti.get("reversal_risk", "")).strip(),
-            "position_sizing": str(ti.get("position_sizing", "")).strip(),
-            "strategy_recommendation": str(ti.get("strategy_recommendation", "")).strip(),
-            "squeeze_guidance": str(ti.get("squeeze_guidance", "")).strip(),
-        }
-    else:
-        result["trading_implications"] = {}
-
-    result["uncertainty_flags"] = _coerce_string_list(candidate.get("uncertainty_flags")) or []
-
-    ta = candidate.get("trader_takeaway")
-    result["trader_takeaway"] = str(ta).strip() if ta else ""
-
-    return result
+# Flows & Positioning Phase 1 uses the NEW engine (app.services.flows.*) which
+# runs deterministic pillar composition AND LLM narrative interpretation inline.
+# This function is now a thin pass-through that lifts the pre-computed
+# narrative, risks, and confidence qualifier from the engine_result into a
+# legacy-shaped response for any remaining callers. No second LLM call is made.
 
 
 def analyze_flows_positioning(
     *,
     engine_result: dict[str, Any],
-    model_url: str | None = None,
-    retries: int = 0,
-    timeout: int = 180,
+    model_url: str | None = None,  # retained for signature compat, unused
+    retries: int = 0,               # retained for signature compat, unused
+    timeout: int = 180,             # retained for signature compat, unused
 ) -> dict[str, Any]:
-    """Run LLM-based flows & positioning analysis using ONLY raw engine inputs.
+    """Return LLM-sourced fields already computed inside the new engine.
 
-    The model receives raw positioning data (put/call, VIX, futures proxies,
-    sentiment, flow signals) and pillar scores. It does NOT receive the
-    composite label, summary, or trader takeaway to prevent anchoring.
+    Phase 1 rewrite: LLM interpretation now lives inside the engine
+    (``app.services.flows.flows_llm_interpretation``). This function no
+    longer issues its own model call. It reads the narrative / risks /
+    qualifier directly from ``engine_result`` and shapes them into the
+    legacy response schema consumed by downstream callers.
 
-    Returns a dict matching the Flows & Positioning model schema.
+    If the engine's LLM path was skipped or failed, ``narrative`` will be
+    ``None`` in the engine_result and this function surfaces that
+    honestly (no fabricated filler).
     """
-    import logging
+    if not isinstance(engine_result, dict):
+        return {
+            "label": "UNAVAILABLE",
+            "score": None,
+            "confidence": 0.0,
+            "summary": "Flows & positioning engine result was missing or malformed.",
+            "narrative": None,
+            "risks": [],
+            "confidence_qualifier": None,
+            "trader_takeaway": "Insufficient data for flows & positioning read.",
+            "_trace": {"input_mode": "passthrough", "source": "engine_result_missing"},
+        }
 
-    if model_url is None:
-        from app.services.model_router import get_model_endpoint
-        model_url = get_model_endpoint()
+    narrative = engine_result.get("narrative")
+    risks = engine_result.get("llm_risks", []) or []
+    qualifier = engine_result.get("confidence_qualifier")
+    score = engine_result.get("score")
+    label = engine_result.get("label") or "ANALYSIS"
+    summary = engine_result.get("summary") or ""
+    takeaway = engine_result.get("trader_takeaway") or ""
 
-    _log = logging.getLogger("bentrade.model_analysis")
+    try:
+        score_num = max(0.0, min(100.0, float(score))) if score is not None else None
+    except (TypeError, ValueError):
+        score_num = None
 
-    raw_evidence = _extract_flows_positioning_raw_evidence(engine_result)
+    confidence = engine_result.get("confidence_score")
+    try:
+        conf_f = float(confidence) / 100.0 if confidence is not None else 0.5
+        conf_f = max(0.0, min(1.0, conf_f))
+    except (TypeError, ValueError):
+        conf_f = 0.5
 
-    pillar_scores = raw_evidence.get("pillar_scores", {})
-    _log.info(
-        "[MODEL_FLOWS_POS] input_mode=raw_only "
-        "pillar_scores=%s excluded_derived=%s warnings=%d missing=%d",
-        pillar_scores,
-        _FLOWS_POSITIONING_EXCLUDED_FIELDS,
-        len(raw_evidence.get("warnings", [])),
-        len(raw_evidence.get("missing_inputs", [])),
-    )
-
-    prompt = (
-        "You are the BenTrade Flows & Positioning Analyst. Analyze the supplied "
-        "positioning and flow data and return ONLY valid JSON matching the required schema.\n\n"
-        "CRITICAL FORMAT RULES:\n"
-        "- Your response MUST start with { and end with } — no text before or after the JSON\n"
-        "- Do NOT wrap in markdown code fences or ```json blocks\n"
-        "- No prose, no chain-of-thought, no <think> tags\n\n"
-        "Your job: Determine whether current positioning and flows support continuation, "
-        "indicate crowding, create squeeze risk, or signal reversal potential.\n\n"
-        "REQUIRED JSON SCHEMA:\n"
-        "{\n"
-        '  "label": "STRONGLY SUPPORTIVE|SUPPORTIVE|MIXED|FRAGILE|REVERSAL RISK|UNSTABLE",\n'
-        '  "score": <number 0-100>,\n'
-        '  "confidence": <number 0.0-1.0>,\n'
-        '  "summary": "<2-3 sentence flows & positioning assessment>",\n'
-        '  "pillar_analysis": {\n'
-        '    "positioning_pressure": "<interpretation>",\n'
-        '    "crowding_stretch": "<interpretation>",\n'
-        '    "squeeze_unwind_risk": "<interpretation>",\n'
-        '    "flow_direction_persistence": "<interpretation>",\n'
-        '    "positioning_stability": "<interpretation>"\n'
-        "  },\n"
-        '  "flow_drivers": {\n'
-        '    "supportive_factors": ["<factor1>", ...],\n'
-        '    "risk_factors": ["<factor1>", ...],\n'
-        '    "ambiguous_factors": ["<factor1>", ...]\n'
-        "  },\n"
-        '  "trading_implications": {\n'
-        '    "continuation_support": "<strong|moderate|weak|none>",\n'
-        '    "reversal_risk": "<low|moderate|elevated|high>",\n'
-        '    "position_sizing": "<full|reduced|minimal>",\n'
-        '    "strategy_recommendation": "<specific guidance>",\n'
-        '    "squeeze_guidance": "<specific guidance>"\n'
-        "  },\n"
-        '  "uncertainty_flags": ["<flag1>", ...],\n'
-        '  "trader_takeaway": "<one actionable paragraph>"\n'
-        "}\n\n"
-        "SCORING GUIDE:\n"
-        "  85-100 = Strongly Supportive Flows — positioning/flows support continuation\n"
-        "  70-84  = Supportive Positioning — healthy positioning with room to run\n"
-        "  55-69  = Mixed but Tradable — some concerns but tradable\n"
-        "  45-54  = Fragile / Crowded — elevated fragility, reduce exposure\n"
-        "  30-44  = Reversal Risk Elevated — significant risk of positioning unwind\n"
-        "  0-29   = Unstable / Unwind Risk — extreme positioning risk, defensive posture\n\n"
-        "IMPORTANT: Base your analysis on the RAW DATA provided. Do not invent data points.\n\n"
-        "DATA SOURCE AWARENESS (proxy honesty):\n"
-        "  - Phase 1 uses PROXY data derived from VIX and market context, NOT direct\n"
-        "    institutional flow feeds, CFTC COT data, or true dealer gamma reports.\n"
-        "  - Put/call ratio is a VIX-derived PROXY, not exchange-reported.\n"
-        "  - Futures positioning, short interest, systematic allocation, and retail\n"
-        "    sentiment are ALL PROXY ESTIMATES from VIX regime heuristics.\n"
-        "  - Flow direction, persistence, and follow-through are derived proxies.\n"
-        "  - This significantly limits the precision of any positioning assessment.\n"
-        "  - Reflect proxy limitations as LOWER confidence, not as confident assessments.\n"
-        "  - If data is missing, reflect that as lower confidence and note it explicitly.\n"
-        "  - NEVER claim precision that the proxy data cannot support."
-    )
-
-    user_data_str = json.dumps(raw_evidence, ensure_ascii=False, indent=None)
-
-    for forbidden in _FLOWS_POSITIONING_EXCLUDED_FIELDS:
-        if f'"{forbidden}"' in user_data_str:
-            _log.error(
-                "[MODEL_FLOWS_POS] LEAK DETECTED: derived field '%s' in user_data",
-                forbidden,
-            )
-
-    _log.debug("[MODEL_FLOWS_POS] user_data_snapshot=%s", user_data_str[:2000])
-
-    payload = {
-        "messages": [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": user_data_str},
-        ],
-        "max_tokens": 3500,
-        "temperature": 0.0,
-        "stream": False,
+    return {
+        "label": str(label).strip().upper(),
+        "score": round(score_num, 1) if score_num is not None else None,
+        "confidence": round(conf_f, 2),
+        "summary": str(summary).strip(),
+        "narrative": narrative,
+        "risks": [str(r).strip() for r in risks if isinstance(r, str) and r.strip()],
+        "confidence_qualifier": qualifier,
+        "trader_takeaway": str(takeaway).strip(),
+        "pillar_status": engine_result.get("pillar_status", {}),
+        "positive_contributors": engine_result.get("positive_contributors", []),
+        "negative_contributors": engine_result.get("negative_contributors", []),
+        "conflicting_signals": engine_result.get("conflicting_signals", []),
+        "_trace": {
+            "input_mode": "passthrough",
+            "source": "engine_result.narrative",
+            "narrative_present": narrative is not None,
+        },
     }
 
-    # ── 5. Call the model (via shared transport layer) ─────────────
-    _transport_result = _model_transport(
-        task_type="flows_positioning",
-        payload=payload,
-        log_prefix="MODEL_FLOWS_POS",
-        model_url=model_url,
-        retries=retries,
-        timeout=timeout,
-    )
-    assistant_text = _transport_result.content
-
-    # ── 6. Parse + coerce ───────────────────────────────────────
-    from common.json_repair import extract_and_repair_json
-    parsed, method = extract_and_repair_json(assistant_text)
-
-    if method:
-        _log.info("[MODEL_FLOWS_POS] JSON extracted via method=%s", method)
-
-    normalized = _coerce_flows_positioning_model_output(parsed)
-    if normalized is None:
-        normalized = _format_enforcement_retry(
-            bad_output=assistant_text,
-            original_system_prompt=prompt,
-            task_type="flows_positioning",
-            log_prefix="MODEL_FLOWS_POS",
-            model_url=model_url,
-            timeout=timeout,
-            module="flows_positioning",
-            coerce_fn=_coerce_flows_positioning_model_output,
-        )
-        if normalized is not None:
-            method = "format_retry"
-        else:
-            normalized = _build_plaintext_fallback(assistant_text, "flows_positioning")
-            method = "plaintext_fallback"
-            if normalized is None:
-                raise ValueError("Model returned invalid flows & positioning analysis payload")
-
-    # ── 7. Attach trace metadata ────────────────────────────────
-    normalized["_trace"] = {
-        "input_mode": "raw_only",
-        "pillar_scores_provided": pillar_scores,
-        "excluded_derived_fields": _FLOWS_POSITIONING_EXCLUDED_FIELDS,
-        "json_parse_method": method,
-        "transport_path": _transport_result.transport_path,
-        "finish_reason": _transport_result.finish_reason,
-    }
-
-    return normalized
 
 
 # ═══════════════════════════════════════════════════════════════════════

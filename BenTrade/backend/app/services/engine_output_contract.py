@@ -97,6 +97,10 @@ ENGINE_METADATA: dict[str, dict[str, str]] = {
         "name": "News & Sentiment",
         "time_horizon": "intraday",
     },
+    "institutional_13f": {
+        "name": "Institutional 13F",
+        "time_horizon": "long_term",
+    },
 }
 
 
@@ -124,6 +128,8 @@ def normalize_engine_output(
     """
     if engine_key == "news_sentiment":
         return _normalize_news(service_payload)
+    if engine_key == "institutional_13f":
+        return _normalize_pillar_engine(engine_key, service_payload)
     return _normalize_pillar_engine(engine_key, service_payload)
 
 
@@ -171,7 +177,7 @@ def _normalize_pillar_engine(
         as_of=payload.get("as_of") or er.get("as_of"),
     )
 
-    return {
+    normalized = {
         "engine_key": engine_key,
         "engine_name": meta.get("name", engine_key),
         "as_of": payload.get("as_of") or er.get("as_of"),
@@ -207,6 +213,14 @@ def _normalize_pillar_engine(
             degraded_reasons=degraded_reasons,
         ),
     }
+
+    # Optional pass-through of pillar_status (Phase 1 flows engine). Other
+    # engines that do not emit pillar_status simply omit it from normalized
+    # output. Backward-compatible.
+    if "pillar_status" in er:
+        normalized["pillar_status"] = er["pillar_status"]
+
+    return normalized
 
 
 # ── News & Sentiment (structurally different) ───────────────────────────

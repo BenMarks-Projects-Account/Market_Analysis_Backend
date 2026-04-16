@@ -303,26 +303,59 @@ def _build_summary(composite: FlowsComposite, legacy_score: float | None, label:
 
 
 def _build_trader_takeaway(composite: FlowsComposite, legacy_score: float | None) -> str:
-    if legacy_score is None:
+    """Per-pillar aware trader takeaway.
+
+    Priorities:
+      1. If any pillar has |score| >= 0.5, call out its direction and note
+         any other pillars that are muting conviction (|score| < 0.3).
+      2. Otherwise fall back to a composite-magnitude phrase.
+      3. Unknown when composite is None.
+    """
+    if legacy_score is None or composite.score is None:
         return "Insufficient data for flows & positioning read."
-    notes: list[str] = []
-    pos = composite.pillars.get("positioning")
-    flo = composite.pillars.get("flows")
-    if pos and pos.score is not None:
-        if pos.score >= 0.6:
-            notes.append("Crowded long positioning — lean contrarian on further upside.")
-        elif pos.score <= -0.6:
-            notes.append("Crowded short positioning — watch for squeeze risk.")
-    if pos and flo and pos.score is not None and flo.score is not None:
-        if pos.score * flo.score < -0.2:
-            notes.append("Positioning and flows disagree — reduce conviction.")
-        elif pos.score > 0.2 and flo.score > 0.2:
-            notes.append("Positioning and flows both constructive — trend-follow bias.")
-        elif pos.score < -0.2 and flo.score < -0.2:
-            notes.append("Positioning and flows both defensive — risk-off bias.")
-    if not notes:
-        notes.append("Neutral flows & positioning — no directional edge from this engine.")
-    return " ".join(notes)
+
+    active = {
+        name: p for name, p in composite.pillars.items() if p.score is not None
+    }
+    if not active:
+        return "Insufficient data for flows & positioning read."
+
+    strongest_name, strongest = max(
+        active.items(), key=lambda kv: abs(kv[1].score or 0.0)
+    )
+    strongest_mag = abs(strongest.score or 0.0)
+
+    # Pretty pillar name (snake_case → Title Case).
+    def _pretty(name: str) -> str:
+        return name.replace("_", " ").title()
+
+    if strongest_mag >= 0.5:
+        direction = "risk-on" if (strongest.score or 0.0) > 0 else "risk-off"
+        others = [(n, p) for n, p in active.items() if n != strongest_name]
+        muting = [n for n, p in others if abs(p.score or 0.0) < 0.3]
+        if muting:
+            muting_str = ", ".join(_pretty(n).lower() for n in muting)
+            return (
+                f"{_pretty(strongest_name)} signaling {direction}, but "
+                f"{muting_str} near-neutral limits conviction."
+            )
+        aligned = [
+            (n, p) for n, p in others
+            if (p.score or 0.0) * (strongest.score or 0.0) > 0
+        ]
+        if aligned and len(aligned) == len(others):
+            return (
+                f"{_pretty(strongest_name)} signaling {direction}; other "
+                f"pillars aligned."
+            )
+        return f"{_pretty(strongest_name)} signaling {direction}."
+
+    # No pillar exceeds 0.5 — moderate composite read.
+    if composite.score >= 0.2:
+        return "Moderate risk-on bias across available pillars."
+    if composite.score <= -0.2:
+        return "Moderate risk-off bias across available pillars."
+    return "No strong directional edge; pillars near neutral or offsetting."
 
 
 def _build_diagnostics(composite: FlowsComposite) -> dict[str, Any]:
