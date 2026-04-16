@@ -52,7 +52,7 @@ import logging
 import math
 import statistics
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -94,6 +94,14 @@ SHARES_OUTSTANDING_PATH: Path = _DATA_DIR / "shares_outstanding.jsonl"
 
 EXPECTED_FLOWS_SUBSIGNALS: int = 5
 MIN_FLOWS_SUBSIGNALS: int = 3
+
+# Bootstrap tunables — see `bootstrap_rs_history` docstring.
+BOOTSTRAP_TARGET_OBSERVATIONS: int = 252
+BOOTSTRAP_LOOKBACK_BUFFER: int = RS_LOOKBACK_DAYS  # 20 trading days
+# ~252 trading days ≈ 365 calendar days. Add the 20-day lookback buffer
+# (≈ 30 cal) plus a 30-day safety margin for holidays/weekends.
+BOOTSTRAP_FETCH_CALENDAR_DAYS: int = 365 + 30 + 30
+BOOTSTRAP_SLOW_WARN_SECONDS: float = 60.0
 
 
 # ── Return helpers ─────────────────────────────────────────────────────
@@ -147,6 +155,64 @@ def _compute_rs_snapshot(bars_by_symbol: dict[str, list[dict[str, Any]]]) -> dic
     credit_flow = None
     if hyg_ret is not None and tlt_ret is not None:
         credit_flow = hyg_ret - tlt_ret
+
+    return {
+        "risk_on_rotation_20d": risk_on_rotation,
+        "cyclicals_vs_staples_20d": cyc_vs_stap,
+        "tech_leadership_20d": tech_lead,
+        "credit_flow_hyg_tlt_20d": credit_flow,
+    }
+
+
+def _compute_rs_at(
+    closes_by_symbol: dict[str, dict[str, float]],
+    eval_date: str,
+    lookback_date: str,
+) -> dict[str, float | None]:
+    """Point-in-time variant of `_compute_rs_snapshot`.
+
+    Uses closes at `eval_date` (T) and `lookback_date` (T-20 trading
+    days). Formula matches the live pipeline exactly — no future-info
+    leakage, bootstrap rows are indistinguishable from forward-built
+    rows by design.
+    """
+    def ret(sym: str) -> float | None:
+        closes = closes_by_symbol.get(sym, {})
+        latest = closes.get(eval_date)
+        prior = closes.get(lookback_date)
+        if not isinstance(latest, (int, float)) or not isinstance(prior, (int, float)):
+            return None
+        if prior <= 0:
+            return None
+        return latest / prior - 1.0
+
+    spy_ret = ret(BENCHMARK)
+
+    def rs_vs_spy(sym: str) -> float | None:
+        r = ret(sym)
+        if r is None or spy_ret is None:
+            return None
+        return r - spy_ret
+
+    offense = [rs_vs_spy(s) for s in OFFENSIVE_SECTORS]
+    defense = [rs_vs_spy(s) for s in DEFENSIVE_SECTORS]
+    off_c = [x for x in offense if x is not None]
+    def_c = [x for x in defense if x is not None]
+    risk_on_rotation = (
+        statistics.fmean(off_c) - statistics.fmean(def_c)
+        if off_c and def_c else None
+    )
+
+    xly_rs, xlp_rs = rs_vs_spy("XLY"), rs_vs_spy("XLP")
+    cyc_vs_stap = (xly_rs - xlp_rs) if (xly_rs is not None and xlp_rs is not None) else None
+
+    tech_lead = rs_vs_spy("XLK")
+
+    hyg_ret, tlt_ret = ret(CREDIT_HY), ret(CREDIT_TSY)
+    credit_flow = (
+        hyg_ret - tlt_ret
+        if (hyg_ret is not None and tlt_ret is not None) else None
+    )
 
     return {
         "risk_on_rotation_20d": risk_on_rotation,
@@ -343,6 +409,118 @@ def _build_nav_overlay_subsignal(
 
 # ── Public entry point ─────────────────────────────────────────────────
 
+async def bootstrap_rs_history(fmp_client: FMPClient) -> int:
+    """Populate `rs_history.jsonl` with ~252 trading days of computed RS rows.
+
+    Idempotent: if the file already has >= RS_HISTORY_MIN_OBS (60) rows,
+    this is a no-op. If the file is missing or below threshold, we fetch
+    ~272 days of bars for all 11 RS symbols, align on common trading
+    dates across symbols, drop the earliest 20 dates (no 20d lookback
+    available), and compute one RS row per remaining date using
+    `_compute_rs_at` (same formula as the live path).
+
+    Rules:
+      * Dates missing from any symbol's bars are skipped — no forward-fill.
+      * Bootstrap does NOT touch `shares_outstanding.jsonl`.
+      * Writes atomically via a tmp file then replace. If the destination
+        already has >= 60 rows when we finish fetching (concurrent run),
+        we skip the write and log a notice.
+      * Returns the final count of rows written.
+    """
+    import asyncio
+    import time
+
+    history = _read_jsonl(RS_HISTORY_PATH)
+    if len(history) >= RS_HISTORY_MIN_OBS:
+        return len(history)
+
+    t0 = time.monotonic()
+    logger.info(
+        "event=rs_history_bootstrap_started existing_rows=%d target=%d",
+        len(history), BOOTSTRAP_TARGET_OBSERVATIONS,
+    )
+
+    today = datetime.now(timezone.utc).date()
+    from_date = (today - timedelta(days=BOOTSTRAP_FETCH_CALENDAR_DAYS)).isoformat()
+    to_date = today.isoformat()
+
+    tasks = [
+        fmp_client.get_historical_price_eod(s, from_date=from_date, to_date=to_date)
+        for s in ALL_RS_SYMBOLS
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    closes_by_symbol: dict[str, dict[str, float]] = {}
+    for sym, res in zip(ALL_RS_SYMBOLS, results):
+        if isinstance(res, BaseException) or not res:
+            logger.warning("bootstrap: %s bars missing (%s)", sym, res if isinstance(res, BaseException) else "empty")
+            closes_by_symbol[sym] = {}
+            continue
+        closes_by_symbol[sym] = {
+            b["date"]: float(b["close"]) for b in res
+            if isinstance(b.get("close"), (int, float))
+        }
+
+    # Dates present for ALL symbols (no forward-fill).
+    per_sym_date_sets = [set(c.keys()) for c in closes_by_symbol.values() if c]
+    if not per_sym_date_sets:
+        logger.warning("event=rs_history_bootstrap_aborted reason=no_data")
+        return len(history)
+    common_dates = sorted(set.intersection(*per_sym_date_sets))
+    if len(common_dates) <= BOOTSTRAP_LOOKBACK_BUFFER:
+        logger.warning(
+            "event=rs_history_bootstrap_aborted reason=insufficient_common_dates count=%d",
+            len(common_dates),
+        )
+        return len(history)
+
+    # For each date from index LOOKBACK_BUFFER onward, the prior date is
+    # at `common_dates[i - LOOKBACK_BUFFER]`. Take the most recent
+    # BOOTSTRAP_TARGET_OBSERVATIONS of those.
+    usable = common_dates[BOOTSTRAP_LOOKBACK_BUFFER:]
+    bootstrap_dates = usable[-BOOTSTRAP_TARGET_OBSERVATIONS:]
+
+    rows: list[dict[str, Any]] = []
+    for d in bootstrap_dates:
+        idx = common_dates.index(d)
+        prior = common_dates[idx - BOOTSTRAP_LOOKBACK_BUFFER]
+        values = _compute_rs_at(closes_by_symbol, d, prior)
+        # Skip rows where ALL four values are None (unusable).
+        if all(v is None for v in values.values()):
+            continue
+        rows.append({"date": d, **values})
+
+    # Re-read once more in case a concurrent run raced us.
+    current = _read_jsonl(RS_HISTORY_PATH)
+    if len(current) >= RS_HISTORY_MIN_OBS:
+        elapsed = time.monotonic() - t0
+        logger.info(
+            "event=rs_history_bootstrap_skipped reason=raced existing=%d elapsed=%.2fs",
+            len(current), elapsed,
+        )
+        return len(current)
+
+    # Atomic write.
+    RS_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = RS_HISTORY_PATH.with_suffix(".jsonl.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, sort_keys=True) + "\n")
+    tmp.replace(RS_HISTORY_PATH)
+
+    elapsed = time.monotonic() - t0
+    if elapsed > BOOTSTRAP_SLOW_WARN_SECONDS:
+        logger.warning(
+            "event=rs_history_bootstrap_slow elapsed=%.2fs observations=%d",
+            elapsed, len(rows),
+        )
+    logger.info(
+        "event=rs_history_bootstrap_complete observations=%d elapsed=%.2fs",
+        len(rows), elapsed,
+    )
+    return len(rows)
+
+
 async def build_flows_pillar(
     fmp_client: FMPClient,
     *,
@@ -350,6 +528,9 @@ async def build_flows_pillar(
 ) -> PillarResult:
     import asyncio
     today = today or datetime.now(timezone.utc).date()
+
+    # Auto-bootstrap on first run (idempotent — no-op if already populated).
+    await bootstrap_rs_history(fmp_client)
 
     # 1. Fetch bars for all RS symbols (parallel)
     bar_tasks = [fmp_client.get_historical_price_eod(s) for s in ALL_RS_SYMBOLS]
@@ -467,6 +648,7 @@ async def build_flows_pillar(
 
 __all__ = [
     "build_flows_pillar",
+    "bootstrap_rs_history",
     "EXPECTED_FLOWS_SUBSIGNALS",
     "MIN_FLOWS_SUBSIGNALS",
     "RS_HISTORY_MIN_OBS",
