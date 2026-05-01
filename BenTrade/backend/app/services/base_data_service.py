@@ -4,12 +4,12 @@ import asyncio
 import logging
 import math
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 from app.clients.finnhub_client import FinnhubClient
 from app.clients.fred_client import FredClient
-from app.clients.polygon_client import PolygonClient
+from app.clients.fmp_client import FMPClient
 from app.clients.tradier_client import TradierClient
 from app.models.schemas import OptionContract
 from app.utils.http import UpstreamError
@@ -28,13 +28,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _lookback_to_dates(lookback_days: int) -> tuple[str, str]:
+    """Convert a lookback_days int to (from_date, to_date) ISO strings."""
+    today = date.today()
+    from_date = (today - timedelta(days=lookback_days)).isoformat()
+    return from_date, today.isoformat()
+
+
 class BaseDataService:
     def __init__(
         self,
         tradier_client: TradierClient,
         finnhub_client: FinnhubClient,
         fred_client: FredClient,
-        polygon_client: PolygonClient | None = None,
+        fmp_client: FMPClient | None = None,
         *,
         chain_source: OptionChainSource | None = None,
         snapshot_recorder: SnapshotRecorder | None = None,
@@ -42,15 +49,15 @@ class BaseDataService:
         self.tradier_client = tradier_client
         self.finnhub_client = finnhub_client
         self.fred_client = fred_client
-        self.polygon_client = polygon_client
+        self.fmp_client = fmp_client
         # Chain source abstraction: defaults to live Tradier
         self.chain_source: OptionChainSource = chain_source or TradierChainSource(tradier_client)
         self.snapshot_recorder: SnapshotRecorder | None = snapshot_recorder
         self._source_health: dict[str, dict[str, Any]] = {
             "finnhub": self._new_source_state(),
-            "polygon": self._new_source_state(),
             "tradier": self._new_source_state(),
             "fred": self._new_source_state(),
+            "fmp": self._new_source_state(),
         }
 
     def _source_configured(self, source: str) -> bool:
@@ -64,10 +71,10 @@ class BaseDataService:
         if key == "fred":
             api_key = str(getattr(self.fred_client.settings, "FRED_KEY", "") or "").strip()
             return bool(api_key)
-        if key == "polygon":
-            if self.polygon_client is None:
+        if key == "fmp":
+            if self.fmp_client is None:
                 return False
-            api_key = str(getattr(self.polygon_client.settings, "POLYGON_API_KEY", "") or "").strip()
+            api_key = str(getattr(self.fmp_client.settings, "FMP_API_KEY", "") or "").strip()
             return bool(api_key)
         return False
 
@@ -95,8 +102,8 @@ class BaseDataService:
             _probe("finnhub", self.finnhub_client.health),
             _probe("fred", self.fred_client.health),
         ]
-        if self.polygon_client is not None:
-            probes.append(_probe("polygon", self.polygon_client.health))
+        if self.fmp_client is not None:
+            probes.append(_probe("fmp", self.fmp_client.health))
         await asyncio.gather(*probes, return_exceptions=True)
 
     @staticmethod
@@ -204,7 +211,7 @@ class BaseDataService:
 
             if not self._source_configured(source):
                 status = "red"
-                message = "misconfigured" if source == "polygon" else "not configured"
+                message = "not configured"
                 out[source] = {
                     "status": status,
                     "last_http": last_http,
@@ -464,20 +471,19 @@ class BaseDataService:
             if value is not None:
                 return value
 
-        logger.info("event=underlying_fallback symbol=%s source=polygon_snapshot", normalized_symbol)
-        # Fallback 1: Polygon snapshot (15-min delayed, unlimited calls)
-        if self.polygon_client is not None and self._source_configured("polygon"):
+        logger.info("event=underlying_fallback symbol=%s source=fmp_quote", normalized_symbol)
+        # Fallback 1: FMP quote
+        if self.fmp_client is not None and self.fmp_client.is_available():
             try:
-                snap = await self.polygon_client.get_snapshot(normalized_symbol)
+                snap = await self.fmp_client.get_quote(normalized_symbol)
                 if snap:
                     for field in ("price", "last", "close"):
                         value = self._to_float(snap.get(field))
                         if value is not None:
-                            self._mark_success("polygon", http_status=200, message="snapshot fallback ok")
+                            self._mark_success("fmp", http_status=200, message="fmp quote fallback ok")
                             return value
             except Exception as exc:
-                self._mark_failure("polygon", exc)
-                logger.debug("event=polygon_snapshot_fallback_failed symbol=%s error=%s", normalized_symbol, exc)
+                logger.debug("event=fmp_quote_fallback_failed symbol=%s error=%s", normalized_symbol, exc)
 
         # Fallback 2: Finnhub quote (legacy, kept for resilience)
         logger.info("event=underlying_fallback symbol=%s source=finnhub", normalized_symbol)
@@ -540,28 +546,31 @@ class BaseDataService:
     async def get_prices_history(self, symbol: str, lookback_days: int = 365) -> list[float]:
         normalized_symbol = self._normalize_symbol(symbol)
         if not normalized_symbol:
-            self._mark_validation_warning("polygon", "invalid symbol")
+            self._mark_validation_warning("fmp", "invalid symbol")
             self._mark_validation_warning("tradier", "invalid symbol")
             return []
 
-        # Primary: Polygon aggregates
-        if self.polygon_client is not None and self._source_configured("polygon"):
+        # Primary: FMP historical EOD bars → extract close prices
+        if self.fmp_client is not None and self.fmp_client.is_available():
             try:
-                closes = await self.polygon_client.get_daily_closes(
-                    normalized_symbol, lookback_days=lookback_days
+                from_date, to_date = _lookback_to_dates(lookback_days)
+                bars = await self.fmp_client.get_historical_price_eod(
+                    normalized_symbol, from_date=from_date, to_date=to_date,
                 )
-                if closes:
-                    self._mark_success("polygon", http_status=200, message="history ok")
-                    return [float(x) for x in closes if x is not None]
+                if bars:
+                    closes = [b["close"] for b in bars if b.get("close") is not None]
+                    if closes:
+                        self._mark_success("fmp", http_status=200, message="fmp history ok")
+                        return [float(x) for x in closes]
                 self._mark_failure(
-                    "polygon",
-                    UpstreamError("Polygon returned empty history", details={"status_code": 204}),
+                    "fmp",
+                    UpstreamError("FMP returned empty history", details={"status_code": 204}),
                 )
-                logger.warning("event=prices_history_empty symbol=%s source=polygon", normalized_symbol)
+                logger.warning("event=prices_history_empty symbol=%s source=fmp", normalized_symbol)
             except Exception as exc:
-                self._mark_failure("polygon", exc)
+                self._mark_failure("fmp", exc)
                 logger.warning(
-                    "event=prices_history_unavailable symbol=%s source=polygon error=%s",
+                    "event=prices_history_unavailable symbol=%s source=fmp error=%s",
                     normalized_symbol,
                     str(exc),
                 )
@@ -590,52 +599,53 @@ class BaseDataService:
         """Return daily close prices with dates: ``[{"date": "YYYY-MM-DD", "close": float}, ...]``."""
         normalized_symbol = self._normalize_symbol(symbol)
         if not normalized_symbol:
-            self._mark_validation_warning("polygon", "invalid symbol")
+            self._mark_validation_warning("fmp", "invalid symbol")
             self._mark_validation_warning("tradier", "invalid symbol")
             return []
 
-        # Primary: Polygon aggregates
-        polygon_bars: list[dict[str, Any]] = []
-        if self.polygon_client is not None and self._source_configured("polygon"):
+        # Primary: FMP historical EOD bars → extract date + close
+        fmp_bars: list[dict[str, Any]] = []
+        if self.fmp_client is not None and self.fmp_client.is_available():
             try:
-                polygon_bars = await self.polygon_client.get_daily_closes_dated(
-                    normalized_symbol, lookback_days=lookback_days
+                from_date, to_date = _lookback_to_dates(lookback_days)
+                raw_bars = await self.fmp_client.get_historical_price_eod(
+                    normalized_symbol, from_date=from_date, to_date=to_date,
                 )
-                if polygon_bars:
-                    self._mark_success("polygon", http_status=200, message="dated history ok")
+                if raw_bars:
+                    fmp_bars = [{"date": b["date"], "close": b["close"]} for b in raw_bars]
+                    self._mark_success("fmp", http_status=200, message="fmp dated history ok")
                 else:
                     self._mark_failure(
-                        "polygon",
-                        UpstreamError("Polygon returned empty dated history", details={"status_code": 204}),
+                        "fmp",
+                        UpstreamError("FMP returned empty dated history", details={"status_code": 204}),
                     )
-                    logger.warning("event=prices_history_dated_empty symbol=%s source=polygon", normalized_symbol)
+                    logger.warning("event=prices_history_dated_empty symbol=%s source=fmp", normalized_symbol)
             except Exception as exc:
-                self._mark_failure("polygon", exc)
+                self._mark_failure("fmp", exc)
                 logger.warning(
-                    "event=prices_history_dated_unavailable symbol=%s source=polygon error=%s",
+                    "event=prices_history_dated_unavailable symbol=%s source=fmp error=%s",
                     normalized_symbol,
                     str(exc),
                 )
 
-        # Staleness check: if Polygon data ends >2 calendar days before today,
+        # Staleness check: if FMP data ends >2 calendar days before today,
         # also fetch Tradier history and use whichever source is fresher.
-        # This handles Polygon free-plan delay and any upstream lag.
         today = datetime.now(timezone.utc).date()
-        polygon_stale = False
-        if polygon_bars:
+        fmp_stale = False
+        if fmp_bars:
             try:
-                last_bar_date = datetime.strptime(polygon_bars[-1]["date"], "%Y-%m-%d").date()
-                polygon_stale = (today - last_bar_date).days > 2
-                if polygon_stale:
+                last_bar_date = datetime.strptime(fmp_bars[-1]["date"], "%Y-%m-%d").date()
+                fmp_stale = (today - last_bar_date).days > 2
+                if fmp_stale:
                     logger.info(
-                        "event=polygon_data_stale symbol=%s last_bar=%s today=%s",
-                        normalized_symbol, polygon_bars[-1]["date"], today.isoformat(),
+                        "event=fmp_data_stale symbol=%s last_bar=%s today=%s",
+                        normalized_symbol, fmp_bars[-1]["date"], today.isoformat(),
                     )
             except (KeyError, ValueError):
                 pass
 
         # Fallback / freshness supplement: Tradier daily history
-        if not polygon_bars or polygon_stale:
+        if not fmp_bars or fmp_stale:
             start_date = today - timedelta(days=lookback_days)
             try:
                 tradier_bars = await self.tradier_client.get_daily_closes_dated(
@@ -645,15 +655,15 @@ class BaseDataService:
                 )
                 if tradier_bars:
                     self._mark_success("tradier", http_status=200, message="dated history fallback ok")
-                    # Use Tradier if Polygon had no data or Tradier is fresher
-                    if not polygon_bars:
+                    # Use Tradier if FMP had no data or Tradier is fresher
+                    if not fmp_bars:
                         return tradier_bars
                     tradier_last = tradier_bars[-1].get("date", "")
-                    polygon_last = polygon_bars[-1].get("date", "")
-                    if tradier_last > polygon_last:
+                    fmp_last = fmp_bars[-1].get("date", "")
+                    if tradier_last > fmp_last:
                         logger.info(
-                            "event=tradier_fresher symbol=%s tradier_last=%s polygon_last=%s",
-                            normalized_symbol, tradier_last, polygon_last,
+                            "event=tradier_fresher symbol=%s tradier_last=%s fmp_last=%s",
+                            normalized_symbol, tradier_last, fmp_last,
                         )
                         return tradier_bars
             except Exception as exc:
@@ -664,35 +674,39 @@ class BaseDataService:
                     str(exc),
                 )
 
-        # Return Polygon data if we have any (even stale), otherwise empty
-        return polygon_bars
+        # Return FMP data if we have any (even stale), otherwise empty
+        return fmp_bars
 
     async def get_intraday_bars(self, symbol: str, lookback_days: int = 14) -> list[dict[str, Any]]:
         """Return hourly bars with ISO-datetime timestamps for intraday charts.
 
         Returns ``[{"date": "ISO-datetime", "close": float}, ...]``.
-        Primary: Polygon 1-hour aggregates.  Fallback: Tradier 15min history.
+        Primary: FMP 1-hour bars.  Fallback: Tradier 15min history.
         Returns empty list (not an error) if intraday data is unavailable.
         """
         normalized_symbol = self._normalize_symbol(symbol)
         if not normalized_symbol:
             return []
 
-        # Primary: Polygon hourly bars (~65 bars over 14 days)
-        if self.polygon_client is not None and self._source_configured("polygon"):
+        # Primary: FMP hourly bars
+        if self.fmp_client is not None:
+            end_date = datetime.now(timezone.utc).date()
+            start_date = end_date - timedelta(days=lookback_days)
             try:
-                bars = await self.polygon_client.get_intraday_bars(
-                    normalized_symbol, lookback_days=lookback_days,
-                    multiplier=1, timespan="hour",
+                bars = await self.fmp_client.get_intraday_bars(
+                    normalized_symbol,
+                    interval="1hour",
+                    from_date=start_date.isoformat(),
+                    to_date=end_date.isoformat(),
                 )
                 if bars:
-                    self._mark_success("polygon", http_status=200, message="intraday bars ok")
+                    self._mark_success("fmp", http_status=200, message="intraday bars ok")
                     return bars
-                logger.debug("event=intraday_empty symbol=%s source=polygon", normalized_symbol)
+                logger.debug("event=intraday_empty symbol=%s source=fmp", normalized_symbol)
             except Exception as exc:
-                self._mark_failure("polygon", exc)
+                self._mark_failure("fmp", exc)
                 logger.warning(
-                    "event=intraday_unavailable symbol=%s source=polygon error=%s",
+                    "event=intraday_unavailable symbol=%s source=fmp error=%s",
                     normalized_symbol, str(exc),
                 )
 

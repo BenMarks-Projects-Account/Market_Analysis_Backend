@@ -424,8 +424,6 @@ class OfflineLiveCallGuard:
         ("tradier_client", "fetch_chain_raw_payload"),
         ("finnhub_client", "get_quote"),
         ("finnhub_client", "get_daily_candles"),
-        ("polygon_client", "get_daily_closes"),
-        ("polygon_client", "get_daily_closes_dated"),
         ("fred_client", "get_latest_series_value"),
     ]
 

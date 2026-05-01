@@ -25,7 +25,7 @@ _SOURCES_CACHE_TTL_S = 30  # return cached result for 30s
 async def health(request: Request) -> HealthResponse:
     tradier_ok = await request.app.state.tradier_client.health()
     finnhub_ok = await request.app.state.finnhub_client.health()
-    polygon_ok = await request.app.state.polygon_client.health()
+    fmp_ok = await request.app.state.fmp_client.health()
     fred_ok = await request.app.state.fred_client.health()
 
     from app.services.model_health_service import check_model_health_async
@@ -34,7 +34,7 @@ async def health(request: Request) -> HealthResponse:
     upstream = {
         "tradier": "ok" if tradier_ok else "down",
         "finnhub": "ok" if finnhub_ok else "down",
-        "polygon": "ok" if polygon_ok else "down",
+        "fmp": "ok" if fmp_ok else "down",
         "fred": "ok" if fred_ok else "down",
         "model_endpoint": "ok" if model_health["status"] == "healthy" else "down",
     }
@@ -60,7 +60,7 @@ async def sources_health(request: Request) -> dict:
 
     source_name_map = {
         "finnhub": "Finnhub",
-        "polygon": "Polygon",
+        "fmp": "FMP",
         "tradier": "Tradier",
         "fred": "FRED",
     }
@@ -74,7 +74,7 @@ async def sources_health(request: Request) -> dict:
         return "degraded"
 
     sources: list[dict] = []
-    for key in ("finnhub", "polygon", "tradier", "fred"):
+    for key in ("finnhub", "fmp", "tradier", "fred"):
         item = snapshot.get(key) or {}
         notes: list[str] = []
         message = str(item.get("message") or "").strip()

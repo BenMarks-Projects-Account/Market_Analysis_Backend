@@ -105,6 +105,26 @@ async def get_volatility_expansion(request: Request) -> dict:
         }
 
 
+# ── Insider Catalyst scanner ──────────────────────────────────────
+
+@router.get("/insider-catalyst")
+async def get_insider_catalyst(request: Request) -> dict:
+    """Run the Insider Catalyst scanner and return ranked candidates."""
+    svc = getattr(request.app.state, "insider_catalyst_service", None)
+    if svc is None:
+        return _stub("stock_insider_catalyst")
+    try:
+        return await svc.scan()
+    except Exception as exc:
+        logger.exception("event=insider_catalyst_scan_error error=%s", exc)
+        return {
+            "strategy_id": "stock_insider_catalyst",
+            "status": "error",
+            "error": str(exc)[:200],
+            "candidates": [],
+        }
+
+
 # ── Stock Engine — aggregate all scanners ─────────────────────────
 
 @router.get("/engine")

@@ -36,7 +36,7 @@ from app.workflows.architecture import (
 
 MARKET_STATE_CONTRACT_VERSION = "1.0"
 
-# Six canonical market engines — order is stable.
+# Canonical market engines — order is stable.
 ENGINE_KEYS: tuple[str, ...] = (
     "breadth_participation",
     "volatility_options",
@@ -44,7 +44,12 @@ ENGINE_KEYS: tuple[str, ...] = (
     "flows_positioning",
     "liquidity_financial_conditions",
     "news_sentiment",
+    "institutional_13f",
 )
+
+# Engines that run only when their service is provided.
+# Missing optional engines are silently skipped (not counted as failures).
+OPTIONAL_ENGINE_KEYS: frozenset[str] = frozenset({"institutional_13f"})
 
 # Macro metrics captured in the market snapshot section.
 MACRO_METRIC_KEYS: tuple[str, ...] = (

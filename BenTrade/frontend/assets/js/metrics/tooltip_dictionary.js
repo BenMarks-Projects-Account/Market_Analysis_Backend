@@ -33,6 +33,77 @@ window.BenTradeTooltipDictionary = (function () {
 
   var METRICS = {
 
+    /* ── Earnings Vol Analyzer (EVA) ── */
+    implied_move_pct: {
+      label: 'Implied Move %',
+      short: 'Expected move into earnings priced by the options market. Computed from the ATM straddle of the first expiration after the earnings date, divided by the underlying price.',
+      formula: 'implied_move = (ATM_call + ATM_put) / spot',
+      why: 'Sets the breakeven the underlying must exceed for long-vol strategies to win.',
+      notes: 'Sensitive to which expiration is selected as the event expiration.',
+    },
+    realized_move_avg_8q: {
+      label: 'Hist Avg Move (8Q)',
+      short: "Average absolute close-to-close earnings move across this ticker's last 8 reported quarters.",
+      formula: 'mean(|close_T+1 / close_T-1 - 1|) over 8 quarters',
+      why: 'Baseline for whether implied vol is rich or cheap relative to history.',
+      notes: 'Older events may be missing if no historical backfill exists.',
+    },
+    vol_edge: {
+      label: 'Vol Edge',
+      short: "How much higher or lower the implied move is vs. this ticker's historical 8-quarter realized average. Positive values suggest vol is overpriced (potential short-vol setup); negative values suggest vol is underpriced.",
+      formula: 'vol_edge = (1 - hist_avg_move / implied_move) × 100',
+      why: 'Quick read on vol-mispricing setups before deeper diligence.',
+      notes: 'Heuristic only. Does not account for catalyst-specific risk shifts.',
+    },
+    iv_rank_52w: {
+      label: 'IV Rank 52W',
+      short: 'Where the current ATM IV ranks within the trailing 52-week range. 100 = at high; 0 = at low.',
+      formula: 'rank = (iv_now - iv_low_52w) / (iv_high_52w - iv_low_52w) × 100',
+      why: 'Distinguishes elevated IV regimes (favorable for short vol) from compressed regimes.',
+      notes: 'A ticker can have high IV rank yet still be cheap vs. its own earnings history.',
+    },
+    iv_vs_hv_30d: {
+      label: 'IV vs HV 30d',
+      short: 'Ratio of 30-day implied volatility to 30-day realized volatility.',
+      formula: 'iv_vs_hv = iv_30d / hv_30d',
+      why: 'Values >1.2 indicate options are pricing in more volatility than the underlying has actually delivered — typical event premium.',
+      notes: 'Read in context of earnings proximity and term structure.',
+    },
+    term_structure_slope: {
+      label: 'Term Slope',
+      short: 'Front-expiration IV minus back-expiration IV. Positive values (inversion) indicate the market is pricing event-specific premium that typically crushes after earnings.',
+      formula: 'slope = iv_front - iv_back',
+      why: 'Flags event-driven kinks in the IV term structure.',
+      notes: 'Crush dynamics depend on how much of the slope is event-specific vs. macro.',
+    },
+    options_liquidity_score: {
+      label: 'Options Liquidity',
+      short: 'Composite 0-100 score of option-chain liquidity (open interest, volume, bid-ask spread, depth).',
+      formula: 'Weighted blend of OI, volume, spread tightness, and chain depth',
+      why: 'Filters out names where execution slippage would erode the edge.',
+      notes: 'Below ~40 is generally not tradeable for vol strategies.',
+    },
+    passes_baseline_filter: {
+      label: 'Tradeable',
+      short: 'Whether the ticker meets minimum tradeability for vol strategies: has options, liquidity score ≥ 40, mid/large/mega cap.',
+      formula: 'has_options AND options_liquidity_score >= 40 AND market_cap_tier IN (mid, large, mega)',
+      why: 'Hard gate before any setup score is interpreted as actionable.',
+      notes: 'Tickers failing this filter may still be informative for context.',
+    },
+    setup_score: {
+      label: 'Setup Score',
+      short: 'Composite 0-100 score combining vol edge, IV rank, term structure, liquidity, and realization consistency. Higher = more attractive vol-mispricing setup. Heuristic only, not yet model-driven.',
+      formula: 'See earnings_analysis.js _computeSetupScore() — weighted blend (40 vol_edge, 20 iv_rank, 15 term_slope, 15 liquidity, 10 realization_consistency)',
+      why: 'Single ranking signal so the table sorts to the most interesting candidates by default.',
+      notes: 'Heuristic. Will be replaced or recalibrated as model-driven scoring lands.',
+    },
+    days_out: {
+      label: 'Days Out',
+      short: 'Trading days between today and the scheduled earnings date.',
+      formula: 'business_days_between(today, earnings_date)',
+      why: 'Drives expiration selection and position-management urgency.',
+    },
+
     /* ── Moving Averages / Technical ── */
     ema_20: {
       label: 'EMA 20',

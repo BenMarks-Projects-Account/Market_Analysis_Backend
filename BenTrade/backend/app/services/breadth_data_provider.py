@@ -26,6 +26,8 @@ import statistics
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
+from app.services.quote_routing import get_batch_quotes
+
 logger = logging.getLogger(__name__)
 
 # ── Default universe constituents ────────────────────────────────────
@@ -146,16 +148,18 @@ class BreadthDataProvider:
         self,
         tradier_client: Any,
         *,
-        polygon_client: Any | None = None,
+        fmp_client: Any | None = None,
         universe: list[str] | None = None,
         universe_name: str = "SP500_Proxy",
         history_days: int = 250,
     ) -> None:
         self.tradier_client = tradier_client
-        self.polygon_client = polygon_client
+        self.fmp_client = fmp_client
         self.universe = universe or _ALL_TICKERS
         self.universe_name = universe_name
         self.history_days = history_days
+        # Shared health state for quote routing across breadth cycles
+        self._tradier_health_cache: dict[str, Any] = {}
 
     async def fetch_breadth_data(self) -> dict[str, Any]:
         """Fetch all data needed for the breadth engine.
@@ -176,52 +180,30 @@ class BreadthDataProvider:
         )
 
         # ── Fetch bulk quotes for all universe tickers ───────────
-        # Primary: Polygon snapshots (unlimited, 15-min delayed)
-        # Fallback: Tradier bulk quotes (rate-limited at 2 req/sec)
-        all_quotes: dict[str, dict[str, Any]] = {}
-        if self.polygon_client is not None:
-            try:
-                # Polygon snapshot batch supports up to ~500 tickers
-                batch_size = 250
-                for i in range(0, len(universe), batch_size):
-                    batch = universe[i:i + batch_size]
-                    try:
-                        batch_snaps = await self.polygon_client.get_snapshots(batch)
-                        all_quotes.update(batch_snaps)
-                    except Exception as exc:
-                        logger.warning(
-                            "event=breadth_polygon_snapshot_batch_failed batch_start=%d error=%s",
-                            i, exc,
-                        )
-            except Exception as exc:
-                logger.warning("event=breadth_polygon_snapshots_failed error=%s", exc)
-
-        # Tradier fallback for any tickers missing from Polygon
-        missing_tickers = [t for t in universe if t not in all_quotes]
-        if missing_tickers:
-            batch_size = 50
-            for i in range(0, len(missing_tickers), batch_size):
-                batch = missing_tickers[i:i + batch_size]
-                try:
-                    batch_quotes = await self.tradier_client.get_quotes(batch)
-                    all_quotes.update(batch_quotes)
-                except Exception as exc:
-                    logger.warning(
-                        "event=breadth_tradier_quote_batch_failed batch_start=%d error=%s",
-                        i, exc,
-                    )
+        # Primary: Tradier batch quotes (50 per call, 3 calls for ~139 symbols)
+        # Fallback: FMP sequential quotes (rate-limited)
+        all_quotes: dict[str, dict[str, Any]] = await get_batch_quotes(
+            self.tradier_client,
+            self.fmp_client,
+            universe,
+            _tradier_health_cache=self._tradier_health_cache,
+        )
 
         # ── Fetch index and EW benchmark quotes ──────────────────
         benchmark_quotes: dict[str, dict[str, Any]] = {}
-        # Already fetched if polygon_client was available
         for sym in [_INDEX_SYMBOL, _EW_SYMBOL]:
             if sym in all_quotes:
                 benchmark_quotes[sym] = all_quotes[sym]
-        # Fill missing benchmarks from Tradier
+        # Fill missing benchmarks via routing helper
         missing_benchmarks = [s for s in [_INDEX_SYMBOL, _EW_SYMBOL] if s not in benchmark_quotes]
         if missing_benchmarks:
             try:
-                bm = await self.tradier_client.get_quotes(missing_benchmarks)
+                bm = await get_batch_quotes(
+                    self.tradier_client,
+                    self.fmp_client,
+                    missing_benchmarks,
+                    _tradier_health_cache=self._tradier_health_cache,
+                )
                 benchmark_quotes.update(bm)
             except Exception as exc:
                 logger.warning("event=breadth_benchmark_fetch_failed error=%s", exc)
@@ -233,23 +215,23 @@ class BreadthDataProvider:
         ).strftime("%Y-%m-%d")
 
         # Fetch historical bars for all universe tickers for MA computation
-        # Primary: Polygon (unlimited), Fallback: Tradier (rate-limited)
+        # FMP is the single source for historical bars (30-min cache TTL).
         ticker_bars: dict[str, list[dict[str, Any]]] = {}
-        sem = asyncio.Semaphore(15)  # Polygon paid tier supports higher concurrency
+        sem = asyncio.Semaphore(20)  # FMP Ultimate supports high concurrency
 
         async def _fetch_bars(ticker: str) -> tuple[str, list[dict[str, Any]]]:
             async with sem:
-                # Try Polygon first
-                if self.polygon_client is not None:
+                # Try FMP first (primary for historical bars)
+                if self.fmp_client is not None and self.fmp_client.is_available():
                     try:
-                        bars = await self.polygon_client.get_daily_bars(
-                            ticker, start_date, end_date
+                        bars = await self.fmp_client.get_historical_price_eod(
+                            ticker, from_date=start_date, to_date=end_date
                         )
                         if bars:
                             return ticker, bars
                     except Exception as exc:
                         logger.debug(
-                            "event=breadth_polygon_bar_fetch_failed ticker=%s error=%s",
+                            "event=breadth_fmp_bar_fetch_failed ticker=%s error=%s",
                             ticker, exc,
                         )
                 # Fallback to Tradier
@@ -276,16 +258,16 @@ class BreadthDataProvider:
             if bars:
                 ticker_bars[ticker] = bars
 
-        # Also fetch benchmark bars (Polygon primary, Tradier fallback)
+        # Also fetch benchmark bars (FMP primary, Tradier fallback)
         for sym in [_INDEX_SYMBOL, _EW_SYMBOL]:
             if sym in ticker_bars:
                 continue
-            bars = []
-            if self.polygon_client is not None:
+            bars: list[dict[str, Any]] = []
+            if self.fmp_client is not None and self.fmp_client.is_available():
                 try:
-                    bars = await self.polygon_client.get_daily_bars(
-                        sym, start_date, end_date
-                    )
+                    bars = await self.fmp_client.get_historical_price_eod(
+                        sym, from_date=start_date, to_date=end_date
+                    ) or []
                 except Exception:
                     pass
             if not bars:

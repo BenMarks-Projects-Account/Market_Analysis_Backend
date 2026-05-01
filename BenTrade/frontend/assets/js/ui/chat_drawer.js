@@ -48,6 +48,15 @@ window.BenTradeChat = (function () {
   let _inflight = false;
   let _lastFailedText = null;
 
+  // ── Drawer mode ──────────────────────────────────────────────────
+  // "chat"  (default) — full AI-chat UI
+  // "notes" — renders BenTradeNotesPanel into a dedicated body slot and
+  //           hides chat-specific DOM. Switching modes tears down the
+  //           outgoing mode's state before rendering the new one.
+  let _mode = 'chat';
+  let _notesBodyEl = null;  // created lazily on first notes-mode open
+  let _notesOpts = null;    // { sectionId, displayName }
+
   // ── Default quick starters per context type (frontend fallback) ──
   var _FALLBACK_STARTERS = {
     market_regime: [
@@ -241,6 +250,14 @@ window.BenTradeChat = (function () {
 
   /**
    * Open the chat drawer.
+   *
+   * Signatures:
+   *   open(contextContract)                         → chat mode (legacy)
+   *   open({ mode: 'chat', ...contextContract })    → chat mode (explicit)
+   *   open({ mode: 'notes', sectionId, displayName })
+   *
+   * Default mode is 'chat' so all existing callers work unchanged.
+   *
    * - If no active session: starts a new one, seeds it, shows starters.
    * - If a minimized session exists for the same context: restores it.
    * - If a minimized session exists for a DIFFERENT context: ends old, starts new.
@@ -254,6 +271,17 @@ window.BenTradeChat = (function () {
     }
 
     _rehomeDrawer();
+
+    // Notes-mode dispatch (additive — chat mode is untouched below).
+    if (contextContract && contextContract.mode === 'notes') {
+      _openNotesMode(contextContract);
+      return;
+    }
+
+    // Switching back into chat mode from notes: teardown notes first.
+    if (_mode === 'notes') {
+      _teardownNotesMode();
+    }
 
     // Validate
     var ctxErrors = _validateContextContract(contextContract);
@@ -280,13 +308,102 @@ window.BenTradeChat = (function () {
     _startNewSession(contextContract);
   }
 
+  // ── Notes mode (additive; does NOT change chat behavior) ─────────
+
+  function _chatChildrenExceptBody() {
+    if (!_drawerEl) return [];
+    return Array.prototype.filter.call(_drawerEl.children, function (el) {
+      return el !== _notesBodyEl;
+    });
+  }
+
+  function _ensureNotesBody() {
+    if (_notesBodyEl && _notesBodyEl.parentElement === _drawerEl) return _notesBodyEl;
+    _notesBodyEl = document.createElement('div');
+    _notesBodyEl.className = 'bt-chat-notes-body';
+    _notesBodyEl.style.display = 'none';
+    _notesBodyEl.style.flex = '1 1 auto';
+    _notesBodyEl.style.minHeight = '0';
+    _notesBodyEl.style.display = 'flex';
+    _notesBodyEl.style.flexDirection = 'column';
+    _drawerEl.appendChild(_notesBodyEl);
+    return _notesBodyEl;
+  }
+
+  function _showNotesBody(show) {
+    _ensureNotesBody();
+    // Hide/show chat-specific children vs the notes body.
+    _chatChildrenExceptBody().forEach(function (el) {
+      el.style.display = show ? 'none' : '';
+    });
+    _notesBodyEl.style.display = show ? 'flex' : 'none';
+  }
+
+  function _teardownNotesMode() {
+    if (_notesBodyEl && window.BenTradeNotesPanel) {
+      try { window.BenTradeNotesPanel.destroy(_notesBodyEl); } catch (_e) {}
+    }
+    _notesOpts = null;
+    _showNotesBody(false);
+    _mode = 'chat';
+  }
+
+  function _openNotesMode(opts) {
+    var sectionId = String(opts && opts.sectionId || '').trim();
+    var displayName = (opts && opts.displayName) || sectionId;
+    if (!sectionId) return;
+
+    // If we were in chat mode, end/minimize the chat visually so the
+    // chat UI is fully hidden. We do NOT destroy the chat session so the
+    // user can come back to it later via the bubble.
+    if (_mode === 'chat') {
+      // Keep chat session intact in memory; just hide chat elements.
+    }
+
+    // If already in notes mode for this section, just reopen.
+    if (_mode === 'notes' && _notesOpts && _notesOpts.sectionId === sectionId) {
+      _hideBubble();
+      _showDrawer();
+      return;
+    }
+
+    // Switching to a new notes section — destroy prior notes state.
+    if (_mode === 'notes') {
+      try { window.BenTradeNotesPanel && window.BenTradeNotesPanel.destroy(_notesBodyEl); } catch (_e) {}
+    }
+
+    _mode = 'notes';
+    _notesOpts = { sectionId: sectionId, displayName: displayName };
+
+    _ensureNotesBody();
+    _showNotesBody(true);
+
+    if (window.BenTradeNotesPanel && typeof window.BenTradeNotesPanel.render === 'function') {
+      window.BenTradeNotesPanel.render(_notesBodyEl, {
+        sectionId: sectionId,
+        displayName: displayName,
+      });
+    } else {
+      _notesBodyEl.textContent = 'Notes panel unavailable.';
+    }
+
+    _hideBubble();
+    _showDrawer();
+  }
+
   /** Minimize: hide drawer, show bubble, keep session alive. */
   function minimize() {
     if (!_drawerEl) return;
     _drawerEl.classList.remove('bt-chat-drawer--open');
     _backdropEl.classList.remove('bt-chat-backdrop--visible');
     document.body.classList.remove('bt-chat-body-lock');
+    // Notes mode has no session to keep alive — tear it down on close
+    // so the drawer returns to a clean chat-ready state next time.
+    if (_mode === 'notes') {
+      _teardownNotesMode();
+    }
     if (_session) _showBubble();
+    else _showBubble();
   }
 
   /** End chat: destroy session, close drawer, keep bubble visible for next use. */
@@ -294,6 +411,9 @@ window.BenTradeChat = (function () {
     _session = null;
     _inflight = false;
     _lastFailedText = null;
+    if (_mode === 'notes') {
+      _teardownNotesMode();
+    }
     if (_drawerEl) {
       _drawerEl.classList.remove('bt-chat-drawer--open');
     }

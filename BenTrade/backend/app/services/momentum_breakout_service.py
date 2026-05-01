@@ -230,21 +230,21 @@ class MomentumBreakoutService:
     ) -> dict[str, Any] | None:
         """Fetch data, compute metrics, apply filters, score, and build trade shape."""
 
-        # -- Fetch OHLCV bars: Polygon primary, Tradier fallback --
-        data_source = "polygon"
+        # -- Fetch OHLCV bars: FMP primary, Tradier fallback --
+        data_source = "fmp"
         end_date = datetime.now(timezone.utc).date()
         start_date = end_date - timedelta(days=cfg["lookback_days"])
 
         bars: list[dict[str, Any]] = []
-        if self.bds.polygon_client is not None:
+        if self.bds.fmp_client is not None and self.bds.fmp_client.is_available():
             try:
-                bars = await self.bds.polygon_client.get_daily_bars(
+                bars = await self.bds.fmp_client.get_historical_price_eod(
                     symbol,
-                    start_date=start_date.isoformat(),
-                    end_date=end_date.isoformat(),
-                )
+                    from_date=start_date.isoformat(),
+                    to_date=end_date.isoformat(),
+                ) or []
             except Exception as exc:
-                logger.warning("event=breakout_bars_fail symbol=%s source=polygon error=%s", symbol, exc)
+                logger.warning("event=breakout_bars_fail symbol=%s source=fmp error=%s", symbol, exc)
 
         # Fallback 1: Tradier full OHLCV bars
         if not bars:

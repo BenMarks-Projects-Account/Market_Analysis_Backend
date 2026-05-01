@@ -53,15 +53,17 @@ from app.api.routes_pre_market import router as pre_market_router
 from app.api.routes_orchestrator import router as orchestrator_router
 from app.api.routes_notifications import router as notifications_router
 from app.api.routes_company_evaluator import router as company_evaluator_router
+from app.api.routes_earnings_vol_analyzer import router as earnings_vol_analyzer_router
 from app.api.routes_calendar_news import router as calendar_news_router
 from app.api.routes_market_intel import router as market_intel_router
 from app.api.routes_sentiment import router as sentiment_router
 from app.api.routes_dashboard_fixes import router as dashboard_fixes_router
 from app.api.routes_specialty_signals import router as specialty_signals_router
 from app.api.routes_refresh import router as refresh_router
+from app.api.routes_export import router as export_router
+from app.api.routes_notes import router as notes_router
 from app.clients.coingecko_client import CoinGeckoClient
 from app.clients.fmp_client import FMPClient
-from app.clients.polygon_client import PolygonClient
 from app.clients.tradier_client import TradierClient
 from app.config import get_settings
 from app.services.base_data_service import BaseDataService
@@ -79,6 +81,7 @@ from app.services.momentum_breakout_service import MomentumBreakoutService
 from app.services.mean_reversion_service import MeanReversionService
 from app.services.volatility_expansion_service import VolatilityExpansionService
 from app.services.stock_engine_service import StockEngineService
+from app.services.insider_catalyst_service import InsiderCatalystService
 from app.services.spread_service import SpreadService
 from app.services.strategy_service import StrategyService
 from app.services.trade_lifecycle_service import TradeLifecycleService
@@ -96,7 +99,6 @@ from app.services.breadth_data_provider import BreadthDataProvider
 from app.services.breadth_service import BreadthService
 from app.services.cross_asset_macro_data_provider import CrossAssetMacroDataProvider
 from app.services.cross_asset_macro_service import CrossAssetMacroService
-from app.services.flows_positioning_data_provider import FlowsPositioningDataProvider
 from app.services.flows_positioning_service import FlowsPositioningService
 from app.services.liquidity_conditions_data_provider import LiquidityConditionsDataProvider
 from app.services.liquidity_conditions_service import LiquidityConditionsService
@@ -141,7 +143,6 @@ def create_app() -> FastAPI:
 
     tradier_client = TradierClient(settings=settings, http_client=http_client, cache=cache)
     finnhub_client = FinnhubClient(settings=settings, http_client=http_client, cache=cache)
-    polygon_client = PolygonClient(settings=settings, http_client=http_client, cache=cache)
     fred_client = FredClient(settings=settings, http_client=http_client, cache=cache)
     futures_client = FuturesClient(settings=settings, cache=cache, http_client=http_client)
     fmp_client = FMPClient(settings=settings, http_client=http_client, cache=cache)
@@ -177,7 +178,7 @@ def create_app() -> FastAPI:
         tradier_client=tradier_client,
         finnhub_client=finnhub_client,
         fred_client=fred_client,
-        polygon_client=polygon_client,
+        fmp_client=fmp_client,
         chain_source=chain_source,
         snapshot_recorder=snapshot_recorder,
     )
@@ -218,6 +219,9 @@ def create_app() -> FastAPI:
         momentum_breakout_service=momentum_breakout_service,
         mean_reversion_service=mean_reversion_service,
         volatility_expansion_service=volatility_expansion_service,
+    )
+    insider_catalyst_service = InsiderCatalystService(
+        fmp_client=fmp_client, settings=settings,
     )
     trade_lifecycle_service = TradeLifecycleService(results_dir=results_dir)
     risk_policy_service = RiskPolicyService(results_dir=results_dir)
@@ -271,7 +275,6 @@ def create_app() -> FastAPI:
     app.state.cache = cache
     app.state.tradier_client = tradier_client
     app.state.finnhub_client = finnhub_client
-    app.state.polygon_client = polygon_client
     app.state.fred_client = fred_client
     app.state.futures_client = futures_client
     app.state.fmp_client = fmp_client
@@ -303,6 +306,7 @@ def create_app() -> FastAPI:
     app.state.trading_service = trading_service
     app.state.stock_execution_service = stock_execution_service
     app.state.stock_engine_service = stock_engine_service
+    app.state.insider_catalyst_service = insider_catalyst_service
     app.state.active_trade_monitor_service = active_trade_monitor_service
     market_context_service = MarketContextService(
         fred_client=fred_client,
@@ -322,7 +326,7 @@ def create_app() -> FastAPI:
 
     breadth_data_provider = BreadthDataProvider(
         tradier_client=tradier_client,
-        polygon_client=polygon_client,
+        fmp_client=fmp_client,
     )
     breadth_service = BreadthService(
         data_provider=breadth_data_provider,
@@ -353,11 +357,8 @@ def create_app() -> FastAPI:
     )
     app.state.cross_asset_macro_service = cross_asset_macro_service
 
-    flows_data_provider = FlowsPositioningDataProvider(
-        market_context_service=market_context_service,
-    )
     flows_positioning_service = FlowsPositioningService(
-        data_provider=flows_data_provider,
+        fmp_client=fmp_client,
         cache=cache,
     )
     app.state.flows_positioning_service = flows_positioning_service
@@ -392,6 +393,7 @@ def create_app() -> FastAPI:
     app.state.tmc_stock_deps = build_tmc_stock_deps(
         stock_engine_service=stock_engine_service,
         model_request_fn=model_request,
+        insider_catalyst_service=insider_catalyst_service,
     )
     app.state.tmc_options_deps = build_tmc_options_deps(
         base_data_service=base_data_service,
@@ -404,6 +406,14 @@ def create_app() -> FastAPI:
     from app.services.model_routing_integration import adaptive_routed_model_interpretation
     mi_model_fn = adaptive_routed_model_interpretation
 
+    # -- Institutional 13F pillar (optional) --------------------------------
+    institutional_13f_service = None
+    if settings.PILLAR_13F_ENABLED:
+        from app.services.institutional_13f_service import Institutional13FService
+        institutional_13f_service = Institutional13FService(
+            fmp_client=fmp_client, cache=cache, settings=settings,
+        )
+    app.state.institutional_13f_service = institutional_13f_service
     mi_deps = MarketIntelligenceDeps(
         market_context_service=market_context_service,
         breadth_service=breadth_service,
@@ -415,12 +425,16 @@ def create_app() -> FastAPI:
         http_client=http_client,
         model_request_fn=mi_model_fn,
         pre_market_service=pre_market_service,
+        institutional_13f_service=institutional_13f_service,
     )
     data_population_service = DataPopulationService(
         data_dir=data_dir,
         mi_deps=mi_deps,
     )
     app.state.data_population_service = data_population_service
+    # Expose mi_deps directly so the history-DB startup hook can thread
+    # the session_maker through without reaching into private attrs.
+    app.state.mi_deps = mi_deps
 
     app.include_router(health_router)
     app.include_router(options_router)
@@ -463,12 +477,15 @@ def create_app() -> FastAPI:
     app.include_router(orchestrator_router)
     app.include_router(notifications_router)
     app.include_router(company_evaluator_router)
+    app.include_router(earnings_vol_analyzer_router)
     app.include_router(calendar_news_router)
     app.include_router(market_intel_router)
     app.include_router(sentiment_router)
     app.include_router(dashboard_fixes_router)
     app.include_router(specialty_signals_router)
     app.include_router(refresh_router)
+    app.include_router(export_router)
+    app.include_router(notes_router)
     app.include_router(frontend_router)
 
     @app.exception_handler(UpstreamError)
@@ -519,6 +536,56 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def _startup() -> None:
+        # ── History DB (decision persistence) ──────────────────────
+        # Best-effort: a NAS hiccup must not block API startup. If init
+        # fails, app.state.history_* stays None and the recorder (Step 3)
+        # will no-op with a warning.
+        app.state.history_engine = None
+        app.state.history_session_maker = None
+        if settings.HISTORY_DB_ENABLED:
+            try:
+                from app.db import (
+                    build_session_maker,
+                    create_history_engine,
+                    init_db,
+                    verify_pragmas,
+                )
+                history_engine = create_history_engine(settings.HISTORY_DB_URL)
+                await init_db(history_engine)
+                pragmas = await verify_pragmas(history_engine)
+                app.state.history_engine = history_engine
+                app.state.history_session_maker = build_session_maker(history_engine)
+                _logger.info(
+                    "event=history_db_startup url=%s journal_mode=%s foreign_keys=%s",
+                    settings.HISTORY_DB_URL,
+                    pragmas.get("journal_mode"),
+                    pragmas.get("foreign_keys"),
+                )
+                # Thread the session_maker into the runner deps bundles that
+                # were constructed before startup fired. Mutating is safe —
+                # runners read this attribute at invocation time.
+                try:
+                    mi_deps_ref = getattr(app.state, "mi_deps", None)
+                    if mi_deps_ref is not None:
+                        mi_deps_ref.history_db_session_maker = app.state.history_session_maker
+                    tmc_s = getattr(app.state, "tmc_stock_deps", None)
+                    if tmc_s is not None:
+                        tmc_s.history_db_session_maker = app.state.history_session_maker
+                    tmc_o = getattr(app.state, "tmc_options_deps", None)
+                    if tmc_o is not None:
+                        tmc_o.history_db_session_maker = app.state.history_session_maker
+                    _logger.info("event=history_db_deps_wired")
+                except Exception as exc:  # noqa: BLE001
+                    _logger.warning("event=history_db_deps_wire_failed error=%r", exc)
+            except Exception as exc:  # noqa: BLE001 — log and continue
+                _logger.error(
+                    "event=history_db_startup_failed error=%s url=%s",
+                    exc,
+                    settings.HISTORY_DB_URL,
+                )
+        else:
+            _logger.info("event=history_db_disabled reason=HISTORY_DB_ENABLED=false")
+
         await app.state.data_population_service.start()
 
     @app.on_event("shutdown")
@@ -531,6 +598,14 @@ def create_app() -> FastAPI:
             pass  # orchestrator was never initialised
         await app.state.data_population_service.stop()
         await app.state.http_client.aclose()
+        # ── History DB teardown ─────────────────────────────────────
+        engine = getattr(app.state, "history_engine", None)
+        if engine is not None:
+            try:
+                await engine.dispose()
+                _logger.info("event=history_db_shutdown status=disposed")
+            except Exception as exc:  # noqa: BLE001
+                _logger.warning("event=history_db_shutdown_error error=%s", exc)
 
     return app
 

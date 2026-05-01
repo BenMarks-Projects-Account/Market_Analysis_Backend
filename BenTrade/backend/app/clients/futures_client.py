@@ -12,8 +12,6 @@ Data source policy (updated 2026-03-25):
   - All fetches now use direct httpx calls to the Yahoo Finance v8
     chart API, eliminating the yfinance dependency and rate-limit
     failures entirely.
-  - Polygon (I:NDX) noted but not used — Stocks Basic plan lacks
-    futures/index access.
 """
 
 from __future__ import annotations
@@ -44,21 +42,20 @@ _YAHOO_TIMEOUT = 15.0  # per-request timeout (seconds)
 # ── Instrument registry ──────────────────────────────────────────────
 # Each entry maps a canonical key to source-specific tickers.
 # "yahoo"        – Yahoo Finance ticker (primary, via direct API)
-# "polygon"      – Polygon I: ticker (secondary, most are 403 on our plan)
 # "label"        – human-readable display name
 # "underlying"   – ETF that tracks this futures contract (or None)
 # "asset_class"  – grouping for UI display
 
 _INSTRUMENTS: dict[str, dict[str, Any]] = {
-    "es":  {"yahoo": "ES=F",     "polygon": None,    "label": "S&P 500 Futures",       "underlying": "SPY", "asset_class": "equity_index"},
-    "nq":  {"yahoo": "NQ=F",     "polygon": "I:NDX", "label": "Nasdaq 100 Futures",    "underlying": "QQQ", "asset_class": "equity_index"},
-    "rty": {"yahoo": "RTY=F",    "polygon": None,    "label": "Russell 2000 Futures",   "underlying": "IWM", "asset_class": "equity_index"},
-    "ym":  {"yahoo": "YM=F",     "polygon": None,    "label": "Dow Futures",            "underlying": "DIA", "asset_class": "equity_index"},
-    "vix": {"yahoo": "^VIX",     "polygon": None,    "label": "VIX Index",              "underlying": None,  "asset_class": "volatility"},
-    "cl":  {"yahoo": "CL=F",     "polygon": None,    "label": "Crude Oil",              "underlying": None,  "asset_class": "commodity"},
-    "dx":  {"yahoo": "DX-Y.NYB", "polygon": None,    "label": "Dollar Index",           "underlying": None,  "asset_class": "currency"},
-    "zn":  {"yahoo": "ZN=F",     "polygon": None,    "label": "10Y Treasury Futures",   "underlying": None,  "asset_class": "fixed_income"},
-    "tnx": {"yahoo": "^TNX",     "polygon": None,    "label": "10Y Treasury Yield",     "underlying": None,  "asset_class": "fixed_income"},
+    "es":  {"yahoo": "ES=F",     "label": "S&P 500 Futures",       "underlying": "SPY", "asset_class": "equity_index"},
+    "nq":  {"yahoo": "NQ=F",     "label": "Nasdaq 100 Futures",    "underlying": "QQQ", "asset_class": "equity_index"},
+    "rty": {"yahoo": "RTY=F",    "label": "Russell 2000 Futures",   "underlying": "IWM", "asset_class": "equity_index"},
+    "ym":  {"yahoo": "YM=F",     "label": "Dow Futures",            "underlying": "DIA", "asset_class": "equity_index"},
+    "vix": {"yahoo": "^VIX",     "label": "VIX Index",              "underlying": None,  "asset_class": "volatility"},
+    "cl":  {"yahoo": "CL=F",     "label": "Crude Oil",              "underlying": None,  "asset_class": "commodity"},
+    "dx":  {"yahoo": "DX-Y.NYB", "label": "Dollar Index",           "underlying": None,  "asset_class": "currency"},
+    "zn":  {"yahoo": "ZN=F",     "label": "10Y Treasury Futures",   "underlying": None,  "asset_class": "fixed_income"},
+    "tnx": {"yahoo": "^TNX",     "label": "10Y Treasury Yield",     "underlying": None,  "asset_class": "fixed_income"},
 }
 
 # VXX is used as a proxy for VIX futures term-structure estimation
@@ -279,7 +276,7 @@ class FuturesClient:
     async def get_vix_term_structure(self) -> dict[str, Any]:
         """VIX spot + VXX-based term-structure estimate.
 
-        True VIX futures (VX=F) are unavailable on both Polygon and Yahoo.
+        True VIX futures (VX=F) are unavailable on Yahoo Finance.
         We approximate term structure using:
           - ``^VIX``  → VIX spot index
           - ``VXX``   → iPath VIX Short-Term Futures ETN (tracks front/2nd

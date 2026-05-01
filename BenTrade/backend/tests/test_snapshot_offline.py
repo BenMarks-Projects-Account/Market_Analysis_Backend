@@ -414,7 +414,6 @@ class TestOfflineLiveCallGuard:
         bds.tradier_client = MagicMock()
         bds.tradier_client.get_chain = AsyncMock(return_value=[])
         bds.finnhub_client = MagicMock()
-        bds.polygon_client = MagicMock()
         bds.fred_client = MagicMock()
 
         with OfflineLiveCallGuard(bds):
@@ -426,7 +425,6 @@ class TestOfflineLiveCallGuard:
         bds = MagicMock()
         bds.tradier_client = MagicMock()
         bds.finnhub_client = MagicMock()
-        bds.polygon_client = MagicMock()
         bds.fred_client = MagicMock()
         bds.fred_client.get_latest_series_value = AsyncMock(return_value=18.0)
 
@@ -440,7 +438,6 @@ class TestOfflineLiveCallGuard:
         bds.tradier_client = MagicMock()
         original_method = bds.tradier_client.get_chain
         bds.finnhub_client = MagicMock()
-        bds.polygon_client = MagicMock()
         bds.fred_client = MagicMock()
 
         with OfflineLiveCallGuard(bds):
@@ -454,7 +451,6 @@ class TestOfflineLiveCallGuard:
         bds.tradier_client = MagicMock()
         original = bds.tradier_client.get_quote
         bds.finnhub_client = MagicMock()
-        bds.polygon_client = MagicMock()
         bds.fred_client = MagicMock()
 
         try:

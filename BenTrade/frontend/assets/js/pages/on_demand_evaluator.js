@@ -11,6 +11,8 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
   // === API CONFIG ===
   var API_BASE = '/api/company-evaluator/on-demand';
   var POLL_INTERVAL_MS = 2000;
+  var POLL_FETCH_TIMEOUT_MS = 15000;       // 15s fetch timeout for slow LLM steps
+  var POLL_MAX_CONSECUTIVE_FAILURES = 4;   // require 4 consecutive failures before "Connection Lost"
 
   // Set to true to use mock data before backend exists
   var MOCK_MODE = false;
@@ -19,6 +21,8 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
   var currentJobId = null;
   var pollTimer = null;
   var currentRawData = null;
+  var _pollConsecutiveFailures = 0;
+  var _lastGoodStatus = null;
 
   // === DOM REFS ===
   var form = scope.querySelector('#ode-form');
@@ -45,12 +49,16 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
   if (cancelBtn) cancelBtn.addEventListener('click', handleCancel);
   if (retryBtn) retryBtn.addEventListener('click', handleRetry);
   _initDeepResearchButton();
+  _initNarrativePanel();
+  _initExportButton();
+  _initGlossary();
   rawTabs.forEach(function(tab) {
     tab.addEventListener('click', function() { switchRawTab(tab); });
   });
 
   // === URL PARAM AUTO-RUN ===
   var _lastAutoSymbol = null;
+  var _isPrintMode = false;
 
   function _getSymbolFromUrl() {
     var hash = window.location.hash || '';
@@ -65,13 +73,31 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
     return normalized;
   }
 
+  function _checkPrintMode() {
+    var hash = window.location.hash || '';
+    var qIdx = hash.indexOf('?');
+    if (qIdx === -1) return false;
+    var params = new URLSearchParams(hash.substring(qIdx + 1));
+    return params.get('print_mode') === '1';
+  }
+
+  function _checkInjectMode() {
+    var hash = window.location.hash || '';
+    var qIdx = hash.indexOf('?');
+    if (qIdx === -1) return false;
+    var params = new URLSearchParams(hash.substring(qIdx + 1));
+    return params.get('inject_mode') === '1';
+  }
+
   function _autoRunAnalysis(symbol) {
     if (!symbolInput) return;
     symbolInput.value = symbol;
-    // Clear URL param to prevent re-run on refresh
-    var baseHash = (window.location.hash || '').split('?')[0];
-    if (history.replaceState) {
-      history.replaceState(null, '', window.location.pathname + window.location.search + baseHash);
+    // In print mode, don't clear URL params — Playwright needs them
+    if (!_isPrintMode) {
+      var baseHash = (window.location.hash || '').split('?')[0];
+      if (history.replaceState) {
+        history.replaceState(null, '', window.location.pathname + window.location.search + baseHash);
+      }
     }
     // Trigger the form submit handler
     if (form && typeof form.requestSubmit === 'function') {
@@ -91,9 +117,99 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
 
   window.addEventListener('hashchange', _onHashChange);
 
+  // ── Connection toggle (mirrors Company Evaluator pattern) ──
+  // OnDemandEvaluator uses the same /api/company-evaluator/* proxy as the
+  // main CE dashboard, so toggling here mutates the same shared backend
+  // mode. The setting is therefore shared across CE and OnDemandEvaluator
+  // (server-side global state — no localStorage), matching CE's design.
+  var _connRadios = scope.querySelectorAll('input[name="ode-conn-mode"]');
+  var _connUrlEl  = scope.querySelector('#ode-conn-url');
+
+  function _ode_esc(s) {
+    if (s == null) return '';
+    var d = document.createElement('span'); d.textContent = String(s); return d.innerHTML;
+  }
+  function _setConnRadioState(mode) {
+    Array.prototype.forEach.call(_connRadios, function (r) { r.checked = (r.value === mode); });
+  }
+  function _showConnUrl(url, healthy) {
+    if (!_connUrlEl) return;
+    var dot = healthy ? '\u25CF' : '\u25CB';
+    var color = healthy ? '#00c853' : '#ff1744';
+    _connUrlEl.innerHTML = '<span style="color:' + color + ';">' + dot + '</span> ' + _ode_esc(url);
+    _connUrlEl.title = healthy ? 'Connected' : 'Cannot reach evaluator at ' + url;
+  }
+  function _showConnWarning(url) {
+    if (!_connUrlEl) return;
+    _connUrlEl.innerHTML = '<span style="color:#ff1744;">\u25CB</span> ' + _ode_esc(url) +
+      ' <span style="color:#ff9800; font-size:0.68rem;">\u2014 not reachable</span>';
+  }
+  function _checkEvaluatorHealth(url) {
+    return fetch('/api/company-evaluator/status').then(function (res) {
+      if (!res.ok) { _showConnWarning(url); return; }
+      return res.json().then(function (data) {
+        if (data.service_healthy) _showConnUrl(url, true); else _showConnWarning(url);
+      });
+    }).catch(function () { _showConnWarning(url); });
+  }
+  function _loadConnectionState() {
+    return fetch('/api/company-evaluator/connection').then(function (res) {
+      if (!res.ok) return;
+      return res.json().then(function (data) {
+        _setConnRadioState(data.mode);
+        _showConnUrl(data.url, null);
+        _checkEvaluatorHealth(data.url);
+      });
+    }).catch(function () { /* ignore */ });
+  }
+  function _switchConnectionMode(mode) {
+    Array.prototype.forEach.call(_connRadios, function (r) { r.disabled = true; });
+    return fetch('/api/company-evaluator/connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: mode }),
+    }).then(function (res) {
+      if (!res.ok) {
+        return res.json().catch(function () { return {}; }).then(function (err) {
+          alert('Failed to switch mode: ' + (err.detail || 'unknown error'));
+          _loadConnectionState();
+        });
+      }
+      return res.json().then(function (data) {
+        _setConnRadioState(data.mode);
+        _showConnUrl(data.url, null);
+        // Cache invalidation: cancel any in-flight job and clear results
+        try { if (currentJobId) { apiCancelJob(currentJobId); currentJobId = null; } } catch (_) {}
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        if (loadingEl) loadingEl.hidden = true;
+        if (errorEl) errorEl.hidden = true;
+        if (resultsEl) { resultsEl.hidden = true; resultsEl.innerHTML = ''; }
+        currentRawData = null;
+        return _checkEvaluatorHealth(data.url);
+      });
+    }).catch(function (e) {
+      alert('Failed to switch connection: ' + e.message);
+      _loadConnectionState();
+    }).then(function () {
+      Array.prototype.forEach.call(_connRadios, function (r) { r.disabled = false; });
+    });
+  }
+  Array.prototype.forEach.call(_connRadios, function (radio) {
+    radio.addEventListener('change', function () {
+      if (this.checked) _switchConnectionMode(this.value);
+    });
+  });
+  _loadConnectionState();
+
   // Initial check on page load
+  _isPrintMode = _checkPrintMode();
+  var _isInjectMode = _checkInjectMode();
+  if (_isPrintMode) {
+    document.body.classList.add('print-mode');
+  }
   var _initSymbol = _getSymbolFromUrl();
-  if (_initSymbol) {
+  // In inject mode, Playwright will call _injectAnalysisForPrint — skip auto-analyze
+  if (_initSymbol && !_isInjectMode) {
     _lastAutoSymbol = _initSymbol;
     _autoRunAnalysis(_initSymbol);
   }
@@ -115,10 +231,18 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
   }
 
   function apiGetJobStatus(jobId) {
-    return fetch(API_BASE + '/jobs/' + encodeURIComponent(jobId)).then(function(resp) {
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      return resp.json();
-    });
+    var controller = new AbortController();
+    var timeoutId = setTimeout(function() { controller.abort(); }, POLL_FETCH_TIMEOUT_MS);
+    return fetch(API_BASE + '/jobs/' + encodeURIComponent(jobId), { signal: controller.signal })
+      .then(function(resp) {
+        clearTimeout(timeoutId);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.json();
+      })
+      .catch(function(err) {
+        clearTimeout(timeoutId);
+        throw err;
+      });
   }
 
   function apiGetJobResult(jobId) {
@@ -145,6 +269,8 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
     }
 
     _disableDeepResearchButton();
+    _disableAddNarrativeButton();
+    _disableExportButton();
     showLoading(symbol);
 
     if (MOCK_MODE) {
@@ -163,8 +289,11 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
   // === POLLING ===
   function startPolling(jobId) {
     stopPolling();
+    _pollConsecutiveFailures = 0;
     pollTimer = setInterval(function() {
       apiGetJobStatus(jobId).then(function(status) {
+        _pollConsecutiveFailures = 0;
+        _lastGoodStatus = status;
         updateLoadingState(status);
         if (status.status === 'complete') {
           stopPolling();
@@ -178,9 +307,13 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
           showError('Analysis Failed', status.error || 'The analysis job failed for an unknown reason.');
         }
       }).catch(function(err) {
-        console.error('Polling error:', err);
-        stopPolling();
-        showError('Connection Lost', 'Could not get job status. Please try again.');
+        _pollConsecutiveFailures++;
+        console.warn('Poll failure ' + _pollConsecutiveFailures + '/' + POLL_MAX_CONSECUTIVE_FAILURES + ':', err.message);
+        if (_pollConsecutiveFailures >= POLL_MAX_CONSECUTIVE_FAILURES) {
+          stopPolling();
+          showError('Connection Lost', 'Could not reach the backend after ' + POLL_MAX_CONSECUTIVE_FAILURES + ' attempts. The job may still be running — click Retry to reconnect.');
+        }
+        // Otherwise keep polling silently; last-known-good state stays visible
       });
     }, POLL_INTERVAL_MS);
   }
@@ -203,8 +336,40 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
   }
 
   function handleRetry() {
-    hideAllStates();
-    if (symbolInput) symbolInput.focus();
+    // If we have an active job, try to reconnect instead of resetting
+    if (currentJobId) {
+      _pollConsecutiveFailures = 0;
+      hideAllStates();
+      // Show loading state with last known progress while we re-fetch
+      if (_lastGoodStatus && loadingEl) {
+        loadingEl.hidden = false;
+        updateLoadingState(_lastGoodStatus);
+      } else if (loadingEl) {
+        loadingEl.hidden = false;
+      }
+      // Attempt an immediate status fetch, then resume polling
+      apiGetJobStatus(currentJobId).then(function(status) {
+        _lastGoodStatus = status;
+        updateLoadingState(status);
+        if (status.status === 'complete') {
+          apiGetJobResult(currentJobId).then(function(result) {
+            showResults(result);
+          }).catch(function(err) {
+            showError('Failed to Load Results', err.message);
+          });
+        } else if (status.status === 'failed') {
+          showError('Analysis Failed', status.error || 'The analysis job failed for an unknown reason.');
+        } else {
+          startPolling(currentJobId);
+        }
+      }).catch(function(err) {
+        console.error('Retry fetch failed:', err);
+        showError('Connection Lost', 'Still cannot reach the backend. Check that the server is running.');
+      });
+    } else {
+      hideAllStates();
+      if (symbolInput) symbolInput.focus();
+    }
   }
 
   // === STATE MANAGEMENT ===
@@ -259,16 +424,18 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
     if (analyzeBtn) analyzeBtn.disabled = false;
 
     renderCompanyHeader(data);
-    renderDistressBadge(data);
     // Mount price chart below header
     if (window.BenTradeComponents && window.BenTradeComponents.mountPriceChart && data.symbol) {
       window.BenTradeComponents.mountPriceChart('ode-chart-container', data.symbol);
     }
     renderBusinessProfile(data);
     renderQualityIndicators(data);
-    renderScoreCards(data);
     renderPillars(data.evaluation);
-    renderSmartMoney(data.smart_money);
+    // Smart money fetches separately from the dedicated FMP endpoint
+    var smSymbol = (data.company && data.company.symbol) || data.symbol;
+    if (smSymbol) {
+      fetchAndRenderSmartMoney(smSymbol);
+    }
     renderValuationModels(data);
     renderEntryAndTargets(data);
     renderThesis(data.llm_recommendation);
@@ -276,9 +443,20 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
     renderRawFinancials();
     renderMetadataFooter(data);
 
-    // Enable deep research button now that we have data
+    // Enable deep research, narrative, and export buttons now that we have data
     var sym = (data.company && data.company.symbol) || data.symbol;
-    if (sym) _enableDeepResearchButton(sym);
+    if (sym) {
+      _enableDeepResearchButton(sym);
+      _enableAddNarrativeButton(sym);
+      _enableExportButton(sym);
+      // Phase 1 PDF export: reset appended-analyses store for this CE run.
+      if (window.BenTradeOnDemandAppendedStore) {
+        window.BenTradeOnDemandAppendedStore.reset(sym, currentJobId);
+      }
+    }
+
+    // Signal to Playwright that rendering is complete
+    document.body.setAttribute('data-print-ready', 'true');
   }
 
   function renderCompanyHeader(data) {
@@ -294,29 +472,7 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
     // Sector fallback: prefer clean sector from comps over raw SIC description
     var sector = (data.comps && data.comps.subject ? data.comps.subject.sector : null) || company.sector || '\u2014';
 
-    container.innerHTML =
-      '<div><div class="ode-company-symbol">' + _esc(company.symbol || '\u2014') + '</div></div>' +
-      '<div class="ode-company-info">' +
-        '<div class="ode-company-name">' + _esc(company.name || '') + '</div>' +
-        '<div class="ode-company-meta">' +
-          '<span>' + _esc(sector) + '</span>' +
-          '<span>' + _esc(company.exchange || '\u2014') + '</span>' +
-          (company.employees ? '<span>' + fmtNum(company.employees) + ' employees</span>' : '') +
-          (company.ceo ? '<span>CEO: ' + _esc(company.ceo) + '</span>' : '') +
-        '</div>' +
-      '</div>' +
-      '<div class="ode-company-price">' +
-        '<div class="ode-company-price-value">' + (price != null ? '$' + price.toFixed(2) : '\u2014') + '</div>' +
-        '<div class="ode-company-market-cap">Mkt Cap: $' + fmtLarge(company.market_cap) + '</div>' +
-      '</div>';
-  }
-
-  // === DISTRESS RISK BADGE ===
-  function renderDistressBadge(data) {
-    var badge = scope.querySelector('#ode-distress-badge');
-    if (!badge) return;
-
-    // Try real API structure first, then mock/legacy
+    // --- Z-score badge ---
     var altmanZ = null;
     var breakdowns = data && data.evaluation ? data.evaluation.pillar_breakdowns : null;
     if (breakdowns && breakdowns.operational_health) {
@@ -327,28 +483,66 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
         altmanZ = oh.components.altman_z.value;
       }
     }
-
-    if (altmanZ === null || altmanZ === undefined) {
-      badge.className = 'ode-distress-badge unknown';
-      badge.innerHTML = '<span class="ode-distress-badge-icon">\u25CF</span>Distress: N/A';
-      return;
+    var zBadgeClass = 'unknown', zBadgeText = 'Z=N/A';
+    if (altmanZ != null && !isNaN(altmanZ)) {
+      var z = Number(altmanZ);
+      if (z >= 2.99) { zBadgeClass = 'safe'; zBadgeText = 'SAFE Z=' + z.toFixed(2); }
+      else if (z >= 1.81) { zBadgeClass = 'watch'; zBadgeText = 'WATCH Z=' + z.toFixed(2); }
+      else { zBadgeClass = 'distress'; zBadgeText = 'DISTRESS Z=' + z.toFixed(2); }
     }
 
-    var z = Number(altmanZ);
-    var level, label;
-    if (z >= 2.99) {
-      level = 'safe';
-      label = 'Safe (Z=' + z.toFixed(2) + ')';
-    } else if (z >= 1.81) {
-      level = 'watch';
-      label = 'Watch (Z=' + z.toFixed(2) + ')';
-    } else {
-      level = 'distress';
-      label = 'Distress (Z=' + z.toFixed(2) + ')';
-    }
+    // --- Scores row values ---
+    var composite = data.evaluation ? data.evaluation.composite_score : null;
+    var completeness = data.evaluation ? data.evaluation.completeness_pct : null;
+    var breakoutScore = data.breakout ? data.breakout.score : null;
+    var rec = data.llm_recommendation || {};
+    var llmRating = rec.rating || null;
+    var llmConviction = rec.conviction;
 
-    badge.className = 'ode-distress-badge ' + level;
-    badge.innerHTML = '<span class="ode-distress-badge-icon">\u25CF</span>' + _esc(label);
+    // Build scores line parts
+    var scoreParts = [];
+    if (composite != null) {
+      var compText = '<span class="ode-hdr-score-label">Composite:</span> <span class="ode-hdr-score-val">' + composite.toFixed(1);
+      if (completeness != null) compText += ' (' + completeness.toFixed(0) + '%)';
+      compText += '</span>';
+      scoreParts.push(compText);
+    }
+    if (breakoutScore != null) {
+      scoreParts.push('<span class="ode-hdr-score-label">Breakout:</span> <span class="ode-hdr-score-val">' + breakoutScore.toFixed(1) + '</span>');
+    }
+    if (llmRating) {
+      var ratingLower = llmRating.toLowerCase().replace(/_/g, '-');
+      var llmHtml = '<span class="ode-hdr-score-label">LLM:</span> <span class="ode-hdr-score-val ode-hdr-llm-' + _esc(ratingLower) + '">' + _esc(llmRating);
+      if (llmConviction != null) llmHtml += ' (' + Math.round(llmConviction) + '%)';
+      llmHtml += '</span>';
+      scoreParts.push(llmHtml);
+    }
+    var scoresRowHtml = scoreParts.length > 0
+      ? scoreParts.join('<span class="ode-hdr-score-sep">\u00b7</span>')
+      : '';
+
+    // --- Meta row ---
+    var metaParts = [];
+    if (sector && sector !== '\u2014') metaParts.push(_esc(sector));
+    if (company.exchange) metaParts.push(_esc(company.exchange));
+    if (company.employees) metaParts.push(fmtNum(company.employees) + ' employees');
+
+    container.innerHTML =
+      '<div class="ode-hdr-main">' +
+        '<div class="ode-hdr-ticker">' + _esc(company.symbol || '\u2014') + '</div>' +
+        '<div class="ode-hdr-identity">' +
+          '<div class="ode-hdr-name-row">' +
+            '<span class="ode-hdr-name">' + _esc(company.name || '') + '</span>' +
+            '<span class="ode-hdr-z-badge ' + zBadgeClass + '">' + zBadgeText + '</span>' +
+          '</div>' +
+          '<div class="ode-hdr-meta">' + metaParts.join(' \u00b7 ') + '</div>' +
+          (scoresRowHtml ? '<div class="ode-hdr-scores">' + scoresRowHtml + '</div>' : '') +
+        '</div>' +
+        '<div class="ode-hdr-price-block">' +
+          '<div class="ode-hdr-price">' + (price != null ? '$' + price.toFixed(2) : '\u2014') + '</div>' +
+          '<div class="ode-hdr-mcap">Mkt Cap: $' + fmtLarge(company.market_cap) + '</div>' +
+        '</div>' +
+      '</div>';
   }
 
   // === QUALITY INDICATORS PANEL ===
@@ -720,41 +914,6 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
       '</div>';
   }
 
-  function renderScoreCards(data) {
-    var compositeCard = scope.querySelector('#ode-composite-card');
-    var breakoutCard = scope.querySelector('#ode-breakout-card');
-    var llmCard = scope.querySelector('#ode-llm-card');
-
-    if (compositeCard) {
-      var score = data.evaluation ? data.evaluation.composite_score : null;
-      var completeness = data.evaluation ? data.evaluation.completeness_pct : null;
-      compositeCard.innerHTML =
-        '<div class="ode-score-card-title">Composite Score</div>' +
-        '<div class="ode-score-card-value">' + (score != null ? score.toFixed(1) : '\u2014') + '</div>' +
-        '<div class="ode-score-card-subtitle">' + (completeness != null ? completeness.toFixed(0) + '% data completeness' : '') + '</div>';
-    }
-
-    if (breakoutCard) {
-      var bScore = data.breakout ? data.breakout.score : null;
-      var bStatus = data.breakout ? data.breakout.filter_status : '';
-      breakoutCard.innerHTML =
-        '<div class="ode-score-card-title">Breakout Score</div>' +
-        '<div class="ode-score-card-value">' + (bScore != null ? bScore.toFixed(1) : '\u2014') + '</div>' +
-        '<div class="ode-score-card-subtitle">' + (bStatus === 'eligible' ? 'Eligible for breakout' : _esc(bStatus)) + '</div>';
-    }
-
-    if (llmCard) {
-      var rec = data.llm_recommendation || {};
-      var rating = (rec.rating || 'hold').toLowerCase().replace(/_/g, '-');
-      llmCard.innerHTML =
-        '<div class="ode-score-card-title">LLM Recommendation</div>' +
-        '<div style="margin: 12px 0;">' +
-          '<span class="ode-llm-rating ode-llm-rating-' + rating + '">' + _esc(rec.rating || '\u2014') + '</span>' +
-        '</div>' +
-        '<div class="ode-score-card-subtitle">Conviction: ' + (rec.conviction != null ? rec.conviction + '%' : '\u2014') + '</div>';
-    }
-  }
-
   function renderPillars(evaluation) {
     var container = scope.querySelector('#ode-pillars-grid');
     if (!container || !evaluation || !evaluation.pillar_scores) return;
@@ -806,67 +965,225 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
     }).join('');
   }
 
-  function renderSmartMoney(sm) {
-    var container = scope.querySelector('#ode-smart-money');
-    if (!container) return;
+  // === SMART MONEY (FMP-powered, fetched separately) ===
 
-    if (!sm) {
-      container.innerHTML = '<div style="color: #506878;">No smart money data available</div>';
+  function fetchAndRenderSmartMoney(symbol) {
+    var section = scope.querySelector('#ode-smart-money-section');
+    var synthesisEl = scope.querySelector('#ode-sm-synthesis');
+    var instEl = scope.querySelector('#ode-sm-institutional');
+    var holdersEl = scope.querySelector('#ode-sm-holders');
+    var insiderEl = scope.querySelector('#ode-sm-insider');
+    var congMfEl = scope.querySelector('#ode-sm-congress-mf');
+    if (!section) return;
+
+    // Show section with loading state
+    section.hidden = false;
+    if (synthesisEl) synthesisEl.innerHTML = '<div class="ode-sm-loading">Loading smart money data\u2026</div>';
+    [instEl, holdersEl, insiderEl, congMfEl].forEach(function(el) { if (el) el.innerHTML = ''; });
+
+    fetch('/api/company-evaluator/smart-money/' + encodeURIComponent(symbol))
+      .then(function(resp) {
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.json();
+      })
+      .then(function(sm) {
+        _renderSmartMoneyData(sm, synthesisEl, instEl, holdersEl, insiderEl, congMfEl);
+      })
+      .catch(function(err) {
+        if (synthesisEl) synthesisEl.innerHTML = '<div class="ode-sm-empty">Smart money data unavailable (' + _esc(err.message) + ')</div>';
+      });
+  }
+
+  function _renderSmartMoneyData(sm, synthesisEl, instEl, holdersEl, insiderEl, congMfEl) {
+    // Synthesis
+    if (synthesisEl) {
+      var scoreBadge = '';
+      if (sm.score_contribution != null && sm.score_contribution !== 0) {
+        var cls = sm.score_contribution > 0 ? 'positive' : 'negative';
+        scoreBadge = ' <span class="ode-sm-score-badge ' + cls + '">' +
+          (sm.score_contribution > 0 ? '+' : '') + sm.score_contribution + ' pts</span>';
+      }
+      synthesisEl.innerHTML = _esc(sm.synthesis || '') + scoreBadge;
+    }
+
+    // Section 1: Institutional summary scoreboard
+    if (instEl) _renderInstitutionalSummary(instEl, sm.institutional);
+
+    // Section 2: Top holders table
+    if (holdersEl) _renderHoldersTable(holdersEl, sm.institutional);
+
+    // Section 3: Insider activity
+    if (insiderEl) _renderInsiderActivity(insiderEl, sm.insider);
+
+    // Section 4: Congressional + mutual funds
+    if (congMfEl) _renderCongressionalAndMF(congMfEl, sm.congressional, sm.mutual_funds);
+  }
+
+  function _renderInstitutionalSummary(el, inst) {
+    if (!inst) { el.innerHTML = '<div class="ode-sm-empty">No institutional data available</div>'; return; }
+
+    var flowClass = 'ode-sm-flow-' + (inst.net_flow_direction || 'flat');
+    var flowLabel = inst.net_flow_direction ? inst.net_flow_direction.charAt(0).toUpperCase() + inst.net_flow_direction.slice(1) : 'N/A';
+    var flowShares = inst.net_flow_shares != null ? fmtNum(Math.abs(inst.net_flow_shares)) + ' shares' : '';
+
+    el.innerHTML =
+      '<div class="ode-sm-scoreboard">' +
+        '<div class="ode-sm-stat">' +
+          '<div class="ode-sm-stat-value">' + (inst.total_pct != null ? inst.total_pct.toFixed(1) + '%' : '\u2014') + '</div>' +
+          '<div class="ode-sm-stat-label">Institutional Ownership</div>' +
+        '</div>' +
+        '<div class="ode-sm-stat">' +
+          '<div class="ode-sm-stat-value">' + (inst.holder_count != null ? fmtNum(inst.holder_count) : '\u2014') + '</div>' +
+          '<div class="ode-sm-stat-label">Total Holders</div>' +
+        '</div>' +
+        '<div class="ode-sm-stat">' +
+          '<div class="ode-sm-stat-value ' + flowClass + '">' + _esc(flowLabel) + '</div>' +
+          '<div class="ode-sm-stat-label">Net Flow' + (flowShares ? ' (' + flowShares + ')' : '') + '</div>' +
+        '</div>' +
+        '<div class="ode-sm-stat">' +
+          '<div class="ode-sm-stat-value">' + (inst.top10_concentration_pct != null ? inst.top10_concentration_pct.toFixed(1) + '%' : '\u2014') + '</div>' +
+          '<div class="ode-sm-stat-label">Top-10 Concentration</div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="text-align:right; font-size:10px; color:#506878;">Quarter: ' + _esc(inst.quarter || '') + '</div>';
+  }
+
+  function _renderHoldersTable(el, inst) {
+    if (!inst || !inst.top_holders || inst.top_holders.length === 0) {
+      el.innerHTML = '<div class="ode-sm-empty">No institutional holder data</div>';
       return;
     }
+    var rows = inst.top_holders.map(function(h, i) {
+      var chgClass = 'ode-sm-change-' + (h.change || 'unchanged');
+      var chgText = h.change || 'unchanged';
+      if (h.change_pct != null) chgText += ' (' + (h.change_pct > 0 ? '+' : '') + h.change_pct.toFixed(1) + '%)';
+      return '<tr>' +
+        '<td>' + (i + 1) + '</td>' +
+        '<td>' + _esc(h.name) + '</td>' +
+        '<td class="num">' + fmtNum(h.shares) + '</td>' +
+        '<td class="num">' + (h.pct_of_portfolio != null ? h.pct_of_portfolio.toFixed(3) + '%' : '\u2014') + '</td>' +
+        '<td class="' + chgClass + '">' + _esc(chgText) + '</td>' +
+      '</tr>';
+    }).join('');
 
-    var cards = [];
+    el.innerHTML = '<div class="ode-sm-table-wrap"><table class="ode-sm-table">' +
+      '<thead><tr><th>#</th><th>Holder</th><th class="num">Shares</th><th class="num">Portfolio %</th><th>Change</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table></div>';
+  }
 
-    // Insider activity
-    var ia = sm.insider_activity;
-    if (ia) {
-      var signal = ia.signal || 'unknown';
-      var signalLabel = signal.replace(/_/g, ' ');
-      var netValue = ia.net_value || 0;
+  function _renderInsiderActivity(el, insider) {
+    if (!insider) { el.innerHTML = '<div class="ode-sm-empty">No insider data available</div>'; return; }
 
-      cards.push(
-        '<div class="ode-sm-card">' +
-          '<div class="ode-pillar-name">Insider Activity</div>' +
-          '<div class="ode-pillar-score">' + (ia.score != null ? ia.score.toFixed(0) : '\u2014') + '</div>' +
-          '<div style="color: ' + (netValue < 0 ? '#f08070' : '#60d890') + '; font-size: 11px; margin-bottom: 8px; text-transform: capitalize;">' + _esc(signalLabel) + '</div>' +
-          '<div class="ode-pillar-components">' +
-            '<div class="ode-pillar-component"><span>Transactions (' + (ia._lookback_days || 180) + 'd)</span><span>' + (ia.transaction_count || 0) + '</span></div>' +
-            '<div class="ode-pillar-component"><span>Buys</span><span>' + (ia.buy_count || 0) + '</span></div>' +
-            '<div class="ode-pillar-component"><span>Sells</span><span>' + (ia.sell_count || 0) + '</span></div>' +
-            '<div class="ode-pillar-component"><span>Buy Value</span><span>' + fmtCurrency(ia.buy_value) + '</span></div>' +
-            '<div class="ode-pillar-component"><span>Sell Value</span><span>' + fmtCurrency(ia.sell_value) + '</span></div>' +
-            '<div class="ode-pillar-component"><span>Net Value</span><span style="color: ' + (netValue < 0 ? '#f08070' : '#60d890') + ';">' + fmtCurrency(Math.abs(netValue)) + ' ' + (netValue < 0 ? '(net sell)' : '(net buy)') + '</span></div>' +
-          '</div>' +
-        '</div>'
-      );
+    // Signal badge
+    var signal = insider.signal || 'neutral';
+    var signalLabel = signal.replace(/_/g, ' ');
+
+    // Insider transactions table (90d)
+    var txns = insider.transaction_table_90d || [];
+    var tableHtml = '';
+    if (txns.length > 0) {
+      var txRows = txns.slice(0, 25).map(function(tx) {
+        var typeColor = tx.type === 'buy' ? '#60d890' : tx.type === 'sell' ? '#f08070' : '#90b8d0';
+        return '<tr>' +
+          '<td>' + _esc(tx.date) + '</td>' +
+          '<td>' + _esc(tx.name) + '</td>' +
+          '<td style="text-transform:capitalize; font-size:10px;">' + _esc(tx.role) + '</td>' +
+          '<td style="color:' + typeColor + '; text-transform:uppercase; font-weight:600;">' + _esc(tx.type) + '</td>' +
+          '<td class="num">' + fmtNum(tx.shares) + '</td>' +
+          '<td class="num">' + (tx.price ? '$' + tx.price.toFixed(2) : '\u2014') + '</td>' +
+          '<td class="num">' + fmtCurrency(tx.value) + '</td>' +
+        '</tr>';
+      }).join('');
+      tableHtml = '<div class="ode-sm-table-wrap"><table class="ode-sm-table">' +
+        '<thead><tr><th>Date</th><th>Name</th><th>Role</th><th>Type</th><th class="num">Shares</th><th class="num">Price</th><th class="num">Value</th></tr></thead>' +
+        '<tbody>' + txRows + '</tbody></table></div>';
+    } else {
+      tableHtml = '<div class="ode-sm-empty">No insider transactions in trailing 90 days</div>';
     }
 
-    // Institutional
-    var inst = sm.institutional_ownership;
-    cards.push(
-      '<div class="ode-sm-card">' +
-        '<div class="ode-pillar-name">Institutional</div>' +
-        '<div class="ode-pillar-score">' + (inst && inst.score != null ? inst.score.toFixed(0) : '\u2014') + '</div>' +
-        '<div class="ode-pillar-components">' +
-          (inst && inst.current_pct != null
-            ? '<div class="ode-pillar-component"><span>Ownership</span><span>' + (inst.current_pct * 100).toFixed(1) + '%</span></div>'
-            : '<div style="color: #506878;">Data not available on current plan</div>') +
-        '</div>' +
-      '</div>'
-    );
+    // Signal sidebar
+    var net90 = insider.net_value_90d || 0;
+    var netColor = net90 >= 0 ? '#60d890' : '#f08070';
+    var netLabel = net90 >= 0 ? 'Net Buy' : 'Net Sell';
 
-    // Congressional
-    cards.push(
-      '<div class="ode-sm-card">' +
-        '<div class="ode-pillar-name">Congressional</div>' +
-        '<div class="ode-pillar-score">\u2014</div>' +
-        '<div class="ode-pillar-components">' +
-          '<div style="color: #506878;">No recent disclosures</div>' +
-        '</div>' +
-      '</div>'
-    );
+    var sidebarHtml =
+      '<div class="ode-sm-insider-signals">' +
+        '<div style="text-align:center; margin-bottom:6px;"><span class="ode-sm-signal ' + _esc(signal) + '">' + _esc(signalLabel) + '</span></div>' +
+        '<div class="ode-sm-insider-signal-row"><span class="ode-sm-insider-signal-label">Buys (90d)</span><span class="ode-sm-insider-signal-value" style="color:#60d890;">' + (insider.buy_count_90d || 0) + ' (' + fmtCurrency(insider.buy_value_90d) + ')</span></div>' +
+        '<div class="ode-sm-insider-signal-row"><span class="ode-sm-insider-signal-label">Sells (90d)</span><span class="ode-sm-insider-signal-value" style="color:#f08070;">' + (insider.sell_count_90d || 0) + ' (' + fmtCurrency(insider.sell_value_90d) + ')</span></div>' +
+        '<div class="ode-sm-insider-signal-row"><span class="ode-sm-insider-signal-label">' + _esc(netLabel) + '</span><span class="ode-sm-insider-signal-value" style="color:' + netColor + ';">' + fmtCurrency(Math.abs(net90)) + '</span></div>';
 
-    container.innerHTML = cards.join('');
+    if (insider.cluster_buy) {
+      sidebarHtml += '<div class="ode-sm-insider-signal-row"><span class="ode-sm-insider-signal-label">Cluster Buy</span><span class="ode-sm-insider-signal-value" style="color:#50d080;">' + insider.cluster_buy_count + ' insiders</span></div>';
+    }
+    if (insider.cluster_sell) {
+      sidebarHtml += '<div class="ode-sm-insider-signal-row"><span class="ode-sm-insider-signal-label">Cluster Sell</span><span class="ode-sm-insider-signal-value" style="color:#f08070;">' + insider.cluster_sell_count + ' insiders</span></div>';
+    }
+
+    // Officer highlight
+    var officers = insider.officer_activity || [];
+    if (officers.length > 0) {
+      var officerNames = [];
+      officers.forEach(function(o) {
+        var label = o.role === 'ceo' ? 'CEO' : o.role === 'cfo' ? 'CFO' : o.role.toUpperCase();
+        officerNames.push(label + ' ' + o.type);
+      });
+      sidebarHtml += '<div class="ode-sm-officer-alert">\u26A0 ' + _esc(officerNames.slice(0, 3).join(', ')) + '</div>';
+    }
+
+    sidebarHtml += '</div>';
+
+    el.innerHTML = '<div class="ode-sm-insider-layout">' + tableHtml + sidebarHtml + '</div>';
+  }
+
+  function _renderCongressionalAndMF(el, congressional, mutualFunds) {
+    var html = '';
+
+    // Congressional trades
+    html += '<div style="margin-bottom: 12px;"><div style="font-size:12px; color:#80c8e0; font-weight:600; margin-bottom:6px;">Congressional Trades (180d)</div>';
+    if (congressional && congressional.trades && congressional.trades.length > 0) {
+      var congRows = congressional.trades.slice(0, 20).map(function(t) {
+        return '<tr>' +
+          '<td>' + _esc(t.date_disclosed) + '</td>' +
+          '<td>' + _esc(t.chamber) + '</td>' +
+          '<td>' + _esc(t.name) + '</td>' +
+          '<td>' + _esc(t.party) + '</td>' +
+          '<td style="text-transform:capitalize;">' + _esc(t.type) + '</td>' +
+          '<td>' + _esc(t.amount) + '</td>' +
+        '</tr>';
+      }).join('');
+      html += '<div class="ode-sm-table-wrap"><table class="ode-sm-table">' +
+        '<thead><tr><th>Disclosed</th><th>Chamber</th><th>Member</th><th>Party</th><th>Type</th><th>Amount</th></tr></thead>' +
+        '<tbody>' + congRows + '</tbody></table></div>';
+    } else {
+      html += '<div class="ode-sm-empty">No congressional trades disclosed for this symbol in the trailing 180 days.</div>';
+    }
+    html += '</div>';
+
+    // Mutual fund holders
+    html += '<div><div style="font-size:12px; color:#80c8e0; font-weight:600; margin-bottom:6px;">Top Mutual Fund / ETF Holders</div>';
+    if (mutualFunds && mutualFunds.holders && mutualFunds.holders.length > 0) {
+      var mfRows = mutualFunds.holders.slice(0, 15).map(function(h) {
+        return '<tr>' +
+          '<td>' + _esc(h.name) + '</td>' +
+          '<td class="num">' + fmtNum(h.shares) + '</td>' +
+          '<td class="num">' + fmtCurrency(h.value) + '</td>' +
+          '<td class="num">' + fmtNum(h.change) + '</td>' +
+          '<td>' + _esc(h.date) + '</td>' +
+        '</tr>';
+      }).join('');
+      html += '<div class="ode-sm-table-wrap"><table class="ode-sm-table">' +
+        '<thead><tr><th>Fund</th><th class="num">Shares</th><th class="num">Value</th><th class="num">Change</th><th>Filed</th></tr></thead>' +
+        '<tbody>' + mfRows + '</tbody></table></div>';
+      if (mutualFunds.total_count > 15) {
+        html += '<div style="font-size:10px; color:#506878; margin-top:4px;">Showing 15 of ' + mutualFunds.total_count + ' fund holders</div>';
+      }
+    } else {
+      html += '<div class="ode-sm-empty">No mutual fund / ETF holder data available.</div>';
+    }
+    html += '</div>';
+
+    el.innerHTML = html;
   }
 
   function renderValuationModels(data) {
@@ -1964,6 +2281,321 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
     };
   }
 
+  // === NARRATIVE ANALYSIS PANEL ===
+
+  var _currentNarrativeSymbol = null;
+  var _narrativeRawMarkdown = null;
+
+  function _enableAddNarrativeButton(symbol) {
+    var btn = scope.querySelector('#ode-add-narrative-btn');
+    if (btn) {
+      btn.disabled = false;
+      _currentNarrativeSymbol = symbol;
+    }
+  }
+
+  function _disableAddNarrativeButton() {
+    var btn = scope.querySelector('#ode-add-narrative-btn');
+    if (btn) {
+      btn.disabled = true;
+      _currentNarrativeSymbol = null;
+    }
+    _hideNarrativePanel();
+  }
+
+  function _openNarrativePasteModal() {
+    var modal = scope.querySelector('#ode-narrative-paste-modal');
+    var textarea = scope.querySelector('#ode-narrative-paste-textarea');
+    var submitBtn = scope.querySelector('#ode-narrative-paste-submit');
+    var charcount = scope.querySelector('#ode-narrative-paste-charcount');
+
+    if (_narrativeRawMarkdown) {
+      textarea.value = _narrativeRawMarkdown;
+      charcount.textContent = _narrativeRawMarkdown.length.toLocaleString() + ' characters';
+      submitBtn.disabled = false;
+    } else {
+      textarea.value = '';
+      charcount.textContent = '0 characters';
+      submitBtn.disabled = true;
+    }
+
+    modal.hidden = false;
+    textarea.focus();
+  }
+
+  function _closeNarrativePasteModal() {
+    var modal = scope.querySelector('#ode-narrative-paste-modal');
+    if (modal) modal.hidden = true;
+  }
+
+  function _handleNarrativeTextareaInput() {
+    var textarea = scope.querySelector('#ode-narrative-paste-textarea');
+    var submitBtn = scope.querySelector('#ode-narrative-paste-submit');
+    var charcount = scope.querySelector('#ode-narrative-paste-charcount');
+
+    var length = textarea.value.length;
+    charcount.textContent = length.toLocaleString() + ' characters';
+    submitBtn.disabled = length < 50;
+  }
+
+  function _submitNarrativePaste() {
+    var textarea = scope.querySelector('#ode-narrative-paste-textarea');
+    var markdown = textarea.value.trim();
+
+    if (markdown.length < 50) return;
+
+    _renderNarrativePanel(markdown, _currentNarrativeSymbol);
+    _closeNarrativePasteModal();
+
+    var section = scope.querySelector('#ode-narrative-section');
+    if (section) {
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  function _escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function _renderNarrativePanel(markdown, symbol) {
+    var section = scope.querySelector('#ode-narrative-section');
+    var content = scope.querySelector('#ode-narrative-content');
+    var meta = scope.querySelector('#ode-narrative-meta');
+
+    if (!section || !content) return;
+
+    _narrativeRawMarkdown = markdown;
+
+    // Phase 1 PDF export: Evaluator currently has a single-slot paste UI,
+    // so on each submission we clear+append to keep the backend payload
+    // list-shaped for when multi-entry UI lands.
+    if (window.BenTradeOnDemandAppendedStore) {
+      window.BenTradeOnDemandAppendedStore.clear();
+      window.BenTradeOnDemandAppendedStore.append('Deep research', markdown);
+    }
+
+    var html;
+    try {
+      if (typeof marked !== 'undefined') {
+        marked.setOptions({
+          gfm: true,
+          breaks: false,
+          headerIds: false,
+          mangle: false,
+        });
+        // Override del renderer: GFM treats ~text~ as strikethrough,
+        // which incorrectly strikes through pasted content containing tildes.
+        // Render <del> tags as plain text instead.
+        var renderer = new marked.Renderer();
+        renderer.del = function(text) {
+          return typeof text === 'object' ? text.text || '' : text;
+        };
+        html = marked.parse(markdown, { renderer: renderer });
+      } else {
+        html = '<pre>' + _escapeHtml(markdown) + '</pre>';
+      }
+    } catch (err) {
+      console.error('Markdown parse error:', err);
+      html = '<pre>' + _escapeHtml(markdown) + '</pre>';
+    }
+
+    content.innerHTML = html;
+
+    var timestamp = new Date().toLocaleString();
+    meta.textContent = 'Added ' + timestamp + (symbol ? ' \u00b7 ' + symbol : '');
+
+    section.hidden = false;
+  }
+
+  // Expose for Playwright: allows server-side PDF renderer to inject narrative
+  window._injectNarrativeForPrint = function(md) {
+    _renderNarrativePanel(md, _currentNarrativeSymbol || '');
+  };
+
+  // Expose for Playwright: inject pre-fetched analysis data (bypasses slow CE polling)
+  window._injectAnalysisForPrint = function(data) {
+    showResults(data);
+  };
+
+  function _hideNarrativePanel() {
+    var section = scope.querySelector('#ode-narrative-section');
+    if (section) {
+      section.hidden = true;
+    }
+    _narrativeRawMarkdown = null;
+    if (window.BenTradeOnDemandAppendedStore) {
+      window.BenTradeOnDemandAppendedStore.clear();
+    }
+  }
+
+  function _removeNarrativePanel() {
+    if (confirm('Remove the research analysis from the dashboard?')) {
+      _hideNarrativePanel();
+    }
+  }
+
+  function _onNarrativeEscKey(e) {
+    if (e.key === 'Escape') {
+      var modal = scope.querySelector('#ode-narrative-paste-modal');
+      if (modal && !modal.hidden) _closeNarrativePasteModal();
+    }
+  }
+
+  function _onNarrativeOverlayClick(e) {
+    var modal = scope.querySelector('#ode-narrative-paste-modal');
+    if (e.target === modal) _closeNarrativePasteModal();
+  }
+
+  function _initNarrativePanel() {
+    var addBtn = scope.querySelector('#ode-add-narrative-btn');
+    if (addBtn) addBtn.addEventListener('click', _openNarrativePasteModal);
+
+    var closeBtn = scope.querySelector('#ode-narrative-paste-close');
+    if (closeBtn) closeBtn.addEventListener('click', _closeNarrativePasteModal);
+
+    var cancelBtn = scope.querySelector('#ode-narrative-paste-cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', _closeNarrativePasteModal);
+
+    var textarea = scope.querySelector('#ode-narrative-paste-textarea');
+    if (textarea) textarea.addEventListener('input', _handleNarrativeTextareaInput);
+
+    var submitBtn = scope.querySelector('#ode-narrative-paste-submit');
+    if (submitBtn) submitBtn.addEventListener('click', _submitNarrativePaste);
+
+    var editBtn = scope.querySelector('#ode-narrative-edit-btn');
+    if (editBtn) editBtn.addEventListener('click', _openNarrativePasteModal);
+
+    var removeBtn = scope.querySelector('#ode-narrative-remove-btn');
+    if (removeBtn) removeBtn.addEventListener('click', _removeNarrativePanel);
+
+    document.addEventListener('keydown', _onNarrativeEscKey);
+
+    var modal = scope.querySelector('#ode-narrative-paste-modal');
+    if (modal) modal.addEventListener('click', _onNarrativeOverlayClick);
+  }
+
+  // === PDF EXPORT ===
+
+  function _enableExportButton() {
+    var btn = scope.querySelector('#ode-export-pdf-btn');
+    if (btn) btn.disabled = false;
+  }
+
+  function _disableExportButton() {
+    var btn = scope.querySelector('#ode-export-pdf-btn');
+    if (btn) btn.disabled = true;
+  }
+
+  // Phase 2 Fix 6: capture the rendered Chart.js canvas as a base64 PNG
+  // (no `data:` prefix) so the backend can embed it via fpdf2.image().
+  // Returns null on any failure — chart is optional, the rest of the
+  // PDF is more important.
+  function _captureChartPng() {
+    try {
+      var canvas = document.querySelector('#ode-chart-container canvas');
+      if (!canvas) return null;
+      var dataUrl = canvas.toDataURL('image/png');
+      if (!dataUrl || dataUrl.indexOf(',') === -1) return null;
+      var b64 = dataUrl.split(',')[1];
+      // Pydantic cap is 3,000,000 chars (~2.25 MB decoded). If the chart
+      // exceeds that, drop it rather than failing the whole export.
+      if (b64.length > 3000000) {
+        console.warn('Chart PNG exceeds 3M base64 chars; omitting from PDF.');
+        return null;
+      }
+      return b64;
+    } catch (err) {
+      console.warn('Chart capture failed:', err);
+      return null;
+    }
+  }
+
+  function _handleExportPdfClick() {
+    var btn = scope.querySelector('#ode-export-pdf-btn');
+    if (!btn || btn.disabled) return;
+
+    var store = window.BenTradeOnDemandAppendedStore;
+    var storeSymbol = store ? store.getSymbol() : null;
+    var storeJobId = store ? store.getJobId() : null;
+    var symbol = storeSymbol || _currentNarrativeSymbol || _currentResearchSymbol;
+    var jobId = storeJobId || currentJobId;
+
+    if (!symbol) {
+      alert('No symbol selected. Analyze a company first.');
+      return;
+    }
+    if (!jobId) {
+      alert('No analysis job available. Re-run the analysis before exporting.');
+      return;
+    }
+
+    var originalText = btn.textContent;
+    btn.textContent = '\u23F3 Generating...';
+    btn.disabled = true;
+
+    var accountMode = null;
+    try {
+      if (window.BenTradeAccountMode && typeof window.BenTradeAccountMode.getMode === 'function') {
+        accountMode = window.BenTradeAccountMode.getMode();
+      }
+    } catch (_err) { /* account-mode module optional on this page */ }
+
+    var payload = {
+      job_id: jobId,
+      symbol: symbol,
+      appended_analyses: store ? store.list() : [],
+      user_notes: null,
+      display_context: {
+        account_mode: (accountMode === 'live' || accountMode === 'paper') ? accountMode : null,
+        generated_at_iso: new Date().toISOString(),
+      },
+      chart_png_base64: _captureChartPng(),
+    };
+
+    window.BenTradeApi.exportOnDemandPdf(payload).then(function(result) {
+      var blob = result.blob;
+      var filename = result.filename || ('bentrade_' + symbol + '_on_demand.pdf');
+      var url = window.URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      btn.textContent = '\u2713 Exported';
+      setTimeout(function() {
+        btn.textContent = originalText;
+        btn.disabled = false;
+      }, 2000);
+    }).catch(function(err) {
+      console.error('PDF export failed:', err);
+      var code = err.detail && err.detail.code ? err.detail.code : null;
+      var friendly = err.message || 'PDF export failed';
+      if (code === 'JOB_NOT_FOUND') {
+        friendly = 'Company Evaluator no longer has a cached result for this analysis. Re-run the analysis and try again.';
+      } else if (code === 'CE_UNREACHABLE') {
+        friendly = 'Company Evaluator is unreachable. Make sure the CE backend is running and try again.';
+      } else if (code === 'PDF_TOO_LARGE') {
+        friendly = 'Generated PDF exceeded size limit. Try removing some appended analyses.';
+      }
+      btn.textContent = '\u2717 Failed';
+      alert('PDF export failed: ' + friendly);
+      setTimeout(function() {
+        btn.textContent = originalText;
+        btn.disabled = false;
+      }, 2000);
+    });
+  }
+
+  function _initExportButton() {
+    var btn = scope.querySelector('#ode-export-pdf-btn');
+    if (btn) btn.addEventListener('click', _handleExportPdfClick);
+  }
+
   // === DEEP RESEARCH PROMPT ===
 
   function _enableDeepResearchButton(symbol) {
@@ -2103,6 +2735,230 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
     if (modal) modal.addEventListener('click', _onResearchOverlayClick);
   }
 
+  // === GLOSSARY PANEL ===
+  var _glossaryData = null;
+  var _glossarySearchTimer = null;
+
+  function _loadGlossaryContent() {
+    if (_glossaryData) return Promise.resolve(_glossaryData);
+    return fetch('/assets/glossary_content.json')
+      .then(function(res) {
+        if (!res.ok) throw new Error('Glossary fetch failed: ' + res.status);
+        return res.json();
+      })
+      .then(function(data) {
+        _glossaryData = data;
+        return data;
+      });
+  }
+
+  function _renderGlossary(data) {
+    var container = scope.querySelector('#ode-glossary-categories');
+    if (!container) return;
+
+    var categories = data.categories || [];
+    var html = '';
+
+    for (var i = 0; i < categories.length; i++) {
+      var cat = categories[i];
+      var entries = cat.entries || [];
+      html += '<div class="ode-glossary-category" data-category="' + _esc(cat.id) + '">';
+      html += '<div class="ode-glossary-category-header" data-glossary-cat-toggle="' + i + '">';
+      html += '<span class="ode-glossary-category-icon">&#9654;</span>';
+      html += '<span>' + _esc(cat.name) + '</span>';
+      html += '<span style="margin-left:auto;opacity:0.5;font-size:0.85em;">' + entries.length + ' entries</span>';
+      html += '</div>';
+      html += '<div class="ode-glossary-category-body">';
+
+      for (var j = 0; j < entries.length; j++) {
+        var entry = entries[j];
+        html += '<div class="ode-glossary-entry" data-entry-id="' + _esc(entry.id) + '">';
+        html += '<div class="ode-glossary-entry-header" data-glossary-entry-toggle="' + i + '-' + j + '">';
+        html += '<span class="ode-glossary-entry-icon">&#9654;</span>';
+        html += '<span>' + _esc(entry.name) + '</span>';
+        html += '</div>';
+        html += '<div class="ode-glossary-entry-body">';
+        if (entry.what) {
+          html += '<div class="ode-glossary-field"><span class="ode-glossary-field-label">What:</span>';
+          html += '<span class="ode-glossary-field-text">' + _esc(entry.what) + '</span></div>';
+        }
+        if (entry.how) {
+          html += '<div class="ode-glossary-field"><span class="ode-glossary-field-label">How:</span>';
+          html += '<span class="ode-glossary-field-text formula">' + _esc(entry.how) + '</span></div>';
+        }
+        if (entry.why) {
+          html += '<div class="ode-glossary-field"><span class="ode-glossary-field-label">Why it matters:</span>';
+          html += '<span class="ode-glossary-field-text">' + _esc(entry.why) + '</span></div>';
+        }
+        if (entry.watch_for) {
+          html += '<div class="ode-glossary-field"><span class="ode-glossary-field-label">Watch for:</span>';
+          html += '<span class="ode-glossary-field-text watch-for">' + _esc(entry.watch_for) + '</span></div>';
+        }
+        html += '</div></div>'; // close entry-body + entry
+      }
+
+      html += '</div></div>'; // close category-body + category
+    }
+
+    container.innerHTML = html;
+
+    // Update stats
+    var statsEl = scope.querySelector('#ode-glossary-stats');
+    if (statsEl) {
+      var totalEntries = 0;
+      for (var k = 0; k < categories.length; k++) {
+        totalEntries += (categories[k].entries || []).length;
+      }
+      statsEl.textContent = categories.length + ' categories \u00B7 ' + totalEntries + ' entries';
+    }
+
+    // Wire up category and entry toggle via event delegation
+    container.addEventListener('click', _onGlossaryContainerClick);
+  }
+
+  function _onGlossaryContainerClick(e) {
+    var catHeader = e.target.closest('[data-glossary-cat-toggle]');
+    if (catHeader) {
+      var cat = catHeader.closest('.ode-glossary-category');
+      if (cat) cat.classList.toggle('expanded');
+      return;
+    }
+    var entryHeader = e.target.closest('[data-glossary-entry-toggle]');
+    if (entryHeader) {
+      var entry = entryHeader.closest('.ode-glossary-entry');
+      if (entry) entry.classList.toggle('expanded');
+    }
+  }
+
+  function _toggleAllGlossary() {
+    var container = scope.querySelector('#ode-glossary-categories');
+    if (!container) return;
+
+    var allCats = container.querySelectorAll('.ode-glossary-category');
+    var allEntries = container.querySelectorAll('.ode-glossary-entry');
+
+    // If any category is expanded, collapse all; otherwise expand all
+    var anyExpanded = false;
+    for (var i = 0; i < allCats.length; i++) {
+      if (allCats[i].classList.contains('expanded')) { anyExpanded = true; break; }
+    }
+
+    for (var c = 0; c < allCats.length; c++) {
+      if (anyExpanded) {
+        allCats[c].classList.remove('expanded');
+      } else {
+        allCats[c].classList.add('expanded');
+      }
+    }
+    for (var e = 0; e < allEntries.length; e++) {
+      if (anyExpanded) {
+        allEntries[e].classList.remove('expanded');
+      } else {
+        allEntries[e].classList.add('expanded');
+      }
+    }
+
+    var btn = scope.querySelector('#ode-glossary-toggle-btn');
+    if (btn) btn.textContent = anyExpanded ? 'Expand All' : 'Collapse All';
+  }
+
+  function _filterGlossary() {
+    var input = scope.querySelector('#ode-glossary-search');
+    var container = scope.querySelector('#ode-glossary-categories');
+    if (!input || !container) return;
+
+    var term = input.value.trim().toLowerCase();
+    var categories = container.querySelectorAll('.ode-glossary-category');
+    var matchCount = 0;
+
+    for (var i = 0; i < categories.length; i++) {
+      var cat = categories[i];
+      var entries = cat.querySelectorAll('.ode-glossary-entry');
+      var catHasMatch = false;
+
+      for (var j = 0; j < entries.length; j++) {
+        var entry = entries[j];
+        if (!term) {
+          entry.classList.remove('search-match', 'search-hidden');
+          catHasMatch = true;
+          continue;
+        }
+        var text = (entry.textContent || '').toLowerCase();
+        if (text.indexOf(term) !== -1) {
+          entry.classList.add('search-match');
+          entry.classList.remove('search-hidden');
+          catHasMatch = true;
+          matchCount++;
+        } else {
+          entry.classList.remove('search-match');
+          entry.classList.add('search-hidden');
+        }
+      }
+
+      if (!term) {
+        cat.classList.remove('search-hidden');
+        cat.classList.remove('expanded');
+      } else if (catHasMatch) {
+        cat.classList.remove('search-hidden');
+        cat.classList.add('expanded');
+      } else {
+        cat.classList.add('search-hidden');
+      }
+    }
+
+    var statsEl = scope.querySelector('#ode-glossary-stats');
+    if (statsEl && _glossaryData) {
+      var totalEntries = 0;
+      var cats = _glossaryData.categories || [];
+      for (var k = 0; k < cats.length; k++) {
+        totalEntries += (cats[k].entries || []).length;
+      }
+      if (term) {
+        statsEl.textContent = matchCount + ' of ' + totalEntries + ' entries match';
+      } else {
+        statsEl.textContent = cats.length + ' categories \u00B7 ' + totalEntries + ' entries';
+      }
+    }
+  }
+
+  function _onGlossarySearchInput() {
+    clearTimeout(_glossarySearchTimer);
+    _glossarySearchTimer = setTimeout(_filterGlossary, 200);
+  }
+
+  function _initGlossary() {
+    var section = scope.querySelector('#ode-glossary-section');
+    if (!section) return;
+
+    // Wire toggle-all button
+    var toggleBtn = scope.querySelector('#ode-glossary-toggle-btn');
+    if (toggleBtn) toggleBtn.addEventListener('click', _toggleAllGlossary);
+
+    // Wire search input
+    var searchInput = scope.querySelector('#ode-glossary-search');
+    if (searchInput) searchInput.addEventListener('input', _onGlossarySearchInput);
+
+    // Load and render
+    _loadGlossaryContent().then(function(data) {
+      _renderGlossary(data);
+
+      // In print mode, expand everything
+      if (document.body.classList.contains('print-mode')) {
+        var container = scope.querySelector('#ode-glossary-categories');
+        if (container) {
+          var allCats = container.querySelectorAll('.ode-glossary-category');
+          var allEntries = container.querySelectorAll('.ode-glossary-entry');
+          for (var c = 0; c < allCats.length; c++) allCats[c].classList.add('expanded');
+          for (var e = 0; e < allEntries.length; e++) allEntries[e].classList.add('expanded');
+        }
+      }
+    }).catch(function(err) {
+      console.error('[Glossary] Failed to load:', err);
+      var container = scope.querySelector('#ode-glossary-categories');
+      if (container) container.innerHTML = '<p style="color:#ef4444;padding:1rem;">Failed to load glossary content.</p>';
+    });
+  }
+
   // === CLEANUP (returned to router) ===
   return function cleanup() {
     stopPolling();
@@ -2111,11 +2967,24 @@ window.BenTradePages.initOnDemandEvaluator = function initOnDemandEvaluator(root
     if (cancelBtn) cancelBtn.removeEventListener('click', handleCancel);
     if (retryBtn) retryBtn.removeEventListener('click', handleRetry);
     document.removeEventListener('keydown', _onResearchEscKey);
+    document.removeEventListener('keydown', _onNarrativeEscKey);
     if (window.BenTradeComponents && window.BenTradeComponents.destroyPriceChart) {
       window.BenTradeComponents.destroyPriceChart('ode-chart-container');
     }
+    delete window._injectNarrativeForPrint;
+    delete window._injectAnalysisForPrint;
+    document.body.removeAttribute('data-print-ready');
+    document.body.classList.remove('print-mode');
     currentJobId = null;
     currentRawData = null;
+    _glossaryData = null;
+    clearTimeout(_glossarySearchTimer);
+    var glossaryContainer = scope.querySelector('#ode-glossary-categories');
+    if (glossaryContainer) glossaryContainer.removeEventListener('click', _onGlossaryContainerClick);
+    var glossaryToggle = scope.querySelector('#ode-glossary-toggle-btn');
+    if (glossaryToggle) glossaryToggle.removeEventListener('click', _toggleAllGlossary);
+    var glossarySearch = scope.querySelector('#ode-glossary-search');
+    if (glossarySearch) glossarySearch.removeEventListener('input', _onGlossarySearchInput);
     if (analyzeBtn) analyzeBtn.disabled = false;
   };
 };

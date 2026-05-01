@@ -27,7 +27,13 @@ from typing import Any
 _log = logging.getLogger("bentrade.tmc_bootstrap")
 
 
-def build_tmc_stock_deps(*, stock_engine_service: Any, model_request_fn: Any = None) -> Any:
+def build_tmc_stock_deps(
+    *,
+    stock_engine_service: Any,
+    model_request_fn: Any = None,
+    insider_catalyst_service: Any = None,
+    history_db_session_maker: Any = None,
+) -> Any:
     """Build the StockOpportunityDeps bundle for TMC stock workflow execution.
 
     Parameters
@@ -41,6 +47,9 @@ def build_tmc_stock_deps(*, stock_engine_service: Any, model_request_fn: Any = N
         provided, the runner's model-analysis stage will call the LLM for
         each selected candidate.  When ``None``, model analysis degrades
         gracefully.  Signature: ``(payload: dict) -> dict``.
+    insider_catalyst_service
+        Optional ``InsiderCatalystService`` for insider-buying boost/penalty
+        enrichment.  When ``None``, the insider enrichment step is skipped.
 
     Returns
     -------
@@ -52,12 +61,21 @@ def build_tmc_stock_deps(*, stock_engine_service: Any, model_request_fn: Any = N
     deps = StockOpportunityDeps(
         stock_engine_service=stock_engine_service,
         model_request_fn=model_request_fn,
+        insider_catalyst_service=insider_catalyst_service,
+        history_db_session_maker=history_db_session_maker,
     )
-    _log.info("event=tmc_stock_deps_built model_analysis=%s", "enabled" if model_request_fn else "disabled")
+    _log.info("event=tmc_stock_deps_built model_analysis=%s insider=%s",
+              "enabled" if model_request_fn else "disabled",
+              "enabled" if insider_catalyst_service else "disabled")
     return deps
 
 
-def build_tmc_options_deps(*, base_data_service: Any, finnhub_client: Any = None) -> Any:
+def build_tmc_options_deps(
+    *,
+    base_data_service: Any,
+    finnhub_client: Any = None,
+    history_db_session_maker: Any = None,
+) -> Any:
     """Build the OptionsOpportunityDeps bundle for TMC options workflow execution.
 
     Parameters
@@ -80,6 +98,7 @@ def build_tmc_options_deps(*, base_data_service: Any, finnhub_client: Any = None
     deps = OptionsOpportunityDeps(
         options_scanner_service=options_scanner_service,
         finnhub_client=finnhub_client,
+        history_db_session_maker=history_db_session_maker,
     )
 
     # Log chain source class so operators can verify live vs mock/snapshot

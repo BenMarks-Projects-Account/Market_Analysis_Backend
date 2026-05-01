@@ -1073,7 +1073,7 @@ class TestNewsSourceFieldDeps:
     def test_headline_components_depend_on_news_sources(self):
         for field in ("headline_sentiment", "negative_pressure",
                       "narrative_severity", "source_agreement", "recency_pressure"):
-            assert set(_NEWS_FIELD_SOURCE_DEPS[field]) == {"finnhub", "polygon"}
+            assert set(_NEWS_FIELD_SOURCE_DEPS[field]) == {"finnhub"}
 
     def test_macro_stress_depends_on_fred(self):
         assert _NEWS_FIELD_SOURCE_DEPS["macro_stress"] == ["fred"]
@@ -1082,7 +1082,6 @@ class TestNewsSourceFieldDeps:
         fsm: dict[str, str] = {}
         sf = [
             {"source": "finnhub", "status": "error"},
-            {"source": "polygon", "status": "error"},
         ]
         _apply_news_source_field_status(fsm, sf)
         for f in ("headline_sentiment", "negative_pressure", "narrative_severity",
@@ -1092,14 +1091,14 @@ class TestNewsSourceFieldDeps:
         assert "macro_stress" not in fsm
 
     def test_only_one_news_source_fails_no_degradation(self):
+        """With finnhub as the sole news source, its failure degrades headline fields."""
         fsm: dict[str, str] = {}
         sf = [
             {"source": "finnhub", "status": "error"},
-            {"source": "polygon", "status": "ok"},
         ]
         _apply_news_source_field_status(fsm, sf)
-        # Not all deps failed → should not be classified
-        assert "headline_sentiment" not in fsm
+        # All deps failed (only finnhub) → degraded
+        assert fsm["headline_sentiment"] == "degraded"
 
     def test_fred_failure_degrades_macro_stress(self):
         fsm: dict[str, str] = {}
@@ -1111,7 +1110,6 @@ class TestNewsSourceFieldDeps:
         fsm: dict[str, str] = {}
         sf = [
             {"source": "finnhub", "status": "unavailable"},
-            {"source": "polygon", "status": "unavailable"},
         ]
         _apply_news_source_field_status(fsm, sf)
         assert fsm["headline_sentiment"] == "degraded"
@@ -1120,7 +1118,6 @@ class TestNewsSourceFieldDeps:
         fsm: dict[str, str] = {"headline_sentiment": "failed_source"}
         sf = [
             {"source": "finnhub", "status": "error"},
-            {"source": "polygon", "status": "error"},
         ]
         _apply_news_source_field_status(fsm, sf)
         # Should NOT overwrite existing classification
@@ -1145,8 +1142,6 @@ class TestNewsFailurePathParity:
         return [
             {"source": "finnhub", "status": "ok", "last_fetched": "2026-03-15T14:00:00Z",
              "item_count": 20, "error": None},
-            {"source": "polygon", "status": "error", "last_fetched": None,
-             "item_count": 0, "error": "rate_limit"},
             {"source": "tradier", "status": "unavailable",
              "error": "No news endpoints available"},
             {"source": "fred", "status": "ok", "last_fetched": "2026-03-15T14:00:00Z",
@@ -1188,9 +1183,9 @@ class TestNewsFailurePathParity:
             engine_result=news_engine_result,
             source_freshness=news_source_freshness,
         )
-        assert len(md["source_status"]) == 4
+        assert len(md["source_status"]) == 3
         sources = {s["source"] for s in md["source_status"]}
-        assert sources == {"finnhub", "polygon", "tradier", "fred"}
+        assert sources == {"finnhub", "tradier", "fred"}
 
     def test_news_failed_sources_includes_error_and_unavailable(
         self, news_engine_result, news_source_freshness
@@ -1201,7 +1196,6 @@ class TestNewsFailurePathParity:
             source_freshness=news_source_freshness,
         )
         failed_names = {fs["source"] for fs in md["failed_sources"]}
-        assert "polygon" in failed_names
         assert "tradier" in failed_names
 
     def test_news_compute_duration_in_metadata(self, news_engine_result, news_source_freshness):
@@ -1225,7 +1219,7 @@ class TestNewsFailurePathParity:
     def test_news_source_errors_passed_alongside_freshness(self, news_engine_result, news_source_freshness):
         """When source_errors is derived from freshness and passed,
         failed sources appear in both failed_sources and source_status."""
-        source_errors = {"polygon": "rate_limit"}
+        source_errors = {"tradier": "No news endpoints available"}
         md = build_dashboard_metadata(
             "news_sentiment",
             engine_result=news_engine_result,
@@ -1234,16 +1228,15 @@ class TestNewsFailurePathParity:
             compute_duration_s=0.5,
         )
         failed_names = {fs["source"] for fs in md["failed_sources"]}
-        assert "polygon" in failed_names
+        assert "tradier" in failed_names
 
     def test_news_all_sources_fail_produces_degraded(self):
         sf = [
             {"source": "finnhub", "status": "error", "error": "timeout"},
-            {"source": "polygon", "status": "error", "error": "rate_limit"},
             {"source": "tradier", "status": "unavailable", "error": "no endpoint"},
             {"source": "fred", "status": "error", "error": "connection refused"},
         ]
-        se = {"finnhub": "timeout", "polygon": "rate_limit", "fred": "connection refused"}
+        se = {"finnhub": "timeout", "fred": "connection refused"}
         md = build_dashboard_metadata(
             "news_sentiment",
             engine_result={"confidence_score": 30, "signal_quality": "low",

@@ -1,0 +1,331 @@
+composite1 score=0.34 conf=0.6699999999999999
+composite2 score=-0.19583333333333333 conf=0.5166666666666666
+composite3 score=None conf=0.0
+
+=== EXAMPLE 1 ===
+{
+  "score": 67.0,
+  "label": "Mixed but Tradable",
+  "short_label": "Mixed",
+  "confidence_score": 67.0,
+  "signal_quality": "medium",
+  "summary": "Positioning neutral; flows mixed. Composite: Mixed but Tradable (67/100).",
+  "trader_takeaway": "Positioning and flows both constructive \u2014 trend-follow bias.",
+  "pillar_scores": {
+    "positioning": 65.0,
+    "flows": 69.0,
+    "dealer_hedging": 67.0
+  },
+  "pillar_weights": {
+    "positioning": 0.3333333333333333,
+    "flows": 0.3333333333333333,
+    "dealer_hedging": 0.3333333333333333
+  },
+  "pillar_explanations": {
+    "positioning": "COT non-commercial net positioning across ES/NQ/VX/ZN/ZB, weekly.",
+    "flows": "Sector relative strength (risk-on vs defensive) plus SPY NAV overlay.",
+    "dealer_hedging": "Dealer gamma proxy (partial)."
+  },
+  "positive_contributors": [
+    "positioning: COT non-commercial net positioning across ES/NQ/VX/ZN/ZB, weekly.",
+    "flows: Sector relative strength (risk-on vs defensive) plus SPY NAV overlay.",
+    "dealer_hedging: Dealer gamma proxy (partial)."
+  ],
+  "negative_contributors": [],
+  "conflicting_signals": [],
+  "warnings": [],
+  "missing_inputs": [],
+  "diagnostics": {
+    "pillar_details": {
+      "positioning": {
+        "status": "active",
+        "available_count": 5,
+        "expected_count": 5,
+        "reason_code": null,
+        "submetrics": [
+          {
+            "name": "cot_es_noncomm",
+            "raw_value": 1.2,
+            "score": 67.5,
+            "reason_code": null,
+            "detail": "ES z=+1.2"
+          },
+          {
+            "name": "cot_nq_noncomm",
+            "raw_value": 0.9,
+            "score": 64.0,
+            "reason_code": null,
+            "detail": ""
+          },
+          {
+            "name": "cot_vx_noncomm",
+            "raw_value": -0.7,
+            "score": 60.0,
+            "reason_code": null,
+            "detail": "VX sign-inverted"
+          },
+          {
+            "name": "cot_zn_noncomm",
+            "raw_value": 1.4,
+            "score": 70.0,
+            "reason_code": null,
+            "detail": ""
+          },
+          {
+            "name": "cot_zb_noncomm",
+            "raw_value": 0.85,
+            "score": 63.5,
+            "reason_code": null,
+            "detail": ""
+          }
+        ]
+      },
+      "flows": {
+        "status": "active",
+        "available_count": 4,
+        "expected_count": 4,
+        "reason_code": null,
+        "submetrics": [
+          {
+            "name": "sector_rs_xly_vs_xlp",
+            "raw_value": 0.028,
+            "score": 72.5,
+            "reason_code": null,
+            "detail": ""
+          },
+          {
+            "name": "sector_rs_xlk_vs_xlu",
+            "raw_value": 0.041,
+            "score": 77.5,
+            "reason_code": null,
+            "detail": ""
+          },
+          {
+            "name": "sector_rs_xlf_vs_xle",
+            "raw_value": 0.012,
+            "score": 60.0,
+            "reason_code": null,
+            "detail": ""
+          },
+          {
+            "name": "nav_spy_wow",
+            "raw_value": 0.7,
+            "score": 66.0,
+            "reason_code": null,
+            "detail": ""
+          }
+        ]
+      },
+      "dealer_hedging": {
+        "status": "active",
+        "available_count": 1,
+        "expected_count": 1,
+        "reason_code": null,
+        "submetrics": [
+          {
+            "name": "gex_proxy",
+            "raw_value": 0.5,
+            "score": 67.0,
+            "reason_code": null,
+            "detail": ""
+          }
+        ]
+      }
+    }
+  },
+  "as_of": "2026-04-16T19:00:00Z",
+  "engine": "flows_positioning"
+}
+
+=== EXAMPLE 2 ===
+{
+  "score": 40.208333333333336,
+  "label": "Reversal Risk Elevated",
+  "short_label": "Reversal Risk",
+  "confidence_score": 51.66666666666666,
+  "signal_quality": "low",
+  "summary": "Positioning neutral; flows mixed; dealer hedging deferred. Composite: Reversal Risk Elevated (40/100).",
+  "trader_takeaway": "Neutral flows & positioning \u2014 no directional edge from this engine.",
+  "pillar_scores": {
+    "positioning": 41.25,
+    "flows": 39.166666666666664,
+    "dealer_hedging": null
+  },
+  "pillar_weights": {
+    "positioning": 0.3333333333333333,
+    "flows": 0.3333333333333333,
+    "dealer_hedging": 0.3333333333333333
+  },
+  "pillar_explanations": {
+    "positioning": "COT non-commercial net positioning (4 of 5 available).",
+    "flows": "Sector RS 3 of 3 available; NAV overlay building history.",
+    "dealer_hedging": "Deferred until Tradier access restored (Phase 2)."
+  },
+  "positive_contributors": [],
+  "negative_contributors": [],
+  "conflicting_signals": [],
+  "warnings": [
+    "ZN COT report stale (>10 days)"
+  ],
+  "missing_inputs": [
+    "positioning.cot_zn_noncomm:COT_STALE",
+    "flows.nav_spy_wow:NAV_HISTORY_BUILDING",
+    "dealer_hedging:DEFERRED_PILLAR_3"
+  ],
+  "diagnostics": {
+    "pillar_details": {
+      "positioning": {
+        "status": "partial",
+        "available_count": 4,
+        "expected_count": 5,
+        "reason_code": null,
+        "submetrics": [
+          {
+            "name": "cot_es_noncomm",
+            "raw_value": -0.3,
+            "score": 45.0,
+            "reason_code": null,
+            "detail": ""
+          },
+          {
+            "name": "cot_nq_noncomm",
+            "raw_value": -0.9,
+            "score": 37.5,
+            "reason_code": null,
+            "detail": ""
+          },
+          {
+            "name": "cot_vx_noncomm",
+            "raw_value": 0.5,
+            "score": 42.5,
+            "reason_code": null,
+            "detail": "VX sign-inverted: longs=risk-off"
+          },
+          {
+            "name": "cot_zn_noncomm",
+            "raw_value": null,
+            "score": null,
+            "reason_code": "COT_STALE",
+            "detail": "Most recent report >10 days old"
+          },
+          {
+            "name": "cot_zb_noncomm",
+            "raw_value": -0.7,
+            "score": 40.0,
+            "reason_code": null,
+            "detail": ""
+          }
+        ]
+      },
+      "flows": {
+        "status": "partial",
+        "available_count": 3,
+        "expected_count": 4,
+        "reason_code": null,
+        "submetrics": [
+          {
+            "name": "sector_rs_xly_vs_xlp",
+            "raw_value": -0.022,
+            "score": 35.0,
+            "reason_code": null,
+            "detail": ""
+          },
+          {
+            "name": "sector_rs_xlk_vs_xlu",
+            "raw_value": -0.008,
+            "score": 45.0,
+            "reason_code": null,
+            "detail": ""
+          },
+          {
+            "name": "sector_rs_xlf_vs_xle",
+            "raw_value": -0.018,
+            "score": 37.5,
+            "reason_code": null,
+            "detail": ""
+          },
+          {
+            "name": "nav_spy_wow",
+            "raw_value": null,
+            "score": null,
+            "reason_code": "NAV_HISTORY_BUILDING",
+            "detail": "Need 8 weeks; 2 accumulated"
+          }
+        ]
+      },
+      "dealer_hedging": {
+        "status": "deferred",
+        "available_count": 0,
+        "expected_count": 0,
+        "reason_code": "DEFERRED_PILLAR_3",
+        "submetrics": []
+      }
+    }
+  },
+  "as_of": "2026-04-16T19:00:00Z",
+  "engine": "flows_positioning"
+}
+
+=== EXAMPLE 3 ===
+{
+  "score": null,
+  "label": "Unknown",
+  "short_label": "Unknown",
+  "confidence_score": 0.0,
+  "signal_quality": "low",
+  "summary": "Insufficient data for flows & positioning read.",
+  "trader_takeaway": "Insufficient data for flows & positioning read.",
+  "pillar_scores": {
+    "positioning": null,
+    "flows": null,
+    "dealer_hedging": null
+  },
+  "pillar_weights": {
+    "positioning": 0.3333333333333333,
+    "flows": 0.3333333333333333,
+    "dealer_hedging": 0.3333333333333333
+  },
+  "pillar_explanations": {
+    "positioning": "FMP COT endpoint returned 5xx for all symbols.",
+    "flows": "FMP historical-price-eod fetch failed.",
+    "dealer_hedging": "Deferred until Tradier access restored (Phase 2)."
+  },
+  "positive_contributors": [],
+  "negative_contributors": [],
+  "conflicting_signals": [],
+  "warnings": [
+    "All upstream data sources failed"
+  ],
+  "missing_inputs": [
+    "positioning:COT_FETCH_FAILED",
+    "flows:SECTOR_RS_FETCH_FAILED",
+    "dealer_hedging:DEFERRED_PILLAR_3"
+  ],
+  "diagnostics": {
+    "pillar_details": {
+      "positioning": {
+        "status": "unavailable",
+        "available_count": 0,
+        "expected_count": 0,
+        "reason_code": "COT_FETCH_FAILED",
+        "submetrics": []
+      },
+      "flows": {
+        "status": "unavailable",
+        "available_count": 0,
+        "expected_count": 0,
+        "reason_code": "SECTOR_RS_FETCH_FAILED",
+        "submetrics": []
+      },
+      "dealer_hedging": {
+        "status": "deferred",
+        "available_count": 0,
+        "expected_count": 0,
+        "reason_code": "DEFERRED_PILLAR_3",
+        "submetrics": []
+      }
+    }
+  },
+  "as_of": "2026-04-16T19:00:00Z",
+  "engine": "flows_positioning"
+}

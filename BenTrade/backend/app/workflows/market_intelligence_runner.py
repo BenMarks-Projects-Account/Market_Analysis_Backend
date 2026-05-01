@@ -17,6 +17,7 @@ Greenfield design — does NOT reference archived pipeline code.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -33,6 +34,7 @@ from app.workflows.market_state_contract import (
     ENGINE_KEYS,
     MACRO_METRIC_KEYS,
     MARKET_STATE_CONTRACT_VERSION,
+    OPTIONAL_ENGINE_KEYS,
     OverallQuality,
     PublicationStatus,
     validate_market_state,
@@ -80,6 +82,10 @@ _ENGINE_DISPATCH: dict[str, tuple[str, str]] = {
         "get_liquidity_conditions_analysis",
     ),
     "news_sentiment": ("news_sentiment_service", "get_news_sentiment"),
+    "institutional_13f": (
+        "institutional_13f_service",
+        "get_13f_analysis",
+    ),
 }
 
 
@@ -112,9 +118,13 @@ class MarketIntelligenceDeps:
     flows_positioning_service: Any
     liquidity_conditions_service: Any
     news_sentiment_service: Any
+    institutional_13f_service: Any | None = None
     http_client: Any | None = None
     model_request_fn: Callable | None = None
     pre_market_service: Any | None = None
+    # Optional history-DB session maker; set post-startup by main.py.
+    # When None, the MI history hook is a silent no-op.
+    history_db_session_maker: Any | None = None
 
 
 @dataclass
@@ -269,6 +279,25 @@ async def run_market_intelligence(
     )
     stages.append(outcome)
 
+    # ── History-DB hook (fire-and-forget) ─────────────────────────
+    # Record one market_state_snapshots row per publish. Runs as a
+    # background task so NAS latency never blocks the runner.
+    if getattr(deps, "history_db_session_maker", None) is not None:
+        try:
+            from app.services.history_recorder import log_market_snapshot
+            artifact = stage_data.get("artifact") or {}
+            asyncio.create_task(
+                log_market_snapshot(
+                    session_maker=deps.history_db_session_maker,
+                    snapshot_id=run_id,
+                    market_state=artifact,
+                    captured_at_utc=artifact.get("generated_at") or now.isoformat(),
+                    artifact_filename=stage_data.get("artifact_filename"),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("event=mi_history_hook_failed error=%r", exc)
+
     # ── Finalize result ──────────────────────────────────────────
     result.stages = [s.to_dict() for s in stages]
     result.warnings = warnings
@@ -408,6 +437,8 @@ async def _stage_run_engines(
     for engine_key in ENGINE_KEYS:
         dispatch = _ENGINE_DISPATCH.get(engine_key)
         if dispatch is None:
+            if engine_key in OPTIONAL_ENGINE_KEYS:
+                continue
             engines_failed += 1
             warnings.append(f"No dispatch entry for engine: {engine_key}")
             continue
@@ -415,6 +446,8 @@ async def _stage_run_engines(
         attr_name, method_name = dispatch
         service = getattr(deps, attr_name, None)
         if service is None:
+            if engine_key in OPTIONAL_ENGINE_KEYS:
+                continue
             engines_failed += 1
             warnings.append(f"Service not provided: {engine_key}")
             continue

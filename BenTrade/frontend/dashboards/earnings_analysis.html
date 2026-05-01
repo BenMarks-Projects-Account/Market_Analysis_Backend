@@ -1,0 +1,86 @@
+<div class="ea-root" id="ea-root">
+  <div class="ea-header">
+    <div>
+      <h2 class="ea-title">Earnings Analysis</h2>
+      <p class="ea-subtitle">Universe-driven scan of upcoming earnings with vol-mispricing signals from EVA.</p>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <div id="ea-connection-toggle" style="display:inline-flex; align-items:center; gap:6px;
+           background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1);
+           border-radius:4px; padding:3px 8px; font-size:0.8rem;">
+        <span style="color:rgba(224,224,224,0.5); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.04em;">Connection:</span>
+        <label style="cursor:pointer; display:inline-flex; align-items:center; gap:3px; color:#e0e0e0;">
+          <input type="radio" name="ea-conn-mode" value="local" style="accent-color:#00e0c3;"> Local
+        </label>
+        <label style="cursor:pointer; display:inline-flex; align-items:center; gap:3px; color:#e0e0e0;">
+          <input type="radio" name="ea-conn-mode" value="remote" style="accent-color:#00e0c3;"> Remote
+        </label>
+      </div>
+      <span id="ea-conn-url" style="color:rgba(224,224,224,0.3); font-size:0.72rem; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+    </div>
+  </div>
+
+  <div class="ea-filter-bar" id="ea-filter-bar">
+    <label for="ea-window">Window</label>
+    <select id="ea-window">
+      <option value="7">7 days</option>
+      <option value="14" selected>14 days</option>
+      <option value="30">30 days</option>
+    </select>
+
+    <label for="ea-sector">Sector</label>
+    <select id="ea-sector"><option value="">All sectors</option></select>
+
+    <label><input type="checkbox" id="ea-tradeable-only" checked> Tradeable only</label>
+
+    <label for="ea-min-score" style="display:flex; align-items:center; gap:6px;">
+      Min Setup
+      <input type="range" id="ea-min-score" min="0" max="100" value="0" step="5">
+      <span id="ea-min-score-val" style="font-family:var(--font-mono); color:var(--cyan); width:24px; text-align:right;">0</span>
+    </label>
+
+    <input type="text" id="ea-search" placeholder="Search ticker or company…">
+
+    <div class="ea-filter-actions">
+      <span class="ea-result-count" id="ea-result-count"></span>
+      <button class="ea-btn" id="ea-refresh">Refresh</button>
+    </div>
+  </div>
+
+  <div class="ea-content">
+    <div class="ea-panel">
+      <div class="ea-panel-header">
+        <span>Upcoming Earnings</span>
+        <span id="ea-last-updated" style="font-size:0.7rem; color:var(--muted); text-transform:none; letter-spacing:0;"></span>
+      </div>
+      <div class="ea-panel-body" id="ea-table-wrap" style="padding:0; max-height:calc(60vh);">
+        <table class="ea-table" id="ea-table">
+          <thead>
+            <tr id="ea-thead-row"></tr>
+          </thead>
+          <tbody id="ea-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Action button row (header + tab toolbar) -->
+    <div class="ea-action-row" id="ea-action-row">
+      <span class="ea-action-title" id="ea-side-title">Select a row above to view event details.</span>
+      <div class="ea-action-buttons" id="ea-tabs">
+        <button class="ea-action-btn" data-tab="overview" disabled>Overview</button>
+        <button class="ea-action-btn" data-tab="history" disabled>History</button>
+        <button class="ea-action-btn" data-tab="timeline" disabled>Timeline</button>
+        <button class="ea-action-btn" data-tab="macro" disabled>Macro</button>
+        <button class="ea-action-btn" data-tab="raw" disabled>Raw</button>
+        <button class="ea-action-btn ea-action-btn-primary" data-tab="model_analysis" disabled>Model Analysis</button>
+      </div>
+    </div>
+
+    <!-- Collapsible content area -->
+    <div class="ea-panel ea-content-panel" id="ea-content-panel" style="display:none;">
+      <div class="ea-panel-body" id="ea-side-body">
+        <div class="ea-state">Select a row above to view event details.</div>
+      </div>
+    </div>
+  </div>
+</div>

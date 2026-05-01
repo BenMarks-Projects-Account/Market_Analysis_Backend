@@ -1,0 +1,35 @@
+<div class="ea-root" id="oea-root">
+  <div class="ea-header">
+    <div>
+      <h2 class="ea-title">On Demand Earnings Analysis</h2>
+      <p class="ea-subtitle">Type any ticker. EVA returns whatever data is available; non-universe names can be added to trigger backfill.</p>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <div id="oea-connection-toggle" style="display:inline-flex; align-items:center; gap:6px;
+           background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1);
+           border-radius:4px; padding:3px 8px; font-size:0.8rem;">
+        <span style="color:rgba(224,224,224,0.5); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.04em;">Connection:</span>
+        <label style="cursor:pointer; display:inline-flex; align-items:center; gap:3px; color:#e0e0e0;">
+          <input type="radio" name="oea-conn-mode" value="local" style="accent-color:#00e0c3;"> Local
+        </label>
+        <label style="cursor:pointer; display:inline-flex; align-items:center; gap:3px; color:#e0e0e0;">
+          <input type="radio" name="oea-conn-mode" value="remote" style="accent-color:#00e0c3;"> Remote
+        </label>
+      </div>
+      <span id="oea-conn-url" style="color:rgba(224,224,224,0.3); font-size:0.72rem; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+    </div>
+  </div>
+
+  <div class="ea-search-row">
+    <input type="text" id="oea-ticker" placeholder="Ticker (e.g. AAPL)" autocomplete="off" maxlength="10">
+    <button class="ea-btn ea-btn-primary" id="oea-analyze">Analyze</button>
+    <button class="ea-btn" id="oea-add" style="display:none;">+ Add to Universe</button>
+    <span class="ea-result-count" id="oea-status"></span>
+  </div>
+
+  <div id="oea-banner-slot"></div>
+
+  <div id="oea-body">
+    <div class="ea-od-empty">Enter a ticker to see earnings vol analysis.</div>
+  </div>
+</div>

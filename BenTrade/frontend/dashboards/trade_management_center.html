@@ -21,6 +21,17 @@
     </div>
     <div class="tmc-control-right">
       <span id="orchestratorStatus" class="tmc-orchestrator-status" title="Continuous workflow orchestrator status"></span>
+      <button
+        id="tmc-orchestrator-pause-btn"
+        class="btn tmc-btn tmc-workflow-btn"
+        type="button"
+        hidden
+        aria-pressed="false"
+        aria-label="Pause workflow cycles"
+        title="Pause workflow cycles">
+        <span class="tmc-orch-btn-label">Pause</span>
+      </button>
+      <span id="tmc-orchestrator-pause-msg" class="tmc-orch-pause-msg" role="status" aria-live="polite" hidden></span>
     </div>
   </div>
 

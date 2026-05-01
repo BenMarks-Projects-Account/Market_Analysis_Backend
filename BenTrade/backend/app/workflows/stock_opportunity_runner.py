@@ -152,12 +152,21 @@ class StockOpportunityDeps:
     gracefully (candidates pass through without model review).
     Signature: ``(payload: dict) -> dict`` (same as model_router.model_request).
 
+    ``insider_catalyst_service`` is an optional ``InsiderCatalystService``
+    that applies insider-buying boost/penalty to candidate scores before
+    the filter/rank/select stage.  When ``None``, the insider enrichment
+    step is skipped.
+
     If you need to test without live Tradier/LLM calls, inject mocks
     for both services.
     """
 
     stock_engine_service: Any
     model_request_fn: Any = None  # Optional[Callable[[dict], dict]]
+    insider_catalyst_service: Any = None  # Optional[InsiderCatalystService]
+    # Optional history-DB session maker; set post-startup by main.py.
+    # When None, the stock decision history hook is a silent no-op.
+    history_db_session_maker: Any = None
 
 
 @dataclass
@@ -500,6 +509,26 @@ async def run_stock_opportunity(
             result.completed_at = _now_iso()
             return result
 
+        # ── Stage 4.5: insider enrichment (async, optional) ──────────
+        if deps.insider_catalyst_service is not None:
+            try:
+                _insider_candidates = stage_data.get("normalized_candidates", [])
+                if _insider_candidates:
+                    await deps.insider_catalyst_service.enrich_with_insider_signal(
+                        _insider_candidates,
+                    )
+                    _boosted = sum(
+                        1 for c in _insider_candidates if c.get("insider_tag")
+                    )
+                    if _boosted:
+                        logger.info(
+                            "event=insider_enrichment applied=%d/%d",
+                            _boosted, len(_insider_candidates),
+                        )
+            except Exception as _ie:
+                logger.warning("event=insider_enrichment_error error=%s", _ie)
+                warnings.append(f"Insider enrichment degraded: {_ie}")
+
         # ── Stage 5: enrich_filter_rank_select ───────────────────────
         dbg.stage_start("enrich_filter_rank_select", {
             "min_setup_quality": MIN_SETUP_QUALITY,
@@ -551,6 +580,38 @@ async def run_stock_opportunity(
                 f"confidence={cand.get('model_confidence')}"
             )
         # Model analysis is optional — degraded is OK.
+
+        # ── History-DB hook (fire-and-forget) ──────────────────────
+        # One decisions row per LLM-evaluated candidate (BUY + PASS),
+        # captured BEFORE model_filter_rank so PASS verdicts are preserved.
+        if getattr(deps, "history_db_session_maker", None) is not None:
+            try:
+                from app.services.history_recorder import log_decision
+                snapshot_id_ref = stage_data.get("market_state_ref")
+                for _cand in stage_data.get("selected_candidates", []) or []:
+                    rec = _cand.get("model_recommendation")
+                    if not rec:
+                        continue  # model failed / skipped for this candidate
+                    asyncio.create_task(
+                        log_decision(
+                            session_maker=deps.history_db_session_maker,
+                            decision_type="stock",
+                            candidate=_cand,
+                            recommendation=rec,
+                            run_id=run_id,
+                            workflow_id=WORKFLOW_ID,
+                            snapshot_id=snapshot_id_ref,
+                            model_score=_cand.get("model_score"),
+                            deterministic_rank=_cand.get("deterministic_rank"),
+                            rank=_cand.get("rank"),
+                            llm_reasoning=(
+                                _cand.get("model_review_summary")
+                                or _cand.get("model_headline")
+                            ),
+                        )
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("event=decision_history_hook_failed type=stock error=%r", exc)
 
         # ── Stage 7b: model_filter_rank ──────────────────────────────
         #    Discard PASS recommendations, rank by model_score, keep top 10.

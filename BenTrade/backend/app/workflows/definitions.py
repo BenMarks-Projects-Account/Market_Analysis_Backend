@@ -66,7 +66,7 @@ MARKET_INTELLIGENCE_STAGES: tuple[StageSpec, ...] = (
         label="Data Collection",
         description=(
             "Fetch current market data from all providers "
-            "(Tradier, FRED, Finnhub, Polygon).  Record source "
+            "(Tradier, FRED, Finnhub, FMP).  Record source "
             "freshness and availability per provider."
         ),
     ),

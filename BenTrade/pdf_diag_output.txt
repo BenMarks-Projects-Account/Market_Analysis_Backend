@@ -1,0 +1,249 @@
+URL: http://localhost:5000/#/on-demand-evaluator?symbol=MSFT&print_mode=1
+location: {
+  "href": "http://localhost:5000/#/on-demand-evaluator?symbol=MSFT&print_mode=1",
+  "hash": "#/on-demand-evaluator?symbol=MSFT&print_mode=1",
+  "search": "",
+  "pathname": "/"
+}
+print-mode class: True
+input selectors: {
+  "#ode-symbol-input": {
+    "found": true,
+    "value": "MSFT",
+    "id": "ode-symbol-input",
+    "name": ""
+  },
+  "[name=\"symbol\"]": {
+    "found": false
+  },
+  "input[type=\"text\"]": {
+    "found": true,
+    "value": "MSFT",
+    "id": "ode-symbol-input",
+    "name": ""
+  },
+  ".ode-form input": {
+    "found": true,
+    "value": "MSFT",
+    "id": "ode-symbol-input",
+    "name": ""
+  }
+}
+form selectors: {
+  "#ode-form": {
+    "found": true,
+    "id": "ode-form",
+    "className": "ode-form"
+  },
+  "#ode-analyze-form": {
+    "found": false
+  },
+  ".ode-form": {
+    "found": true,
+    "id": "ode-form",
+    "className": "ode-form"
+  },
+  "form": {
+    "found": true,
+    "id": "ode-form",
+    "className": "ode-form"
+  }
+}
+DOM after nav: {
+  "ticker": null,
+  "price": null,
+  "printReady": null,
+  "loadingVisible": true,
+  "errorVisible": false,
+  "resultsVisible": false,
+  "errorText": null
+}
+DOM after wait: {
+  "ticker": null,
+  "price": null,
+  "printReady": null,
+  "sectionCount": 8,
+  "sectionSamples": [
+    "Valuation Models",
+    "Pillar Breakdown",
+    "Entry & Price Targets"
+  ],
+  "loadingVisible": true,
+  "errorVisible": false,
+  "resultsVisible": false,
+  "errorText": null
+}
+
+--- Browser Console (2 entries) ---
+  error: Failed to load resource: the server responded with a status of 404 (Not Found)
+  log: [source-health-store] fetched {as_of: 2026-04-15T00:11:52.733412+00:00, model_status: ok, model_notes: Array(2)}
+
+--- Network Requests (168 entries) ---
+  GET http://localhost:5000/ -> 200
+  GET http://localhost:5000/assets/css/app.css -> 200
+  GET http://localhost:5000/assets/css/module-dashboard.css?v=20260310d -> 200
+  GET http://localhost:5000/assets/css/on_demand_evaluator.css?v=20260413b -> 200
+  GET http://localhost:5000/assets/css/price_chart.css?v=20260615a -> 200
+  GET http://localhost:5000/assets/branding/bentrade-rocket.gif -> 404
+  GET http://localhost:5000/assets/js/utils/debug.js?v=20260217a -> 200
+  GET http://localhost:5000/assets/js/utils/overlayRoot.js?v=20260227a -> 200
+  GET http://localhost:5000/assets/js/state/session_state.js?v=20260215a -> 200
+  GET http://localhost:5000/assets/js/api/client.js?v=20260319a -> 200
+  GET http://localhost:5000/assets/js/utils/tradeKey.js?v=20260216a -> 200
+  GET http://localhost:5000/assets/js/utils/format.js?v=20260217a -> 200
+  GET http://localhost:5000/assets/js/utils/tradeAccessor.js?v=20260217a -> 200
+  GET http://localhost:5000/assets/js/metrics/tooltip_dictionary.js?v=20260303a -> 200
+  GET http://localhost:5000/assets/js/metrics/glossary.js?v=20260303a -> 200
+  GET http://localhost:5000/assets/js/ui/tooltip.js?v=20260303a -> 200
+  GET http://localhost:5000/assets/js/ui/ben_tooltip.js?v=20260303a -> 200
+  GET http://localhost:5000/assets/js/ui/trade_card.js?v=20260217a -> 200
+  GET http://localhost:5000/assets/js/ui/model_analysis.js?v=20260227a -> 200
+  GET http://localhost:5000/assets/js/ui/source_health.js?v=20260215a -> 200
+  GET http://localhost:5000/assets/js/ui/boot_choice_modal.js?v=20260319b -> 200
+  GET http://localhost:5000/assets/js/ui/data_workbench_modal.js?v=20260225a -> 200
+  GET http://localhost:5000/assets/js/ui/home_loading_overlay.js?v=20260216b -> 200
+  GET http://localhost:5000/assets/js/ui/chat_drawer.js?v=20260614a -> 200
+  GET http://localhost:5000/assets/js/ui/panel_expand.js?v=20260318a -> 200
+  GET http://localhost:5000/assets/js/ui/toast_notification.js?v=20260326a -> 200
+  GET http://localhost:5000/assets/js/utils/rateLimiter.js?v=20260216a -> 200
+  GET http://localhost:5000/assets/js/ui/notes.js?v=20260216a -> 200
+  GET http://localhost:5000/assets/js/stores/sessionStats.js?v=20260216b -> 200
+  GET http://localhost:5000/assets/js/stores/marketContext.js?v=20260309a -> 200
+  GET http://localhost:5000/assets/js/stores/homeCache.js?v=20260306a -> 200
+  GET http://localhost:5000/assets/js/stores/dashboardCache.js?v=20260306a -> 200
+  GET http://localhost:5000/assets/js/stores/modelAnalysisStore.js?v=20260227a -> 200
+  GET http://localhost:5000/assets/js/stores/scanResultsCache.js?v=20260225a -> 200
+  GET http://localhost:5000/assets/js/stores/scannerOrchestrator.js?v=20260218a -> 200
+  GET http://localhost:5000/assets/js/stores/playbookScoring.js?v=20260219a -> 200
+  GET http://localhost:5000/assets/js/strategies/profiles.js?v=20260218a -> 200
+  GET http://localhost:5000/assets/js/strategies/defaults.js?v=20260218a -> 200
+  GET http://localhost:5000/assets/js/stores/symbolUniverse.js?v=20260218a -> 200
+  GET http://localhost:5000/assets/js/ui/symbolUniverseSelector.js?v=20260218a -> 200
+  GET http://localhost:5000/assets/js/ui/banner_ticker.js?v=20260319h -> 200
+  GET http://localhost:5000/assets/js/config/strategy_card_config.js?v=20260218a -> 200
+  GET http://localhost:5000/assets/js/config/stock_strategies.js?v=20260302a -> 200
+  GET http://localhost:5000/assets/js/models/option_trade_card_model.js?v=20260218a -> 200
+  GET http://localhost:5000/assets/js/models/stock_trade_card_mapper.js?v=20260302e -> 200
+  GET http://localhost:5000/assets/js/models/trade_ticket_model.js?v=20260227a -> 200
+  GET http://localhost:5000/assets/js/ui/trade_ticket.js?v=20260227a -> 200
+  GET http://localhost:5000/assets/js/ui/stock_execute_modal.js?v=20260302f -> 200
+  GET http://localhost:5000/assets/js/pages/strategy_dashboard_shell.js?v=20260218a -> 200
+  GET http://localhost:5000/assets/js/pages/active_trades.js?v=20260306a -> 200
+  GET http://localhost:5000/assets/js/pages/trade_workbench.js?v=20260217a -> 200
+  GET http://localhost:5000/assets/js/pages/stock_analysis.js?v=20260216d -> 200
+  GET http://localhost:5000/assets/js/components/price_chart.js?v=20260615a -> 200
+  GET http://localhost:5000/assets/js/components/pre_market_display.js?v=20260325a -> 200
+  GET http://localhost:5000/assets/js/components/metric_formatter.js?v=20260413a -> 200
+  GET http://localhost:5000/assets/js/pages/stock_scanner.js?v=20260217a -> 200
+  GET http://localhost:5000/assets/js/pages/stock_pullback_swing.js?v=20260302e -> 200
+  GET http://localhost:5000/assets/js/pages/stock_momentum_breakout.js?v=20260302e -> 200
+  GET http://localhost:5000/assets/js/pages/stock_mean_reversion.js?v=20260302e -> 200
+  GET http://localhost:5000/assets/js/pages/stock_volatility_expansion.js?v=20260302e -> 200
+  GET http://localhost:5000/assets/js/pages/home.js?v=20260325a -> 200
+  GET http://localhost:5000/assets/js/pages/risk_capital.js?v=20260306a -> 200
+  GET http://localhost:5000/assets/js/pages/portfolio_risk.js?v=20260306a -> 200
+  GET http://localhost:5000/assets/js/pages/trade_lifecycle.js?v=20260216a -> 200
+  GET http://localhost:5000/assets/js/pages/strategy_analytics.js?v=20260216a -> 200
+  GET http://localhost:5000/assets/js/pages/data_health.js?v=20260217a -> 200
+  GET http://localhost:5000/assets/js/pages/news_sentiment.js?v=20260310d -> 200
+  GET http://localhost:5000/assets/js/pages/admin_data_workbench.js?v=20260217b -> 200
+  GET http://localhost:5000/assets/js/pages/breadth_participation.js?v=20260310d -> 200
+  GET http://localhost:5000/assets/js/pages/volatility_options.js?v=20260311a -> 200
+  GET http://localhost:5000/assets/js/pages/cross_asset_macro.js?v=20260311a -> 200
+  GET http://localhost:5000/assets/js/pages/flows_positioning.js?v=20260311a -> 200
+  GET http://localhost:5000/assets/js/pages/liquidity_conditions.js?v=20260311a -> 200
+  GET http://localhost:5000/assets/js/pages/scanner_review.js?v=20260312a -> 200
+  GET http://localhost:5000/assets/js/pages/trade_management_center.js?v=20260403a -> 200
+  GET http://localhost:5000/assets/js/pages/notifications.js?v=20260326a -> 200
+  GET http://localhost:5000/assets/js/pages/company_evaluator.js?v=20260615a -> 200
+  GET http://localhost:5000/assets/js/pages/on_demand_evaluator.js?v=20260615a -> 200
+  GET http://localhost:5000/assets/js/app.js?v=20260217a -> 200
+  GET http://localhost:5000/assets/js/router.js?v=20260216c -> 200
+  GET https://cdn.jsdelivr.net/npm/marked/marked.min.js -> 200
+  GET https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&display=swap -> 200
+  GET https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js -> 200
+  GET http://localhost:5000/dashboards/on_demand_evaluator.html -> 200
+  GET http://localhost:5000/api/stock/ticker-universe -> 200
+  GET http://localhost:5000/assets/glossary_content.json -> 200
+  GET https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2 -> 200
+  POST http://localhost:5000/api/company-evaluator/on-demand/analyze -> 200
+  GET https://fonts.gstatic.com/s/exo2/v26/7cHmv4okm5zmbtYoK-4.woff2 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/stock/ticker-snapshot -> 200
+  GET http://localhost:5000/api/health/sources -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/notifications?limit=10&unread_only=true -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/notifications?limit=10&unread_only=true -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/notifications?limit=10&unread_only=true -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/notifications?limit=10&unread_only=true -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/notifications?limit=10&unread_only=true -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/notifications?limit=10&unread_only=true -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/notifications?limit=10&unread_only=true -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/notifications?limit=10&unread_only=true -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/notifications?limit=10&unread_only=true -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/notifications?limit=10&unread_only=true -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/notifications?limit=10&unread_only=true -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/notifications?limit=10&unread_only=true -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/company-evaluator/on-demand/jobs/ondemand_2026-04-15T00%3A11%3A53_MSFT_88a4 -> 200
+  GET http://localhost:5000/api/notifications?limit=10&unread_only=true -> 200

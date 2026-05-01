@@ -11,7 +11,6 @@ class _DummySettings:
     TRADIER_TOKEN = "x"
     FINNHUB_KEY = "x"
     FRED_KEY = "x"
-    POLYGON_API_KEY = "x"
 
 
 class _DummyClient:
@@ -24,7 +23,6 @@ def _make_service() -> BaseDataService:
         tradier_client=_DummyClient(),
         finnhub_client=_DummyClient(),
         fred_client=_DummyClient(),
-        polygon_client=_DummyClient(),
     )
 
 

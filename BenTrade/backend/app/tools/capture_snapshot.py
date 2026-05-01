@@ -98,7 +98,6 @@ async def _run(args: argparse.Namespace) -> None:
     from app.clients.tradier_client import TradierClient
     from app.clients.finnhub_client import FinnhubClient
     from app.clients.fred_client import FredClient
-    from app.clients.polygon_client import PolygonClient
     from app.services.base_data_service import BaseDataService
     from app.services.snapshot_capture_service import SnapshotCaptureService
     from app.utils.cache import TTLCache
@@ -126,7 +125,6 @@ async def _run(args: argparse.Namespace) -> None:
 
         tradier_client = TradierClient(settings=settings, http_client=http_client, cache=cache)
         finnhub_client = FinnhubClient(settings=settings, http_client=http_client, cache=cache)
-        polygon_client = PolygonClient(settings=settings, http_client=http_client, cache=cache)
         fred_client = FredClient(settings=settings, http_client=http_client, cache=cache)
 
         chain_source = TradierChainSource(tradier_client)
@@ -135,7 +133,6 @@ async def _run(args: argparse.Namespace) -> None:
             tradier_client=tradier_client,
             finnhub_client=finnhub_client,
             fred_client=fred_client,
-            polygon_client=polygon_client,
             chain_source=chain_source,
         )
 

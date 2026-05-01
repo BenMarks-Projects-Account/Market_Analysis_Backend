@@ -124,7 +124,7 @@ class StrategyService:
         if data_source_mode == "snapshot":
             pricing_source = "snapshot+fred"
         else:
-            pricing_source = "tradier+fred+polygon"
+            pricing_source = "tradier+fred+fmp"
 
         return {
             "underlying_snapshot": {
@@ -2850,7 +2850,7 @@ class StrategyService:
             if snapshot_staleness_info:
                 filter_trace["snapshot_staleness"] = snapshot_staleness_info
         else:
-            filter_trace["pricing_source"] = "tradier+fred+polygon"
+            filter_trace["pricing_source"] = "tradier+fred+fmp"
 
         blob = self._build_report_blob(
             strategy_id=strategy_id,

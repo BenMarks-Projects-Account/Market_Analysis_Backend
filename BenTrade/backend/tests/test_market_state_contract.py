@@ -178,7 +178,7 @@ class TestContractConstants:
         assert MARKET_STATE_CONTRACT_VERSION == "1.0"
 
     def test_engine_keys_count(self):
-        assert len(ENGINE_KEYS) == 6
+        assert len(ENGINE_KEYS) == 7
 
     def test_engine_keys_are_strings(self):
         for k in ENGINE_KEYS:

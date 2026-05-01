@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="assets/css/app.css">
   <link rel="stylesheet" href="assets/css/module-dashboard.css?v=20260310d">
   <link rel="stylesheet" href="assets/css/on_demand_evaluator.css?v=20260413b">
+  <link rel="stylesheet" href="assets/css/earnings_analysis.css?v=20260430b">
   <link rel="stylesheet" href="assets/css/price_chart.css?v=20260615a">
   <style>
     /* CE symbol/name links */
@@ -317,6 +318,20 @@
               <span class="nav-item-text">
                 <span class="nav-item-title">Trade Management Center</span>
                 <span class="nav-item-sub">Candidate review + execution</span>
+              </span>
+            </a>
+            <a class="nav-link" href="#/earnings-analysis" data-route="earnings-analysis">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">Earnings Analysis</span>
+                <span class="nav-item-sub">Universe earnings vol scan</span>
+              </span>
+            </a>
+            <a class="nav-link" href="#/on-demand-earnings-analysis" data-route="on-demand-earnings-analysis">
+              <span class="nav-dot"></span>
+              <span class="nav-item-text">
+                <span class="nav-item-title">On Demand Earnings Analysis</span>
+                <span class="nav-item-sub">Single-ticker EVA research</span>
               </span>
             </a>
             <a class="nav-link" href="#/company-evaluator" data-route="company-evaluator">
@@ -777,7 +792,7 @@
   <script src="assets/js/utils/debug.js?v=20260217a"></script>
   <script src="assets/js/utils/overlayRoot.js?v=20260227a"></script>
   <script src="assets/js/state/session_state.js?v=20260215a"></script>
-  <script src="assets/js/api/client.js?v=20260319a"></script>
+  <script src="assets/js/api/client.js?v=20260430b"></script>
   <script src="assets/js/utils/tradeKey.js?v=20260216a"></script>
   <script src="assets/js/utils/format.js?v=20260217a"></script>
   <script src="assets/js/utils/tradeAccessor.js?v=20260217a"></script>
@@ -792,6 +807,8 @@
   <script src="assets/js/ui/data_workbench_modal.js?v=20260225a"></script>
   <script src="assets/js/ui/home_loading_overlay.js?v=20260216b"></script>
   <script src="assets/js/ui/chat_drawer.js?v=20260614a"></script>
+  <script src="assets/js/ui/notes_panel.js?v=20260417a"></script>
+  <script src="assets/js/config/home_note_sections.js?v=20260417a"></script>
   <script src="assets/js/ui/panel_expand.js?v=20260318a"></script>
   <script src="assets/js/ui/toast_notification.js?v=20260326a"></script>
   <script src="assets/js/utils/rateLimiter.js?v=20260216a"></script>
@@ -800,10 +817,12 @@
   <script src="assets/js/stores/marketContext.js?v=20260309a"></script>
   <script src="assets/js/stores/homeCache.js?v=20260306a"></script>
   <script src="assets/js/stores/dashboardCache.js?v=20260306a"></script>
+  <script src="assets/js/stores/earnings_analysis_cache.js?v=20260428b"></script>
   <script src="assets/js/stores/modelAnalysisStore.js?v=20260227a"></script>
   <script src="assets/js/stores/scanResultsCache.js?v=20260225a"></script>
   <script src="assets/js/stores/scannerOrchestrator.js?v=20260218a"></script>
   <script src="assets/js/stores/playbookScoring.js?v=20260219a"></script>
+  <script src="assets/js/stores/onDemandAppendedStore.js?v=20260417a"></script>
   <script src="assets/js/strategies/profiles.js?v=20260218a"></script>
   <script src="assets/js/strategies/defaults.js?v=20260218a"></script>
   <script src="assets/js/stores/symbolUniverse.js?v=20260218a"></script>
@@ -821,6 +840,7 @@
   <script src="assets/js/pages/trade_workbench.js?v=20260217a"></script>
   <script src="assets/js/pages/stock_analysis.js?v=20260216d"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="assets/js/components/price_chart.js?v=20260615a"></script>
   <script src="assets/js/components/pre_market_display.js?v=20260325a"></script>
   <script src="assets/js/components/metric_formatter.js?v=20260413a"></script>
@@ -846,7 +866,9 @@
   <script src="assets/js/pages/trade_management_center.js?v=20260403a"></script>
   <script src="assets/js/pages/notifications.js?v=20260326a"></script>
   <script src="assets/js/pages/company_evaluator.js?v=20260615a"></script>
-  <script src="assets/js/pages/on_demand_evaluator.js?v=20260615a"></script>
+  <script src="assets/js/pages/on_demand_evaluator.js?v=20260417a"></script>
+  <script src="assets/js/pages/earnings_analysis.js?v=20260430b"></script>
+  <script src="assets/js/pages/on_demand_earnings_analysis.js?v=20260428b"></script>
   <script src="assets/js/app.js?v=20260217a"></script>
   <script src="assets/js/router.js?v=20260216c"></script>
 </body>

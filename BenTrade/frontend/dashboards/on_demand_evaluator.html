@@ -3,6 +3,18 @@
     <section class="ode-hero ode-hero-compact">
         <div class="ode-hero-title">
             <span class="ode-hero-label">On-Demand Evaluator</span>
+            <div id="ode-connection-toggle" style="display:inline-flex; align-items:center; gap:6px;
+                 background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1);
+                 border-radius:4px; padding:3px 8px; font-size:0.8rem; margin-left:12px;">
+              <span style="color:rgba(224,224,224,0.5); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.04em;">Connection:</span>
+              <label style="cursor:pointer; display:inline-flex; align-items:center; gap:3px; color:#e0e0e0;">
+                <input type="radio" name="ode-conn-mode" value="local" style="accent-color:#00e0c3;"> Local
+              </label>
+              <label style="cursor:pointer; display:inline-flex; align-items:center; gap:3px; color:#e0e0e0;">
+                <input type="radio" name="ode-conn-mode" value="remote" style="accent-color:#00e0c3;"> Remote
+              </label>
+            </div>
+            <span id="ode-conn-url" style="color:rgba(224,224,224,0.3); font-size:0.72rem; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-left:8px;"></span>
         </div>
 
         <form class="ode-form" id="ode-form" autocomplete="off">
@@ -24,6 +36,20 @@
                     title="Generate a deep research prompt to paste into a chat conversation"
                     disabled>
                 Deep Research Prompt
+            </button>
+            <button id="ode-add-narrative-btn"
+                    class="ode-add-narrative-btn"
+                    type="button"
+                    title="Paste the chat model's research response to add it as a panel"
+                    disabled>
+                Add Analysis
+            </button>
+            <button id="ode-export-pdf-btn"
+                    class="ode-export-pdf-btn"
+                    type="button"
+                    title="Export the entire dashboard to PDF"
+                    disabled>
+                Export PDF
             </button>
         </form>
     </section>
@@ -57,18 +83,8 @@
 
     <!-- Results (hidden by default, populated after job completes) -->
     <section class="ode-results" id="ode-results" hidden>
-        <!-- Company header -->
+        <!-- Company header (consolidated: ticker, name, Z-score, price, meta, scores) -->
         <div class="ode-company-header" id="ode-company-header"></div>
-        <div class="ode-distress-badge unknown" id="ode-distress-badge"></div>
-
-        <!-- Price chart (auto-loads after analysis) -->
-        <div id="ode-chart-container"></div>
-
-        <!-- Business profile (populated after analysis if LLM available) -->
-        <section class="ode-business-profile" id="ode-business-profile" hidden>
-            <div class="ode-section-title">Business Profile</div>
-            <div class="ode-business-profile-body" id="ode-business-profile-body"></div>
-        </section>
 
         <!-- Quality signals (populated after analysis) -->
         <section class="ode-quality-indicators" id="ode-quality-indicators" hidden>
@@ -76,24 +92,8 @@
             <div class="ode-quality-grid" id="ode-quality-grid"></div>
         </section>
 
-        <!-- Top row: scores and recommendation -->
-        <div class="ode-scores-row">
-            <div class="ode-score-card ode-composite-card" id="ode-composite-card"></div>
-            <div class="ode-score-card ode-breakout-card" id="ode-breakout-card"></div>
-            <div class="ode-score-card ode-llm-card" id="ode-llm-card"></div>
-        </div>
-
-        <!-- Pillar breakdown -->
-        <div class="ode-section">
-            <div class="ode-section-title">Pillar Breakdown</div>
-            <div class="ode-pillars-grid" id="ode-pillars-grid"></div>
-        </div>
-
-        <!-- Smart money panel -->
-        <div class="ode-section">
-            <div class="ode-section-title">Smart Money</div>
-            <div class="ode-smart-money" id="ode-smart-money"></div>
-        </div>
+        <!-- Price chart (auto-loads after analysis) -->
+        <div id="ode-chart-container"></div>
 
         <!-- Valuation models row: DCF, EVA, Comps, EPV -->
         <div class="ode-section">
@@ -106,6 +106,12 @@
             </div>
         </div>
 
+        <!-- Pillar breakdown -->
+        <div class="ode-section">
+            <div class="ode-section-title">Pillar Breakdown</div>
+            <div class="ode-pillars-grid" id="ode-pillars-grid"></div>
+        </div>
+
         <!-- Entry analysis + price targets -->
         <div class="ode-section">
             <div class="ode-section-title">Entry &amp; Price Targets</div>
@@ -115,10 +121,66 @@
             </div>
         </div>
 
+        <!-- Business profile (populated after analysis if LLM available) -->
+        <section class="ode-business-profile" id="ode-business-profile" hidden>
+            <div class="ode-section-title">Business Profile</div>
+            <div class="ode-business-profile-body" id="ode-business-profile-body"></div>
+        </section>
+
         <!-- LLM thesis (full text) -->
         <div class="ode-section">
-            <div class="ode-section-title">Investment Thesis</div>
+            <div class="ode-section-title">AI Investment Thesis</div>
             <div class="ode-thesis" id="ode-thesis"></div>
+        </div>
+
+        <!-- Narrative analysis panel (populated after paste) -->
+        <section class="ode-section ode-narrative-section" id="ode-narrative-section" hidden>
+            <div class="ode-section-header">
+                <h2 class="ode-section-title">AI DEEP RESEARCH ANALYSIS</h2>
+                <div class="ode-narrative-actions">
+                    <button class="ode-narrative-edit-btn" id="ode-narrative-edit-btn" title="Edit or replace this analysis">
+                        ✎ Edit
+                    </button>
+                    <button class="ode-narrative-remove-btn" id="ode-narrative-remove-btn" title="Remove this analysis from the dashboard">
+                        × Remove
+                    </button>
+                </div>
+            </div>
+            <div class="ode-narrative-content" id="ode-narrative-content"></div>
+            <div class="ode-narrative-meta" id="ode-narrative-meta"></div>
+        </section>
+
+        <!-- SMART MONEY SECTION — restored with FMP Ultimate data -->
+        <div class="ode-section ode-smart-money-section" id="ode-smart-money-section" hidden>
+            <div class="ode-section-title">Smart Money</div>
+            <div class="ode-smart-money" id="ode-smart-money">
+                <!-- Synthesis banner -->
+                <div class="ode-sm-synthesis" id="ode-sm-synthesis"></div>
+
+                <!-- Section 1: Institutional Ownership Summary -->
+                <details class="ode-sm-group" open>
+                    <summary class="ode-sm-group-header">Institutional Ownership</summary>
+                    <div class="ode-sm-group-body" id="ode-sm-institutional"></div>
+                </details>
+
+                <!-- Section 2: Top Institutional Holders -->
+                <details class="ode-sm-group">
+                    <summary class="ode-sm-group-header">Top Institutional Holders</summary>
+                    <div class="ode-sm-group-body" id="ode-sm-holders"></div>
+                </details>
+
+                <!-- Section 3: Insider Activity -->
+                <details class="ode-sm-group" open>
+                    <summary class="ode-sm-group-header">Insider Activity</summary>
+                    <div class="ode-sm-group-body" id="ode-sm-insider"></div>
+                </details>
+
+                <!-- Section 4: Congressional & Mutual Fund -->
+                <details class="ode-sm-group">
+                    <summary class="ode-sm-group-header">Congressional &amp; Mutual Fund Activity</summary>
+                    <div class="ode-sm-group-body" id="ode-sm-congress-mf"></div>
+                </details>
+            </div>
         </div>
 
         <!-- Raw financials at the bottom (verbose) -->
@@ -136,7 +198,71 @@
 
         <!-- Metadata footer -->
         <div class="ode-metadata-footer" id="ode-metadata-footer"></div>
+
+        <!-- Glossary & methodology reference -->
+        <section class="ode-section ode-glossary-section" id="ode-glossary-section">
+            <div class="ode-glossary-header">
+                <div class="ode-section-title">Glossary &amp; Methodology</div>
+                <button class="ode-glossary-toggle" id="ode-glossary-toggle" aria-expanded="false">
+                    <span class="ode-glossary-toggle-label">Expand All</span>
+                    <span class="ode-glossary-toggle-icon">&#x25BC;</span>
+                </button>
+            </div>
+            <div class="ode-glossary-intro">
+                Reference definitions, formulas, and interpretation notes for
+                every metric and model shown on this page. Click any category
+                to expand it, or click an individual entry to see its full
+                explanation.
+            </div>
+            <div class="ode-glossary-search-box">
+                <input
+                    type="text"
+                    id="ode-glossary-search"
+                    class="ode-glossary-search-input"
+                    placeholder="Search metrics... (e.g., 'Piotroski', 'ROIC', 'EPV')"
+                    autocomplete="off"
+                />
+                <div class="ode-glossary-search-stats" id="ode-glossary-search-stats"></div>
+            </div>
+            <div class="ode-glossary-categories" id="ode-glossary-categories">
+                <div class="ode-glossary-loading">Loading glossary...</div>
+            </div>
+        </section>
     </section>
+
+    <!-- Narrative paste modal -->
+    <div class="ode-modal-overlay" id="ode-narrative-paste-modal" hidden>
+        <div class="ode-modal ode-narrative-paste-dialog" role="dialog" aria-labelledby="narrative-paste-title">
+            <div class="ode-modal-header">
+                <div class="ode-modal-title" id="narrative-paste-title">
+                    Add Research Analysis
+                </div>
+                <button class="ode-modal-close" aria-label="Close" id="ode-narrative-paste-close">&times;</button>
+            </div>
+            <div class="ode-modal-body">
+                <div class="ode-narrative-paste-instructions">
+                    Paste the chat model's response below. Markdown formatting
+                    (headers, lists, bold) will be preserved and rendered as a
+                    panel at the bottom of the dashboard.
+                </div>
+                <textarea
+                    id="ode-narrative-paste-textarea"
+                    class="ode-narrative-paste-textarea"
+                    placeholder="Paste the full research response here..."
+                    spellcheck="false"
+                    rows="20"></textarea>
+                <div class="ode-narrative-paste-charcount" id="ode-narrative-paste-charcount">
+                    0 characters
+                </div>
+            </div>
+            <div class="ode-modal-footer">
+                <button class="ode-btn-secondary" id="ode-narrative-paste-cancel">Cancel</button>
+                <button class="ode-btn-primary" id="ode-narrative-paste-submit" disabled>
+                    Add to Dashboard
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- Deep Research Prompt modal -->
     <div class="ode-modal-overlay" id="ode-research-prompt-modal" hidden>

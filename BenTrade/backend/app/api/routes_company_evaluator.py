@@ -629,3 +629,30 @@ async def proxy_search_symbols(
         raise
     except Exception as exc:
         _log.error("event=search_proxy_failed query=%r error=%s", query, exc)
+
+
+# ── Smart Money (local FMP — not proxied) ─────────────────────────────
+
+@router.get("/smart-money/{symbol}")
+async def get_smart_money(symbol: str, request: Request):
+    """Fetch smart money data (institutional, insider, congressional) from FMP.
+
+    This endpoint runs locally on BenTrade — not proxied to the evaluator.
+    Data is computed from FMP Ultimate endpoints with per-method caching.
+    """
+    from app.services.smart_money_service import get_smart_money_data
+
+    fmp = getattr(request.app.state, "fmp_client", None)
+    if fmp is None:
+        raise HTTPException(503, detail="FMP client not available")
+
+    sym = symbol.strip().upper()
+    if not sym or not sym.isalpha() or len(sym) > 10:
+        raise HTTPException(400, detail="Invalid symbol")
+
+    try:
+        data = await get_smart_money_data(fmp, sym)
+        return data
+    except Exception as exc:
+        _log.error("event=smart_money_failed symbol=%s error=%s", sym, exc)
+        raise HTTPException(500, detail=f"Smart money fetch failed: {exc}")

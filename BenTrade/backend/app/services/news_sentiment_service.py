@@ -5,7 +5,7 @@ Three independent layers:
   2. Internal Engine — deterministic rule-based scoring (always runs with base)
   3. Model Analysis — LLM-based assessment, triggered manually by the user
 
-Data fetching (Finnhub, Polygon, FRED) remains here.  Scoring is delegated.
+Data fetching (Finnhub, FRED) remains here.  Scoring is delegated.
 
 Caching:
   - Base + engine payload cached for NEWS_CACHE_TTL seconds (default 300).
@@ -147,10 +147,6 @@ class NewsSentimentService:
         finnhub_items, finnhub_fresh = await self._fetch_finnhub()
         items.extend(finnhub_items)
         freshness.append(finnhub_fresh)
-
-        polygon_items, polygon_fresh = await self._fetch_polygon()
-        items.extend(polygon_items)
-        freshness.append(polygon_fresh)
 
         # Tradier doesn't have news endpoints — mark unavailable
         freshness.append(SourceFreshness(
@@ -429,74 +425,6 @@ class NewsSentimentService:
             logger.warning("event=finnhub_news_error error=%s", exc)
             return [], SourceFreshness(
                 source="finnhub", status="error",
-                last_fetched=datetime.now(timezone.utc).isoformat(),
-                error=str(exc)[:200],
-            )
-
-    # ── Polygon fetch ───────────────────────────────────────────────
-
-    async def _fetch_polygon(self) -> tuple[list[NormalizedNewsItem], SourceFreshness]:
-        """Fetch news from Polygon /v2/reference/news endpoint."""
-        if not self.settings.POLYGON_API_KEY:
-            return [], SourceFreshness(
-                source="polygon", status="unavailable", error="No API key configured",
-            )
-
-        try:
-            url = f"{self.settings.POLYGON_BASE_URL}/v2/reference/news"
-            params = {
-                "limit": 50,
-                "order": "desc",
-                "sort": "published_utc",
-                "apiKey": self.settings.POLYGON_API_KEY,
-            }
-            resp = await self.http_client.get(url, params=params, timeout=10.0)
-            resp.raise_for_status()
-            data = resp.json()
-
-            results = data.get("results") or []
-            items: list[NormalizedNewsItem] = []
-            for article in results[:50]:
-                headline = str(article.get("title") or "").strip()
-                if not headline:
-                    continue
-
-                summary = str(article.get("description") or "").strip()
-                published_at = str(article.get("published_utc") or "").strip()
-
-                tickers = article.get("tickers") or []
-                symbols = [str(t).strip().upper() for t in tickers if t][:10]
-
-                text = f"{headline} {summary}".lower()
-                category = self._classify_category(text)
-                sentiment_score = self._score_sentiment(text)
-                sentiment_label = self._label_from_score(sentiment_score)
-                relevance = self._compute_relevance(headline, symbols, category)
-
-                items.append(NormalizedNewsItem(
-                    source="polygon",
-                    headline=headline,
-                    summary=summary[:500],
-                    url=str(article.get("article_url") or ""),
-                    published_at=published_at,
-                    symbols=symbols,
-                    category=category,
-                    sentiment_label=sentiment_label,
-                    sentiment_score=round(sentiment_score, 3),
-                    relevance_score=relevance,
-                ))
-
-            logger.info("event=polygon_news_fetched count=%d", len(items))
-            return items, SourceFreshness(
-                source="polygon", status="ok",
-                last_fetched=datetime.now(timezone.utc).isoformat(),
-                item_count=len(items),
-            )
-
-        except Exception as exc:
-            logger.warning("event=polygon_news_error error=%s", exc)
-            return [], SourceFreshness(
-                source="polygon", status="error",
                 last_fetched=datetime.now(timezone.utc).isoformat(),
                 error=str(exc)[:200],
             )

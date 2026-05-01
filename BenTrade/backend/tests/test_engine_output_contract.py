@@ -442,7 +442,7 @@ def _news_payload():
         "macro_context": {"vix": 16.5, "us_10y_yield": 4.2},
         "source_freshness": [
             {"source": "finnhub", "status": "ok", "last_fetched": "2026-03-15T13:55:00Z", "item_count": 15, "error": None},
-            {"source": "polygon", "status": "error", "last_fetched": None, "item_count": 0, "error": "API key expired"},
+            {"source": "tradier", "status": "unavailable", "last_fetched": None, "item_count": 0, "error": "No news endpoints available"},
         ],
         "as_of": "2026-03-15T14:00:00Z",
         "item_count": 2,
@@ -649,7 +649,7 @@ class TestNewsEngine:
 
     def test_news_source_status_errors(self):
         r = normalize_engine_output("news_sentiment", _news_payload())
-        assert "polygon" in r["source_status"]["errors"]
+        assert "tradier" in r["source_status"]["errors"]
         assert r["source_status"]["direct_count"] == 1  # finnhub OK
         assert r["source_status"]["proxy_count"] == 0
 
@@ -820,7 +820,7 @@ class TestHelpers:
         assert sections == {}
 
     def test_engine_metadata_coverage(self):
-        """All 6 engines have metadata entries."""
+        """All engines have metadata entries."""
         expected = {
             "breadth_participation",
             "volatility_options",
@@ -828,5 +828,6 @@ class TestHelpers:
             "flows_positioning",
             "liquidity_financial_conditions",
             "news_sentiment",
+            "institutional_13f",
         }
         assert set(ENGINE_METADATA.keys()) == expected

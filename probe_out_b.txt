@@ -1,0 +1,293 @@
+﻿
+======================================================================
+FMP v3: /api/v3/etf-info/SPY
+======================================================================
+URL: https://financialmodelingprep.com/api/v3/etf-info/SPY
+Params: {}
+Status: 403  CT: application/json; charset=utf-8
+Keys: ['Error Message']
+Sample: {
+  "Error Message": "Legacy Endpoint : Due to Legacy endpoints being no longer supported - This endpoint is only available for legacy users who have valid subscriptions prior August 31, 2025. Please visit our documentation page https://site.financialmodelingprep.com/developer/docs for our current APIs. "
+}
+
+======================================================================
+FMP v3: /api/v3/etf-holder/SPY
+======================================================================
+URL: https://financialmodelingprep.com/api/v3/etf-holder/SPY
+Params: {}
+Status: 403  CT: application/json; charset=utf-8
+Keys: ['Error Message']
+Sample: {
+  "Error Message": "Legacy Endpoint : Due to Legacy endpoints being no longer supported - This endpoint is only available for legacy users who have valid subscriptions prior August 31, 2025. Please visit our documentation page https://site.financialmodelingprep.com/developer/docs for our current APIs. "
+}
+
+======================================================================
+FMP stable: /etf/holdings?symbol=SPY
+======================================================================
+URL: https://financialmodelingprep.com/stable/etf/holdings
+Params: {'symbol': 'SPY'}
+Status: 200  CT: application/json; charset=utf-8
+List length: 505
+Keys: ['symbol', 'asset', 'name', 'isin', 'securityCusip', 'sharesNumber', 'weightPercentage', 'marketValue', 'updatedAt']
+Sample: {
+  "symbol": "SPY",
+  "asset": "NVDA",
+  "name": "NVIDIA CORP",
+  "isin": "",
+  "securityCusip": "67066G104",
+  "sharesNumber": 286670335,
+  "weightPercentage": 8.012,
+  "marketValue": 56401834472,
+  "updatedAt": "2026-04-16 11:04:20"
+}
+
+======================================================================
+FMP stable: /etf-holdings?symbol=SPY
+======================================================================
+URL: https://financialmodelingprep.com/stable/etf-holdings
+Params: {'symbol': 'SPY'}
+Status: 404  CT: application/json; charset=utf-8
+List length: 0
+
+======================================================================
+FMP stable: /etf/info?symbol=SPY
+======================================================================
+URL: https://financialmodelingprep.com/stable/etf/info
+Params: {'symbol': 'SPY'}
+Status: 200  CT: application/json; charset=utf-8
+List length: 1
+Keys: ['symbol', 'name', 'description', 'isin', 'assetClass', 'securityCusip', 'domicile', 'website', 'etfCompany', 'expenseRatio', 'assetsUnderManagement', 'avgVolume', 'inceptionDate', 'nav', 'navCurrency', 'holdingsCount', 'isActivelyTrading', 'updatedAt', 'sectorsList']
+Sample: {
+  "symbol": "SPY",
+  "name": "State Street SPDR S&P 500 ETF Trust",
+  "description": "The State Street SPDR S&P 500 ETF Trust seeks to provide investment results that, before expenses, correspond generally to the price and yield performance of the S&P 500 Index (the \u201cIndex\u201d)The S&P 500 Index is a diversified large cap U.S. index that holds companies across all eleven GICS sectorsLaunched in January 1993, SPY was the very first exchange traded fund listed in the United States",
+  "isin": "US78462F1030",
+  "assetClass": "Equity",
+  "securityCusip": "78462F103",
+  "domicile": "US",
+  "website": "https://www.ssga.com/us/en/institutional/etfs/state-street-spdr-sp-500-etf-trust-spy",
+  "etfCompany": "SPDR",
+  "expenseRatio": 0.0945,
+  "assetsUnderManagement": 708698290000,
+  "avgVolume": 73651172,
+  "inceptionDate": "1993-01-22",
+  "nav": 699.93,
+  "navCurrency": "USD",
+  "holdingsCount": 504,
+  "isActivelyTrading": true,
+  "updatedAt": "2026-04-16T19:06:00.073Z",
+  "sectorsList": [
+    {
+      "industry": "Basic Materials",
+      "exposure": 1.9
+    },
+    {
+      "industry": "Cash & Others",
+      "exposure": 0.010000000000005116
+    },
+    {
+      "industry": "Communication Services",
+      "exposure": 10.48
+    },
+    {
+      "industry": "Consumer Cyclical",
+      "exposure": 10
+    },
+    {
+      "industry": "Consumer Defensive",
+      "exposure": 5.25
+    },
+    {
+      "industry": "Energy",
+      "exposure": 4.02
+    },
+    {
+      "industry": "Financial Services
+
+======================================================================
+FMP stable: /etfs (list)
+======================================================================
+URL: https://financialmodelingprep.com/stable/etfs
+Params: {}
+Status: 404  CT: application/json; charset=utf-8
+List length: 0
+
+======================================================================
+FMP stable: /profile?symbol=SPY (has sharesOutstanding)
+======================================================================
+URL: https://financialmodelingprep.com/stable/profile
+Params: {'symbol': 'SPY'}
+Status: 200  CT: application/json; charset=utf-8
+List length: 1
+Keys: ['symbol', 'price', 'marketCap', 'beta', 'lastDividend', 'range', 'change', 'changePercentage', 'volume', 'averageVolume', 'companyName', 'currency', 'cik', 'isin', 'cusip', 'exchangeFullName', 'exchange', 'industry', 'website', 'description']
+Sample: {
+  "symbol": "SPY",
+  "price": 701.07,
+  "marketCap": 711113645899,
+  "beta": 1,
+  "lastDividend": 7.3826,
+  "range": "508.46-702.78",
+  "change": 1.13,
+  "changePercentage": 0.16144,
+  "volume": 37361982,
+  "averageVolume": 88994801,
+  "companyName": "State Street SPDR S&P 500 ETF Trust",
+  "currency": "USD",
+  "cik": "0000884394",
+  "isin": "US78462F1030",
+  "cusip": "78462F103",
+  "exchangeFullName": "New York Stock Exchange Arca",
+  "exchange": "AMEX",
+  "industry": "Asset Management",
+  "website": "http://www.spdrs.com",
+  "description": "The State Street SPDR S&P 500 ETF Trust seeks to provide investment results that, before expenses, correspond generally to the price and yield performance of the S&P 500 Index (the \u201cIndex\u201d)The S&P 500 Index is a diversified large cap U.S. index that holds companies across all eleven GICS sectorsLaunched in January 1993, SPY was the very first exchange traded fund listed in the United States",
+  "ceo": "",
+  "sector": "Financial Services",
+  "country": "US",
+  "fullTimeEmployees": null,
+  "phone": null,
+  "address": null,
+  "city": "New York City",
+  "state": "NY",
+  "zip": null,
+  "image": "https://images.financialmodelingprep.com/symbol/SPY.png",
+  "ipoDate": "1993-01-29",
+  "defaultImage": false,
+  "isEtf": true,
+  "isActivelyTrading": true,
+  "isAdr": false,
+  "isFund": false
+}
+
+======================================================================
+FMP stable: /options?symbol=SPY
+======================================================================
+URL: https://financialmodelingprep.com/stable/options
+Params: {'symbol': 'SPY'}
+Status: 404  CT: application/json; charset=utf-8
+List length: 0
+
+======================================================================
+FMP stable: /put-call-ratio?symbol=SPY
+======================================================================
+URL: https://financialmodelingprep.com/stable/put-call-ratio
+Params: {'symbol': 'SPY'}
+Status: 404  CT: application/json; charset=utf-8
+List length: 0
+
+======================================================================
+FMP stable: /equity-put-call-ratio
+======================================================================
+URL: https://financialmodelingprep.com/stable/equity-put-call-ratio
+Params: {}
+Status: 404  CT: application/json; charset=utf-8
+List length: 0
+
+======================================================================
+CBOE: equity_pc.csv WITH UA
+======================================================================
+URL: https://cdn.cboe.com/api/global/us_indices/daily_market_statistics/equity_pc.csv
+Params: {}
+Status: 403  CT: application/xml
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>P47TM37CW324VW77</RequestId><HostId>zReYkbgQPIY4NO2KVQqbT3tGon9+tl5Pt79+kMXI4jONy4lMLHcBNujQdEnEegQVc0U+JlH/tONAzCz1bJRALg==</HostId></Error>
+
+======================================================================
+CBOE: Pubic PC via www.cboe.com
+======================================================================
+URL: https://www.cboe.com/us/options/market_statistics/daily/
+Params: {}
+Status: 200  CT: text/html; charset=utf-8
+<!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+<html lang="en-us">
+<head>
+    
+           
+
+
+
+
+
+    <script src="https://cdn.cookielaw.org/scripttemplates/otSDKStub.js"  type="text/javascript" charset="UTF-8" data-domain-script="019682b2-f8a4-757a-b22a-a5dc76f8622e" ></script>
+    <script type="text/javascript">
+        function OptanonWrapper() { }
+    </script>
+
+    
+
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+
+    <title>Cboe Daily Market Statistics</title>
+
+    <meta name="description" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    
+
+    
+        
+<script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag() {
+        dataLayer.push(arguments);
+    }
+    gtag("consent", "default", {
+        ad_
+
+======================================================================
+Finnhub: /quote SPY (sanity)
+======================================================================
+URL: https://finnhub.io/api/v1/quote
+Params: {'symbol': 'SPY'}
+Status: 200  CT: application/json; charset=utf-8
+Keys: ['c', 'd', 'dp', 'h', 'l', 'o', 'pc', 't']
+Sample: {
+  "c": 701.1,
+  "d": 1.16,
+  "dp": 0.1657,
+  "h": 702.78,
+  "l": 698.53,
+  "o": 701.02,
+  "pc": 699.94,
+  "t": 1776367958
+}
+
+======================================================================
+Finnhub: stock/option-chain
+======================================================================
+URL: https://finnhub.io/api/v1/stock/option-chain
+Params: {'symbol': 'SPY'}
+Status: 403  CT: application/json
+Keys: ['error']
+Sample: {
+  "error": "You don't have access to this resource."
+}
+
+======================================================================
+FMP stable: /technical-indicators/sma?symbol=SPY
+======================================================================
+URL: https://financialmodelingprep.com/stable/technical-indicators/sma
+Params: {'symbol': 'SPY', 'periodLength': 20, 'timeframe': '1day'}
+Status: 200  CT: application/json; charset=utf-8
+List length: 1255
+Keys: ['date', 'open', 'high', 'low', 'close', 'volume', 'sma']
+Sample: {
+  "date": "2026-04-16 00:00:00",
+  "open": 701.06,
+  "high": 702.78,
+  "low": 698.53,
+  "close": 700.90997,
+  "volume": 37182539,
+  "sma": 664.0624985
+}

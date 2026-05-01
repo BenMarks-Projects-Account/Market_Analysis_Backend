@@ -194,7 +194,7 @@
 
     // header
     html += '<div class="tmc-pm-header">'
-          + '<span class="tmc-pm-title">PRE-MARKET INTELLIGENCE</span>'
+          + '<span class="tmc-pm-title" data-note-section="pre_market_intelligence">PRE-MARKET INTELLIGENCE</span>'
           + '<span class="tmc-pm-time">'
           +   (briefing.timestamp ? new Date(briefing.timestamp).toLocaleTimeString() : '')
           + '</span>'

@@ -536,4 +536,70 @@ Feed portfolio risk engine output into decision layer. Add concentration penalty
 
 | Date | Change | Author |
 |---|---|---|
+| 2026-04-15 | Added Section: On-Demand Company Evaluator — Smart Money panel rebuild with FMP Ultimate | Copilot |
 | 2026-03-20 | Initial creation — full current-state review | Copilot |
+
+---
+
+## On-Demand Company Evaluator — Smart Money Panel
+
+**Added 2026-04-15**
+
+### Architecture
+
+The On-Demand Company Evaluator runs as a separate service (`192.168.1.143:8100`) with BenTrade acting as a pure proxy for evaluation jobs (`/api/company-evaluator/on-demand/*` routes).
+
+The **Smart Money panel** is a local BenTrade feature — it does NOT proxy to the evaluator. Instead, it fetches data directly from FMP Ultimate endpoints and computes signals locally.
+
+### Data Flow
+
+```
+Frontend (on_demand_evaluator.js)
+  │
+  ├─ Main evaluation → proxy → evaluator service (port 8100)
+  │
+  └─ Smart Money → GET /api/company-evaluator/smart-money/{symbol}
+       │
+       └─ smart_money_service.py
+            │
+            └─ 8 parallel FMP calls via fmp_client.py:
+                 ├─ /institutional-ownership/extract-analytics/holder  (13F holders, 6h TTL)
+                 ├─ /institutional-ownership/symbol-positions-summary  (13F summary, 6h TTL)
+                 ├─ /shares-float                                     (float data, 6h TTL)
+                 ├─ /insider-trading/search                           (Form 4 by symbol, 1h TTL)
+                 ├─ /insider-trading/statistics                       (insider stats, 1h TTL)
+                 ├─ /funds/disclosure-holders-latest                  (mutual fund holders, 6h TTL)
+                 ├─ /senate-trades                                    (per-symbol, 5min TTL)
+                 └─ /house-trades                                     (per-symbol, 5min TTL)
+```
+
+### Frontend Panel Structure
+
+4 collapsible sections in the evaluator results page:
+
+1. **Institutional Ownership Summary** — scoreboard with ownership %, holder count, net flow direction, top-10 concentration
+2. **Top Institutional Holders** — table of top 20 holders with color-coded change classification (new/increased/decreased/exited)
+3. **Insider Activity** — split layout: 90-day transaction table + signal sidebar (cluster detection, net flow, officer alerts)
+4. **Congressional & Mutual Fund Activity** — congressional trades (180d window) + top mutual fund/ETF holders
+
+### Scoring Integration
+
+| Signal | Points | Direction |
+|---|---|---|
+| Institutional net flow (last quarter) buying | +10 | Positive |
+| Institutional net flow (last quarter) selling | −10 | Negative |
+| Insider cluster buy (3+ unique buyers in 30d) | +15 | Positive |
+| Insider cluster sell (3+ unique sellers in 30d) | −10 | Negative |
+| Net insider $ flow (90d) positive | +5 | Positive |
+| Net insider $ flow (90d) negative (>$100K) | −5 | Negative |
+| Congressional activity | 0 | Informational only |
+
+### Key Files
+
+- `app/services/smart_money_service.py` — signal computation, synthesis generation, main `get_smart_money_data()` entry point
+- `app/clients/fmp_client.py` — 8 new FMP endpoint methods (institutional, insider, congressional, mutual fund, float)
+- `app/api/routes_company_evaluator.py` — `GET /smart-money/{symbol}` route (local, not proxied)
+- `frontend/dashboards/on_demand_evaluator.html` — 4 collapsible `<details>` sections
+- `frontend/assets/js/pages/on_demand_evaluator.js` — `fetchAndRenderSmartMoney()` + 4 section renderers
+- `frontend/assets/css/on_demand_evaluator.css` — smart money panel styles (scoreboard, tables, signal badges)
+- `tests/test_smart_money_service.py` — 32 tests covering all computation helpers and error resilience

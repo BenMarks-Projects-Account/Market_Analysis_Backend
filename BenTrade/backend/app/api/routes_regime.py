@@ -36,7 +36,7 @@ async def get_regime(request: Request) -> dict:
 async def get_regime_proxies(request: Request) -> dict[str, Any]:
     """Return ~2-week proxy chart data for broad-market ETFs.
 
-    Tries 15-min intraday bars first (Polygon → Tradier) for denser,
+    Tries 15-min intraday bars first (FMP → Tradier) for denser,
     more-live charts.  Falls back to daily close bars if intraday data
     is unavailable for a symbol.
 

@@ -16,5 +16,7 @@ dependencies = [
     "scipy==1.17.0",
     "boto3==1.42.48",
     "python-dotenv==1.2.1",
+    "sqlalchemy[asyncio]>=2.0.35",
+    "aiosqlite>=0.20.0",
 ]
 requires-python = ">=3.11"

@@ -9833,3 +9833,332 @@ a.at-symbol-link:hover{
     text-align: center;
 }
 .uoa-loading, .uoa-empty { color: #607890; font-size: 12px; padding: 12px 0; }
+
+
+/* === Notes Panel (home-dashboard component notes v1) === */
+/* All selectors are scoped with .notes-panel / .notes-panel-* to avoid
+   leaking styles into the chat drawer. Colors follow the dark theme
+   variables used by the chat drawer shell. */
+
+[data-note-section] {
+    cursor: pointer;
+}
+[data-note-section]:hover {
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+}
+
+.notes-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    color: var(--text-primary, #d8e0ea);
+    font-family: inherit;
+}
+.notes-panel-header {
+    padding: 12px 16px 10px;
+    border-bottom: 1px solid var(--panel-border, rgba(255,255,255,0.08));
+    flex-shrink: 0;
+}
+.notes-panel-header h3 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-primary, #d8e0ea);
+}
+.notes-panel-banner {
+    margin: 8px 12px 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: rgba(255, 60, 60, 0.12);
+    border: 1px solid rgba(255, 60, 60, 0.35);
+    color: #ffb4b4;
+    font-size: 12px;
+}
+.notes-panel-list {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+}
+.notes-panel-empty {
+    padding: 16px 4px;
+    color: var(--text-muted, #6b7a8c);
+    font-size: 12px;
+    text-align: center;
+}
+.notes-panel-row {
+    border: 1px solid var(--panel-border, rgba(255,255,255,0.08));
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 6px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.notes-panel-row-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.notes-panel-ts {
+    font-size: 11px;
+    color: var(--text-muted, #6b7a8c);
+    font-variant-numeric: tabular-nums;
+}
+.notes-panel-delete {
+    background: transparent;
+    border: none;
+    color: var(--text-muted, #6b7a8c);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    opacity: 0.55;
+    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.notes-panel-row:hover .notes-panel-delete {
+    opacity: 1;
+}
+.notes-panel-delete:hover {
+    background: rgba(255, 60, 60, 0.15);
+    color: #ff8b8b;
+}
+.notes-panel-body {
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-primary, #d8e0ea);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.notes-panel-append {
+    flex-shrink: 0;
+    border-top: 1px solid var(--panel-border, rgba(255,255,255,0.08));
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.15);
+}
+.notes-panel-append textarea {
+    resize: vertical;
+    min-height: 52px;
+    max-height: 160px;
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.3);
+    color: var(--text-primary, #d8e0ea);
+    border: 1px solid var(--panel-border, rgba(255,255,255,0.12));
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.35;
+}
+.notes-panel-append textarea:focus {
+    outline: none;
+    border-color: rgba(100, 160, 255, 0.55);
+}
+.notes-panel-append button[type="submit"] {
+    align-self: flex-end;
+    background: rgba(100, 160, 255, 0.15);
+    color: #cfe0ff;
+    border: 1px solid rgba(100, 160, 255, 0.45);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: background 0.15s ease, opacity 0.15s ease;
+}
+.notes-panel-append button[type="submit"]:hover:not(:disabled) {
+    background: rgba(100, 160, 255, 0.25);
+}
+.notes-panel-append button[type="submit"]:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* === Notes Panel (home-dashboard component notes v1) === */
+/* All selectors are scoped with .notes-panel / .notes-panel-* to avoid
+   leaking styles into the chat drawer. Colors follow the dark theme
+   variables used by the chat drawer shell. */
+
+[data-note-section] {
+    cursor: pointer;
+}
+[data-note-section]:hover {
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+}
+
+.notes-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    color: var(--text-primary, #d8e0ea);
+    font-family: inherit;
+}
+.notes-panel-header {
+    padding: 12px 16px 10px;
+    border-bottom: 1px solid var(--panel-border, rgba(255,255,255,0.08));
+    flex-shrink: 0;
+}
+.notes-panel-header h3 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-primary, #d8e0ea);
+}
+.notes-panel-banner {
+    margin: 8px 12px 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: rgba(255, 60, 60, 0.12);
+    border: 1px solid rgba(255, 60, 60, 0.35);
+    color: #ffb4b4;
+    font-size: 12px;
+}
+.notes-panel-list {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+}
+.notes-panel-empty {
+    padding: 16px 4px;
+    color: var(--text-muted, #6b7a8c);
+    font-size: 12px;
+    text-align: center;
+}
+.notes-panel-row {
+    border: 1px solid var(--panel-border, rgba(255,255,255,0.08));
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 6px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.notes-panel-row-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.notes-panel-ts {
+    font-size: 11px;
+    color: var(--text-muted, #6b7a8c);
+    font-variant-numeric: tabular-nums;
+}
+.notes-panel-delete {
+    background: transparent;
+    border: none;
+    color: var(--text-muted, #6b7a8c);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    opacity: 0.55;
+    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.notes-panel-row:hover .notes-panel-delete {
+    opacity: 1;
+}
+.notes-panel-delete:hover {
+    background: rgba(255, 60, 60, 0.15);
+    color: #ff8b8b;
+}
+.notes-panel-body {
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-primary, #d8e0ea);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.notes-panel-append {
+    flex-shrink: 0;
+    border-top: 1px solid var(--panel-border, rgba(255,255,255,0.08));
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.15);
+}
+.notes-panel-append textarea {
+    resize: vertical;
+    min-height: 52px;
+    max-height: 160px;
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.3);
+    color: var(--text-primary, #d8e0ea);
+    border: 1px solid var(--panel-border, rgba(255,255,255,0.12));
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.35;
+}
+.notes-panel-append textarea:focus {
+    outline: none;
+    border-color: rgba(100, 160, 255, 0.55);
+}
+.notes-panel-append button[type="submit"] {
+    align-self: flex-end;
+    background: rgba(100, 160, 255, 0.15);
+    color: #cfe0ff;
+    border: 1px solid rgba(100, 160, 255, 0.45);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: background 0.15s ease, opacity 0.15s ease;
+}
+.notes-panel-append button[type="submit"]:hover:not(:disabled) {
+    background: rgba(100, 160, 255, 0.25);
+}
+.notes-panel-append button[type="submit"]:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* === TMC Orchestrator Pause Button ======================================== */
+#tmc-orchestrator-pause-btn { min-width: 88px; }
+#tmc-orchestrator-pause-btn.is-paused {
+  background: var(--accent-amber, #f5a623);
+  color: #1a1a1a;
+  border-color: var(--accent-amber, #f5a623);
+}
+#tmc-orchestrator-pause-btn.is-pausing {
+  opacity: 0.65;
+  cursor: progress;
+}
+#tmc-orchestrator-pause-btn[hidden] { display: none !important; }
+.tmc-orch-pause-msg {
+  font-size: 0.8em;
+  color: var(--text-muted, #8a9aab);
+  padding: 0 6px;
+}
+.tmc-orch-pause-msg.is-error { color: var(--accent-red, #ff5252); }
+.tmc-orch-pause-msg[hidden] { display: none !important; }

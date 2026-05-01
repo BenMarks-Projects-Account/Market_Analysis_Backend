@@ -35,13 +35,13 @@
     <!-- ═══ Pre-Market Indicators ═══ -->
     <section class="stock-card home-premarket-panel">
       <div class="home-premarket-header">
-        <div class="stock-card-title bt-panel-title">Pre-Market Indicators</div>
+        <div class="stock-card-title bt-panel-title" data-note-section="pre_market_indicators">Pre-Market Indicators</div>
         <button id="homePreMarketRefreshBtn" class="btn qtButton home-premarket-refresh-btn" type="button" title="Refresh pre-market charts">↻ Refresh</button>
       </div>
       <div id="homePreMarketEmpty" class="home-premarket-empty" style="display:none;">Pre-market indicator data unavailable.</div>
       <div id="homePreMarketCharts" class="home-premarket-grid">
         <div class="home-premarket-card">
-          <div class="home-chart-title">Index Futures — Continuous (48h)</div>
+          <div class="home-chart-title" data-note-section="index_futures_continuous_48h">Index Futures — Continuous (48h)</div>
           <svg id="homePreMarketIndexFutures" class="home-chart home-premarket-svg" viewBox="0 0 800 240" preserveAspectRatio="none"></svg>
         </div>
         <div class="home-premarket-card">
@@ -78,13 +78,13 @@
 
     <!-- ═══ 1. Market Regime ═══ -->
     <section class="stock-card home-regime-panel">
-      <div class="stock-card-title bt-panel-title">Market Regime</div>
+      <div class="stock-card-title bt-panel-title" data-note-section="market_regime">Market Regime</div>
       <!-- Hero: regime status + environment read -->
       <div id="homeRegimeStrip" class="home-regime-strip"></div>
 
       <!-- Broad market proxy charts — full width context layer -->
       <div class="home-regime-section-panel">
-        <div class="home-regime-section-header">Macro Market Proxies</div>
+        <div class="home-regime-section-header" data-note-section="macro_market_proxies">Macro Market Proxies</div>
         <div id="homeRegimeProxies" class="home-regime-proxies-grid">
           <div class="home-regime-proxy-placeholder stock-note">Loading proxy charts…</div>
         </div>

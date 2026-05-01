@@ -655,7 +655,7 @@ class ActiveTradeMonitorService:
         """Fetch SMA20, SMA50, RSI14 for a symbol from price history.
 
         Uses BaseDataService.get_prices_history() which already has its own
-        caching layer (Polygon/Tradier daily closes).
+        caching layer (FMP/Tradier daily closes).
 
         Returns dict with keys: sma20, sma50, rsi14 (any may be None).
         """

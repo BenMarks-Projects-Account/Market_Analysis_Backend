@@ -322,6 +322,9 @@ class OptionsOpportunityDeps:
     # When provided, enables earnings proximity detection for individual
     # stocks in the expanded universe.  Gracefully degrades if None.
     finnhub_client: Any = None
+    # Optional history-DB session maker; set post-startup by main.py.
+    # When None, the options decision history hook is a silent no-op.
+    history_db_session_maker: Any = None
 
 
 @dataclass
@@ -840,6 +843,38 @@ async def run_options_opportunity(
         dbg.stage_end("model_analysis", outcome.status, {
             "model_analysis_counts": stage_data.get("model_analysis_counts"),
         })
+
+        # ── History-DB hook (fire-and-forget) ──────────────────────
+        # One decisions row per LLM-evaluated candidate (EXECUTE + PASS),
+        # captured BEFORE model_filter so PASS verdicts are preserved.
+        if getattr(deps, "history_db_session_maker", None) is not None:
+            try:
+                from app.services.history_recorder import log_decision
+                snapshot_id_ref = stage_data.get("market_state_ref")
+                for _cand in stage_data.get("model_candidates", []) or []:
+                    rec = _cand.get("model_recommendation")
+                    if not rec:
+                        continue  # model failed for this candidate — skip
+                    asyncio.create_task(
+                        log_decision(
+                            session_maker=deps.history_db_session_maker,
+                            decision_type="options",
+                            candidate=_cand,
+                            recommendation=rec,
+                            run_id=run_id,
+                            workflow_id="options_opportunity",
+                            snapshot_id=snapshot_id_ref,
+                            model_score=_cand.get("model_score"),
+                            deterministic_rank=_cand.get("deterministic_rank"),
+                            rank=_cand.get("rank"),
+                            llm_reasoning=(
+                                _cand.get("model_narrative")
+                                or _cand.get("model_headline")
+                            ),
+                        )
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("event=decision_history_hook_failed type=options error=%r", exc)
 
         # Model analysis is enrichment — degraded is OK, only hard errors abort.
         # (degraded = some/all model calls failed, candidates still have quant data)

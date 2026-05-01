@@ -62,11 +62,9 @@ class Settings(BaseModel):
     FRED_KEY: str = _cfg("FRED_KEY", "FRED_API_KEY", default="")
     FRED_BASE_URL: str = _cfg("FRED_BASE_URL", default="https://api.stlouisfed.org/fred")
 
-    POLYGON_API_KEY: str = _cfg("POLYGON_API_KEY", default="")
-    POLYGON_BASE_URL: str = _cfg("POLYGON_BASE_URL", default="https://api.polygon.io")
-
     FMP_API_KEY: str = _cfg("FMP_API_KEY", default="")
     FMP_BASE_URL: str = _cfg("FMP_BASE_URL", default="https://financialmodelingprep.com/stable")
+    FMP_MAX_RPM: int = int(os.getenv("FMP_MAX_RPM", "3000"))
 
     # ── AWS Bedrock (premium model execution) ──────────────────
     BEDROCK_ENABLED: bool = os.getenv("BEDROCK_ENABLED", "true").lower() == "true"
@@ -76,6 +74,9 @@ class Settings(BaseModel):
 
     # ── Company Evaluator (Machine 2 proxy) ──────────────────────
     COMPANY_EVALUATOR_URL: str = _cfg("COMPANY_EVALUATOR_URL", default="http://192.168.1.143:8100")
+
+    # ── Earnings Vol Analyzer (EVA proxy) ────────────────────────
+    EVA_BASE_URL: str = _cfg("EVA_BASE_URL", default="http://192.168.1.143:8200")
 
     FRED_VIX_SERIES_ID: str = "VIXCLS"
 
@@ -139,9 +140,41 @@ class Settings(BaseModel):
     SNAPSHOT_MAX_AGE_HOURS: int = int(os.getenv("SNAPSHOT_MAX_AGE_HOURS", "48"))
     SNAPSHOT_RETENTION_DAYS: int = int(os.getenv("SNAPSHOT_RETENTION_DAYS", "7"))
 
+    # ── Insider catalyst scanner ───────────────────────────────────
+    INSIDER_CLUSTER_THRESHOLD: int = int(os.getenv("INSIDER_CLUSTER_THRESHOLD", "5"))
+    INSIDER_LOOKBACK_DAYS: int = int(os.getenv("INSIDER_LOOKBACK_DAYS", "30"))
+    INSIDER_MARKET_CAP_MIN: int = int(os.getenv("INSIDER_MARKET_CAP_MIN", "250000000"))
+    INSIDER_MARKET_CAP_MAX: int = int(os.getenv("INSIDER_MARKET_CAP_MAX", "10000000000"))
+    INSIDER_BOOST_POINTS: int = int(os.getenv("INSIDER_BOOST_POINTS", "15"))
+    INSIDER_PENALTY_POINTS: int = int(os.getenv("INSIDER_PENALTY_POINTS", "10"))
+    INSIDER_CACHE_TTL_SECONDS: int = int(os.getenv("INSIDER_CACHE_TTL_SECONDS", "3600"))
+
+    # ── 13F Institutional pillar ───────────────────────────────────
+    PILLAR_13F_ENABLED: bool = os.getenv("PILLAR_13F_ENABLED", "true").lower() in ("1", "true", "yes")
+    PILLAR_WEIGHT_13F: float = float(os.getenv("PILLAR_WEIGHT_13F", "0.10"))
+    SMART_MONEY_TIER1_WEIGHT: int = int(os.getenv("SMART_MONEY_TIER1_WEIGHT", "3"))
+    SMART_MONEY_TIER2_WEIGHT: int = int(os.getenv("SMART_MONEY_TIER2_WEIGHT", "1"))
+    SMART_MONEY_TIER2_SIZE: int = int(os.getenv("SMART_MONEY_TIER2_SIZE", "100"))
+    SMART_MONEY_TIER1_FILERS_PATH: str = os.getenv("SMART_MONEY_TIER1_FILERS_PATH", "config/smart_money_tier1.json")
+    PILLAR_13F_CACHE_TTL_SECONDS: int = int(os.getenv("PILLAR_13F_CACHE_TTL_SECONDS", "86400"))
+    PILLAR_13F_RECOMPUTE_CHECK_INTERVAL_SECONDS: int = int(os.getenv("PILLAR_13F_RECOMPUTE_CHECK_INTERVAL_SECONDS", "3600"))
+
     # ── Experiment flags ───────────────────────────────────────────
     # (Soft-cap and candidate sampling removed — all candidates
     #  proceed directly to enrichment with no truncation.)
+
+    # ── Decision history database (SQLite on NAS) ──────────────────
+    # See backend/app/db/ — async SQLAlchemy + aiosqlite + WAL.
+    # Default targets the shared NAS location next to Company Evaluator's DB.
+    # UNC path encoding: SQLAlchemy strips the first 3 slashes of sqlite:///,
+    # so a UNC share `\\host\share\...` needs FIVE leading slashes to keep
+    # the `//host/share/...` form that Python's sqlite3 can open on Windows.
+    HISTORY_DB_URL: str = _cfg(
+        "HISTORY_DB_URL",
+        default="sqlite://///192.168.1.149/CompanyEvaluatorData/bentrade/db/bentrade_history.db",
+    )
+    # Flip to false to disable startup of the history DB (emergency off-switch).
+    HISTORY_DB_ENABLED: bool = os.getenv("HISTORY_DB_ENABLED", "true").lower() in ("1", "true", "yes")
 
     def model_post_init(self, __context) -> None:
         from app.trading.tradier_credentials import get_tradier_base_url

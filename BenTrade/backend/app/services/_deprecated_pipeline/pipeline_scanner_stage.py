@@ -484,7 +484,6 @@ def _make_per_scanner_clients(deps: dict[str, Any]) -> dict[str, Any]:
 
     from app.clients.finnhub_client import FinnhubClient
     from app.clients.fred_client import FredClient
-    from app.clients.polygon_client import PolygonClient
     from app.clients.tradier_client import TradierClient
     from app.services.base_data_service import BaseDataService
 
@@ -497,13 +496,11 @@ def _make_per_scanner_clients(deps: dict[str, Any]) -> dict[str, Any]:
     tradier_client = TradierClient(settings, http_client, cache)
     finnhub_client = FinnhubClient(settings, http_client, cache)
     fred_client = FredClient(settings, http_client, cache)
-    polygon_client = PolygonClient(settings, http_client, cache)
 
     base_data_service = BaseDataService(
         tradier_client=tradier_client,
         finnhub_client=finnhub_client,
         fred_client=fred_client,
-        polygon_client=polygon_client,
     )
 
     return {

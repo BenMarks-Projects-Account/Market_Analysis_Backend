@@ -1,0 +1,762 @@
+﻿FMP key present: True  Finnhub key present: True  Polygon key present: True
+
+======================================================================
+FMP: commitment-of-traders-report-list
+======================================================================
+URL: https://financialmodelingprep.com/stable/commitment-of-traders-report-list
+Params (ex-apikey): {}
+Status: 404
+Content-Type: application/json; charset=utf-8
+List length: 0
+
+======================================================================
+FMP: commitment-of-traders-report symbol=ES (10w)
+======================================================================
+URL: https://financialmodelingprep.com/stable/commitment-of-traders-report
+Params (ex-apikey): {'symbol': 'ES', 'from': '2026-02-05', 'to': '2026-04-16'}
+Status: 200
+Content-Type: application/json; charset=utf-8
+List length: 9
+First item keys: ['symbol', 'date', 'name', 'sector', 'marketAndExchangeNames', 'cftcContractMarketCode', 'cftcMarketCode', 'cftcRegionCode', 'cftcCommodityCode', 'openInterestAll', 'noncommPositionsLongAll', 'noncommPositionsShortAll', 'noncommPositionsSpreadAll', 'commPositionsLongAll', 'commPositionsShortAll', 'totReptPositionsLongAll', 'totReptPositionsShortAll', 'nonreptPositionsLongAll', 'nonreptPositionsShortAll', 'openInterestOld', 'noncommPositionsLongOld', 'noncommPositionsShortOld', 'noncommPositionsSpreadOld', 'commPositionsLongOld', 'commPositionsShortOld', 'totReptPositionsLongOld', 'totReptPositionsShortOld', 'nonreptPositionsLongOld', 'nonreptPositionsShortOld', 'openInterestOther', 'noncommPositionsLongOther', 'noncommPositionsShortOther', 'noncommPositionsSpreadOther', 'commPositionsLongOther', 'commPositionsShortOther', 'totReptPositionsLongOther', 'totReptPositionsShortOther', 'nonreptPositionsLongOther', 'nonreptPositionsShortOther', 'changeInOpenInterestAll', 'changeInNoncommLongAll', 'changeInNoncommShortAll', 'changeInNoncommSpeadAll', 'changeInCommLongAll', 'changeInCommShortAll', 'changeInTotReptLongAll', 'changeInTotReptShortAll', 'changeInNonreptLongAll', 'changeInNonreptShortAll', 'pctOfOpenInterestAll', 'pctOfOiNoncommLongAll', 'pctOfOiNoncommShortAll', 'pctOfOiNoncommSpreadAll', 'pctOfOiCommLongAll', 'pctOfOiCommShortAll', 'pctOfOiTotReptLongAll', 'pctOfOiTotReptShortAll', 'pctOfOiNonreptLongAll', 'pctOfOiNonreptShortAll', 'pctOfOpenInterestOl', 'pctOfOiNoncommLongOl', 'pctOfOiNoncommShortOl', 'pctOfOiNoncommSpreadOl', 'pctOfOiCommLongOl', 'pctOfOiCommShortOl', 'pctOfOiTotReptLongOl', 'pctOfOiTotReptShortOl', 'pctOfOiNonreptLongOl', 'pctOfOiNonreptShortOl', 'pctOfOpenInterestOther', 'pctOfOiNoncommLongOther', 'pctOfOiNoncommShortOther', 'pctOfOiNoncommSpreadOther', 'pctOfOiCommLongOther', 'pctOfOiCommShortOther', 'pctOfOiTotReptLongOther', 'pctOfOiTotReptShortOther', 'pctOfOiNonreptLongOther', 'pctOfOiNonreptShortOther', 'tradersTotAll', 'tradersNoncommLongAll', 'tradersNoncommShortAll', 'tradersNoncommSpreadAll', 'tradersCommLongAll', 'tradersCommShortAll', 'tradersTotReptLongAll', 'tradersTotReptShortAll', 'tradersTotOl', 'tradersNoncommLongOl', 'tradersNoncommShortOl', 'tradersNoncommSpeadOl', 'tradersCommLongOl', 'tradersCommShortOl', 'tradersTotReptLongOl', 'tradersTotReptShortOl', 'tradersTotOther', 'tradersNoncommLongOther', 'tradersNoncommShortOther', 'tradersNoncommSpreadOther', 'tradersCommLongOther', 'tradersCommShortOther', 'tradersTotReptLongOther', 'tradersTotReptShortOther', 'concGrossLe4TdrLongAll', 'concGrossLe4TdrShortAll', 'concGrossLe8TdrLongAll', 'concGrossLe8TdrShortAll', 'concNetLe4TdrLongAll', 'concNetLe4TdrShortAll', 'concNetLe8TdrLongAll', 'concNetLe8TdrShortAll', 'concGrossLe4TdrLongOl', 'concGrossLe4TdrShortOl', 'concGrossLe8TdrLongOl', 'concGrossLe8TdrShortOl', 'concNetLe4TdrLongOl', 'concNetLe4TdrShortOl', 'concNetLe8TdrLongOl', 'concNetLe8TdrShortOl', 'concGrossLe4TdrLongOther', 'concGrossLe4TdrShortOther', 'concGrossLe8TdrLongOther', 'concGrossLe8TdrShortOther', 'concNetLe4TdrLongOther', 'concNetLe4TdrShortOther', 'concNetLe8TdrLongOther', 'concNetLe8TdrShortOther', 'contractUnits']
+First item: {
+  "symbol": "ES",
+  "date": "2026-04-07 00:00:00",
+  "name": "S&P 500 E-Mini (ES)",
+  "sector": "INDICES",
+  "marketAndExchangeNames": "E-MINI S&P 500 - CHICAGO MERCANTILE EXCHANGE",
+  "cftcContractMarketCode": "13874A",
+  "cftcMarketCode": "CME",
+  "cftcRegionCode": "0",
+  "cftcCommodityCode": "138",
+  "openInterestAll": 1929090,
+  "noncommPositionsLongAll": 233095,
+  "noncommPositionsShortAll": 278761,
+  "noncommPositionsSpreadAll": 38626,
+  "commPositionsLongAll": 1415196,
+  "commPositionsShortAll": 1432724,
+  "totReptPositionsLongAll": 1686917,
+  "totReptPositionsShortAll": 1750111,
+  "nonreptPositionsLongAll": 242173,
+  "nonreptPositionsShortAll": 178979,
+  "openInterestOld": 1929090,
+  "noncommPositionsLongOld": 233095,
+  "noncommPositionsShortOld": 278761,
+  "noncommPositionsSpreadOld": 38626,
+  "commPositionsLongOld": 1415196,
+  "commPositionsShortOld": 1432724,
+  "totReptPositionsLongOld": 1686917,
+  "totReptPositionsShortOld": 1750111,
+  "nonreptPositionsLongOld": 242173,
+  "nonreptPositionsShortOld": 178979,
+  "openInterestOther": 0,
+  "noncommPositionsLongOther": 0,
+  "noncommPositionsShortOther": 0,
+  "noncommPositionsSpreadOther": 0,
+  "commPositionsLongOther": 0,
+  "commPositionsShortOther": 0,
+  "totReptPositionsLongOther": 0,
+  "totReptPositionsShortOther": 0,
+  "nonreptPositionsLongOther": 0,
+  "nonreptPositionsShortOther": 0,
+  "changeInOpenInterestAll": -18679,
+  "changeInNoncommLongAll": -8294,
+  "changeInNoncommShortAll": -5107,
+  "changeInNoncommSpeadAll": 4819,
+  "changeInCommLongAll": -13705,
+  "changeInCommShortAll": -29075,
+  "changeInTotReptLongAll": -17180,
+  "changeInTotReptShortAll": -29363,
+  "changeInNonreptLongAll": -1499,
+  "changeInNonreptShortAll": 10684,
+  "pctOfOpenInterestAll": 100,
+  "pctOfOiNoncommLongAll": 12.1,
+  "pctOfOiNoncommShortAll": 14.5,
+  "pctOfOiNoncommSpreadAll": 2,
+  "pctOfOiCommLongAll": 73.4,
+  "pctOfOiCommShortAll": 74.3,
+  "pctOfOiTotReptLongAll": 87.4,
+  "pctOfOiTotReptShortAll": 90.7,
+  "pctOfOiNonreptLo
+Second item: {
+  "symbol": "ES",
+  "date": "2026-03-31 00:00:00",
+  "name": "S&P 500 E-Mini (ES)",
+  "sector": "INDICES",
+  "marketAndExchangeNames": "E-MINI S&P 500 - CHICAGO MERCANTILE EXCHANGE",
+  "cftcContractMarketCode": "13874A",
+  "cftcMarketCode": "CME",
+  "cftcRegionCode": "0",
+  "cftcCommodityCode": "138",
+  "openInterestAll": 1947769,
+  "noncommPositionsLongAll": 241389,
+  "noncommPositionsShortAll": 283868,
+  "noncommPositionsSpreadAll": 33807,
+  "commPositionsLongAll": 1428901,
+  "commPositionsShortAll": 1461799,
+  "totReptPositionsLongAll": 1704097,
+  "totReptPositionsShortAll": 1779474,
+  "nonreptPositionsLongAll": 243672,
+  "nonreptPositionsShortAll": 168295,
+  "openInterestOld": 1947769,
+  "noncommPositionsLongOld": 241389,
+  "noncommPositionsShortOld": 283868,
+  "noncommPositionsSpreadOld": 33807,
+  "commPositionsLongOld": 1428901,
+  "commPositionsShortOld": 1461799,
+  "totReptPositionsLongOld": 1704097,
+  "totReptPositionsShortOld": 1779474,
+  "nonreptPositionsLongOld": 243672,
+ 
+
+======================================================================
+FMP: commitment-of-traders-report symbol=NQ
+======================================================================
+URL: https://financialmodelingprep.com/stable/commitment-of-traders-report
+Params (ex-apikey): {'symbol': 'NQ', 'from': '2026-02-05', 'to': '2026-04-16'}
+Status: 200
+Content-Type: application/json; charset=utf-8
+List length: 9
+First item keys: ['symbol', 'date', 'name', 'sector', 'marketAndExchangeNames', 'cftcContractMarketCode', 'cftcMarketCode', 'cftcRegionCode', 'cftcCommodityCode', 'openInterestAll', 'noncommPositionsLongAll', 'noncommPositionsShortAll', 'noncommPositionsSpreadAll', 'commPositionsLongAll', 'commPositionsShortAll', 'totReptPositionsLongAll', 'totReptPositionsShortAll', 'nonreptPositionsLongAll', 'nonreptPositionsShortAll', 'openInterestOld', 'noncommPositionsLongOld', 'noncommPositionsShortOld', 'noncommPositionsSpreadOld', 'commPositionsLongOld', 'commPositionsShortOld', 'totReptPositionsLongOld', 'totReptPositionsShortOld', 'nonreptPositionsLongOld', 'nonreptPositionsShortOld', 'openInterestOther', 'noncommPositionsLongOther', 'noncommPositionsShortOther', 'noncommPositionsSpreadOther', 'commPositionsLongOther', 'commPositionsShortOther', 'totReptPositionsLongOther', 'totReptPositionsShortOther', 'nonreptPositionsLongOther', 'nonreptPositionsShortOther', 'changeInOpenInterestAll', 'changeInNoncommLongAll', 'changeInNoncommShortAll', 'changeInNoncommSpeadAll', 'changeInCommLongAll', 'changeInCommShortAll', 'changeInTotReptLongAll', 'changeInTotReptShortAll', 'changeInNonreptLongAll', 'changeInNonreptShortAll', 'pctOfOpenInterestAll', 'pctOfOiNoncommLongAll', 'pctOfOiNoncommShortAll', 'pctOfOiNoncommSpreadAll', 'pctOfOiCommLongAll', 'pctOfOiCommShortAll', 'pctOfOiTotReptLongAll', 'pctOfOiTotReptShortAll', 'pctOfOiNonreptLongAll', 'pctOfOiNonreptShortAll', 'pctOfOpenInterestOl', 'pctOfOiNoncommLongOl', 'pctOfOiNoncommShortOl', 'pctOfOiNoncommSpreadOl', 'pctOfOiCommLongOl', 'pctOfOiCommShortOl', 'pctOfOiTotReptLongOl', 'pctOfOiTotReptShortOl', 'pctOfOiNonreptLongOl', 'pctOfOiNonreptShortOl', 'pctOfOpenInterestOther', 'pctOfOiNoncommLongOther', 'pctOfOiNoncommShortOther', 'pctOfOiNoncommSpreadOther', 'pctOfOiCommLongOther', 'pctOfOiCommShortOther', 'pctOfOiTotReptLongOther', 'pctOfOiTotReptShortOther', 'pctOfOiNonreptLongOther', 'pctOfOiNonreptShortOther', 'tradersTotAll', 'tradersNoncommLongAll', 'tradersNoncommShortAll', 'tradersNoncommSpreadAll', 'tradersCommLongAll', 'tradersCommShortAll', 'tradersTotReptLongAll', 'tradersTotReptShortAll', 'tradersTotOl', 'tradersNoncommLongOl', 'tradersNoncommShortOl', 'tradersNoncommSpeadOl', 'tradersCommLongOl', 'tradersCommShortOl', 'tradersTotReptLongOl', 'tradersTotReptShortOl', 'tradersTotOther', 'tradersNoncommLongOther', 'tradersNoncommShortOther', 'tradersNoncommSpreadOther', 'tradersCommLongOther', 'tradersCommShortOther', 'tradersTotReptLongOther', 'tradersTotReptShortOther', 'concGrossLe4TdrLongAll', 'concGrossLe4TdrShortAll', 'concGrossLe8TdrLongAll', 'concGrossLe8TdrShortAll', 'concNetLe4TdrLongAll', 'concNetLe4TdrShortAll', 'concNetLe8TdrLongAll', 'concNetLe8TdrShortAll', 'concGrossLe4TdrLongOl', 'concGrossLe4TdrShortOl', 'concGrossLe8TdrLongOl', 'concGrossLe8TdrShortOl', 'concNetLe4TdrLongOl', 'concNetLe4TdrShortOl', 'concNetLe8TdrLongOl', 'concNetLe8TdrShortOl', 'concGrossLe4TdrLongOther', 'concGrossLe4TdrShortOther', 'concGrossLe8TdrLongOther', 'concGrossLe8TdrShortOther', 'concNetLe4TdrLongOther', 'concNetLe4TdrShortOther', 'concNetLe8TdrLongOther', 'concNetLe8TdrShortOther', 'contractUnits']
+First item: {
+  "symbol": "NQ",
+  "date": "2026-04-07 00:00:00",
+  "name": "Nasdaq 100 E-Mini (NQ)",
+  "sector": "INDICES",
+  "marketAndExchangeNames": "NASDAQ MINI - CHICAGO MERCANTILE EXCHANGE",
+  "cftcContractMarketCode": "209742",
+  "cftcMarketCode": "CME",
+  "cftcRegionCode": "0",
+  "cftcCommodityCode": "209",
+  "openInterestAll": 246794,
+  "noncommPositionsLongAll": 72783,
+  "noncommPositionsShortAll": 60258,
+  "noncommPositionsSpreadAll": 5544,
+  "commPositionsLongAll": 137538,
+  "commPositionsShortAll": 147043,
+  "totReptPositionsLongAll": 215865,
+  "totReptPositionsShortAll": 212845,
+  "nonreptPositionsLongAll": 30929,
+  "nonreptPositionsShortAll": 33949,
+  "openInterestOld": 246794,
+  "noncommPositionsLongOld": 72783,
+  "noncommPositionsShortOld": 60258,
+  "noncommPositionsSpreadOld": 5544,
+  "commPositionsLongOld": 137538,
+  "commPositionsShortOld": 147043,
+  "totReptPositionsLongOld": 215865,
+  "totReptPositionsShortOld": 212845,
+  "nonreptPositionsLongOld": 30929,
+  "nonreptPositionsShortOld": 33949,
+  "openInterestOther": 0,
+  "noncommPositionsLongOther": 0,
+  "noncommPositionsShortOther": 0,
+  "noncommPositionsSpreadOther": 0,
+  "commPositionsLongOther": 0,
+  "commPositionsShortOther": 0,
+  "totReptPositionsLongOther": 0,
+  "totReptPositionsShortOther": 0,
+  "nonreptPositionsLongOther": 0,
+  "nonreptPositionsShortOther": 0,
+  "changeInOpenInterestAll": 1472,
+  "changeInNoncommLongAll": -5845,
+  "changeInNoncommShortAll": 2230,
+  "changeInNoncommSpeadAll": 1657,
+  "changeInCommLongAll": 8786,
+  "changeInCommShortAll": -3617,
+  "changeInTotReptLongAll": 4598,
+  "changeInTotReptShortAll": 270,
+  "changeInNonreptLongAll": -3126,
+  "changeInNonreptShortAll": 1202,
+  "pctOfOpenInterestAll": 100,
+  "pctOfOiNoncommLongAll": 29.5,
+  "pctOfOiNoncommShortAll": 24.4,
+  "pctOfOiNoncommSpreadAll": 2.2,
+  "pctOfOiCommLongAll": 55.7,
+  "pctOfOiCommShortAll": 59.6,
+  "pctOfOiTotReptLongAll": 87.5,
+  "pctOfOiTotReptShortAll": 86.2,
+  "pctOfOiNonreptLongAll": 12.5,
+  "pctOfOiNonrep
+Second item: {
+  "symbol": "NQ",
+  "date": "2026-03-31 00:00:00",
+  "name": "Nasdaq 100 E-Mini (NQ)",
+  "sector": "INDICES",
+  "marketAndExchangeNames": "NASDAQ MINI - CHICAGO MERCANTILE EXCHANGE",
+  "cftcContractMarketCode": "209742",
+  "cftcMarketCode": "CME",
+  "cftcRegionCode": "0",
+  "cftcCommodityCode": "209",
+  "openInterestAll": 245322,
+  "noncommPositionsLongAll": 78628,
+  "noncommPositionsShortAll": 58028,
+  "noncommPositionsSpreadAll": 3887,
+  "commPositionsLongAll": 128752,
+  "commPositionsShortAll": 150660,
+  "totReptPositionsLongAll": 211267,
+  "totReptPositionsShortAll": 212575,
+  "nonreptPositionsLongAll": 34055,
+  "nonreptPositionsShortAll": 32747,
+  "openInterestOld": 245322,
+  "noncommPositionsLongOld": 78628,
+  "noncommPositionsShortOld": 58028,
+  "noncommPositionsSpreadOld": 3887,
+  "commPositionsLongOld": 128752,
+  "commPositionsShortOld": 150660,
+  "totReptPositionsLongOld": 211267,
+  "totReptPositionsShortOld": 212575,
+  "nonreptPositionsLongOld": 34055,
+  "nonreptPositionsS
+
+======================================================================
+FMP: commitment-of-traders-report symbol=VX
+======================================================================
+URL: https://financialmodelingprep.com/stable/commitment-of-traders-report
+Params (ex-apikey): {'symbol': 'VX', 'from': '2026-02-05', 'to': '2026-04-16'}
+Status: 200
+Content-Type: application/json; charset=utf-8
+List length: 9
+First item keys: ['symbol', 'date', 'name', 'sector', 'marketAndExchangeNames', 'cftcContractMarketCode', 'cftcMarketCode', 'cftcRegionCode', 'cftcCommodityCode', 'openInterestAll', 'noncommPositionsLongAll', 'noncommPositionsShortAll', 'noncommPositionsSpreadAll', 'commPositionsLongAll', 'commPositionsShortAll', 'totReptPositionsLongAll', 'totReptPositionsShortAll', 'nonreptPositionsLongAll', 'nonreptPositionsShortAll', 'openInterestOld', 'noncommPositionsLongOld', 'noncommPositionsShortOld', 'noncommPositionsSpreadOld', 'commPositionsLongOld', 'commPositionsShortOld', 'totReptPositionsLongOld', 'totReptPositionsShortOld', 'nonreptPositionsLongOld', 'nonreptPositionsShortOld', 'openInterestOther', 'noncommPositionsLongOther', 'noncommPositionsShortOther', 'noncommPositionsSpreadOther', 'commPositionsLongOther', 'commPositionsShortOther', 'totReptPositionsLongOther', 'totReptPositionsShortOther', 'nonreptPositionsLongOther', 'nonreptPositionsShortOther', 'changeInOpenInterestAll', 'changeInNoncommLongAll', 'changeInNoncommShortAll', 'changeInNoncommSpeadAll', 'changeInCommLongAll', 'changeInCommShortAll', 'changeInTotReptLongAll', 'changeInTotReptShortAll', 'changeInNonreptLongAll', 'changeInNonreptShortAll', 'pctOfOpenInterestAll', 'pctOfOiNoncommLongAll', 'pctOfOiNoncommShortAll', 'pctOfOiNoncommSpreadAll', 'pctOfOiCommLongAll', 'pctOfOiCommShortAll', 'pctOfOiTotReptLongAll', 'pctOfOiTotReptShortAll', 'pctOfOiNonreptLongAll', 'pctOfOiNonreptShortAll', 'pctOfOpenInterestOl', 'pctOfOiNoncommLongOl', 'pctOfOiNoncommShortOl', 'pctOfOiNoncommSpreadOl', 'pctOfOiCommLongOl', 'pctOfOiCommShortOl', 'pctOfOiTotReptLongOl', 'pctOfOiTotReptShortOl', 'pctOfOiNonreptLongOl', 'pctOfOiNonreptShortOl', 'pctOfOpenInterestOther', 'pctOfOiNoncommLongOther', 'pctOfOiNoncommShortOther', 'pctOfOiNoncommSpreadOther', 'pctOfOiCommLongOther', 'pctOfOiCommShortOther', 'pctOfOiTotReptLongOther', 'pctOfOiTotReptShortOther', 'pctOfOiNonreptLongOther', 'pctOfOiNonreptShortOther', 'tradersTotAll', 'tradersNoncommLongAll', 'tradersNoncommShortAll', 'tradersNoncommSpreadAll', 'tradersCommLongAll', 'tradersCommShortAll', 'tradersTotReptLongAll', 'tradersTotReptShortAll', 'tradersTotOl', 'tradersNoncommLongOl', 'tradersNoncommShortOl', 'tradersNoncommSpeadOl', 'tradersCommLongOl', 'tradersCommShortOl', 'tradersTotReptLongOl', 'tradersTotReptShortOl', 'tradersTotOther', 'tradersNoncommLongOther', 'tradersNoncommShortOther', 'tradersNoncommSpreadOther', 'tradersCommLongOther', 'tradersCommShortOther', 'tradersTotReptLongOther', 'tradersTotReptShortOther', 'concGrossLe4TdrLongAll', 'concGrossLe4TdrShortAll', 'concGrossLe8TdrLongAll', 'concGrossLe8TdrShortAll', 'concNetLe4TdrLongAll', 'concNetLe4TdrShortAll', 'concNetLe8TdrLongAll', 'concNetLe8TdrShortAll', 'concGrossLe4TdrLongOl', 'concGrossLe4TdrShortOl', 'concGrossLe8TdrLongOl', 'concGrossLe8TdrShortOl', 'concNetLe4TdrLongOl', 'concNetLe4TdrShortOl', 'concNetLe8TdrLongOl', 'concNetLe8TdrShortOl', 'concGrossLe4TdrLongOther', 'concGrossLe4TdrShortOther', 'concGrossLe8TdrLongOther', 'concGrossLe8TdrShortOther', 'concNetLe4TdrLongOther', 'concNetLe4TdrShortOther', 'concNetLe8TdrLongOther', 'concNetLe8TdrShortOther', 'contractUnits']
+First item: {
+  "symbol": "VX",
+  "date": "2026-04-07 00:00:00",
+  "name": "CBOE VIX (VX)",
+  "sector": "INDICES",
+  "marketAndExchangeNames": "VIX FUTURES - CBOE FUTURES EXCHANGE",
+  "cftcContractMarketCode": "1170E1",
+  "cftcMarketCode": "E",
+  "cftcRegionCode": "0",
+  "cftcCommodityCode": "117",
+  "openInterestAll": 346605,
+  "noncommPositionsLongAll": 91271,
+  "noncommPositionsShortAll": 111659,
+  "noncommPositionsSpreadAll": 74542,
+  "commPositionsLongAll": 152225,
+  "commPositionsShortAll": 129659,
+  "totReptPositionsLongAll": 318038,
+  "totReptPositionsShortAll": 315860,
+  "nonreptPositionsLongAll": 28567,
+  "nonreptPositionsShortAll": 30745,
+  "openInterestOld": 346605,
+  "noncommPositionsLongOld": 91271,
+  "noncommPositionsShortOld": 111659,
+  "noncommPositionsSpreadOld": 74542,
+  "commPositionsLongOld": 152225,
+  "commPositionsShortOld": 129659,
+  "totReptPositionsLongOld": 318038,
+  "totReptPositionsShortOld": 315860,
+  "nonreptPositionsLongOld": 28567,
+  "nonreptPositionsShortOld": 30745,
+  "openInterestOther": 0,
+  "noncommPositionsLongOther": 0,
+  "noncommPositionsShortOther": 0,
+  "noncommPositionsSpreadOther": 0,
+  "commPositionsLongOther": 0,
+  "commPositionsShortOther": 0,
+  "totReptPositionsLongOther": 0,
+  "totReptPositionsShortOther": 0,
+  "nonreptPositionsLongOther": 0,
+  "nonreptPositionsShortOther": 0,
+  "changeInOpenInterestAll": -2211,
+  "changeInNoncommLongAll": 13430,
+  "changeInNoncommShortAll": 2660,
+  "changeInNoncommSpeadAll": -2851,
+  "changeInCommLongAll": -13986,
+  "changeInCommShortAll": -2581,
+  "changeInTotReptLongAll": -3407,
+  "changeInTotReptShortAll": -2772,
+  "changeInNonreptLongAll": 1196,
+  "changeInNonreptShortAll": 561,
+  "pctOfOpenInterestAll": 100,
+  "pctOfOiNoncommLongAll": 26.3,
+  "pctOfOiNoncommShortAll": 32.2,
+  "pctOfOiNoncommSpreadAll": 21.5,
+  "pctOfOiCommLongAll": 43.9,
+  "pctOfOiCommShortAll": 37.4,
+  "pctOfOiTotReptLongAll": 91.8,
+  "pctOfOiTotReptShortAll": 91.1,
+  "pctOfOiNonreptLongAll": 8.2,
+  "pctOfOiNonreptShortAl
+Second item: {
+  "symbol": "VX",
+  "date": "2026-03-31 00:00:00",
+  "name": "CBOE VIX (VX)",
+  "sector": "INDICES",
+  "marketAndExchangeNames": "VIX FUTURES - CBOE FUTURES EXCHANGE",
+  "cftcContractMarketCode": "1170E1",
+  "cftcMarketCode": "E",
+  "cftcRegionCode": "0",
+  "cftcCommodityCode": "117",
+  "openInterestAll": 348816,
+  "noncommPositionsLongAll": 77841,
+  "noncommPositionsShortAll": 108999,
+  "noncommPositionsSpreadAll": 77393,
+  "commPositionsLongAll": 166211,
+  "commPositionsShortAll": 132240,
+  "totReptPositionsLongAll": 321445,
+  "totReptPositionsShortAll": 318632,
+  "nonreptPositionsLongAll": 27371,
+  "nonreptPositionsShortAll": 30184,
+  "openInterestOld": 348816,
+  "noncommPositionsLongOld": 77841,
+  "noncommPositionsShortOld": 108999,
+  "noncommPositionsSpreadOld": 77393,
+  "commPositionsLongOld": 166211,
+  "commPositionsShortOld": 132240,
+  "totReptPositionsLongOld": 321445,
+  "totReptPositionsShortOld": 318632,
+  "nonreptPositionsLongOld": 27371,
+  "nonreptPositionsShortOld": 301
+
+======================================================================
+FMP: commitment-of-traders-report symbol=ZN
+======================================================================
+URL: https://financialmodelingprep.com/stable/commitment-of-traders-report
+Params (ex-apikey): {'symbol': 'ZN', 'from': '2026-02-05', 'to': '2026-04-16'}
+Status: 200
+Content-Type: application/json; charset=utf-8
+List length: 9
+First item keys: ['symbol', 'date', 'name', 'sector', 'marketAndExchangeNames', 'cftcContractMarketCode', 'cftcMarketCode', 'cftcRegionCode', 'cftcCommodityCode', 'openInterestAll', 'noncommPositionsLongAll', 'noncommPositionsShortAll', 'noncommPositionsSpreadAll', 'commPositionsLongAll', 'commPositionsShortAll', 'totReptPositionsLongAll', 'totReptPositionsShortAll', 'nonreptPositionsLongAll', 'nonreptPositionsShortAll', 'openInterestOld', 'noncommPositionsLongOld', 'noncommPositionsShortOld', 'noncommPositionsSpreadOld', 'commPositionsLongOld', 'commPositionsShortOld', 'totReptPositionsLongOld', 'totReptPositionsShortOld', 'nonreptPositionsLongOld', 'nonreptPositionsShortOld', 'openInterestOther', 'noncommPositionsLongOther', 'noncommPositionsShortOther', 'noncommPositionsSpreadOther', 'commPositionsLongOther', 'commPositionsShortOther', 'totReptPositionsLongOther', 'totReptPositionsShortOther', 'nonreptPositionsLongOther', 'nonreptPositionsShortOther', 'changeInOpenInterestAll', 'changeInNoncommLongAll', 'changeInNoncommShortAll', 'changeInNoncommSpeadAll', 'changeInCommLongAll', 'changeInCommShortAll', 'changeInTotReptLongAll', 'changeInTotReptShortAll', 'changeInNonreptLongAll', 'changeInNonreptShortAll', 'pctOfOpenInterestAll', 'pctOfOiNoncommLongAll', 'pctOfOiNoncommShortAll', 'pctOfOiNoncommSpreadAll', 'pctOfOiCommLongAll', 'pctOfOiCommShortAll', 'pctOfOiTotReptLongAll', 'pctOfOiTotReptShortAll', 'pctOfOiNonreptLongAll', 'pctOfOiNonreptShortAll', 'pctOfOpenInterestOl', 'pctOfOiNoncommLongOl', 'pctOfOiNoncommShortOl', 'pctOfOiNoncommSpreadOl', 'pctOfOiCommLongOl', 'pctOfOiCommShortOl', 'pctOfOiTotReptLongOl', 'pctOfOiTotReptShortOl', 'pctOfOiNonreptLongOl', 'pctOfOiNonreptShortOl', 'pctOfOpenInterestOther', 'pctOfOiNoncommLongOther', 'pctOfOiNoncommShortOther', 'pctOfOiNoncommSpreadOther', 'pctOfOiCommLongOther', 'pctOfOiCommShortOther', 'pctOfOiTotReptLongOther', 'pctOfOiTotReptShortOther', 'pctOfOiNonreptLongOther', 'pctOfOiNonreptShortOther', 'tradersTotAll', 'tradersNoncommLongAll', 'tradersNoncommShortAll', 'tradersNoncommSpreadAll', 'tradersCommLongAll', 'tradersCommShortAll', 'tradersTotReptLongAll', 'tradersTotReptShortAll', 'tradersTotOl', 'tradersNoncommLongOl', 'tradersNoncommShortOl', 'tradersNoncommSpeadOl', 'tradersCommLongOl', 'tradersCommShortOl', 'tradersTotReptLongOl', 'tradersTotReptShortOl', 'tradersTotOther', 'tradersNoncommLongOther', 'tradersNoncommShortOther', 'tradersNoncommSpreadOther', 'tradersCommLongOther', 'tradersCommShortOther', 'tradersTotReptLongOther', 'tradersTotReptShortOther', 'concGrossLe4TdrLongAll', 'concGrossLe4TdrShortAll', 'concGrossLe8TdrLongAll', 'concGrossLe8TdrShortAll', 'concNetLe4TdrLongAll', 'concNetLe4TdrShortAll', 'concNetLe8TdrLongAll', 'concNetLe8TdrShortAll', 'concGrossLe4TdrLongOl', 'concGrossLe4TdrShortOl', 'concGrossLe8TdrLongOl', 'concGrossLe8TdrShortOl', 'concNetLe4TdrLongOl', 'concNetLe4TdrShortOl', 'concNetLe8TdrLongOl', 'concNetLe8TdrShortOl', 'concGrossLe4TdrLongOther', 'concGrossLe4TdrShortOther', 'concGrossLe8TdrLongOther', 'concGrossLe8TdrShortOther', 'concNetLe4TdrLongOther', 'concNetLe4TdrShortOther', 'concNetLe8TdrLongOther', 'concNetLe8TdrShortOther', 'contractUnits']
+First item: {
+  "symbol": "ZN",
+  "date": "2026-04-07 00:00:00",
+  "name": "10-Year T-Note (ZN)",
+  "sector": "FINANCIALS",
+  "marketAndExchangeNames": "UST 10Y NOTE - CHICAGO BOARD OF TRADE",
+  "cftcContractMarketCode": "043602",
+  "cftcMarketCode": "CBT",
+  "cftcRegionCode": "0",
+  "cftcCommodityCode": "43",
+  "openInterestAll": 5123122,
+  "noncommPositionsLongAll": 567683,
+  "noncommPositionsShortAll": 1391307,
+  "noncommPositionsSpreadAll": 128236,
+  "commPositionsLongAll": 4032672,
+  "commPositionsShortAll": 3233330,
+  "totReptPositionsLongAll": 4728591,
+  "totReptPositionsShortAll": 4752873,
+  "nonreptPositionsLongAll": 394531,
+  "nonreptPositionsShortAll": 370249,
+  "openInterestOld": 5123122,
+  "noncommPositionsLongOld": 567683,
+  "noncommPositionsShortOld": 1391307,
+  "noncommPositionsSpreadOld": 128236,
+  "commPositionsLongOld": 4032672,
+  "commPositionsShortOld": 3233330,
+  "totReptPositionsLongOld": 4728591,
+  "totReptPositionsShortOld": 4752873,
+  "nonreptPositionsLongOld": 394531,
+  "nonreptPositionsShortOld": 370249,
+  "openInterestOther": 0,
+  "noncommPositionsLongOther": 0,
+  "noncommPositionsShortOther": 0,
+  "noncommPositionsSpreadOther": 0,
+  "commPositionsLongOther": 0,
+  "commPositionsShortOther": 0,
+  "totReptPositionsLongOther": 0,
+  "totReptPositionsShortOther": 0,
+  "nonreptPositionsLongOther": 0,
+  "nonreptPositionsShortOther": 0,
+  "changeInOpenInterestAll": -29674,
+  "changeInNoncommLongAll": -58803,
+  "changeInNoncommShortAll": -19242,
+  "changeInNoncommSpeadAll": 15227,
+  "changeInCommLongAll": 23191,
+  "changeInCommShortAll": -27826,
+  "changeInTotReptLongAll": -20385,
+  "changeInTotReptShortAll": -31841,
+  "changeInNonreptLongAll": -9289,
+  "changeInNonreptShortAll": 2167,
+  "pctOfOpenInterestAll": 100,
+  "pctOfOiNoncommLongAll": 11.1,
+  "pctOfOiNoncommShortAll": 27.2,
+  "pctOfOiNoncommSpreadAll": 2.5,
+  "pctOfOiCommLongAll": 78.7,
+  "pctOfOiCommShortAll": 63.1,
+  "pctOfOiTotReptLongAll": 92.3,
+  "pctOfOiTotReptShortAll": 92.8,
+  "pctOfOiNonrept
+Second item: {
+  "symbol": "ZN",
+  "date": "2026-03-31 00:00:00",
+  "name": "10-Year T-Note (ZN)",
+  "sector": "FINANCIALS",
+  "marketAndExchangeNames": "UST 10Y NOTE - CHICAGO BOARD OF TRADE",
+  "cftcContractMarketCode": "043602",
+  "cftcMarketCode": "CBT",
+  "cftcRegionCode": "0",
+  "cftcCommodityCode": "43",
+  "openInterestAll": 5152796,
+  "noncommPositionsLongAll": 626486,
+  "noncommPositionsShortAll": 1410549,
+  "noncommPositionsSpreadAll": 113009,
+  "commPositionsLongAll": 4009481,
+  "commPositionsShortAll": 3261156,
+  "totReptPositionsLongAll": 4748976,
+  "totReptPositionsShortAll": 4784714,
+  "nonreptPositionsLongAll": 403820,
+  "nonreptPositionsShortAll": 368082,
+  "openInterestOld": 5152796,
+  "noncommPositionsLongOld": 626486,
+  "noncommPositionsShortOld": 1410549,
+  "noncommPositionsSpreadOld": 113009,
+  "commPositionsLongOld": 4009481,
+  "commPositionsShortOld": 3261156,
+  "totReptPositionsLongOld": 4748976,
+  "totReptPositionsShortOld": 4784714,
+  "nonreptPositionsLongOld": 403820,
+  
+
+======================================================================
+FMP: commitment-of-traders-report symbol=ZB
+======================================================================
+URL: https://financialmodelingprep.com/stable/commitment-of-traders-report
+Params (ex-apikey): {'symbol': 'ZB', 'from': '2026-02-05', 'to': '2026-04-16'}
+Status: 200
+Content-Type: application/json; charset=utf-8
+List length: 9
+First item keys: ['symbol', 'date', 'name', 'sector', 'marketAndExchangeNames', 'cftcContractMarketCode', 'cftcMarketCode', 'cftcRegionCode', 'cftcCommodityCode', 'openInterestAll', 'noncommPositionsLongAll', 'noncommPositionsShortAll', 'noncommPositionsSpreadAll', 'commPositionsLongAll', 'commPositionsShortAll', 'totReptPositionsLongAll', 'totReptPositionsShortAll', 'nonreptPositionsLongAll', 'nonreptPositionsShortAll', 'openInterestOld', 'noncommPositionsLongOld', 'noncommPositionsShortOld', 'noncommPositionsSpreadOld', 'commPositionsLongOld', 'commPositionsShortOld', 'totReptPositionsLongOld', 'totReptPositionsShortOld', 'nonreptPositionsLongOld', 'nonreptPositionsShortOld', 'openInterestOther', 'noncommPositionsLongOther', 'noncommPositionsShortOther', 'noncommPositionsSpreadOther', 'commPositionsLongOther', 'commPositionsShortOther', 'totReptPositionsLongOther', 'totReptPositionsShortOther', 'nonreptPositionsLongOther', 'nonreptPositionsShortOther', 'changeInOpenInterestAll', 'changeInNoncommLongAll', 'changeInNoncommShortAll', 'changeInNoncommSpeadAll', 'changeInCommLongAll', 'changeInCommShortAll', 'changeInTotReptLongAll', 'changeInTotReptShortAll', 'changeInNonreptLongAll', 'changeInNonreptShortAll', 'pctOfOpenInterestAll', 'pctOfOiNoncommLongAll', 'pctOfOiNoncommShortAll', 'pctOfOiNoncommSpreadAll', 'pctOfOiCommLongAll', 'pctOfOiCommShortAll', 'pctOfOiTotReptLongAll', 'pctOfOiTotReptShortAll', 'pctOfOiNonreptLongAll', 'pctOfOiNonreptShortAll', 'pctOfOpenInterestOl', 'pctOfOiNoncommLongOl', 'pctOfOiNoncommShortOl', 'pctOfOiNoncommSpreadOl', 'pctOfOiCommLongOl', 'pctOfOiCommShortOl', 'pctOfOiTotReptLongOl', 'pctOfOiTotReptShortOl', 'pctOfOiNonreptLongOl', 'pctOfOiNonreptShortOl', 'pctOfOpenInterestOther', 'pctOfOiNoncommLongOther', 'pctOfOiNoncommShortOther', 'pctOfOiNoncommSpreadOther', 'pctOfOiCommLongOther', 'pctOfOiCommShortOther', 'pctOfOiTotReptLongOther', 'pctOfOiTotReptShortOther', 'pctOfOiNonreptLongOther', 'pctOfOiNonreptShortOther', 'tradersTotAll', 'tradersNoncommLongAll', 'tradersNoncommShortAll', 'tradersNoncommSpreadAll', 'tradersCommLongAll', 'tradersCommShortAll', 'tradersTotReptLongAll', 'tradersTotReptShortAll', 'tradersTotOl', 'tradersNoncommLongOl', 'tradersNoncommShortOl', 'tradersNoncommSpeadOl', 'tradersCommLongOl', 'tradersCommShortOl', 'tradersTotReptLongOl', 'tradersTotReptShortOl', 'tradersTotOther', 'tradersNoncommLongOther', 'tradersNoncommShortOther', 'tradersNoncommSpreadOther', 'tradersCommLongOther', 'tradersCommShortOther', 'tradersTotReptLongOther', 'tradersTotReptShortOther', 'concGrossLe4TdrLongAll', 'concGrossLe4TdrShortAll', 'concGrossLe8TdrLongAll', 'concGrossLe8TdrShortAll', 'concNetLe4TdrLongAll', 'concNetLe4TdrShortAll', 'concNetLe8TdrLongAll', 'concNetLe8TdrShortAll', 'concGrossLe4TdrLongOl', 'concGrossLe4TdrShortOl', 'concGrossLe8TdrLongOl', 'concGrossLe8TdrShortOl', 'concNetLe4TdrLongOl', 'concNetLe4TdrShortOl', 'concNetLe8TdrLongOl', 'concNetLe8TdrShortOl', 'concGrossLe4TdrLongOther', 'concGrossLe4TdrShortOther', 'concGrossLe8TdrLongOther', 'concGrossLe8TdrShortOther', 'concNetLe4TdrLongOther', 'concNetLe4TdrShortOther', 'concNetLe8TdrLongOther', 'concNetLe8TdrShortOther', 'contractUnits']
+First item: {
+  "symbol": "ZB",
+  "date": "2026-04-07 00:00:00",
+  "name": "30-Year T-Bond (ZB)",
+  "sector": "FINANCIALS",
+  "marketAndExchangeNames": "UST BOND - CHICAGO BOARD OF TRADE",
+  "cftcContractMarketCode": "020601",
+  "cftcMarketCode": "CBT",
+  "cftcRegionCode": "0",
+  "cftcCommodityCode": "20",
+  "openInterestAll": 1786514,
+  "noncommPositionsLongAll": 197953,
+  "noncommPositionsShortAll": 256949,
+  "noncommPositionsSpreadAll": 24703,
+  "commPositionsLongAll": 1324620,
+  "commPositionsShortAll": 1368929,
+  "totReptPositionsLongAll": 1547276,
+  "totReptPositionsShortAll": 1650581,
+  "nonreptPositionsLongAll": 239238,
+  "nonreptPositionsShortAll": 135933,
+  "openInterestOld": 1786514,
+  "noncommPositionsLongOld": 197953,
+  "noncommPositionsShortOld": 256949,
+  "noncommPositionsSpreadOld": 24703,
+  "commPositionsLongOld": 1324620,
+  "commPositionsShortOld": 1368929,
+  "totReptPositionsLongOld": 1547276,
+  "totReptPositionsShortOld": 1650581,
+  "nonreptPositionsLongOld": 239238,
+  "nonreptPositionsShortOld": 135933,
+  "openInterestOther": 0,
+  "noncommPositionsLongOther": 0,
+  "noncommPositionsShortOther": 0,
+  "noncommPositionsSpreadOther": 0,
+  "commPositionsLongOther": 0,
+  "commPositionsShortOther": 0,
+  "totReptPositionsLongOther": 0,
+  "totReptPositionsShortOther": 0,
+  "nonreptPositionsLongOther": 0,
+  "nonreptPositionsShortOther": 0,
+  "changeInOpenInterestAll": -17385,
+  "changeInNoncommLongAll": -16584,
+  "changeInNoncommShortAll": 10779,
+  "changeInNoncommSpeadAll": 147,
+  "changeInCommLongAll": 1467,
+  "changeInCommShortAll": -23952,
+  "changeInTotReptLongAll": -14970,
+  "changeInTotReptShortAll": -13026,
+  "changeInNonreptLongAll": -2415,
+  "changeInNonreptShortAll": -4359,
+  "pctOfOpenInterestAll": 100,
+  "pctOfOiNoncommLongAll": 11.1,
+  "pctOfOiNoncommShortAll": 14.4,
+  "pctOfOiNoncommSpreadAll": 1.4,
+  "pctOfOiCommLongAll": 74.1,
+  "pctOfOiCommShortAll": 76.6,
+  "pctOfOiTotReptLongAll": 86.6,
+  "pctOfOiTotReptShortAll": 92.4,
+  "pctOfOiNonreptLongAll": 1
+Second item: {
+  "symbol": "ZB",
+  "date": "2026-03-31 00:00:00",
+  "name": "30-Year T-Bond (ZB)",
+  "sector": "FINANCIALS",
+  "marketAndExchangeNames": "UST BOND - CHICAGO BOARD OF TRADE",
+  "cftcContractMarketCode": "020601",
+  "cftcMarketCode": "CBT",
+  "cftcRegionCode": "0",
+  "cftcCommodityCode": "20",
+  "openInterestAll": 1803899,
+  "noncommPositionsLongAll": 214537,
+  "noncommPositionsShortAll": 246170,
+  "noncommPositionsSpreadAll": 24556,
+  "commPositionsLongAll": 1323153,
+  "commPositionsShortAll": 1392881,
+  "totReptPositionsLongAll": 1562246,
+  "totReptPositionsShortAll": 1663607,
+  "nonreptPositionsLongAll": 241653,
+  "nonreptPositionsShortAll": 140292,
+  "openInterestOld": 1803899,
+  "noncommPositionsLongOld": 214537,
+  "noncommPositionsShortOld": 246170,
+  "noncommPositionsSpreadOld": 24556,
+  "commPositionsLongOld": 1323153,
+  "commPositionsShortOld": 1392881,
+  "totReptPositionsLongOld": 1562246,
+  "totReptPositionsShortOld": 1663607,
+  "nonreptPositionsLongOld": 241653,
+  "nonrept
+
+======================================================================
+FMP: commitment-of-traders-report symbol=SP
+======================================================================
+URL: https://financialmodelingprep.com/stable/commitment-of-traders-report
+Params (ex-apikey): {'symbol': 'SP', 'from': '2026-02-05', 'to': '2026-04-16'}
+Status: 200
+Content-Type: application/json; charset=utf-8
+List length: 0
+
+======================================================================
+FMP: commitment-of-traders-report-analysis symbol=ES
+======================================================================
+URL: https://financialmodelingprep.com/stable/commitment-of-traders-report-analysis
+Params (ex-apikey): {'symbol': 'ES'}
+Status: 404
+Content-Type: application/json; charset=utf-8
+List length: 0
+
+======================================================================
+FMP: etf-info symbol=SPY
+======================================================================
+URL: https://financialmodelingprep.com/stable/etf-info
+Params (ex-apikey): {'symbol': 'SPY'}
+Status: 404
+Content-Type: application/json; charset=utf-8
+List length: 0
+
+======================================================================
+FMP: etf-holder symbol=SPY
+======================================================================
+URL: https://financialmodelingprep.com/stable/etf-holder
+Params (ex-apikey): {'symbol': 'SPY'}
+Status: 404
+Content-Type: application/json; charset=utf-8
+List length: 0
+
+======================================================================
+FMP: historical-price-eod/full symbol=SPY
+======================================================================
+URL: https://financialmodelingprep.com/stable/historical-price-eod/full
+Params (ex-apikey): {'symbol': 'SPY', 'from': '2026-02-15', 'to': '2026-04-16'}
+Status: 200
+Content-Type: application/json; charset=utf-8
+List length: 42
+First item keys: ['symbol', 'date', 'open', 'high', 'low', 'close', 'volume', 'change', 'changePercent', 'vwap']
+First item: {
+  "symbol": "SPY",
+  "date": "2026-04-16",
+  "open": 701.06,
+  "high": 702.78,
+  "low": 698.53,
+  "close": 700.90997,
+  "volume": 37182539,
+  "change": -0.15003,
+  "changePercent": -0.02140045,
+  "vwap": 700.74
+}
+Second item: {
+  "symbol": "SPY",
+  "date": "2026-04-15",
+  "open": 695.26,
+  "high": 700.28,
+  "low": 694.2,
+  "close": 699.94,
+  "volume": 58240384,
+  "change": 4.68,
+  "changePercent": 0.67313,
+  "vwap": 697.42
+}
+
+======================================================================
+Finnhub: option chain index?
+======================================================================
+URL: https://finnhub.io/api/v1/indicator
+Params (ex-apikey): {'symbol': 'SPY', 'resolution': 'D', 'indicator': 'sma', 'timeperiod': 20, 'from': 0, 'to': 0, 'token': 'd5v9j19r01qjj9jioetgd5v9j19r01qjj9jioeu0'}
+Status: 403
+Content-Type: application/json
+Top-level keys: ['error']
+Full (truncated): {
+  "error": "You don't have access to this resource."
+}
+
+======================================================================
+CBOE: equity_pc.csv (equity put/call ratio)
+======================================================================
+URL: https://cdn.cboe.com/api/global/us_indices/daily_market_statistics/equity_pc.csv
+Params (ex-apikey): {}
+Status: 403
+Content-Type: application/xml
+Body (first 1500 chars):
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>V4HE15E8T10MAAC1</RequestId><HostId>Qu4u9d3ofTEipYDvCenqFxMXrxw1J7M5BHBVenwAi7r6YuFTtnJLCglUhTWoFCTc5VLZXl+Mbfu/V7VkdnH4J58Y810GKfYs</HostId></Error>
+
+======================================================================
+CBOE: index_pc.csv (index put/call ratio)
+======================================================================
+URL: https://cdn.cboe.com/api/global/us_indices/daily_market_statistics/index_pc.csv
+Params (ex-apikey): {}
+Status: 403
+Content-Type: application/xml
+Body (first 1500 chars):
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>V4HCHWS9ZKGZ371K</RequestId><HostId>00lblocUheP+429dcX9AjUG93+YOtlUsHsL5NBhDVVcTVAmYjlD4ofzvVC7weySmlbBupyLdMsQ=</HostId></Error>
+
+======================================================================
+CBOE: volume_ratios_spx.csv
+======================================================================
+URL: https://cdn.cboe.com/api/global/us_indices/daily_market_statistics/volume_ratios_spx.csv
+Params (ex-apikey): {}
+Status: 403
+Content-Type: application/xml
+Body (first 1500 chars):
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>BPPJ9CA6JB8KVMHS</RequestId><HostId>CBsrA9Rucim/xyZ38MYEd+V0aKRIAnLErn60xcqXrCb+4VOLfw81UEdKGbfe+BtcV9fQzeLZY0AC9r7nc0RjVTihXuHy6gasKcW5S0Lc/vU=</HostId></Error>
+
+======================================================================
+CBOE: total_pc.csv
+======================================================================
+URL: https://cdn.cboe.com/api/global/us_indices/daily_market_statistics/total_pc.csv
+Params (ex-apikey): {}
+Status: 403
+Content-Type: application/xml
+Body (first 1500 chars):
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>BPPMCHF04DWRHZWG</RequestId><HostId>nkCwfTJb0tmYwXZWzhcci5GNHq9nUNnmd0nPj9CKKPm5guQYEW0RWAxVbgSlfeCKuFJDTWwhi1LUEZTUMFtQ1VdljHVNnAdk</HostId></Error>
+
+======================================================================
+AAII: sentiment survey results page
+======================================================================
+URL: https://www.aaii.com/sentimentsurvey/sent_results
+Params (ex-apikey): {}
+Status: 403
+Content-Type: text/html
+Body (first 1500 chars):
+<html style="height:100%"><head><META NAME="ROBOTS" CONTENT="NOINDEX, NOFOLLOW"><meta name="format-detection" content="telephone=no"><meta name="viewport" content="initial-scale=1.0"><meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"><script type="text/javascript" src="/_Incapsula_Resource?SWJIYLWA=719d34d31c8e3a6e6fffd425f7e032f3"></script><script src="/I-Mornices-To-can-And-blowt-Thund-dish-your-heri" async></script></head><body style="margin:0px;height:100%"><iframe id="main-iframe" src="/_Incapsula_Resource?CWUDNSAI=23&xinfo=44-14581791-0%20NNNY%20RT%281776367905816%2025%29%20q%280%20-1%20-1%20-1%29%20r%280%20-1%29%20B15%2814%2c0%2c0%29%20U18&incident_id=1842000810242589357-80566156300260460&edet=15&cinfo=0e000000566f&rpinfo=0&cip=174.100.224.19&mth=GET" frameborder=0 width="100%" height="100%" marginheight="0px" marginwidth="0px">Request unsuccessful. Incapsula incident ID: 1842000810242589357-80566156300260460</iframe></body></html>
+
+======================================================================
+Polygon: aggregate SPY daily 30d
+======================================================================
+URL: https://api.polygon.io/v2/aggs/ticker/SPY/range/1/day/2026-03-07/2026-04-16
+Params (ex-apikey): {'adjusted': 'true', 'sort': 'asc', 'apiKey': 'fNZGpdBQBqifUKVr15B044dLK3onGOXW'}
+Status: 200
+Content-Type: application/json
+Top-level keys: ['ticker', 'queryCount', 'resultsCount', 'adjusted', 'results', 'status', 'request_id', 'count']
+Full (truncated): {
+  "ticker": "SPY",
+  "queryCount": 28,
+  "resultsCount": 28,
+  "adjusted": true,
+  "results": [
+    {
+      "v": 102667711.038582,
+      "vw": 671.0514,
+      "o": 666.39,
+      "c": 678.27,
+      "h": 679.92,
+      "l": 662.39,
+      "t": 1773028800000,
+      "n": 1484006
+    },
+    {
+      "v": 81505315.849502,
+      "vw": 679.08,
+      "o": 677.72,
+      "c": 677.18,
+      "h": 683.36,
+      "l": 674.76,
+      "t": 1773115200000,
+      "n": 1197642
+    },
+    {
+      "v": 68441672.317886,
+      "vw": 675.9564,
+      "o": 677.58,
+      "c": 676.33,
+      "h": 680.08,
+      "l": 673.34,
+      "t": 1773201600000,
+      "n": 957759
+    },
+    {
+      "v": 108882246.682898,
+      "vw": 668.5395,
+      "o": 671.16,
+      "c": 666.06,
+      "h": 671.65,
+      "l": 665.87,
+      "t": 1773288000000,
+      "n": 1415063
+    },
+    {
+      "v": 97200242.450889,
+      "vw": 664.9581,
+      "o": 669.27,
+      "c": 662.29,
+      "h": 672.335,
+      "l": 661.36,
+      "t": 1773374400000,
+      "n": 1307829
+    },
+    {
+      "v": 82023130.110765,
+      "vw": 668.6147,
+      "o": 668.38,
+      "c": 669.03,
+      "h": 672.07,
+      "l": 667.12,
+      "t": 1773633600000,
+      "n": 1100981
+    },
+    {
+      "v": 87122542.595942,
+      "vw": 671.2898,
+      "o": 672.39,
+      "c": 670.79,
+      "h": 674.44,
+      "l": 669.7,
+      "t": 1773720000000,
+      "n": 915896
+    },
+    {
+      "v": 82062576.584433,
+      "vw": 665.185,
+      "o": 668.36,
+      "c": 661.43,
+      "h": 669.72,
+      "l": 661.19,
+      "t": 1773806400000,
+      "n": 1106763
+    },
+    {
+      "v": 111272539.22716,
+      "vw": 658.7065,
+      "o": 656.97,
+      "c": 659.8,
+      "h": 662.98,
+      "l": 655.17,
+      "t": 1773892800000,
+      "n": 1496795
+    },
+    {
+      "v": 165586395.574835,
+      "vw": 651.4186,
+      "o": 656.51,
+      "c": 648.57,
+      "h": 656.69,
+      "l": 644.72,
+      "t": 1773979200000,
+      "n": 1617683
+    },
+    {
+      "v": 134802732.497249,
+      "vw": 657.3014,
+      "o

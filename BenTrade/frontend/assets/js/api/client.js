@@ -391,6 +391,47 @@ window.BenTradeApi = (function(){
     return timedFetch('/api/signals/unusual-options');
   }
 
+  /* ── Earnings Vol Analyzer (EVA) ───────────────────────────── */
+  function getEvaHealth(){
+    return jsonFetch('/api/eva/health');
+  }
+  function getEvaUpcomingEvents(days, ticker){
+    var params = new URLSearchParams({ days: String(days == null ? 14 : days) });
+    if (ticker) params.set('ticker', ticker);
+    return jsonFetch('/api/eva/events/upcoming?' + params.toString());
+  }
+  function getEvaEvent(eventId){
+    return jsonFetch('/api/eva/events/' + encodeURIComponent(eventId));
+  }
+  function getEvaEventFeatures(eventId){
+    return jsonFetch('/api/eva/events/' + encodeURIComponent(eventId) + '/features');
+  }
+  function getEvaTicker(ticker){
+    return jsonFetch('/api/eva/tickers/' + encodeURIComponent(ticker));
+  }
+  function getEvaTickerLatestFeatures(ticker){
+    return jsonFetch('/api/eva/tickers/' + encodeURIComponent(ticker) + '/latest-features');
+  }
+  function analyzeEvaEvent(eventId, forceRefresh){
+    var url = '/api/eva/events/' + encodeURIComponent(eventId) +
+      '/analyze?force_refresh=' + (forceRefresh ? 'true' : 'false');
+    return modelFetch(url, { method: 'POST' });
+  }
+  function getEvaUniverse(){
+    return jsonFetch('/api/eva/universe');
+  }
+  function getEvaUniverseAll(includeInactive){
+    return jsonFetch('/api/eva/universe/all?include_inactive=' + (includeInactive ? 'true' : 'false'));
+  }
+  function addEvaTicker(ticker, notes){
+    var params = new URLSearchParams({ ticker: ticker });
+    if (notes) params.set('notes', notes);
+    return jsonFetch('/api/eva/universe/add?' + params.toString(), { method: 'POST' });
+  }
+  function removeEvaTicker(ticker){
+    return jsonFetch('/api/eva/universe/remove?ticker=' + encodeURIComponent(ticker), { method: 'POST' });
+  }
+
   function getMarketPictureModelScores(){
     return jsonFetch('/api/market-picture/model-scores');
   }
@@ -683,6 +724,43 @@ window.BenTradeApi = (function(){
     });
   }
 
+  /* ── On-Demand Evaluator PDF export (Phase 1) ──
+   * POST /api/export/on-demand-pdf → application/pdf bytes.
+   * Resolves with {blob, filename} on 2xx; throws Error with .status/.detail
+   * on error (structured: {code, message, job_id?}).
+   */
+  async function exportOnDemandPdf(payload){
+    const response = await fetch('/api/export/on-demand-pdf', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/pdf'},
+      body: JSON.stringify(payload || {}),
+    });
+    if(!response.ok){
+      var detail = null;
+      var message = 'PDF export failed (' + response.status + ')';
+      try{
+        const body = await response.json();
+        detail = body?.detail || null;
+        if(detail && typeof detail === 'object' && detail.message){
+          message = detail.message;
+        } else if(typeof body?.detail === 'string'){
+          message = body.detail;
+        }
+      }catch(_err){ /* non-JSON error body */ }
+      const err = new Error(message);
+      err.status = response.status;
+      err.detail = detail;
+      throw err;
+    }
+    const blob = await response.blob();
+    // Parse filename from Content-Disposition if available
+    var filename = null;
+    const cd = response.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="?([^"]+)"?/i);
+    if(m && m[1]) filename = m[1];
+    return { blob: blob, filename: filename };
+  }
+
   return {
     listReports,
     getReport,
@@ -727,6 +805,17 @@ window.BenTradeApi = (function(){
     getEquityCurve,
     getCongressionalTrading,
     getUnusualOptions,
+    getEvaHealth,
+    getEvaUpcomingEvents,
+    getEvaEvent,
+    getEvaEventFeatures,
+    getEvaTicker,
+    getEvaTickerLatestFeatures,
+    analyzeEvaEvent,
+    getEvaUniverse,
+    getEvaUniverseAll,
+    addEvaTicker,
+    removeEvaTicker,
     getMarketPictureModelScores,
     getMarketPictureHistory,
     postLifecycleEvent,
@@ -779,9 +868,54 @@ window.BenTradeApi = (function(){
     resumeOrchestrator,
     setOrchestratorDelay,
     contextualChat,
+    exportOnDemandPdf,
     resetCircuitBreaker,
     getCircuitBreakerStatus,
     MODEL_TIMEOUT_MS: MODEL_TIMEOUT_MS,
     modelFetch: modelFetch,
   };
 })();
+
+// ── Home-dashboard component notes (v1) ───────────────────────────
+// Registered as a namespaced attachment so existing BenTradeApi consumers
+// are unaffected. Keys match the backend /api/notes contract exactly.
+if (window.BenTradeApi && !window.BenTradeApi.notes) {
+  window.BenTradeApi.notes = {
+    list: function (sectionId) {
+      return fetch("/api/notes/sections/" + encodeURIComponent(sectionId), {
+        headers: { "Accept": "application/json" },
+      }).then(function (r) {
+        if (!r.ok) throw Object.assign(new Error("list notes failed"), { status: r.status });
+        return r.json();
+      });
+    },
+    append: function (sectionId, body) {
+      return fetch(
+        "/api/notes/sections/" + encodeURIComponent(sectionId) + "/append",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+          },
+          body: JSON.stringify({ body: body }),
+        }
+      ).then(function (r) {
+        if (!r.ok) throw Object.assign(new Error("append note failed"), { status: r.status });
+        return r.json();
+      });
+    },
+    delete: function (sectionId, noteId) {
+      return fetch(
+        "/api/notes/sections/" +
+          encodeURIComponent(sectionId) +
+          "/notes/" +
+          encodeURIComponent(noteId),
+        { method: "DELETE", headers: { "Accept": "application/json" } }
+      ).then(function (r) {
+        if (!r.ok) throw Object.assign(new Error("delete note failed"), { status: r.status });
+        return r.json();
+      });
+    },
+  };
+}

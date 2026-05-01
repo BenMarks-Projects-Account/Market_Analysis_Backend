@@ -4506,10 +4506,13 @@
 
     // ── Orchestrator status indicator + auto-refresh ──
     var _orchLastCycle = null;
+    var _orchConsecutiveFailures = 0;
     var _orchPollTimer = setInterval(function () {
       if (!api.getOrchestratorStatus) return;
       api.getOrchestratorStatus().then(function (status) {
+        _orchConsecutiveFailures = 0;
         _updateOrchestratorIndicator(status);
+        _applyOrchState(status);
         // Auto-refresh TMC displays when a new cycle completes
         if (status.last_cycle_completed && status.last_cycle_completed !== _orchLastCycle) {
           _orchLastCycle = status.last_cycle_completed;
@@ -4523,11 +4526,30 @@
             console.log('[TMC:DIAG] Orchestrator cycle complete — SKIPPED refresh (Full Refresh running)');
           }
         }
-      }).catch(function () {
+      }).catch(function (err) {
+        _orchConsecutiveFailures += 1;
+        console.warn('event=orchestrator.status.poll_failed', err);
         // Orchestrator may not be running — show idle
         _updateOrchestratorIndicator({ running: false, current_stage: 'idle', cycle_count: 0 });
+        _applyOrchState({ running: false, paused: false, current_stage: 'idle' });
+        if (_orchConsecutiveFailures >= 3) {
+          _setOrchPauseMsg('status unavailable', false);
+        }
       });
     }, 5000);
+
+    // Orchestrator Pause/Resume button wiring
+    var _orchPauseBtn = document.getElementById('tmc-orchestrator-pause-btn');
+    if (_orchPauseBtn) {
+      _orchPauseBtn.addEventListener('click', _handleOrchPauseClick);
+    }
+    // Prime state + button from an immediate status fetch (don't wait 5s)
+    if (api.getOrchestratorStatus) {
+      api.getOrchestratorStatus().then(function (status) {
+        _updateOrchestratorIndicator(status);
+        _applyOrchState(status);
+      }).catch(function () { /* poll interval will handle */ });
+    }
 
     // Cleanup handler for SPA navigation
     window.BenTradeActiveViewCleanup = function () {
@@ -4536,10 +4558,146 @@
       if (_freshnessTimer) { clearInterval(_freshnessTimer); _freshnessTimer = null; }
       _stopStockCompletionPoll();
       _stopOptionsCompletionPoll();
+      var _btn = document.getElementById('tmc-orchestrator-pause-btn');
+      if (_btn) _btn.removeEventListener('click', _handleOrchPauseClick);
       _activeRunning = false;
       var metaEl = document.getElementById('tmcActiveRunMeta');
       if (metaEl) metaEl.remove();
     };
+  }
+
+  /* -- Orchestrator pause/resume button ------------------------------ */
+
+  // Stages that indicate a cycle is mid-flight (the "Pausing…" window
+  // after pause was clicked but before the cycle finishes).
+  var CYCLE_IN_PROGRESS_STAGES = {
+    market_intelligence: true,
+    tmc_stock_options_active: true,
+    tmc_portfolio_balance: true,
+    error_cooldown: true,
+  };
+
+  function _orchInFlightRef(v) {
+    // Small accessor so _applyOrchState can read the in-flight flag.
+    // _orchInFlight is declared inside initTradeManagementCenter; we expose
+    // it via a window-local getter set before each click.
+    return window.__tmcOrchInFlight === true;
+  }
+
+  function _applyOrchState(status) {
+    var btn = document.getElementById('tmc-orchestrator-pause-btn');
+    if (!btn) return;
+    var label = btn.querySelector('.tmc-orch-btn-label');
+    var running = !!(status && status.running);
+    var paused = !!(status && status.paused);
+    var stage = (status && status.current_stage) || 'idle';
+
+    if (!running) {
+      btn.hidden = true;
+      btn.disabled = true;
+      btn.setAttribute('aria-pressed', 'false');
+      btn.setAttribute('aria-label', 'Orchestrator not running');
+      btn.title = 'Orchestrator not running';
+      return;
+    }
+    btn.hidden = false;
+    btn.title = '';
+
+    // Defensive fallback: if current_stage is missing, treat paused as
+    // fully paused (don't get stuck in "Pausing…").
+    var cycleInProgress = !!CYCLE_IN_PROGRESS_STAGES[stage];
+
+    if (paused && cycleInProgress) {
+      if (label) label.textContent = 'Pausing…';
+      btn.disabled = true;
+      btn.classList.add('is-pausing');
+      btn.classList.remove('is-paused');
+      btn.setAttribute('aria-pressed', 'true');
+      btn.setAttribute('aria-label', 'Pausing workflow cycles (current cycle finishing)');
+    } else if (paused) {
+      if (label) label.textContent = 'Resume';
+      btn.disabled = _orchInFlightRef();
+      btn.classList.add('is-paused');
+      btn.classList.remove('is-pausing');
+      btn.setAttribute('aria-pressed', 'true');
+      btn.setAttribute('aria-label', 'Resume workflow cycles');
+    } else {
+      if (label) label.textContent = 'Pause';
+      btn.disabled = _orchInFlightRef();
+      btn.classList.remove('is-paused', 'is-pausing');
+      btn.setAttribute('aria-pressed', 'false');
+      btn.setAttribute('aria-label', 'Pause workflow cycles');
+    }
+  }
+
+  function _setOrchPauseMsg(msg, isError) {
+    var el = document.getElementById('tmc-orchestrator-pause-msg');
+    if (!el) return;
+    if (!msg) {
+      el.hidden = true;
+      el.textContent = '';
+      el.classList.remove('is-error');
+      return;
+    }
+    el.hidden = false;
+    el.textContent = msg;
+    el.classList.toggle('is-error', !!isError);
+    if (isError) {
+      clearTimeout(el._clearTimer);
+      el._clearTimer = setTimeout(function () {
+        el.hidden = true;
+        el.textContent = '';
+        el.classList.remove('is-error');
+      }, 4000);
+    }
+  }
+
+  function _handleOrchPauseClick() {
+    var btn = document.getElementById('tmc-orchestrator-pause-btn');
+    if (!btn || btn.disabled) return;
+    var isPaused = btn.getAttribute('aria-pressed') === 'true';
+
+    window.__tmcOrchInFlight = true;
+    btn.disabled = true;
+    var label = btn.querySelector('.tmc-orch-btn-label');
+    if (label) label.textContent = isPaused ? 'Resuming…' : 'Pausing…';
+
+    var api = window.BenTradeApi || {};
+    var action = isPaused ? api.resumeOrchestrator : api.pauseOrchestrator;
+    if (typeof action !== 'function') {
+      window.__tmcOrchInFlight = false;
+      console.error('event=orchestrator.toggle_failed reason=api_missing');
+      _setOrchPauseMsg('API unavailable', true);
+      return;
+    }
+
+    action().then(function (status) {
+      // Endpoint returns fresh status inline; apply immediately so UI
+      // reflects truth without waiting for next poll tick.
+      if (status && typeof status === 'object') {
+        _updateOrchestratorIndicator(status);
+        _applyOrchState(status);
+      }
+      _setOrchPauseMsg('', false);
+    }).catch(function (err) {
+      console.error('event=orchestrator.toggle_failed', err);
+      if (typeof showToast === 'function') {
+        showToast('Failed to toggle workflow cycles: ' + (err && err.message ? err.message : 'unknown'), 'error');
+      }
+      _setOrchPauseMsg('Toggle failed', true);
+      // Re-sync to truth via immediate status fetch
+      if (api.getOrchestratorStatus) {
+        api.getOrchestratorStatus().then(function (s) {
+          _updateOrchestratorIndicator(s);
+          _applyOrchState(s);
+        }).catch(function () { /* ignored */ });
+      }
+    }).then(function () {
+      window.__tmcOrchInFlight = false;
+      // _applyOrchState uses in-flight flag to decide disabled — re-run
+      // against a synthetic current state read from DOM-derived pressed
+      // attribute is not safe, so rely on next poll or the then() above.
+    });
   }
 
   /* -- Orchestrator status display ----------------------------------- */

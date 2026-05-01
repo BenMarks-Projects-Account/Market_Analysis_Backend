@@ -10,3 +10,8 @@ boto3==1.42.48
 python-dotenv==1.2.1
 # strands-agents==0.1.0  # Commented out as not available
 requests==2.31.0
+# History database (SQLite on NAS, async)
+sqlalchemy[asyncio]>=2.0.35
+aiosqlite>=0.20.0
+# On-demand evaluator PDF export (Phase 1)
+fpdf2>=2.8.0

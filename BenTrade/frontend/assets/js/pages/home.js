@@ -4728,6 +4728,29 @@ window.BenTradePages.initHome = function initHome(rootEl){
   resetQueueProgress();
   updateHomeScanCacheUI();
 
+  // ── Home-dashboard component notes (v1) ──────────────────────────
+  // Clicking a heading with [data-note-section] opens the shared right-
+  // side drawer in notes mode. Registry lives in config/home_note_sections.js.
+  // Delegated listener to keep dynamic sections (e.g. pre-market intel panel
+  // rendered by BenTradePreMarket) covered without rebinding on every update.
+  function _onNoteSectionClick(e){
+    var target = e.target.closest('[data-note-section]');
+    if(!target) return;
+    var sectionId = target.dataset.noteSection;
+    if(!sectionId) return;
+    var registry = window.BenTradeHomeNoteSections || {};
+    var displayName = registry[sectionId];
+    if(!displayName) return; // not registered — ignore
+    if(!(window.BenTradeChat && typeof window.BenTradeChat.open === 'function')) return;
+    window.BenTradeChat.open({
+      mode: 'notes',
+      sectionId: sectionId,
+      displayName: displayName,
+    });
+  }
+  var _notesClickRoot = rootEl || doc;
+  _notesClickRoot.addEventListener('click', _onNoteSectionClick);
+
   return function cleanupHome(){
     queueState.stopRequested = true;
     queueState.isRunning = false;
@@ -4741,6 +4764,7 @@ window.BenTradePages.initHome = function initHome(rootEl){
     setRefreshingBadge(false);
     _clearAllRefreshTimers();
     if(_statePollTimer){ clearInterval(_statePollTimer); _statePollTimer = null; }
+    try { _notesClickRoot.removeEventListener('click', _onNoteSectionClick); } catch(_e) {}
     // NOTE: do NOT null the renderer here.
     // The renderer is harmlessly overwritten on next initHome().
     // Nulling it caused setSnapshot() calls (from in-flight refreshes completing

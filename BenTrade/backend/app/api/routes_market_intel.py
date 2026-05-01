@@ -1,4 +1,4 @@
-"""Market Intelligence API routes (FMP + Polygon powered).
+"""Market Intelligence API routes (FMP powered).
 
 Endpoints:
   GET  /api/market/movers              → top gainers, losers, most active
@@ -15,6 +15,8 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, Request
+
+from app.services.quote_routing import get_batch_quotes
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["market-intel"])
@@ -39,8 +41,8 @@ SECTOR_ETFS = {
 
 # ── Helpers ────────────────────────────────────────────────────
 
-async def _build_sector_rotation_from_etfs(polygon_client) -> list[dict]:
-    """Compute sector rotation table from Polygon daily bars for 11 sector ETFs.
+async def _build_sector_rotation_from_etfs(fmp_client) -> list[dict]:
+    """Compute sector rotation table from FMP daily bars for 11 sector ETFs.
 
     Returns [{"sector": str, "etf": str, "1d": float|None, "1w": float|None,
               "1m": float|None, "3m": float|None}, ...] sorted by 1M desc.
@@ -50,10 +52,10 @@ async def _build_sector_rotation_from_etfs(polygon_client) -> list[dict]:
 
     async def _fetch_bars(sector: str, etf: str):
         try:
-            bars = await polygon_client.get_aggregates_ohlc(
-                etf, start_date=start, end_date=today,
+            bars = await fmp_client.get_historical_price_eod(
+                etf, from_date=start.isoformat(), to_date=today.isoformat(),
             )
-            return (sector, etf, bars)
+            return (sector, etf, bars or [])
         except Exception as e:
             logger.warning("Sector rotation: failed to fetch %s (%s): %s", etf, sector, e)
             return (sector, etf, [])
@@ -118,15 +120,14 @@ async def get_market_movers(request: Request) -> dict:
 async def get_market_sectors(request: Request) -> dict:
     """Sector rotation heatmap — 1d / 1w / 1m / 3m changes from sector ETFs.
 
-    Uses Polygon daily OHLC bars for 11 sector ETFs (XLF, XLK, etc.)
+    Uses FMP daily OHLC bars for 11 sector ETFs (XLF, XLK, etc.)
     to compute accurate multi-timeframe rotation data.
     FMP current snapshot kept for supplementary metadata when available.
     """
-    polygon = request.app.state.polygon_client
     fmp = request.app.state.fmp_client
 
-    # Primary: Polygon ETF-based rotation (accurate multi-timeframe)
-    rotation = await _build_sector_rotation_from_etfs(polygon)
+    # Primary: FMP ETF-based rotation (accurate multi-timeframe)
+    rotation = await _build_sector_rotation_from_etfs(fmp)
 
     # Supplementary: FMP current-day snapshot (used for 'current' field only)
     current = []
@@ -142,7 +143,7 @@ async def get_market_sectors(request: Request) -> dict:
     }
 
 
-# High-volume stocks scanned for pre-market movers via Polygon snapshots.
+# High-volume stocks scanned for pre-market movers.
 _PREMARKET_SCAN_SYMBOLS = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD",
     "NFLX", "JPM", "V", "MA", "BAC", "WMT", "UNH", "JNJ", "PG",
@@ -153,17 +154,25 @@ _PREMARKET_SCAN_SYMBOLS = [
     "SPY", "QQQ", "IWM", "DIA",
 ]
 
+# Shared health state for quote routing in this module
+_premarket_tradier_health: dict[str, object] = {}
 
-async def _get_premarket_from_polygon(polygon_client) -> dict | None:
-    """Compute pre-market movers from Polygon batch snapshots.
 
-    Uses todaysChange/todaysChangePerc from Polygon snapshots,
-    which during pre-market reflect movement vs previous close.
+async def _get_premarket_from_quotes(tradier_client, fmp_client) -> dict | None:
+    """Compute pre-market movers via Tradier primary + FMP fallback.
+
+    Tradier provides extended-hours quotes including pre-market pricing.
+    FMP fallback returns regular-session pricing (acceptable degradation).
     """
     try:
-        snapshots = await polygon_client.get_snapshots(_PREMARKET_SCAN_SYMBOLS)
+        snapshots = await get_batch_quotes(
+            tradier_client,
+            fmp_client,
+            _PREMARKET_SCAN_SYMBOLS,
+            _tradier_health_cache=_premarket_tradier_health,
+        )
     except Exception as e:
-        logger.info("Polygon snapshot batch failed: %s", e)
+        logger.info("Pre-market quote batch failed: %s", e)
         return None
 
     if not snapshots:
@@ -182,7 +191,7 @@ async def _get_premarket_from_polygon(polygon_client) -> dict | None:
 
         movers.append({
             "symbol": sym,
-            "name": sym,  # Polygon snapshots don't include company name
+            "name": sym,
             "price": price,
             "change": round(price - prev_close, 2) if prev_close else None,
             "changesPercentage": round(change_pct, 2),
@@ -202,10 +211,12 @@ async def _get_premarket_from_polygon(polygon_client) -> dict | None:
 async def get_pre_market_movers(request: Request) -> dict:
     """Pre-market gappers (top moving stocks before market open).
 
-    Tries sources in order: FMP → Polygon snapshots.
+    Tries sources in order:
+      1. FMP pre-market endpoint (dedicated pre-market data)
+      2. Tradier batch quotes + FMP fallback (extended-hours quotes)
     """
     fmp = request.app.state.fmp_client
-    polygon = request.app.state.polygon_client
+    tradier = request.app.state.tradier_client
 
     # Source 1: FMP pre-market (may be plan-blocked)
     if fmp.is_available():
@@ -225,14 +236,14 @@ async def get_pre_market_movers(request: Request) -> dict:
         except Exception as e:
             logger.info("FMP pre-market unavailable: %s", e)
 
-    # Source 2: Polygon snapshots (15-min delayed, but includes pre-market)
+    # Source 2: Tradier batch + FMP fallback (extended-hours quotes)
     try:
-        data = await _get_premarket_from_polygon(polygon)
+        data = await _get_premarket_from_quotes(tradier, fmp)
         if data and (data.get("gainers") or data.get("losers")):
-            data["source"] = "polygon"
+            data["source"] = "tradier_routing"
             return data
     except Exception as e:
-        logger.warning("Polygon pre-market failed: %s", e)
+        logger.warning("Pre-market quote routing failed: %s", e)
 
     return {
         "gainers": [],
@@ -271,3 +282,39 @@ async def get_market_upgrades_downgrades(
         "downgrades": downgrades[:15],
         "all": grades,
     }
+
+
+# ── Institutional 13F pillar ─────────────────────────────────
+
+@router.get("/api/market-intel/pillars/13f")
+async def get_13f_pillar(request: Request, force: bool = Query(False)) -> dict:
+    """Return cached Institutional 13F pillar result.
+
+    Query params:
+        force – bypass cache and recompute.
+    """
+    svc = getattr(request.app.state, "institutional_13f_service", None)
+    if svc is None:
+        raise HTTPException(status_code=503, detail="13F pillar not enabled")
+
+    try:
+        result = await svc.get_13f_analysis(force=force)
+        return result
+    except Exception as exc:
+        logger.error("13F pillar error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/api/admin/pillars/13f/recompute")
+async def recompute_13f_pillar(request: Request) -> dict:
+    """Admin endpoint — force full 13F recompute (clears cache + sentinels)."""
+    svc = getattr(request.app.state, "institutional_13f_service", None)
+    if svc is None:
+        raise HTTPException(status_code=503, detail="13F pillar not enabled")
+
+    try:
+        result = await svc.force_recompute()
+        return result
+    except Exception as exc:
+        logger.error("13F recompute error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))

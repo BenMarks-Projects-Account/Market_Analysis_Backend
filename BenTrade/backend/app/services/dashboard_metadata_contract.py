@@ -415,14 +415,14 @@ def _build_field_status_map(
 
 # News component → upstream source dependency mapping.
 # headline_sentiment, negative_pressure, narrative_severity, source_agreement,
-# recency_pressure all require news items from finnhub/polygon.
+# recency_pressure all require news items from finnhub.
 # macro_stress requires FRED macro data.
 _NEWS_FIELD_SOURCE_DEPS: dict[str, list[str]] = {
-    "headline_sentiment": ["finnhub", "polygon"],
-    "negative_pressure": ["finnhub", "polygon"],
-    "narrative_severity": ["finnhub", "polygon"],
-    "source_agreement": ["finnhub", "polygon"],
-    "recency_pressure": ["finnhub", "polygon"],
+    "headline_sentiment": ["finnhub"],
+    "negative_pressure": ["finnhub"],
+    "narrative_severity": ["finnhub"],
+    "source_agreement": ["finnhub"],
+    "recency_pressure": ["finnhub"],
     "macro_stress": ["fred"],
 }
 

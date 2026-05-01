@@ -1,0 +1,26 @@
+{
+    "_description": "Tier 1 smart money filers for 13F institutional pillar. Weight multiplier: 3x. CIK numbers verified against SEC EDGAR 13F-HR filings.",
+    "_last_verified": "2026-04-16",
+    "filers": [
+        {"name": "BERKSHIRE HATHAWAY INC", "cik": "0001067983", "short_name": "Berkshire Hathaway (Buffett)"},
+        {"name": "PERSHING SQUARE CAPITAL MANAGEMENT, L.P.", "cik": "0001336528", "short_name": "Pershing Square (Ackman)"},
+        {"name": "BAUPOST GROUP LLC", "cik": "0001061768", "short_name": "Baupost Group (Klarman)"},
+        {"name": "SCION ASSET MANAGEMENT, LLC", "cik": "0001649339", "short_name": "Scion Capital (Burry)"},
+        {"name": "GREENLIGHT CAPITAL INC", "cik": "0001079114", "short_name": "Greenlight Capital (Einhorn)"},
+        {"name": "THIRD POINT LLC", "cik": "0001040273", "short_name": "Third Point (Loeb)"},
+        {"name": "APPALOOSA LP", "cik": "0001656456", "short_name": "Appaloosa Management (Tepper)"},
+        {"name": "D. E. SHAW & CO., L.P.", "cik": "0001009207", "short_name": "D.E. Shaw"},
+        {"name": "RENAISSANCE TECHNOLOGIES LLC", "cik": "0001037389", "short_name": "Renaissance Technologies"},
+        {"name": "BRIDGEWATER ASSOCIATES, LP", "cik": "0001350694", "short_name": "Bridgewater Associates"},
+        {"name": "CITADEL ADVISORS LLC", "cik": "0001423053", "short_name": "Citadel"},
+        {"name": "TIGER GLOBAL MANAGEMENT LLC", "cik": "0001167483", "short_name": "Tiger Global Management"},
+        {"name": "COATUE MANAGEMENT LLC", "cik": "0001535392", "short_name": "Coatue Management"},
+        {"name": "LONE PINE CAPITAL LLC", "cik": "0001061165", "short_name": "Lone Pine Capital"},
+        {"name": "VIKING GLOBAL INVESTORS LP", "cik": "0001103804", "short_name": "Viking Global Investors"},
+        {"name": "DUQUESNE FAMILY OFFICE LLC", "cik": "0001536411", "short_name": "Duquesne (Druckenmiller)"},
+        {"name": "MAVERICK CAPITAL LTD", "cik": "0001010412", "short_name": "Maverick Capital"},
+        {"name": "ALTIMETER CAPITAL MANAGEMENT, LP", "cik": "0001678130", "short_name": "Altimeter Capital"},
+        {"name": "PABRAI INVESTMENT FUNDS", "cik": "0001173334", "short_name": "Pabrai Investment Fund"},
+        {"name": "FARALLON CAPITAL MANAGEMENT LLC", "cik": "0001099281", "short_name": "Farallon Capital"}
+    ]
+}

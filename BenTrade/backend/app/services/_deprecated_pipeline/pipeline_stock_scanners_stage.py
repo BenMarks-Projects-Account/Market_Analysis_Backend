@@ -97,7 +97,6 @@ def _execute_stock_scanner(
     async def _run() -> dict[str, Any]:
         from app.clients.finnhub_client import FinnhubClient
         from app.clients.fred_client import FredClient
-        from app.clients.polygon_client import PolygonClient
         from app.clients.tradier_client import TradierClient
         from app.services.base_data_service import BaseDataService
 
@@ -110,12 +109,10 @@ def _execute_stock_scanner(
             tradier_client = TradierClient(settings, http_client, cache)
             finnhub_client = FinnhubClient(settings, http_client, cache)
             fred_client = FredClient(settings, http_client, cache)
-            polygon_client = PolygonClient(settings, http_client, cache)
             bds = BaseDataService(
                 tradier_client=tradier_client,
                 finnhub_client=finnhub_client,
                 fred_client=fred_client,
-                polygon_client=polygon_client,
             )
             mod = __import__(spec[0], fromlist=[spec[1]])
             service = getattr(mod, spec[1])(bds)

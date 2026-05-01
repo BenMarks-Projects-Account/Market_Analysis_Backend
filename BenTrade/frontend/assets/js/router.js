@@ -207,6 +207,8 @@
     "notifications": { title: "Notifications", group: "Navigation", subgroup: "Alerts", description: "BUY/EXECUTE signal alerts" },
     "company-evaluator": { title: "Company Evaluator", group: "Analysis", subgroup: "Fundamentals", description: "Ranked company evaluations from Machine 2" },
     "on-demand-evaluator": { title: "On-Demand Evaluator", group: "Analysis", subgroup: "Fundamentals", description: "Deep-dive any symbol with full evaluation pipeline" },
+    "earnings-analysis": { title: "Earnings Analysis", group: "Trade Management", subgroup: "Earnings", description: "Universe earnings vol-mispricing scan (EVA)" },
+    "on-demand-earnings-analysis": { title: "On Demand Earnings Analysis", group: "Trade Management", subgroup: "Earnings", description: "Single-ticker earnings vol research (EVA)" },
   };
 
   const routes = {
@@ -379,6 +381,16 @@
       view: "dashboards/on_demand_evaluator.html",
       init: () => window.BenTradePages?.initOnDemandEvaluator?.(document.getElementById('view')),
       title: routeMeta["on-demand-evaluator"].title
+    },
+    "earnings-analysis": {
+      view: "dashboards/earnings_analysis.html",
+      init: () => window.BenTradePages?.initEarningsAnalysis?.(document.getElementById('view')),
+      title: routeMeta["earnings-analysis"].title
+    },
+    "on-demand-earnings-analysis": {
+      view: "dashboards/on_demand_earnings_analysis.html",
+      init: () => window.BenTradePages?.initOnDemandEarningsAnalysis?.(document.getElementById('view')),
+      title: routeMeta["on-demand-earnings-analysis"].title
     }
   };
 
