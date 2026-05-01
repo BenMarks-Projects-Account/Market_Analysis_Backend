@@ -74,11 +74,18 @@
   }
   function _normalizeSnapshot(snap) {
     if (!snap || typeof snap !== 'object') return snap;
+    // Idempotent guard: once normalized, return as-is. The |n|<=1 heuristic
+    // in _scaleIfDecimal is NOT self-idempotent (a 0.45% value scaled once
+    // to 0.45 is still <=1 and would scale again to 45). Without this flag,
+    // calling _normalizeSnapshot twice on the same object inflates percent
+    // fields by another factor of 100 \u2014 the ×10000 display bug.
+    if (snap.__pct_normalized) return snap;
     var out = {};
     Object.keys(snap).forEach(function (k) { out[k] = snap[k]; });
     _PCT_DECIMAL_FIELDS.forEach(function (k) {
       if (out[k] != null) out[k] = _scaleIfDecimal(out[k]);
     });
+    out.__pct_normalized = true;
     return out;
   }
 
@@ -189,9 +196,10 @@
   /** Build side-panel HTML for a given snapshot + ticker profile + event. */
   EAShared.renderSidePanel = function (ctx) {
     // ctx: { event, ticker_profile, snapshot, snapshots_all, history }
-    // Defensive normalization \u2014 idempotent, so safe even if caller already
-    // normalized (e.g. main dashboard _flatten path). The OnDemand caller
-    // passes raw snapshots; this ensures it renders correctly too.
+    // Idempotent normalization \u2014 _normalizeSnapshot tags its output with
+    // __pct_normalized so re-entry is a no-op. Safe whether the caller is
+    // the main dashboard (already normalized via _flatten) or OnDemand
+    // (passes raw snapshots).
     var snap = _normalizeSnapshot(ctx.snapshot || {});
     var ev = ctx.event || {};
     var prof = ctx.ticker_profile || {};
@@ -670,25 +678,49 @@
     }
     function _buildAnalysisHtml(result, eventId) {
       var sections = result.structured_sections || null;
+      // v2.0: Premium prompt is independent of local analysis — always show.
+      var premiumBtn = '<button class="ea-action-btn" data-ea-premium-prompt="' + _esc(eventId) + '" title="Generate a copyable prompt for Claude Pro / ChatGPT Plus">Premium Model Prompt</button>';
       var cachedBanner = result.cached
         ? '<div class="ea-analysis-cached">' +
             '<span>Cached \u00b7 ' + _esc(_formatAnalysisTime(result.created_at)) + '</span>' +
-            '<button class="ea-action-btn" data-ea-reanalyze="' + _esc(eventId) + '">Re-analyze</button>' +
+            '<span class="ea-analysis-actions">' +
+              '<button class="ea-action-btn" data-ea-reanalyze="' + _esc(eventId) + '">Re-analyze</button>' +
+              premiumBtn +
+            '</span>' +
           '</div>'
-        : '';
+        : '<div class="ea-analysis-cached">' +
+            '<span></span>' +
+            '<span class="ea-analysis-actions">' + premiumBtn + '</span>' +
+          '</div>';
       var sectionsHtml;
-      if (sections && sections.setup_quality) {
+      if (sections && sections.setup_quality && sections.directional_thesis) {
         sectionsHtml =
           '<h3>Setup Quality</h3><p>' + _esc(sections.setup_quality) + '</p>' +
-          '<h3>Recommended Trade</h3><p>' + _esc(sections.recommended_trade) + '</p>' +
-          '<h3>Risks</h3><p>' + _esc(sections.risks).replace(/\n/g, '<br>') + '</p>' +
-          '<h3>Confidence</h3><p>' + _esc(sections.confidence) + '</p>';
+          '<h3>Directional Thesis</h3>' +
+          '<p class="ea-thesis">' + _esc(sections.directional_thesis) + '</p>' +
+          '<div class="ea-trade-tiers">' +
+            '<div class="ea-trade-tier ea-tier-conservative">' +
+              '<h4>Conservative</h4>' +
+              '<pre>' + _esc(sections.conservative_trade || '(missing)') + '</pre>' +
+            '</div>' +
+            '<div class="ea-trade-tier ea-tier-medium">' +
+              '<h4>Medium</h4>' +
+              '<pre>' + _esc(sections.medium_trade || '(missing)') + '</pre>' +
+            '</div>' +
+            '<div class="ea-trade-tier ea-tier-aggressive">' +
+              '<h4>Aggressive</h4>' +
+              '<pre>' + _esc(sections.aggressive_trade || '(missing)') + '</pre>' +
+            '</div>' +
+          '</div>' +
+          '<h3>Risks</h3><p>' + _esc(sections.risks || '').replace(/\n/g, '<br>') + '</p>' +
+          '<h3>Confidence</h3><p>' + _esc(sections.confidence || '') + '</p>';
       } else {
         sectionsHtml = '<pre class="ea-analysis-raw">' + _esc(result.response_text || '(no response)') + '</pre>';
       }
       var provider = result.model_provider || 'unknown';
       var mode = result.execution_mode || 'unknown';
       var model = result.model_used || 'unknown';
+      var promptV = result.prompt_version || '?';
       var tokens = (result.tokens_input || result.tokens_output)
         ? ' \u00b7 Tokens: ' + (result.tokens_input || '?') + ' in / ' + (result.tokens_output || '?') + ' out'
         : '';
@@ -696,7 +728,8 @@
         cachedBanner +
         '<div class="ea-analysis-content">' + sectionsHtml + '</div>' +
         '<div class="ea-analysis-meta">' +
-          _esc(provider) + ' \u00b7 ' + _esc(mode) + ' \u00b7 ' + _esc(model) + tokens +
+          _esc(provider) + ' \u00b7 ' + _esc(mode) + ' \u00b7 ' + _esc(model) +
+          ' \u00b7 prompt v' + _esc(promptV) + tokens +
         '</div>' +
         '</div>';
     }
@@ -714,6 +747,196 @@
           _renderModelAnalysis(eid, true);
         });
       });
+      Array.prototype.forEach.call(elSideBody.querySelectorAll('[data-ea-premium-prompt]'), function (b) {
+        b.addEventListener('click', function () {
+          var eid = b.getAttribute('data-ea-premium-prompt');
+          _showPremiumPromptModal(eid, b);
+        });
+      });
+    }
+
+    // ── Premium model prompt modal ───────────────────────────────
+    // Mirrors Company Evaluator's research-prompt modal pattern: opens an
+    // overlay, fetches the prompt, supports copy-to-clipboard, and lets the
+    // user paste the premium model's response back to be persisted.
+    function _showPremiumPromptModal(eventId, sourceBtn) {
+      // Disable trigger to avoid double-clicks while the request is in-flight.
+      if (sourceBtn) {
+        sourceBtn.disabled = true;
+        sourceBtn.dataset._origText = sourceBtn.textContent;
+        sourceBtn.textContent = 'Generating\u2026';
+      }
+      window.BenTradeApi.getEvaPremiumPrompt(eventId).then(function (resp) {
+        _renderPremiumPromptModal(resp || {}, eventId);
+      }).catch(function (err) {
+        var msg = (err && err.message) || String(err);
+        alert('Failed to generate premium prompt: ' + msg);
+      }).finally(function () {
+        if (sourceBtn) {
+          sourceBtn.disabled = false;
+          if (sourceBtn.dataset._origText) {
+            sourceBtn.textContent = sourceBtn.dataset._origText;
+            delete sourceBtn.dataset._origText;
+          }
+        }
+      });
+    }
+
+    function _closePremiumPromptModal() {
+      var existing = document.querySelector('.ea-premium-modal-overlay');
+      if (existing) existing.remove();
+      document.removeEventListener('keydown', _onPremiumModalEsc);
+    }
+
+    function _onPremiumModalEsc(e) {
+      if (e.key === 'Escape') _closePremiumPromptModal();
+    }
+
+    function _renderPremiumPromptModal(resp, eventId) {
+      _closePremiumPromptModal();
+      var ticker = resp.ticker || 'event ' + eventId;
+      var promptText = resp.prompt_text || '';
+      var charCount = resp.char_count || promptText.length;
+      var meta = charCount.toLocaleString() + ' characters';
+      if (resp.local_analysis_age_seconds != null) {
+        meta += ' \u00b7 local analysis ' + _formatPromptAge(resp.local_analysis_age_seconds);
+      }
+
+      var overlay = document.createElement('div');
+      overlay.className = 'ea-premium-modal-overlay';
+      overlay.innerHTML =
+        '<div class="ea-premium-modal" role="dialog" aria-modal="true" aria-label="Premium Model Prompt">' +
+          '<div class="ea-premium-modal-header">' +
+            '<h3>Premium Model Prompt \u2014 ' + _esc(ticker) + '</h3>' +
+            '<button type="button" class="ea-modal-close" aria-label="Close">\u00d7</button>' +
+          '</div>' +
+          '<div class="ea-premium-modal-body">' +
+            '<p class="ea-premium-instructions">' +
+              'Copy the prompt below and paste it into Claude Pro, ChatGPT Plus, or another premium model. ' +
+              'This prompt requests a full senior-trader analysis with view decomposition, up to 8 trade ' +
+              "recommendations, and educational framing \u2014 independent of the local model's analysis. " +
+              'Paste the response back below to save it for reference.' +
+            '</p>' +
+            '<div class="ea-premium-prompt-actions">' +
+              '<button type="button" class="ea-action-btn" data-ea-copy-prompt>Copy Prompt to Clipboard</button>' +
+              '<span class="ea-premium-meta">' + _esc(meta) + '</span>' +
+              '<span class="ea-copy-status" data-ea-copy-status></span>' +
+            '</div>' +
+            '<textarea class="ea-premium-prompt-text" data-ea-prompt-text readonly></textarea>' +
+            '<hr class="ea-premium-divider">' +
+            '<h4>Save Premium Model Response (optional)</h4>' +
+            '<p class="ea-premium-instructions">' +
+              "Paste the premium model's response here to save it alongside the local analysis for future reference." +
+            '</p>' +
+            '<textarea class="ea-premium-response-text" data-ea-response-text ' +
+              'placeholder="Paste premium model\u2019s response here\u2026"></textarea>' +
+            '<div class="ea-premium-prompt-actions">' +
+              '<button type="button" class="ea-action-btn" data-ea-save-response>Save Response</button>' +
+              '<span class="ea-save-status" data-ea-save-status></span>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(overlay);
+
+      // Set textarea value via property (not innerHTML attribute) so any
+      // characters \u2014 including angle brackets / quotes \u2014 round-trip
+      // unchanged when the user copies it back out.
+      var promptArea = overlay.querySelector('[data-ea-prompt-text]');
+      promptArea.value = promptText;
+
+      // Attempt to prefill the response area if a previous one was saved.
+      window.BenTradeApi.getEvaPremiumResponse(eventId).then(function (saved) {
+        if (saved && saved.response_text) {
+          var ta = overlay.querySelector('[data-ea-response-text]');
+          if (ta) ta.value = saved.response_text;
+        }
+      }).catch(function () { /* 404 is the normal first-run case */ });
+
+      overlay.querySelector('.ea-modal-close').addEventListener('click', _closePremiumPromptModal);
+      overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) _closePremiumPromptModal();
+      });
+      document.addEventListener('keydown', _onPremiumModalEsc);
+
+      var copyBtn = overlay.querySelector('[data-ea-copy-prompt]');
+      var copyStatus = overlay.querySelector('[data-ea-copy-status]');
+      copyBtn.addEventListener('click', function () {
+        _copyTextToClipboard(promptText).then(function (ok) {
+          if (ok) {
+            copyStatus.textContent = '\u2713 Copied';
+            copyStatus.classList.add('ea-status-ok');
+            copyStatus.classList.remove('ea-status-err');
+            setTimeout(function () {
+              copyStatus.textContent = '';
+              copyStatus.classList.remove('ea-status-ok');
+            }, 2000);
+          } else {
+            copyStatus.textContent = 'Copy failed \u2014 select and copy manually';
+            copyStatus.classList.add('ea-status-err');
+            copyStatus.classList.remove('ea-status-ok');
+            promptArea.focus();
+            promptArea.select();
+          }
+        });
+      });
+
+      var saveBtn = overlay.querySelector('[data-ea-save-response]');
+      var saveStatus = overlay.querySelector('[data-ea-save-status]');
+      saveBtn.addEventListener('click', function () {
+        var ta = overlay.querySelector('[data-ea-response-text]');
+        var text = (ta.value || '').trim();
+        if (!text) {
+          saveStatus.textContent = 'Nothing to save';
+          saveStatus.classList.add('ea-status-err');
+          saveStatus.classList.remove('ea-status-ok');
+          return;
+        }
+        saveBtn.disabled = true;
+        saveStatus.textContent = 'Saving\u2026';
+        saveStatus.classList.remove('ea-status-ok', 'ea-status-err');
+        window.BenTradeApi.saveEvaPremiumResponse(eventId, text).then(function (r) {
+          saveStatus.textContent = '\u2713 Saved \u00b7 ' + ((r && r.char_count) || text.length).toLocaleString() + ' chars';
+          saveStatus.classList.add('ea-status-ok');
+        }).catch(function (err) {
+          saveStatus.textContent = 'Save failed: ' + ((err && err.message) || String(err));
+          saveStatus.classList.add('ea-status-err');
+        }).finally(function () {
+          saveBtn.disabled = false;
+        });
+      });
+    }
+
+    function _formatPromptAge(seconds) {
+      if (seconds == null) return '';
+      if (seconds < 60) return 'generated ' + seconds + 's ago';
+      if (seconds < 3600) return 'generated ' + Math.round(seconds / 60) + 'm ago';
+      if (seconds < 86400) return 'generated ' + Math.round(seconds / 3600) + 'h ago';
+      return 'generated ' + Math.round(seconds / 86400) + 'd ago';
+    }
+
+    function _copyTextToClipboard(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text).then(function () { return true; }).catch(function () {
+          return _fallbackCopy(text);
+        });
+      }
+      return Promise.resolve(_fallbackCopy(text));
+    }
+
+    function _fallbackCopy(text) {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+      } catch (_) {
+        return false;
+      }
     }
     function _renderModelAnalysis(eventId, forceRefresh) {
       _setActiveActionButton('model_analysis');

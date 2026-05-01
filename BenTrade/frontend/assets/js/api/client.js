@@ -417,6 +417,22 @@ window.BenTradeApi = (function(){
       '/analyze?force_refresh=' + (forceRefresh ? 'true' : 'false');
     return modelFetch(url, { method: 'POST' });
   }
+  function getEvaPremiumPrompt(eventId){
+    return jsonFetch('/api/eva/events/' + encodeURIComponent(eventId) + '/premium-prompt');
+  }
+  function saveEvaPremiumResponse(eventId, responseText){
+    return jsonFetch(
+      '/api/eva/events/' + encodeURIComponent(eventId) + '/premium-response',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response_text: responseText }),
+      }
+    );
+  }
+  function getEvaPremiumResponse(eventId){
+    return jsonFetch('/api/eva/events/' + encodeURIComponent(eventId) + '/premium-response');
+  }
   function getEvaUniverse(){
     return jsonFetch('/api/eva/universe');
   }
@@ -812,6 +828,9 @@ window.BenTradeApi = (function(){
     getEvaTicker,
     getEvaTickerLatestFeatures,
     analyzeEvaEvent,
+    getEvaPremiumPrompt,
+    saveEvaPremiumResponse,
+    getEvaPremiumResponse,
     getEvaUniverse,
     getEvaUniverseAll,
     addEvaTicker,

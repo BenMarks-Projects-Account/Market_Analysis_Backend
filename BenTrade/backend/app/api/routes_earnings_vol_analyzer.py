@@ -12,6 +12,7 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 _log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/eva", tags=["earnings-vol-analyzer"])
@@ -213,12 +214,13 @@ async def analyze_event(event_id: int, force_refresh: bool = Query(False)):
         execute_routed_model,
     )
 
-    # 1. Cache hit
+    # 1. Cache hit (only if prompt version matches current)
     if not force_refresh:
         cached = load_cached_analysis(event_id)
-        if cached is not None:
+        if cached is not None and cached.get("prompt_version") == ANALYSIS_PROMPT_VERSION:
             cached["cached"] = True
             return cached
+        # Stale (older prompt version) or missing \u2014 fall through and re-analyze.
 
     # 2. Fetch source data from EVA
     data = await _proxy_get(f"/api/events/{event_id}/analysis-data")
@@ -289,6 +291,86 @@ async def analyze_event(event_id: int, force_refresh: bool = Query(False)):
 
     save_analysis(event_id, result)
     return result
+
+
+# ── Premium model prompt (deterministic, no LLM call) ────────────────
+
+class PremiumPromptOut(BaseModel):
+    event_id: int
+    ticker: str | None = None
+    prompt_text: str
+    generated_at: str
+    char_count: int
+
+
+class PremiumResponseIn(BaseModel):
+    response_text: str
+
+
+class PremiumResponseOut(BaseModel):
+    saved: bool
+    event_id: int
+    saved_at: str
+    char_count: int
+
+
+@router.get("/events/{event_id}/premium-prompt", response_model=PremiumPromptOut)
+async def get_premium_prompt(event_id: int):
+    """Build a copyable premium-tier prompt from raw EVA data.
+
+    v2.0: No longer requires cached local analysis. Premium model approaches
+    data fresh and produces independent analysis with view-decomposition framework.
+    """
+    from app.services.eva_analysis_prompts import build_premium_prompt, utcnow_iso
+
+    analysis_data = await _proxy_get(f"/api/events/{event_id}/analysis-data")
+    prompt_text = build_premium_prompt(analysis_data, cached_analysis=None)
+
+    return PremiumPromptOut(
+        event_id=event_id,
+        ticker=analysis_data.get("ticker"),
+        prompt_text=prompt_text,
+        generated_at=utcnow_iso(),
+        char_count=len(prompt_text),
+    )
+
+
+@router.post("/events/{event_id}/premium-response", response_model=PremiumResponseOut)
+async def post_premium_response(event_id: int, body: PremiumResponseIn):
+    """Persist a user-pasted premium model response alongside the local analysis.
+
+    Stored in ``backend/data/eva_premium_responses/{event_id}.json``,
+    separate from the local analysis cache (different lifecycle). One
+    response per event \u2014 a new POST overwrites the prior one.
+    """
+    from app.services.eva_analysis_prompts import save_premium_response as _save
+
+    text = (body.response_text or "").strip()
+    if not text:
+        raise HTTPException(400, detail={"error": "empty_response", "message": "response_text is empty"})
+
+    try:
+        payload = _save(event_id, text)
+    except OSError as exc:
+        raise HTTPException(500, detail={"error": "write_failed", "message": str(exc)})
+
+    return PremiumResponseOut(
+        saved=True,
+        event_id=event_id,
+        saved_at=payload["saved_at"],
+        char_count=len(text),
+    )
+
+
+@router.get("/events/{event_id}/premium-response")
+async def get_premium_response(event_id: int):
+    """Return the saved premium model response for an event, or 404 if none."""
+    from app.services.eva_analysis_prompts import load_premium_response
+
+    payload = load_premium_response(event_id)
+    if not payload:
+        raise HTTPException(404, detail={"error": "not_found", "message": "No saved premium response for this event."})
+    return payload
 
 
 # ── Tickers ──────────────────────────────────────────────────────────

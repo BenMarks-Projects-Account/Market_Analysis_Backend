@@ -490,3 +490,157 @@
   color: var(--text); max-height: 60vh; overflow: auto;
 }
 
+
+/* === Model Analysis: three trade tiers === */
+.ea-thesis {
+  font-style: italic;
+  padding: 8px 12px;
+  background: rgba(20,40,55,0.4);
+  border-radius: 4px;
+  margin: 0 0 12px 0;
+}
+.ea-trade-tiers {
+  display: flex; flex-direction: column; gap: 12px;
+  margin: 16px 0;
+}
+.ea-trade-tier {
+  padding: 12px; border-radius: 4px;
+  border-left: 3px solid;
+  background: rgba(0,0,0,0.18);
+}
+.ea-tier-conservative { border-left-color: #66bb6a; background: rgba(102,187,106,0.06); }
+.ea-tier-medium       { border-left-color: #ffa726; background: rgba(255,167,38,0.06); }
+.ea-tier-aggressive   { border-left-color: #e57373; background: rgba(229,115,115,0.06); }
+.ea-trade-tier h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-family: var(--font-display);
+}
+.ea-tier-conservative h4 { color: #66bb6a; }
+.ea-tier-medium h4       { color: #ffa726; }
+.ea-tier-aggressive h4   { color: #e57373; }
+.ea-trade-tier pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+
+/* ── Premium Model Prompt modal (mirrors Company Evaluator research-prompt UX) ── */
+.ea-analysis-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+
+.ea-premium-modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.7);
+  z-index: 10000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.ea-premium-modal {
+  background: var(--surface-gunmetal, #0f2332);
+  color: var(--text, #d8e4ec);
+  border: 1px solid var(--panel-border, rgba(80,120,150,0.3));
+  border-radius: 8px;
+  width: 100%;
+  max-width: 920px;
+  max-height: 90vh;
+  display: flex; flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+}
+.ea-premium-modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--panel-border, rgba(80,120,150,0.3));
+}
+.ea-premium-modal-header h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  letter-spacing: 0.04em;
+  color: var(--cyan-2, #c0d8e8);
+}
+.ea-modal-close {
+  background: none; border: none;
+  color: var(--text, #d8e4ec);
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0 8px;
+  line-height: 1;
+}
+.ea-modal-close:hover { color: #fff; }
+.ea-premium-modal-body {
+  padding: 18px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+.ea-premium-instructions {
+  font-size: 0.85rem;
+  color: var(--cyan-2, #90b0c8);
+  margin: 6px 0 10px 0;
+  opacity: 0.85;
+}
+.ea-premium-prompt-actions {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.ea-premium-meta {
+  font-size: 0.8rem;
+  color: var(--cyan-2, #90b0c8);
+  opacity: 0.7;
+  font-family: var(--font-mono);
+}
+.ea-copy-status, .ea-save-status {
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+}
+.ea-status-ok  { color: #66bb6a; }
+.ea-status-err { color: #e57373; }
+.ea-premium-prompt-text {
+  width: 100%;
+  min-height: 320px;
+  max-height: 50vh;
+  font-family: var(--font-mono, 'Consolas','Monaco',monospace);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  background: rgba(8,18,28,0.85);
+  color: var(--text, #d8e4ec);
+  border: 1px solid var(--panel-border, rgba(80,120,150,0.3));
+  border-radius: 4px;
+  padding: 12px;
+  resize: vertical;
+  white-space: pre;
+  overflow: auto;
+  box-sizing: border-box;
+}
+.ea-premium-divider {
+  border: none;
+  border-top: 1px solid var(--panel-border, rgba(80,120,150,0.3));
+  margin: 22px 0 14px 0;
+}
+.ea-premium-modal-body h4 {
+  margin: 4px 0 8px 0;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  color: var(--cyan-2, #c0d8e8);
+}
+.ea-premium-response-text {
+  width: 100%;
+  min-height: 180px;
+  font-family: var(--font-sans, inherit);
+  font-size: 0.9rem;
+  line-height: 1.45;
+  background: rgba(8,18,28,0.85);
+  color: var(--text, #d8e4ec);
+  border: 1px solid var(--panel-border, rgba(80,120,150,0.3));
+  border-radius: 4px;
+  padding: 12px;
+  resize: vertical;
+  box-sizing: border-box;
+}
